@@ -1,0 +1,19 @@
+# VectrixDB Tests Requirements
+
+# Core
+vectrixdb
+
+# Data loading
+pandas
+
+# Custom models
+sentence-transformers
+
+# LangChain integration
+langchain
+langchain-openai
+python-dotenv
+
+# Jupyter
+jupyter
+ipykernel
