@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vectrixdb"
-version = "0.1.0"
-description = "Where vectors come alive - A modern, visual-first vector database"
+version = "1.0.0"
+description = "Where vectors come alive - A lightweight, visual-first vector database with embedded ML models"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 authors = [
-    { name = "Daddy Nyame Owusu - Boakye" }
+    { name = "Kwadwo Daddy Nyame Owusu - Boakye", email = "kwadwo.owusuboakye@outlook.com" }
 ]
 keywords = [
     "vector-database",
@@ -22,10 +22,11 @@ keywords = [
     "approximate-nearest-neighbors"
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -94,29 +95,29 @@ Repository = "https://github.com/knowusuboaky/VectrixDB"
 
 [tool.hatch.build.targets.wheel]
 packages = ["vectrixdb"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"vectrixdb/dashboard" = "vectrixdb/dashboard"
-# English models bundled (no download needed for language="en")
-"vectrixdb/models/data/dense_en" = "vectrixdb/models/data/dense_en"
-"vectrixdb/models/data/reranker_en" = "vectrixdb/models/data/reranker_en"
-"vectrixdb/models/data/colbert" = "vectrixdb/models/data/colbert"
-"vectrixdb/models/data/sparse" = "vectrixdb/models/data/sparse"
+# Exclude models that are auto-downloaded from GitHub
+exclude = [
+    "vectrixdb/models/data/colbert",
+    "vectrixdb/models/data/reranker_en",
+    "vectrixdb/models/data/dense",
+    "vectrixdb/models/data/reranker",
+    "vectrixdb/models/data/bge-m3",
+    "vectrixdb/models/data/rebel",
+]
 
 [tool.hatch.build.targets.sdist]
-include = [
-    "/vectrixdb",
-    "/vectrixdb/dashboard/**/*",
-    # English models bundled
-    "/vectrixdb/models/data/dense_en/**/*",
-    "/vectrixdb/models/data/reranker_en/**/*",
-    "/vectrixdb/models/data/colbert/**/*",
-    "/vectrixdb/models/data/sparse/**/*",
+exclude = [
+    "vectrixdb/models/data/colbert",
+    "vectrixdb/models/data/reranker_en",
+    "vectrixdb/models/data/dense",
+    "vectrixdb/models/data/reranker",
+    "vectrixdb/models/data/bge-m3",
+    "vectrixdb/models/data/rebel",
 ]
 
 [tool.black]
 line-length = 100
-target-version = ["py310", "py311", "py312"]
+target-version = ["py39", "py310", "py311", "py312", "py313"]
 
 [tool.ruff]
 line-length = 100

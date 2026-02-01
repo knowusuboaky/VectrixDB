@@ -2,21 +2,23 @@
 Embedded Models for VectrixDB
 
 ONNX-based models that run locally with zero network calls.
-English models are bundled with pip install (~100MB).
-Multilingual models are auto-downloaded on first use.
+Core models bundled with pip install (~35MB).
+Additional models auto-downloaded from GitHub on first use.
 
-English Models (Bundled - no download needed):
-- DenseEmbedder(language="en"): intfloat/e5-small-v2 (~32MB INT8)
-- RerankerEmbedder(language="en"): cross-encoder/ms-marco-MiniLM-L-12-v2 (~32MB INT8)
-- LateInteractionEmbedder(language="en"): answerdotai/answerai-colbert-small-v1 (~32MB INT8)
+Bundled Models (no download needed):
+- DenseEmbedder(language="en"): intfloat/e5-small-v2 (~33MB INT8)
 - SparseEmbedder: BM25 vocabulary-based (~1MB)
 
-Multilingual Models (Auto-downloaded on first use):
+English Models (auto-download from GitHub on first use):
+- RerankerEmbedder(language="en"): cross-encoder/ms-marco-MiniLM-L-12-v2 (~22MB INT8)
+- LateInteractionEmbedder(language="en"): answerdotai/answerai-colbert-small-v1 (~22MB INT8)
+
+Multilingual Models (auto-download from GitHub on first use):
 - DenseEmbedder(): intfloat/multilingual-e5-small (~113MB INT8) - 100+ languages
 - RerankerEmbedder(): cross-encoder/mmarco-mMiniLMv2-L12-H384-v1 (~113MB INT8) - 15+ languages
 - LateInteractionEmbedder(): BAAI/bge-m3 (~563MB INT8) - 100+ languages
 
-GraphRAG (Auto-downloaded on first use):
+GraphRAG (auto-download from GitHub on first use):
 - GraphExtractor: Babelscape/mrebel-base (~718MB INT8) - 18 languages
 """
 
@@ -1007,10 +1009,16 @@ class RerankerEmbedder:
                         f"Note: If downloads are blocked, use language='en' for bundled English models."
                     ) from e
             else:
-                raise FileNotFoundError(
-                    f"Reranker model not found: {model_path}\n"
-                    f"English models should be bundled. Try reinstalling: pip install --force-reinstall vectrixdb"
-                )
+                # English reranker model - auto-download from GitHub
+                print(f"English reranker model not found. Downloading from GitHub...")
+                try:
+                    download_models(model_type="reranker_en", progress=True)
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to download English reranker model.\n\n"
+                        f"Error: {e}\n\n"
+                        f"Try manual download: vectrixdb download-models --type reranker_en"
+                    ) from e
 
         # Set up ONNX Runtime session
         providers = ["CPUExecutionProvider"]
@@ -1239,10 +1247,16 @@ class LateInteractionEmbedder:
                         f"Note: If downloads are blocked, use language='en' for bundled English ColBERT model."
                     ) from e
             else:
-                raise FileNotFoundError(
-                    f"Late interaction model not found: {model_path}\n"
-                    f"English ColBERT model should be bundled. Try reinstalling: pip install --force-reinstall vectrixdb"
-                )
+                # English ColBERT model - auto-download from GitHub
+                print(f"English ColBERT model not found. Downloading from GitHub...")
+                try:
+                    download_models(model_type="late_interaction_en", progress=True)
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to download English ColBERT model.\n\n"
+                        f"Error: {e}\n\n"
+                        f"Try manual download: vectrixdb download-models --type late_interaction_en"
+                    ) from e
 
         # Set up ONNX Runtime session
         providers = ["CPUExecutionProvider"]

@@ -136,7 +136,8 @@ class ModelDownloader:
         Download a specific model type.
 
         Args:
-            model_type: "dense", "sparse", "reranker", "colbert", "late_interaction", or "rebel"
+            model_type: "dense", "sparse", "reranker", "colbert", "late_interaction",
+                        "reranker_en", "late_interaction_en", or "rebel"
 
         Returns:
             Path to model directory
@@ -147,10 +148,14 @@ class ModelDownloader:
             return self._create_sparse()
         elif model_type == "reranker":
             return self._download_reranker()
+        elif model_type == "reranker_en":
+            return self._download_reranker_en()
         elif model_type == "colbert":
             return self._download_colbert()
         elif model_type == "late_interaction":
             return self._download_late_interaction()
+        elif model_type == "late_interaction_en":
+            return self._download_late_interaction_en()
         elif model_type == "rebel":
             return self._download_rebel()
         else:
@@ -460,6 +465,40 @@ class ModelDownloader:
         ]
 
         return {word: i for i, word in enumerate(words)}
+
+    def _download_reranker_en(self) -> Path:
+        """Download English reranker model from GitHub."""
+        config = MODEL_CONFIG["reranker_en"]
+        model_dir = self.models_dir / "reranker_en"
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Downloading English reranker model: {config['name']}...")
+
+        # Download from GitHub releases
+        if self._download_from_github("reranker_en", model_dir, config):
+            return model_dir
+
+        raise RuntimeError(
+            f"Failed to download English reranker model from GitHub.\n"
+            f"Please check your internet connection or try again later."
+        )
+
+    def _download_late_interaction_en(self) -> Path:
+        """Download English ColBERT model from GitHub."""
+        config = MODEL_CONFIG["late_interaction_en"]
+        model_dir = self.models_dir / "colbert"
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Downloading English ColBERT model: {config['name']}...")
+
+        # Download from GitHub releases
+        if self._download_from_github("colbert", model_dir, config):
+            return model_dir
+
+        raise RuntimeError(
+            f"Failed to download English ColBERT model from GitHub.\n"
+            f"Please check your internet connection or try again later."
+        )
 
     def _download_reranker(self) -> Path:
         """Download and convert reranker model to ONNX."""
