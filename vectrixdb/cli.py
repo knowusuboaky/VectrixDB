@@ -42,6 +42,8 @@ def serve(
     path: str = typer.Option("./vectrixdb_data", "--path", "-d", help="Database path"),
     reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload"),
     dashboard: bool = typer.Option(True, "--dashboard/--no-dashboard", help="Enable dashboard"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", help="API key for authentication"),
+    read_only_key: Optional[str] = typer.Option(None, "--read-only-key", help="Read-only API key"),
 ):
     """Start the VectrixDB server."""
     console.print(Panel(BANNER, style="cyan", border_style="cyan"))
@@ -50,11 +52,15 @@ def serve(
     console.print(f"  [dim]Server:[/dim] http://{host}:{port}")
     console.print(f"  [dim]Dashboard:[/dim] http://{host}:{port}/dashboard")
     console.print(f"  [dim]API Docs:[/dim] http://{host}:{port}/docs")
+    if api_key:
+        console.print(f"  [dim]API Key:[/dim] {api_key[:8]}..." if len(api_key) > 8 else f"  [dim]API Key:[/dim] {api_key}")
+    else:
+        console.print(f"  [dim]API Key:[/dim] disabled")
     console.print()
 
     from .api.server import run_server
 
-    run_server(host=host, port=port, db_path=path, reload=reload)
+    run_server(host=host, port=port, db_path=path, reload=reload, api_key=api_key, read_only_key=read_only_key)
 
 
 @app.command()
