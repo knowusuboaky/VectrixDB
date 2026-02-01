@@ -3,8 +3,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Versions](https://img.shields.io/pypi/pyversions/vectrixdb.svg)](https://pypi.org/project/vectrixdb/)
 [![VectrixDB Version](https://img.shields.io/pypi/v/vectrixdb.svg)](https://pypi.org/project/vectrixdb/)
-[![Downloads](https://pepy.tech/badge/vectrixdb)](https://pepy.tech/project/vectrixdb)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/knowusuboaky/VectrixDB/main.yml)](https://github.com/knowusuboaky/VectrixDB/actions)
+[![Downloads](https://img.shields.io/pypi/dm/vectrixdb.svg)](https://pypi.org/project/vectrixdb/)
 [![Issues](https://img.shields.io/github/issues/knowusuboaky/VectrixDB)](https://github.com/knowusuboaky/VectrixDB/issues)
 [![Contact](https://img.shields.io/badge/Email-Contact-green.svg)](mailto:kwadwo.owusuboakye@outlook.com)
 
