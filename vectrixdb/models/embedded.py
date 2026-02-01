@@ -1020,6 +1020,14 @@ class RerankerEmbedder:
                         f"Try manual download: vectrixdb download-models --type reranker_en"
                     ) from e
 
+            # Re-check model path after download
+            if not model_path.exists():
+                raise FileNotFoundError(
+                    f"Model file not found after download: {model_path}\n"
+                    f"The download may have failed or extracted to wrong location.\n"
+                    f"Try manual download: vectrixdb download-models --type reranker_en"
+                )
+
         # Set up ONNX Runtime session
         providers = ["CPUExecutionProvider"]
         if self.device == "cuda":
@@ -1257,6 +1265,14 @@ class LateInteractionEmbedder:
                         f"Error: {e}\n\n"
                         f"Try manual download: vectrixdb download-models --type late_interaction_en"
                     ) from e
+
+            # Re-check model path after download
+            if not model_path.exists():
+                raise FileNotFoundError(
+                    f"Model file not found after download: {model_path}\n"
+                    f"The download may have failed or extracted to wrong location.\n"
+                    f"Try manual download: vectrixdb download-models --type late_interaction_en"
+                )
 
         # Set up ONNX Runtime session
         providers = ["CPUExecutionProvider"]

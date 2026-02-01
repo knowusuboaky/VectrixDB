@@ -110,7 +110,40 @@ class ModelDownloader:
             model_dir.mkdir(parents=True, exist_ok=True)
 
             with zipfile.ZipFile(tmp_path, "r") as zip_ref:
-                zip_ref.extractall(model_dir)
+                # Check if zip has a nested root folder
+                namelist = zip_ref.namelist()
+                # Find common prefix (nested folder)
+                first_item = namelist[0] if namelist else ""
+                root_folder = first_item.split("/")[0] if "/" in first_item else None
+
+                # Check if all files are under the same root folder
+                has_nested_folder = (
+                    root_folder and
+                    all(n.startswith(root_folder + "/") or n == root_folder + "/" for n in namelist)
+                )
+
+                if has_nested_folder:
+                    # Extract with flattening - remove the root folder prefix
+                    print(f"  Flattening nested folder: {root_folder}/")
+                    for member in namelist:
+                        # Skip the root folder itself
+                        if member == root_folder + "/":
+                            continue
+                        # Remove the root folder prefix
+                        relative_path = member[len(root_folder) + 1:]
+                        if not relative_path:
+                            continue
+                        # Extract to the correct location
+                        target_path = model_dir / relative_path
+                        if member.endswith("/"):
+                            target_path.mkdir(parents=True, exist_ok=True)
+                        else:
+                            target_path.parent.mkdir(parents=True, exist_ok=True)
+                            with zip_ref.open(member) as src, open(target_path, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+                else:
+                    # Normal extraction
+                    zip_ref.extractall(model_dir)
 
             # Clean up temp file
             os.unlink(tmp_path)
