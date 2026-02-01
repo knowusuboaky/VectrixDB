@@ -56,8 +56,8 @@ except ImportError:
     GraphRAGPipeline = None
     GraphSearchResult = None
 
-# Version
-__version__ = "0.1.0"
+# Version - imported from main package
+from .. import __version__
 
 
 class VectrixDB:

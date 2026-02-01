@@ -117,4 +117,4 @@ __all__ = [
     "create_pipeline",
 ]
 
-__version__ = "0.1.0"
+from ... import __version__

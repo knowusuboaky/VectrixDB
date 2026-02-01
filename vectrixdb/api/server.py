@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..core.database import VectrixDB
+from .. import __version__
 from ..core.types import DistanceMetric
 from ..core.storage import StorageBackend, StorageConfig
 from ..core.cache import CacheBackend, CacheConfig
@@ -650,7 +651,7 @@ def create_app(
     app = FastAPI(
         title="VectrixDB",
         description="Where vectors come alive - A modern, visual-first vector database",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
     )
 
@@ -702,7 +703,7 @@ async def root():
     return {
         "name": "VectrixDB",
         "tagline": "Where vectors come alive",
-        "version": "0.1.0",
+        "version": __version__,
         "docs": "/docs",
         "dashboard": "/dashboard",
         "auth_enabled": get_api_key() is not None,
