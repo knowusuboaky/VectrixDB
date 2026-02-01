@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vectrixdb"
-version = "1.0.4"
+version = "1.0.5"
 description = "Where vectors come alive - A lightweight, visual-first vector database with embedded ML models"
 readme = "README.md"
 license = "Apache-2.0"
