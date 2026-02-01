@@ -1255,23 +1255,9 @@ class LateInteractionEmbedder:
                         f"Note: If downloads are blocked, use language='en' for bundled English ColBERT model."
                     ) from e
             else:
-                # English ColBERT model - auto-download from GitHub
-                print(f"English ColBERT model not found. Downloading from GitHub...")
-                try:
-                    download_models(model_type="late_interaction_en", progress=True)
-                except Exception as e:
-                    raise RuntimeError(
-                        f"Failed to download English ColBERT model.\n\n"
-                        f"Error: {e}\n\n"
-                        f"Try manual download: vectrixdb download-models --type late_interaction_en"
-                    ) from e
-
-            # Re-check model path after download
-            if not model_path.exists():
                 raise FileNotFoundError(
-                    f"Model file not found after download: {model_path}\n"
-                    f"The download may have failed or extracted to wrong location.\n"
-                    f"Try manual download: vectrixdb download-models --type late_interaction_en"
+                    f"ColBERT model not found: {model_path}\n"
+                    f"English models should be bundled. Try reinstalling: pip install --force-reinstall vectrixdb"
                 )
 
         # Set up ONNX Runtime session

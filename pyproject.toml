@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vectrixdb"
-version = "1.0.5"
+version = "1.0.6"
 description = "Where vectors come alive - A lightweight, visual-first vector database with embedded ML models"
 readme = "README.md"
 license = "Apache-2.0"
@@ -96,9 +96,8 @@ Repository = "https://github.com/knowusuboaky/VectrixDB"
 [tool.hatch.build.targets.wheel]
 packages = ["vectrixdb"]
 # Exclude models that are auto-downloaded from GitHub
-# Bundled: dense_en, reranker_en, sparse (English models, ~66MB total)
+# Bundled: dense_en, reranker_en, colbert, sparse (English models, ~99MB total)
 exclude = [
-    "vectrixdb/models/data/colbert",
     "vectrixdb/models/data/dense",
     "vectrixdb/models/data/reranker",
     "vectrixdb/models/data/bge-m3",
@@ -107,7 +106,6 @@ exclude = [
 
 [tool.hatch.build.targets.sdist]
 exclude = [
-    "vectrixdb/models/data/colbert",
     "vectrixdb/models/data/dense",
     "vectrixdb/models/data/reranker",
     "vectrixdb/models/data/bge-m3",
