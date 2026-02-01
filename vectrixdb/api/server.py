@@ -917,10 +917,14 @@ async def create_collection_v2(request: CreateCollectionRequestV2):
     if tier in ['hybrid', 'ultimate', 'graph']:
         enable_text_index = True  # These tiers require text index for BM25/rerank
 
-    # Normalize tags to just the tier (remove redundant tags)
+    # Normalize tags: keep tier + language tags (EN/ML)
     if 'demo' not in tags_lower:
-        # Keep only the tier tag and demo if present
-        tags = [tier]
+        normalized_tags = [tier]
+        # Preserve language tags
+        for t in tags:
+            if t.upper() in ['EN', 'ML']:
+                normalized_tags.append(t.upper())
+        tags = normalized_tags
 
     try:
         collection = db.create_collection(
