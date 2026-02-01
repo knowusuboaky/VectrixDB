@@ -96,9 +96,9 @@ Repository = "https://github.com/knowusuboaky/VectrixDB"
 [tool.hatch.build.targets.wheel]
 packages = ["vectrixdb"]
 # Exclude models that are auto-downloaded from GitHub
+# Bundled: dense_en, reranker_en, sparse (English models, ~66MB total)
 exclude = [
     "vectrixdb/models/data/colbert",
-    "vectrixdb/models/data/reranker_en",
     "vectrixdb/models/data/dense",
     "vectrixdb/models/data/reranker",
     "vectrixdb/models/data/bge-m3",
@@ -108,7 +108,6 @@ exclude = [
 [tool.hatch.build.targets.sdist]
 exclude = [
     "vectrixdb/models/data/colbert",
-    "vectrixdb/models/data/reranker_en",
     "vectrixdb/models/data/dense",
     "vectrixdb/models/data/reranker",
     "vectrixdb/models/data/bge-m3",
