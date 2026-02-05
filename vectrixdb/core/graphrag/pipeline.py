@@ -78,16 +78,16 @@ class GraphRAGPipeline:
         self.path = Path(path) if path else None
         self.embed_fn = embed_fn
 
+        # State tracking
+        self._is_built = False
+        self._stats = GraphRAGStats()
+
         # Initialize components
         self._init_chunker()
         self._init_extractor()
         self._init_graph()
-        self._init_storage()
         self._init_searchers()
-
-        # State tracking
-        self._is_built = False
-        self._stats = GraphRAGStats()
+        self._init_storage()
 
     def _init_chunker(self) -> None:
         """Initialize document chunker."""
