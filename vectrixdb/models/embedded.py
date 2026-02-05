@@ -1960,3 +1960,7 @@ class GraphExtractor:
     def __call__(self, text: str) -> List[Triplet]:
         """Alias for extract()."""
         return self.extract(text)
+
+
+# Backward-compatible alias for older GraphRAG imports.
+REBELExtractor = GraphExtractor
