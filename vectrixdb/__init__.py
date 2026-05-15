@@ -46,7 +46,7 @@ Author: VectrixDB Team
 License: Apache 2.0
 """
 
-__version__ = "1.1.2"
+__version__ = "1.2.0"
 __author__ = "VectrixDB Team"
 __tagline__ = "Where vectors come alive"
 
@@ -104,6 +104,8 @@ from .core.storage import (
     BaseStorage,
     InMemoryStorage,
     SQLiteStorage,
+    LakebaseStorage,
+    DeltaLakeStorage,
     create_storage,
 )
 
@@ -228,6 +230,28 @@ except ImportError:
     GraphRAGConfig = None
     GraphRAGPipeline = None
 
+# Sync (Delta Lake → Lakebase)
+from .core.sync import (
+    VectrixSync,
+    SyncResult,
+    SyncStatus,
+    create_sync,
+)
+
+# Document Index (hierarchical document storage)
+from .core.document_index import (
+    DocumentIndex,
+    DocumentInfo,
+    DocumentNode,
+    DocumentType,
+    ChunkInfo,
+    chunk_text,
+    chunk_with_context,
+    build_tree_from_markdown,
+    build_tree_from_pdf,
+    build_tree_from_text,
+)
+
 __all__ = [
     # Easy API (Recommended)
     "Vectrix",
@@ -274,6 +298,8 @@ __all__ = [
     "BaseStorage",
     "InMemoryStorage",
     "SQLiteStorage",
+    "LakebaseStorage",
+    "DeltaLakeStorage",
     "create_storage",
     # Cache
     "CacheBackend",
@@ -360,6 +386,22 @@ __all__ = [
     "create_nlp_only_config",
     "create_pipeline",
     "GRAPHRAG_AVAILABLE",
+    # Sync
+    "VectrixSync",
+    "SyncResult",
+    "SyncStatus",
+    "create_sync",
+    # Document Index
+    "DocumentIndex",
+    "DocumentInfo",
+    "DocumentNode",
+    "DocumentType",
+    "ChunkInfo",
+    "chunk_text",
+    "chunk_with_context",
+    "build_tree_from_markdown",
+    "build_tree_from_pdf",
+    "build_tree_from_text",
     # Meta
     "__version__",
 ]

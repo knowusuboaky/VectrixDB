@@ -2,7 +2,7 @@
 VectrixDB Database - Main database interface.
 
 Manages collections and provides a unified interface with:
-- Multiple storage backends (memory, SQLite, Cosmos DB)
+- Multiple storage backends (memory, SQLite, Cosmos DB, Lakebase)
 - Caching layer (memory LRU, Redis, hybrid)
 - Auto-scaling and resource management
 - Thread-safe operations
@@ -39,6 +39,13 @@ from .scaling import (
     ScalingConfig,
     AutoScaler,
     ResourceMonitor,
+)
+from .document_index import (
+    DocumentIndex,
+    DocumentInfo,
+    DocumentNode,
+    DocumentType,
+    ChunkInfo,
 )
 
 # GraphRAG support (optional import)
@@ -86,6 +93,12 @@ class VectrixDB:
         ... )
         >>> db = VectrixDB(storage_config=storage_config)
 
+    With Databricks Lakebase:
+        >>> db = VectrixDB.with_lakebase(
+        ...     host="your-workspace.cloud.databricks.com",
+        ...     token="dapi_xxxxx"
+        ... )
+
     With auto-scaling:
         >>> from vectrixdb import ScalingConfig, ScalingStrategy
         >>> scaling_config = ScalingConfig(strategy=ScalingStrategy.BALANCED)
@@ -94,7 +107,7 @@ class VectrixDB:
     Features:
         - Multiple collections with HNSW indexing
         - Hybrid search (vector + keyword)
-        - Pluggable storage (memory, SQLite, Cosmos DB)
+        - Pluggable storage (memory, SQLite, Cosmos DB, Lakebase)
         - Multi-tier caching (memory, Redis, hybrid)
         - Auto-scaling and resource management
         - Thread-safe operations
@@ -191,6 +204,9 @@ class VectrixDB:
         if graphrag_config and GRAPHRAG_AVAILABLE:
             if graphrag_config.enabled:
                 self._init_graphrag()
+
+        # Initialize Document Index
+        self._document_index: Optional[DocumentIndex] = None
 
     def _init_storage(self) -> None:
         """Initialize the main database metadata storage."""
@@ -847,6 +863,156 @@ class VectrixDB:
         """Check if GraphRAG is enabled."""
         return self._graphrag_pipeline is not None
 
+    # =========================================================================
+    # Document Index Methods
+    # =========================================================================
+
+    @property
+    def documents(self) -> DocumentIndex:
+        """
+        Access the document index for hierarchical document storage.
+
+        The document index provides:
+        - Tree structure from documents (PDF pages, markdown headings)
+        - Smart chunking for vectorization
+        - Page/section navigation
+
+        Example:
+            >>> db = VectrixDB("./data")
+            >>> # Index a document
+            >>> db.documents.index_file("guide.pdf")
+            >>> # Get chunks for vectorization
+            >>> chunks = db.documents.get_chunks("guide")
+            >>> # Navigate to page 5
+            >>> page = db.documents.get_page("guide", 5)
+        """
+        if self._document_index is None:
+            self._document_index = DocumentIndex(self._storage)
+        return self._document_index
+
+    def index_document(
+        self,
+        file_path: str,
+        doc_id: Optional[str] = None,
+        doc_type: Optional[str] = None,
+        chunk_size: int = 1000,
+        chunk_overlap: int = 200,
+    ) -> DocumentInfo:
+        """
+        Index a document file (convenience method).
+
+        Args:
+            file_path: Path to the file.
+            doc_id: Document ID (defaults to filename).
+            doc_type: Document type (auto-detected if not provided).
+            chunk_size: Size of chunks for vectorization.
+            chunk_overlap: Overlap between chunks.
+
+        Returns:
+            DocumentInfo with indexing results.
+
+        Example:
+            >>> db = VectrixDB("./data")
+            >>> doc = db.index_document("products.pdf")
+            >>> print(f"Indexed {doc.page_count} pages")
+        """
+        return self.documents.index_file(
+            file_path=file_path,
+            doc_id=doc_id,
+            doc_type=doc_type,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+
+    def index_text(
+        self,
+        doc_id: str,
+        content: str,
+        title: Optional[str] = None,
+        doc_type: str = "markdown",
+    ) -> DocumentInfo:
+        """
+        Index text content directly (convenience method).
+
+        Args:
+            doc_id: Unique document ID.
+            content: Document text content.
+            title: Document title.
+            doc_type: Type ("markdown", "pdf", "text").
+
+        Returns:
+            DocumentInfo with indexing results.
+
+        Example:
+            >>> db = VectrixDB("./data")
+            >>> doc = db.index_text("readme", "# Welcome\\n...", doc_type="markdown")
+        """
+        return self.documents.index_text(
+            doc_id=doc_id,
+            content=content,
+            title=title,
+            doc_type=doc_type,
+        )
+
+    def get_page(self, doc_id: str, page_num: int) -> Optional[DocumentNode]:
+        """
+        Get a specific page from an indexed document.
+
+        Args:
+            doc_id: Document ID.
+            page_num: Page number (1-indexed).
+
+        Returns:
+            DocumentNode for the page or None.
+
+        Example:
+            >>> page = db.get_page("products", 5)
+            >>> print(page.text)
+        """
+        return self.documents.get_page(doc_id, page_num)
+
+    def get_section(self, doc_id: str, section_title: str) -> Optional[DocumentNode]:
+        """
+        Get a section by title from an indexed document.
+
+        Args:
+            doc_id: Document ID.
+            section_title: Section title to find.
+
+        Returns:
+            DocumentNode for the section or None.
+
+        Example:
+            >>> intro = db.get_section("readme", "Introduction")
+            >>> print(intro.text)
+        """
+        return self.documents.get_section(doc_id, section_title)
+
+    def get_chunks(
+        self,
+        doc_id: str,
+        chunk_size: int = 1000,
+        chunk_overlap: int = 200,
+    ) -> List[ChunkInfo]:
+        """
+        Get chunks for vectorization from an indexed document.
+
+        Args:
+            doc_id: Document ID.
+            chunk_size: Maximum chunk size.
+            chunk_overlap: Overlap between chunks.
+
+        Returns:
+            List of ChunkInfo objects ready for embedding.
+
+        Example:
+            >>> chunks = db.get_chunks("products")
+            >>> for chunk in chunks:
+            ...     vector = embed(chunk.text)
+            ...     collection.add([chunk.chunk_id], [vector], [{"doc_id": chunk.doc_id}])
+        """
+        return self.documents.get_chunks(doc_id, chunk_size, chunk_overlap)
+
     def __getitem__(self, name: str) -> Collection:
         """Get collection by name using bracket notation."""
         return self.get_collection(name)
@@ -1007,6 +1173,114 @@ class VectrixDB:
             cosmos_endpoint=endpoint,
             cosmos_key=key,
             cosmos_database=database_name,
+        )
+        return cls(storage_config=storage_config, cache_config=cache_config)
+
+    @classmethod
+    def with_lakebase(
+        cls,
+        host: str,
+        database: str = "vectrixdb",
+        token: Optional[str] = None,
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        port: int = 5432,
+        ssl: bool = True,
+        cache_config: Optional[CacheConfig] = None,
+    ) -> "VectrixDB":
+        """
+        Create database with Databricks Lakebase storage (PostgreSQL + pgvector).
+
+        Lakebase is Databricks' managed PostgreSQL with pgvector support,
+        ideal for production vector databases with enterprise features.
+
+        Args:
+            host: Lakebase host URL
+            database: Database name in Lakebase
+            token: Databricks Personal Access Token (preferred auth)
+            user: PostgreSQL username (fallback auth)
+            password: PostgreSQL password (fallback auth)
+            port: PostgreSQL port (default: 5432)
+            ssl: Enable SSL (default: True, required for Databricks)
+            cache_config: Optional cache configuration
+
+        Example:
+            # With Databricks token (recommended)
+            db = VectrixDB.with_lakebase(
+                host="your-workspace.cloud.databricks.com",
+                token="dapi_xxxxx"
+            )
+
+            # With user/password
+            db = VectrixDB.with_lakebase(
+                host="your-lakebase-host.com",
+                user="admin",
+                password="your-password"
+            )
+        """
+        storage_config = StorageConfig(
+            backend=StorageBackend.LAKEBASE,
+            lakebase_host=host,
+            lakebase_port=port,
+            lakebase_database=database,
+            lakebase_token=token,
+            lakebase_user=user,
+            lakebase_password=password,
+            lakebase_ssl=ssl,
+        )
+        return cls(storage_config=storage_config, cache_config=cache_config)
+
+    @classmethod
+    def with_delta_lake(
+        cls,
+        workspace_url: str,
+        token: str,
+        catalog: str = "main",
+        schema: str = "vectrixdb",
+        warehouse_id: Optional[str] = None,
+        http_path: Optional[str] = None,
+        cache_config: Optional[CacheConfig] = None,
+    ) -> "VectrixDB":
+        """
+        Create database with Databricks Delta Lake + Unity Catalog storage.
+
+        Delta Lake provides governed, ACID-compliant storage with time travel
+        and lineage tracking. Best for batch workloads and compliance.
+
+        NOTE: Vector search is SLOW in Delta Lake (full scan). For real-time
+        search, use with_lakebase() or sync Delta Lake to Lakebase.
+
+        Args:
+            workspace_url: Databricks workspace URL (e.g., https://adb-123.azuredatabricks.net)
+            token: Databricks Personal Access Token
+            catalog: Unity Catalog name (must exist, default: "main")
+            schema: Schema name (created if not exists, default: "vectrixdb")
+            warehouse_id: SQL Warehouse ID (optional, for serverless)
+            http_path: HTTP path for SQL Warehouse (optional)
+            cache_config: Optional cache configuration
+
+        Example:
+            db = VectrixDB.with_delta_lake(
+                workspace_url="https://adb-123456789.azuredatabricks.net",
+                token="dapi_xxxxx",
+                catalog="main",
+                schema="agent_registry"
+            )
+
+            # Create collection (stored in Delta Lake)
+            db.create_collection("embeddings", dimension=384)
+
+            # Index documents (stored in Delta Lake)
+            db.documents.index_text("Hello world", title="Doc1")
+        """
+        storage_config = StorageConfig(
+            backend=StorageBackend.DELTA_LAKE,
+            delta_workspace_url=workspace_url,
+            delta_token=token,
+            delta_catalog=catalog,
+            delta_schema=schema,
+            delta_warehouse_id=warehouse_id,
+            delta_http_path=http_path,
         )
         return cls(storage_config=storage_config, cache_config=cache_config)
 

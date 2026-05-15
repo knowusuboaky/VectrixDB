@@ -580,6 +580,27 @@ async def lifespan(app: FastAPI):
             cosmos_key=os.environ.get("VECTRIXDB_COSMOS_KEY", ""),
             cosmos_database=os.environ.get("VECTRIXDB_COSMOS_DATABASE", "vectrixdb"),
         )
+    elif storage_backend == "lakebase":
+        storage_config = StorageConfig(
+            backend=StorageBackend.LAKEBASE,
+            lakebase_host=os.environ.get("VECTRIXDB_LAKEBASE_HOST", ""),
+            lakebase_port=int(os.environ.get("VECTRIXDB_LAKEBASE_PORT", "5432")),
+            lakebase_database=os.environ.get("VECTRIXDB_LAKEBASE_DATABASE", "vectrixdb"),
+            lakebase_token=os.environ.get("VECTRIXDB_LAKEBASE_TOKEN"),
+            lakebase_user=os.environ.get("VECTRIXDB_LAKEBASE_USER"),
+            lakebase_password=os.environ.get("VECTRIXDB_LAKEBASE_PASSWORD"),
+            lakebase_ssl=os.environ.get("VECTRIXDB_LAKEBASE_SSL", "true").lower() == "true",
+        )
+    elif storage_backend == "delta_lake":
+        storage_config = StorageConfig(
+            backend=StorageBackend.DELTA_LAKE,
+            delta_workspace_url=os.environ.get("VECTRIXDB_DELTA_WORKSPACE_URL", ""),
+            delta_token=os.environ.get("VECTRIXDB_DELTA_TOKEN", ""),
+            delta_catalog=os.environ.get("VECTRIXDB_DELTA_CATALOG", "main"),
+            delta_schema=os.environ.get("VECTRIXDB_DELTA_SCHEMA", "vectrixdb"),
+            delta_warehouse_id=os.environ.get("VECTRIXDB_DELTA_WAREHOUSE_ID"),
+            delta_http_path=os.environ.get("VECTRIXDB_DELTA_HTTP_PATH"),
+        )
     elif storage_backend == "memory":
         storage_config = StorageConfig(backend=StorageBackend.MEMORY)
 
@@ -822,10 +843,27 @@ async def database_info():
     """Get database information."""
     db = get_db()
     info = db.info()
+
+    # Get storage backend
+    storage_backend = "sqlite"  # default
+    if hasattr(db, '_storage_config') and db._storage_config:
+        storage_backend = db._storage_config.backend.value
+
+    # Get documents count
+    documents_count = 0
+    try:
+        if hasattr(db, 'documents'):
+            docs = db.documents.list_documents()
+            documents_count = len(docs)
+    except Exception:
+        pass
+
     return {
         "collections_count": info.collections_count,
         "total_vectors": info.total_vectors,
         "total_size_bytes": info.total_size_bytes,
+        "storage_backend": storage_backend,
+        "documents_count": documents_count,
     }
 
 
@@ -1952,6 +1990,154 @@ async def get_extended_info():
     db = get_db()
     info = db.extended_info()
     return ApiResponse(ok=True, data=info)
+
+
+# =============================================================================
+# Routes - Document Index
+# =============================================================================
+
+
+class IndexDocumentRequest(BaseModel):
+    """Request to index a document."""
+    text: str = Field(..., min_length=1)
+    title: Optional[str] = None
+    doc_type: str = Field(default="text", description="Document type: text, markdown, pdf")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.get("/api/v1/documents", tags=["documents"])
+async def list_documents():
+    """List all indexed documents."""
+    db = get_db()
+    try:
+        docs = db.documents.list_documents()
+        return {
+            "documents": [
+                {
+                    "doc_id": doc.doc_id,
+                    "title": doc.title,
+                    "doc_type": doc.doc_type.value if hasattr(doc.doc_type, 'value') else str(doc.doc_type),
+                    "page_count": doc.page_count,
+                    "section_count": doc.section_count,
+                    "node_count": doc.node_count,
+                    "indexed_at": doc.indexed_at,
+                    "metadata": doc.metadata,
+                }
+                for doc in docs
+            ],
+            "total": len(docs),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list documents: {str(e)}")
+
+
+@app.get("/api/v1/documents/{doc_id}", tags=["documents"])
+async def get_document(doc_id: str):
+    """Get a document with its tree structure."""
+    db = get_db()
+    try:
+        doc = db.documents.get_document(doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
+
+        nodes = db.documents.get_document_nodes(doc_id)
+        return {
+            "document": {
+                "doc_id": doc.doc_id,
+                "title": doc.title,
+                "doc_type": doc.doc_type.value if hasattr(doc.doc_type, 'value') else str(doc.doc_type),
+                "page_count": doc.page_count,
+                "section_count": doc.section_count,
+                "node_count": doc.node_count,
+                "indexed_at": doc.indexed_at,
+                "metadata": doc.metadata,
+            },
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "parent_id": node.parent_id,
+                    "level": node.level,
+                    "title": node.title,
+                    "text": node.text[:200] + "..." if len(node.text) > 200 else node.text,
+                    "page_num": node.page_num,
+                    "position": node.position,
+                }
+                for node in nodes
+            ],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get document: {str(e)}")
+
+
+@app.post("/api/v1/documents", tags=["documents"])
+async def index_document(request: IndexDocumentRequest):
+    """Index a new document."""
+    db = get_db()
+    try:
+        doc_info = db.documents.index_text(
+            text=request.text,
+            title=request.title,
+            metadata=request.metadata,
+        )
+        await emit_event("document_indexed", {"doc_id": doc_info.doc_id, "title": doc_info.title})
+        return {
+            "ok": True,
+            "document": {
+                "doc_id": doc_info.doc_id,
+                "title": doc_info.title,
+                "node_count": doc_info.node_count,
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to index document: {str(e)}")
+
+
+@app.delete("/api/v1/documents/{doc_id}", tags=["documents"])
+async def delete_document(doc_id: str):
+    """Delete an indexed document."""
+    db = get_db()
+    try:
+        success = db.documents.delete_document(doc_id)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
+        await emit_event("document_deleted", {"doc_id": doc_id})
+        return {"ok": True, "deleted": doc_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+
+
+@app.get("/api/v1/documents/{doc_id}/chunks", tags=["documents"])
+async def get_document_chunks(doc_id: str, chunk_size: int = Query(default=512, ge=100, le=2000)):
+    """Get chunks from a document for embedding."""
+    db = get_db()
+    try:
+        chunks = db.documents.get_chunks(doc_id, chunk_size=chunk_size)
+        if not chunks:
+            raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found or has no chunks")
+        return {
+            "doc_id": doc_id,
+            "chunks": [
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "node_id": chunk.node_id,
+                    "text": chunk.text,
+                    "heading": chunk.heading,
+                    "level": chunk.level,
+                    "page_num": chunk.page_num,
+                    "position": chunk.position,
+                }
+                for chunk in chunks
+            ],
+            "total": len(chunks),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get chunks: {str(e)}")
 
 
 # =============================================================================

@@ -109,6 +109,25 @@
     .auth-badge.authenticated { background: rgba(102, 187, 106, 0.15); color: var(--success); }
     .auth-badge svg { width: 14px; height: 14px; }
 
+    /* Storage Backend Badge */
+    .storage-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 16px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .storage-badge.sqlite { background: rgba(41, 182, 246, 0.15); color: var(--info); }
+    .storage-badge.lakebase { background: rgba(156, 39, 176, 0.15); color: #ab47bc; }
+    .storage-badge.cosmosdb { background: rgba(0, 150, 136, 0.15); color: #26a69a; }
+    .storage-badge.memory { background: rgba(158, 158, 158, 0.15); color: var(--text-secondary); }
+    .storage-badge.delta_lake { background: rgba(255, 87, 34, 0.15); color: #ff7043; }
+    .storage-badge svg { width: 14px; height: 14px; }
+
     /* WebSocket Connection Status */
     .ws-status {
       display: inline-flex;
@@ -1123,6 +1142,14 @@
       </a>
       <div class="appbar-spacer"></div>
       <div class="appbar-actions">
+        <div class="storage-badge sqlite" id="storage-badge" title="Storage backend">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
+          <span id="storage-text">SQLITE</span>
+        </div>
         <div class="ws-status connecting" id="ws-status" title="WebSocket connection status">
           <span class="ws-dot"></span>
           <span id="ws-text">Connecting...</span>
@@ -1178,6 +1205,16 @@
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
             Search
+          </button>
+          <button class="drawer-item" data-page="documents">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+            Documents
           </button>
 
           <div class="drawer-divider"></div>
@@ -1266,6 +1303,8 @@
               <option value="/collections/{name}">Get collection info</option>
               <option value="/collections/{name}/points">List points</option>
               <option value="/collections/{name}/search">Search collection</option>
+              <option value="/documents">List indexed documents</option>
+              <option value="/documents/{id}">Get document tree</option>
               <option value="/health">Health check</option>
               <option value="/info">Database info</option>
             </datalist>
@@ -1794,6 +1833,8 @@
             <button class="btn btn-text" onclick="document.getElementById('code-quickstart').scrollIntoView({behavior:'smooth'})" style="font-size: 12px;">Quick Start</button>
             <button class="btn btn-text" onclick="document.getElementById('code-tiers').scrollIntoView({behavior:'smooth'})" style="font-size: 12px;">Tiers & Modes</button>
             <button class="btn btn-text" onclick="document.getElementById('code-data').scrollIntoView({behavior:'smooth'})" style="font-size: 12px;">Loading Data</button>
+            <button class="btn btn-text" onclick="document.getElementById('code-docindex').scrollIntoView({behavior:'smooth'})" style="font-size: 12px;">Document Index</button>
+            <button class="btn btn-text" onclick="document.getElementById('code-deltalake').scrollIntoView({behavior:'smooth'})" style="font-size: 12px;">Delta Lake & Sync</button>
             <button class="btn btn-text" onclick="document.getElementById('code-custom').scrollIntoView({behavior:'smooth'})" style="font-size: 12px;">Custom Models</button>
             <button class="btn btn-text" onclick="document.getElementById('code-embedders').scrollIntoView({behavior:'smooth'})" style="font-size: 12px;">Direct Embedders</button>
             <button class="btn btn-text" onclick="document.getElementById('code-langchain').scrollIntoView({behavior:'smooth'})" style="font-size: 12px;">LangChain</button>
@@ -2040,6 +2081,218 @@ db.add(
 )</pre>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- Document Index Section -->
+          <div id="code-docindex" class="card" style="margin-bottom: 24px;">
+            <div class="card-header" style="display: flex; align-items: center; gap: 12px;">
+              <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(0, 150, 136, 0.15); display: flex; align-items: center; justify-content: center;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#009688" stroke-width="2" style="width: 20px; height: 20px;">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+              </div>
+              <span>Document Index (Hierarchical Storage)</span>
+            </div>
+            <div class="card-body">
+              <p style="color: var(--text-secondary); margin-bottom: 16px;">Index documents with page/section hierarchy. Separate from vector collections - uses the same storage backend.</p>
+
+              <!-- Basic Document Indexing -->
+              <div style="margin-bottom: 16px;">
+                <div style="font-weight: 500; margin-bottom: 8px;">Index Text Documents</div>
+                <div class="code-block" onclick="copyCode(this)" style="cursor: pointer; position: relative;">
+                  <div style="position: absolute; top: 8px; right: 8px; font-size: 10px; color: var(--text-disabled);">click to copy</div>
+                  <pre style="background: var(--bg-default); padding: 16px; border-radius: 8px; font-size: 13px; overflow-x: auto; margin: 0; font-family: 'JetBrains Mono', monospace;"><span style="color: #c792ea;">from</span> vectrixdb <span style="color: #c792ea;">import</span> VectrixDB
+
+<span style="color: #546e7a;"># Open database (uses same storage as collections)</span>
+db = VectrixDB(<span style="color: #c3e88d;">"./my_data"</span>)
+
+<span style="color: #546e7a;"># Index a text document</span>
+doc_info = db.documents.index_text(
+    text=<span style="color: #c3e88d;">"""# Introduction
+This is the first section.
+
+## Background
+More details here.
+
+## Methods
+The approach used."""</span>,
+    title=<span style="color: #c3e88d;">"My Research Paper"</span>
+)
+
+<span style="color: #82aaff;">print</span>(<span style="color: #c3e88d;">f"Indexed: </span>{doc_info.doc_id}<span style="color: #c3e88d;"> with </span>{doc_info.node_count}<span style="color: #c3e88d;"> nodes"</span>)</pre>
+                </div>
+              </div>
+
+              <!-- Navigate Document Tree -->
+              <div style="margin-bottom: 16px;">
+                <div style="font-weight: 500; margin-bottom: 8px;">Navigate Document Tree</div>
+                <div class="code-block" onclick="copyCode(this)" style="cursor: pointer; position: relative;">
+                  <div style="position: absolute; top: 8px; right: 8px; font-size: 10px; color: var(--text-disabled);">click to copy</div>
+                  <pre style="background: var(--bg-default); padding: 16px; border-radius: 8px; font-size: 13px; overflow-x: auto; margin: 0; font-family: 'JetBrains Mono', monospace;"><span style="color: #546e7a;"># List all documents</span>
+docs = db.documents.list_documents()
+<span style="color: #c792ea;">for</span> doc <span style="color: #c792ea;">in</span> docs:
+    <span style="color: #82aaff;">print</span>(<span style="color: #c3e88d;">f"</span>{doc.title}<span style="color: #c3e88d;">: </span>{doc.section_count}<span style="color: #c3e88d;"> sections"</span>)
+
+<span style="color: #546e7a;"># Get document tree nodes</span>
+nodes = db.documents.get_document_nodes(doc_id)
+<span style="color: #c792ea;">for</span> node <span style="color: #c792ea;">in</span> nodes:
+    indent = <span style="color: #c3e88d;">"  "</span> * node.level
+    <span style="color: #82aaff;">print</span>(<span style="color: #c3e88d;">f"</span>{indent}{node.title}<span style="color: #c3e88d;">"</span>)
+
+<span style="color: #546e7a;"># Get specific section</span>
+section = db.documents.get_section(doc_id, section_title=<span style="color: #c3e88d;">"Methods"</span>)
+<span style="color: #82aaff;">print</span>(section.text)</pre>
+                </div>
+              </div>
+
+              <!-- Get Chunks for Embedding -->
+              <div style="margin-bottom: 16px;">
+                <div style="font-weight: 500; margin-bottom: 8px;">Get Chunks for Embedding</div>
+                <div class="code-block" onclick="copyCode(this)" style="cursor: pointer; position: relative;">
+                  <div style="position: absolute; top: 8px; right: 8px; font-size: 10px; color: var(--text-disabled);">click to copy</div>
+                  <pre style="background: var(--bg-default); padding: 16px; border-radius: 8px; font-size: 13px; overflow-x: auto; margin: 0; font-family: 'JetBrains Mono', monospace;"><span style="color: #546e7a;"># Get smart chunks with heading context</span>
+chunks = db.documents.get_chunks(doc_id, chunk_size=<span style="color: #f78c6c;">512</span>)
+
+<span style="color: #c792ea;">for</span> chunk <span style="color: #c792ea;">in</span> chunks:
+    <span style="color: #82aaff;">print</span>(<span style="color: #c3e88d;">f"[</span>{chunk.heading}<span style="color: #c3e88d;">] </span>{chunk.text[:100]}<span style="color: #c3e88d;">..."</span>)
+
+<span style="color: #546e7a;"># Use chunks with Vectrix for semantic search</span>
+<span style="color: #c792ea;">from</span> vectrixdb <span style="color: #c792ea;">import</span> Vectrix
+
+vx = Vectrix(<span style="color: #c3e88d;">"doc_search"</span>, tier=<span style="color: #c3e88d;">"hybrid"</span>)
+vx.add(
+    texts=[c.text <span style="color: #c792ea;">for</span> c <span style="color: #c792ea;">in</span> chunks],
+    ids=[c.chunk_id <span style="color: #c792ea;">for</span> c <span style="color: #c792ea;">in</span> chunks],
+    metadata=[{<span style="color: #c3e88d;">"doc_id"</span>: c.doc_id, <span style="color: #c3e88d;">"heading"</span>: c.heading} <span style="color: #c792ea;">for</span> c <span style="color: #c792ea;">in</span> chunks]
+)</pre>
+                </div>
+              </div>
+
+              <!-- With Lakebase Storage -->
+              <div style="margin-bottom: 16px;">
+                <div style="font-weight: 500; margin-bottom: 8px;">With Lakebase (Databricks) Storage</div>
+                <div class="code-block" onclick="copyCode(this)" style="cursor: pointer; position: relative;">
+                  <div style="position: absolute; top: 8px; right: 8px; font-size: 10px; color: var(--text-disabled);">click to copy</div>
+                  <pre style="background: var(--bg-default); padding: 16px; border-radius: 8px; font-size: 13px; overflow-x: auto; margin: 0; font-family: 'JetBrains Mono', monospace;"><span style="color: #c792ea;">from</span> vectrixdb <span style="color: #c792ea;">import</span> VectrixDB
+
+<span style="color: #546e7a;"># Connect to Databricks Lakebase</span>
+db = VectrixDB.with_lakebase(
+    host=<span style="color: #c3e88d;">"your-workspace.cloud.databricks.com"</span>,
+    database=<span style="color: #c3e88d;">"vectrixdb"</span>,
+    token=<span style="color: #c3e88d;">"dapi..."</span>  <span style="color: #546e7a;"># Databricks PAT</span>
+)
+
+<span style="color: #546e7a;"># Documents use the same Lakebase storage</span>
+db.documents.index_text(<span style="color: #c3e88d;">"Your document content..."</span>, title=<span style="color: #c3e88d;">"Cloud Doc"</span>)</pre>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Delta Lake & Sync Section -->
+          <div id="code-deltalake" class="card" style="margin-bottom: 24px;">
+            <div class="card-header" style="display: flex; align-items: center; gap: 12px;">
+              <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(255, 87, 34, 0.15); display: flex; align-items: center; justify-content: center;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#ff7043" stroke-width="2" style="width: 20px; height: 20px;">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                  <path d="M2 17l10 5 10-5"/>
+                  <path d="M2 12l10 5 10-5"/>
+                </svg>
+              </div>
+              <span>Delta Lake & Sync (Databricks)</span>
+            </div>
+            <div class="card-body">
+              <p style="color: var(--text-secondary); margin-bottom: 16px;">Use Delta Lake (Unity Catalog) for governed storage, sync to Lakebase for fast vector search.</p>
+
+              <!-- Delta Lake Storage -->
+              <div style="margin-bottom: 16px;">
+                <div style="font-weight: 500; margin-bottom: 8px;">Delta Lake with Unity Catalog</div>
+                <div class="code-block" onclick="copyCode(this)" style="cursor: pointer; position: relative;">
+                  <div style="position: absolute; top: 8px; right: 8px; font-size: 10px; color: var(--text-disabled);">click to copy</div>
+                  <pre style="background: var(--bg-default); padding: 16px; border-radius: 8px; font-size: 13px; overflow-x: auto; margin: 0; font-family: 'JetBrains Mono', monospace;"><span style="color: #c792ea;">from</span> vectrixdb <span style="color: #c792ea;">import</span> VectrixDB
+
+<span style="color: #546e7a;"># Connect to Delta Lake via Unity Catalog</span>
+db = VectrixDB.with_delta_lake(
+    workspace_url=<span style="color: #c3e88d;">"https://adb-123.azuredatabricks.net"</span>,
+    token=<span style="color: #c3e88d;">"dapi..."</span>,  <span style="color: #546e7a;"># Databricks PAT</span>
+    catalog=<span style="color: #c3e88d;">"main"</span>,     <span style="color: #546e7a;"># Unity Catalog catalog</span>
+    schema=<span style="color: #c3e88d;">"vectrixdb"</span>  <span style="color: #546e7a;"># Schema for VectrixDB tables</span>
+)
+
+<span style="color: #546e7a;"># Create collection (stored as Delta table)</span>
+coll = db.create_collection(<span style="color: #c3e88d;">"documents"</span>, dimension=<span style="color: #f78c6c;">384</span>)
+coll.add(ids=[<span style="color: #c3e88d;">"doc1"</span>], vectors=[[<span style="color: #f78c6c;">0.1</span>, <span style="color: #f78c6c;">0.2</span>, ...]])</pre>
+                </div>
+              </div>
+
+              <!-- Sync Delta Lake to Lakebase -->
+              <div style="margin-bottom: 16px;">
+                <div style="font-weight: 500; margin-bottom: 8px;">Sync: Delta Lake → Lakebase</div>
+                <div class="code-block" onclick="copyCode(this)" style="cursor: pointer; position: relative;">
+                  <div style="position: absolute; top: 8px; right: 8px; font-size: 10px; color: var(--text-disabled);">click to copy</div>
+                  <pre style="background: var(--bg-default); padding: 16px; border-radius: 8px; font-size: 13px; overflow-x: auto; margin: 0; font-family: 'JetBrains Mono', monospace;"><span style="color: #c792ea;">from</span> vectrixdb <span style="color: #c792ea;">import</span> VectrixDB, VectrixSync
+
+<span style="color: #546e7a;"># Source: Delta Lake (governed, ACID, slow search)</span>
+delta = VectrixDB.with_delta_lake(
+    workspace_url=<span style="color: #c3e88d;">"https://adb-123.azuredatabricks.net"</span>,
+    token=<span style="color: #c3e88d;">"dapi..."</span>,
+    catalog=<span style="color: #c3e88d;">"main"</span>,
+    schema=<span style="color: #c3e88d;">"vectrixdb"</span>
+)
+
+<span style="color: #546e7a;"># Target: Lakebase (fast vector search)</span>
+lakebase = VectrixDB.with_lakebase(
+    host=<span style="color: #c3e88d;">"your-workspace.cloud.databricks.com"</span>,
+    token=<span style="color: #c3e88d;">"dapi..."</span>,
+    database=<span style="color: #c3e88d;">"vectrixdb"</span>
+)
+
+<span style="color: #546e7a;"># Create sync + auto-sync (one-liner!)</span>
+sync = VectrixSync(source=delta, target=lakebase)
+sync.auto()  <span style="color: #546e7a;"># Full sync + starts scheduler</span>
+
+<span style="color: #546e7a;"># Now just write to Delta Lake - auto-synced!</span></pre>
+                </div>
+              </div>
+
+              <!-- Auto Sync (Recommended) -->
+              <div style="margin-bottom: 16px;">
+                <div style="font-weight: 500; margin-bottom: 8px; color: var(--success);">Auto Sync (Recommended)</div>
+                <div class="code-block" onclick="copyCode(this)" style="cursor: pointer; position: relative;">
+                  <div style="position: absolute; top: 8px; right: 8px; font-size: 10px; color: var(--text-disabled);">click to copy</div>
+                  <pre style="background: var(--bg-default); padding: 16px; border-radius: 8px; font-size: 13px; overflow-x: auto; margin: 0; font-family: 'JetBrains Mono', monospace;"><span style="color: #546e7a;"># One-liner: full sync if needed + start scheduler</span>
+sync.auto(interval_minutes=<span style="color: #f78c6c;">5</span>)
+
+<span style="color: #546e7a;"># That's it! Now just write to Delta Lake</span>
+delta.get_collection(<span style="color: #c3e88d;">"docs"</span>).add(ids=[<span style="color: #c3e88d;">"new1"</span>], vectors=[[...]])
+<span style="color: #546e7a;"># Auto-synced every 5 minutes!</span>
+
+<span style="color: #546e7a;"># Check status anytime</span>
+status = sync.status()
+<span style="color: #82aaff;">print</span>(<span style="color: #c3e88d;">f"Last sync: </span>{status.last_sync}<span style="color: #c3e88d;">, Lag: </span>{status.lag_seconds:.0f}<span style="color: #c3e88d;">s"</span>)</pre>
+                </div>
+              </div>
+
+              <!-- Architecture -->
+              <div style="margin-bottom: 16px;">
+                <div style="font-weight: 500; margin-bottom: 8px; color: var(--info);">Architecture Pattern</div>
+                <div style="background: var(--bg-default); padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-secondary);">
+                  <div style="margin-bottom: 8px;"><strong style="color: var(--text-primary);">Write Path:</strong> App → Delta Lake (governed)</div>
+                  <div style="margin-bottom: 8px;"><strong style="color: var(--text-primary);">Sync:</strong> VectrixSync (scheduled/manual)</div>
+                  <div style="margin-bottom: 8px;"><strong style="color: var(--text-primary);">Read Path:</strong> Lakebase (fast pgvector search)</div>
+                  <div style="border-top: 1px solid var(--divider); padding-top: 8px; margin-top: 12px;">
+                    <span style="color: var(--success);">✓</span> Unity Catalog governance &nbsp;&nbsp;
+                    <span style="color: var(--success);">✓</span> ACID transactions &nbsp;&nbsp;
+                    <span style="color: var(--success);">✓</span> Fast vector search
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
 
@@ -2429,6 +2682,43 @@ vectrixdb models-info</pre>
           </div>
         </div>
 
+        <!-- Documents -->
+        <div class="page" id="page-documents">
+          <h1 class="page-title">Documents</h1>
+          <p style="color: var(--text-secondary); margin-bottom: 24px;">Hierarchical document index for page/section navigation</p>
+
+          <div class="card" style="margin-bottom: 16px;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Indexed Documents</span>
+              <button class="btn btn-primary btn-sm" onclick="openDialog('index-doc')" style="padding: 6px 12px; font-size: 12px;">
+                + Index Document
+              </button>
+            </div>
+            <div class="card-body" id="documents-list">
+              <div class="loading"><div class="spinner"></div></div>
+            </div>
+          </div>
+
+          <!-- Document Tree View (shown when a document is selected) -->
+          <div class="card" id="document-tree-card" style="display: none;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="btn btn-text" onclick="hideDocumentTree()" style="padding: 4px 8px;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                    <polyline points="15 18 9 12 15 6"/>
+                  </svg>
+                  Back
+                </button>
+                <span id="document-tree-title">Document</span>
+              </div>
+              <button class="btn btn-text" onclick="deleteCurrentDocument()" style="color: var(--error);">Delete</button>
+            </div>
+            <div class="card-body" id="document-tree">
+              <!-- Tree structure will be rendered here -->
+            </div>
+          </div>
+        </div>
+
       </main>
     </div>
 
@@ -2555,6 +2845,34 @@ vectrixdb models-info</pre>
       <div class="dialog-actions">
         <button class="btn btn-text" onclick="closeDialog('confirm')">CANCEL</button>
         <button class="btn btn-primary" id="confirm-action-btn" onclick="confirmAction()">CONFIRM</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Index Document Dialog -->
+  <div class="dialog-overlay" id="dialog-index-doc">
+    <div class="dialog" style="max-width: 600px;">
+      <div class="dialog-title">Index Document</div>
+      <div class="dialog-content">
+        <div class="form-group">
+          <label class="form-label">Title (optional)</label>
+          <input type="text" class="form-input" id="index-doc-title" placeholder="Document title">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Document Type</label>
+          <select class="form-select" id="index-doc-type">
+            <option value="text">Plain Text</option>
+            <option value="markdown">Markdown</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Content</label>
+          <textarea class="form-input" id="index-doc-content" rows="10" placeholder="Paste your document content here..."></textarea>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn btn-text" onclick="closeDialog('index-doc')">CANCEL</button>
+        <button class="btn btn-primary" onclick="indexDocument()">INDEX</button>
       </div>
     </div>
   </div>
@@ -2713,6 +3031,7 @@ vectrixdb models-info</pre>
       applyToggles();
       updateAuthBadge();
       loadCollections();
+      loadStorageInfo();
       setupNavigation();
       connectWebSocket();
       setupDropzone();
@@ -2763,6 +3082,8 @@ vectrixdb models-info</pre>
         });
         // Load server metrics and render
         loadServerMetrics().then(() => renderApiMetrics());
+      } else if (page === 'documents') {
+        loadDocuments();
       }
     }
 
@@ -3290,6 +3611,213 @@ vectrixdb models-info</pre>
         });
       } catch (e) {
         grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><h3>Error</h3><p>${e.message}</p></div>`;
+      }
+    }
+
+    // ===========================================
+    // Document Index Functions
+    // ===========================================
+
+    let currentDocId = null;
+
+    async function loadStorageInfo() {
+      try {
+        const res = await fetch(`${API}/api/v1/info`, { headers: getHeaders() });
+        const data = await res.json();
+
+        const badge = document.getElementById('storage-badge');
+        const text = document.getElementById('storage-text');
+
+        const backend = (data.storage_backend || 'sqlite').toLowerCase();
+        text.textContent = backend.toUpperCase();
+
+        // Update badge class
+        badge.className = 'storage-badge ' + backend;
+      } catch (e) {
+        console.error('Failed to load storage info:', e);
+      }
+    }
+
+    async function loadDocuments() {
+      const list = document.getElementById('documents-list');
+
+      try {
+        const res = await fetch(`${API}/api/v1/documents`, { headers: getHeaders() });
+        const data = await res.json();
+
+        if (!data.documents?.length) {
+          list.innerHTML = `
+            <div class="empty-state" style="text-align: center; padding: 48px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.5;">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+              </svg>
+              <h3 style="margin-bottom: 8px;">No documents indexed</h3>
+              <p style="color: var(--text-secondary);">Index your first document to enable hierarchical navigation</p>
+            </div>`;
+          return;
+        }
+
+        list.innerHTML = `
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--divider);">
+                <th style="text-align: left; padding: 12px 8px; font-weight: 500; color: var(--text-secondary);">Title</th>
+                <th style="text-align: left; padding: 12px 8px; font-weight: 500; color: var(--text-secondary);">Type</th>
+                <th style="text-align: center; padding: 12px 8px; font-weight: 500; color: var(--text-secondary);">Pages</th>
+                <th style="text-align: center; padding: 12px 8px; font-weight: 500; color: var(--text-secondary);">Sections</th>
+                <th style="text-align: left; padding: 12px 8px; font-weight: 500; color: var(--text-secondary);">Indexed</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${data.documents.map(doc => `
+                <tr onclick="showDocumentTree('${doc.doc_id}')" style="cursor: pointer; border-bottom: 1px solid var(--divider);" onmouseover="this.style.background='var(--action-hover)'" onmouseout="this.style.background='transparent'">
+                  <td style="padding: 12px 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px; opacity: 0.6;">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                      </svg>
+                      ${doc.title || doc.doc_id}
+                    </div>
+                  </td>
+                  <td style="padding: 12px 8px;"><span class="tag tag-default">${doc.doc_type}</span></td>
+                  <td style="padding: 12px 8px; text-align: center;">${doc.page_count || '-'}</td>
+                  <td style="padding: 12px 8px; text-align: center;">${doc.section_count || '-'}</td>
+                  <td style="padding: 12px 8px; color: var(--text-secondary); font-size: 12px;">${doc.indexed_at ? new Date(doc.indexed_at).toLocaleDateString() : '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>`;
+      } catch (e) {
+        list.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${e.message}</p></div>`;
+      }
+    }
+
+    async function showDocumentTree(docId) {
+      currentDocId = docId;
+
+      try {
+        const res = await fetch(`${API}/api/v1/documents/${docId}`, { headers: getHeaders() });
+        const data = await res.json();
+
+        document.getElementById('document-tree-title').textContent = data.document.title || docId;
+        document.getElementById('document-tree-card').style.display = 'block';
+
+        // Build tree from flat nodes
+        const nodes = data.nodes || [];
+        const tree = document.getElementById('document-tree');
+
+        if (!nodes.length) {
+          tree.innerHTML = '<p style="color: var(--text-secondary);">No nodes in this document</p>';
+          return;
+        }
+
+        // Render nodes as a tree
+        tree.innerHTML = renderNodeTree(nodes);
+      } catch (e) {
+        showSnackbar('Failed to load document: ' + e.message);
+      }
+    }
+
+    function renderNodeTree(nodes) {
+      // Group by level and parent
+      const rootNodes = nodes.filter(n => !n.parent_id || n.level === 0);
+      const childMap = {};
+
+      nodes.forEach(n => {
+        if (n.parent_id) {
+          if (!childMap[n.parent_id]) childMap[n.parent_id] = [];
+          childMap[n.parent_id].push(n);
+        }
+      });
+
+      function renderNode(node, depth = 0) {
+        const indent = depth * 20;
+        const icon = node.level === 0 ? '📑' : '§';
+        const children = childMap[node.node_id] || [];
+
+        return `
+          <div style="padding: 8px; padding-left: ${indent + 8}px; border-bottom: 1px solid var(--divider);">
+            <div style="display: flex; align-items: flex-start; gap: 8px;">
+              <span style="opacity: 0.6;">${icon}</span>
+              <div style="flex: 1;">
+                <div style="font-weight: 500;">${node.title || 'Untitled'}</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${node.text}</div>
+              </div>
+              ${node.page_num ? `<span style="font-size: 11px; color: var(--text-disabled);">p.${node.page_num}</span>` : ''}
+            </div>
+          </div>
+          ${children.map(c => renderNode(c, depth + 1)).join('')}
+        `;
+      }
+
+      return rootNodes.map(n => renderNode(n, 0)).join('');
+    }
+
+    function hideDocumentTree() {
+      document.getElementById('document-tree-card').style.display = 'none';
+      currentDocId = null;
+    }
+
+    async function deleteCurrentDocument() {
+      if (!currentDocId) return;
+
+      if (!confirm('Are you sure you want to delete this document?')) return;
+
+      try {
+        const res = await fetch(`${API}/api/v1/documents/${currentDocId}`, {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+
+        if (res.ok) {
+          showSnackbar('Document deleted');
+          hideDocumentTree();
+          loadDocuments();
+        } else {
+          const err = await res.json();
+          showSnackbar('Failed to delete: ' + (err.detail || 'Unknown error'));
+        }
+      } catch (e) {
+        showSnackbar('Failed to delete: ' + e.message);
+      }
+    }
+
+    async function indexDocument() {
+      const title = document.getElementById('index-doc-title').value.trim();
+      const docType = document.getElementById('index-doc-type').value;
+      const content = document.getElementById('index-doc-content').value.trim();
+
+      if (!content) {
+        showSnackbar('Please enter document content');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API}/api/v1/documents`, {
+          method: 'POST',
+          headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: content,
+            title: title || null,
+            doc_type: docType
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          showSnackbar('Document indexed: ' + (data.document?.title || data.document?.doc_id));
+          closeDialog('index-doc');
+          document.getElementById('index-doc-title').value = '';
+          document.getElementById('index-doc-content').value = '';
+          loadDocuments();
+        } else {
+          const err = await res.json();
+          showSnackbar('Failed to index: ' + (err.detail || 'Unknown error'));
+        }
+      } catch (e) {
+        showSnackbar('Failed to index: ' + e.message);
       }
     }
 
