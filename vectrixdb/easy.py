@@ -619,18 +619,19 @@ class Vectrix:
             self._db = VectrixDB(self.path)
             self._using_storage_backend = False
 
-        # Determine schema based on mode
-        schema_config = self._get_schema_config()
+        # Store schema config for internal use (what embeddings to generate)
+        self._schema_config = self._get_schema_config()
 
         try:
             self._collection = self._db.get_collection(self.name)
         except:
+            # Create collection with standard params only
+            # Schema config (mode, store_dense, etc.) is used internally by Vectrix
             self._collection = self._db.create_collection(
                 name=self.name,
                 dimension=self.dimension,
                 metric="cosine",
                 enable_text_index=True,
-                **schema_config
             )
 
     def _get_schema_config(self) -> Dict[str, Any]:
