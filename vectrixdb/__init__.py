@@ -46,7 +46,7 @@ Author: VectrixDB Team
 License: Apache 2.0
 """
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 __author__ = "VectrixDB Team"
 __tagline__ = "Where vectors come alive"
 

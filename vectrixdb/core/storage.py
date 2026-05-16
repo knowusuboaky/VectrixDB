@@ -1184,7 +1184,7 @@ class LakebaseStorage(BaseStorage):
             with self._conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO _vectrix_collections (name, dimension, description, config, updated_at)
-                    VALUES (%s, %s, %s, %s, NOW())
+                    VALUES (%s, %s::vector, %s, %s, NOW())
                     ON CONFLICT (name) DO UPDATE SET
                         dimension = %s,
                         description = %s,
@@ -1221,18 +1221,21 @@ class LakebaseStorage(BaseStorage):
         text_content = data.pop("text_content", None)
         metadata = data  # Remaining fields are metadata
 
+        # Convert embedding list to string format for pgvector
+        embedding_str = f"[{','.join(map(str, embedding))}]" if embedding else None
+
         with self._lock:
             with self._conn.cursor() as cur:
                 cur.execute(f"""
                     INSERT INTO "{collection}" (id, embedding, metadata, text_content, updated_at)
-                    VALUES (%s, %s, %s, %s, NOW())
+                    VALUES (%s, %s::vector, %s, %s, NOW())
                     ON CONFLICT (id) DO UPDATE SET
-                        embedding = COALESCE(%s, "{collection}".embedding),
+                        embedding = COALESCE(%s::vector, "{collection}".embedding),
                         metadata = %s,
                         text_content = COALESCE(%s, "{collection}".text_content),
                         updated_at = NOW()
-                """, (id, embedding, json.dumps(metadata), text_content,
-                      embedding, json.dumps(metadata), text_content))
+                """, (id, embedding_str, json.dumps(metadata), text_content,
+                      embedding_str, json.dumps(metadata), text_content))
                 self._conn.commit()
 
     def insert_batch(self, collection: str, documents: List[Tuple[str, Dict[str, Any]]]) -> int:
@@ -1247,16 +1250,19 @@ class LakebaseStorage(BaseStorage):
                     text_content = data.pop("text_content", None)
                     metadata = data  # Remaining fields are metadata
 
+                    # Convert embedding list to string format for pgvector
+                    embedding_str = f"[{','.join(map(str, embedding))}]" if embedding else None
+
                     cur.execute(f"""
                         INSERT INTO "{collection}" (id, embedding, metadata, text_content, updated_at)
-                        VALUES (%s, %s, %s, %s, NOW())
+                        VALUES (%s, %s::vector, %s, %s, NOW())
                         ON CONFLICT (id) DO UPDATE SET
-                            embedding = COALESCE(%s, "{collection}".embedding),
+                            embedding = COALESCE(%s::vector, "{collection}".embedding),
                             metadata = %s,
                             text_content = COALESCE(%s, "{collection}".text_content),
                             updated_at = NOW()
-                    """, (id, embedding, json.dumps(metadata), text_content,
-                          embedding, json.dumps(metadata), text_content))
+                    """, (id, embedding_str, json.dumps(metadata), text_content,
+                          embedding_str, json.dumps(metadata), text_content))
                     count += 1
                 self._conn.commit()
                 return count
@@ -1302,7 +1308,7 @@ class LakebaseStorage(BaseStorage):
                     cur.execute(f"""
                         UPDATE "{collection}" SET
                             metadata = %s,
-                            embedding = COALESCE(%s, embedding),
+                            embedding = COALESCE(%s::vector, embedding),
                             text_content = COALESCE(%s, text_content),
                             updated_at = NOW()
                         WHERE id = %s
