@@ -148,6 +148,42 @@ class Vectrix:
     # Reranker - shared instance
     _reranker = None
 
+    # Bundled model aliases for easy selection
+    _DENSE_ALIASES = {
+        "multilingual": "dense",
+        "multi": "dense",
+        "e5-small": "dense_en",
+        "bge-small": "bge_small_en",
+        "e5-small-fp32": "e5_small",
+    }
+
+    _SPARSE_ALIASES = {
+        "bm25": "sparse",
+        "splade": "splade_pp_en",
+        "splade++": "splade_pp_en",
+        "neural": "splade_pp_en",  # Neural sparse (SPLADE++)
+        # HuggingFace: "naver/splade-cocondenser-ensembledistil"
+    }
+
+    _RERANKER_ALIASES = {
+        "l6": "reranker_en_l6",
+        "L6": "reranker_en_l6",
+        "l12": "reranker_en",
+        "L12": "reranker_en",
+        "minilm-l6": "reranker_en_l6",
+        "minilm-l12": "reranker_en",
+        # GitHub releases (download on first use):
+        # "github:reranker-multi" -> mMiniLMv2-L12 (113MB, 15+ languages)
+    }
+
+    _LATE_INTERACTION_ALIASES = {
+        "colbert": "colbert",
+        "colbert-small": "colbert",  # answerai-colbert-small-v1 (bundled, 33MB)
+        "answerai-colbert": "colbert",
+        # GitHub releases (download on first use):
+        # "github:bge-m3" -> BGE-M3 (563MB, 100+ languages)
+    }
+
     # Supported model prefixes and their handlers
     _MODEL_REGISTRY = {
         # Bundled models (no network calls after setup)
@@ -205,6 +241,12 @@ class Vectrix:
         model_path: str = None,
         language: str = None,
         tier: str = "dense",
+        # New: Search mode and model selection
+        mode: Literal["dense", "hybrid", "ultimate", "graph"] = None,
+        dense_model: str = None,
+        sparse_model: str = None,
+        reranker_model: str = None,
+        late_interaction_model: str = None,
     ):
         """
         Create or open a VectrixDB collection.
@@ -212,69 +254,239 @@ class Vectrix:
         Args:
             name: Collection name
             path: Storage path (default: ./vectrixdb_data)
-            model: Embedding model identifier. Examples:
-                   - None: Uses bundled "vectrixdb/all-MiniLM-L6-v2" (no network)
-                   - "vectrixdb/all-MiniLM-L6-v2": Bundled model (no network)
-                   - "sentence-transformers/all-MiniLM-L6-v2": HuggingFace model
-                   - "sentence-transformers/all-mpnet-base-v2": HuggingFace model
-                   - "BAAI/bge-small-en-v1.5": BGE model via sentence-transformers
-                   - "openai/text-embedding-3-small": OpenAI (requires embed_fn)
+            model: Embedding model identifier (deprecated, use dense_model instead)
             dimension: Vector dimension (auto-detected from model)
             embed_fn: Custom embedding function: fn(texts: List[str]) -> np.ndarray
             model_path: Path to custom ONNX model directory
             language: Language for bundled models - None/"multi" for multilingual (default),
                       "en"/"english" for English-optimized (smaller, faster)
-            tier: Storage tier - determines search capabilities:
-                  - "dense": Vector embeddings only (fastest, smallest)
-                  - "hybrid": Vector + BM25 sparse (balanced, default for search modes)
-                  - "ultimate": Vector + BM25 + ColBERT late interaction (best quality)
-                  - "graph": Ultimate + knowledge graph (for GraphRAG)
+            tier: Storage tier (deprecated, use 'mode' instead)
+            mode: Default search mode - validates required models at creation:
+                  - "dense": Vector similarity only (fastest)
+                  - "hybrid": Dense + Sparse + Reranker (balanced)
+                  - "ultimate": Dense + Sparse + Reranker + ColBERT (best quality)
+                  - "graph": Ultimate + Knowledge Graph (for GraphRAG)
+            dense_model: Dense embedding model (bundled alias or HuggingFace path)
+                  Bundled: "multilingual", "e5-small", "bge-small", "e5-small-fp32"
+                  HuggingFace: "BAAI/bge-large-en-v1.5", "intfloat/e5-large-v2", etc.
+            sparse_model: Sparse embedding model (bundled alias or HuggingFace path)
+                  Bundled: "bm25", "splade", "splade++"
+                  HuggingFace: "naver/splade-cocondenser-ensembledistil", etc.
+            reranker_model: Cross-encoder reranker model (bundled alias or HuggingFace path)
+                  Bundled: "L6", "L12"
+                  HuggingFace: "cross-encoder/ms-marco-MiniLM-L-12-v2", etc.
+            late_interaction_model: ColBERT model (bundled alias or HuggingFace path)
+                  Bundled: "colbert"
+                  HuggingFace: "colbert-ir/colbertv2.0", etc.
 
         Examples:
-            # Bundled model - no network calls (default)
+            # Basic usage (bundled models, offline)
             >>> db = Vectrix("docs")
-            >>> db = Vectrix("docs", model="vectrixdb/all-MiniLM-L6-v2")
+            >>> results = db.search("query")
 
-            # English-optimized (smaller models)
-            >>> db = Vectrix("docs", language="en")
+            # With mode and model selection (bundled)
+            >>> db = Vectrix(
+            ...     "docs",
+            ...     mode="hybrid",
+            ...     dense_model="bge-small",
+            ...     sparse_model="splade",
+            ...     reranker_model="L6",
+            ... )
+            >>> results = db.search("query")  # Uses hybrid by default
 
-            # With tier for hybrid search
-            >>> db = Vectrix("docs", tier="hybrid")
-            >>> results = db.search("query", mode="hybrid")
+            # With HuggingFace models
+            >>> db = Vectrix(
+            ...     "docs",
+            ...     mode="ultimate",
+            ...     dense_model="BAAI/bge-large-en-v1.5",
+            ...     sparse_model="naver/splade-cocondenser-ensembledistil",
+            ...     reranker_model="cross-encoder/ms-marco-MiniLM-L-12-v2",
+            ...     late_interaction_model="colbert-ir/colbertv2.0",
+            ... )
 
-            # Sentence-transformers (requires HuggingFace)
-            >>> db = Vectrix("docs", model="sentence-transformers/all-mpnet-base-v2")
-            >>> db = Vectrix("docs", model="BAAI/bge-small-en-v1.5")
-
-            # Custom embedding function
-            >>> db = Vectrix("docs", model="openai/text-embedding-3-small", embed_fn=openai_embed)
-
-            # Custom ONNX model
-            >>> db = Vectrix("docs", model_path="/path/to/my/model", dimension=768)
+            # Mixed bundled + HuggingFace
+            >>> db = Vectrix(
+            ...     "docs",
+            ...     mode="hybrid",
+            ...     dense_model="bge-small",  # Bundled
+            ...     sparse_model="splade",     # Bundled
+            ...     reranker_model="cross-encoder/ms-marco-TinyBERT-L-2-v2",  # HuggingFace
+            ... )
         """
         self.name = name
         self.path = path
         self.embed_fn = embed_fn
         self.model_path = model_path
         self.language = language
-        self.tier = tier.lower() if tier else "dense"
 
-        # Validate tier
-        valid_tiers = ["dense", "hybrid", "ultimate", "graph"]
-        if self.tier not in valid_tiers:
-            raise ValueError(f"Invalid tier '{tier}'. Must be one of: {valid_tiers}")
+        # Handle mode/tier (mode takes precedence)
+        self.default_mode = mode.lower() if mode else (tier.lower() if tier else "dense")
+        self.tier = self.default_mode  # Keep for backwards compatibility
 
-        # Parse model identifier
-        self._parse_model(model, dimension)
+        # Store model selections
+        self.dense_model_name = dense_model
+        self.sparse_model_name = sparse_model
+        self.reranker_model_name = reranker_model
+        self.late_interaction_model_name = late_interaction_model
+
+        # Validate mode
+        valid_modes = ["dense", "hybrid", "ultimate", "graph"]
+        if self.default_mode not in valid_modes:
+            raise ValueError(f"Invalid mode '{self.default_mode}'. Must be one of: {valid_modes}")
+
+        # Validate required models for the selected mode
+        self._validate_mode_models()
+
+        # Parse model identifier (for dense model)
+        self._parse_model(model or dense_model, dimension)
 
         self._model = None
         self._db = None
         self._collection = None
         self._texts: Dict[str, str] = {}  # id -> text storage
-        self._instance_reranker = None  # Instance-level reranker (respects language)
+        self._instance_reranker = None  # Instance-level reranker
         self._instance_late_interaction = None  # Instance-level late interaction
+        self._instance_sparse_embedder = None  # Instance-level sparse embedder
 
         self._init_db()
+
+    def _validate_mode_models(self):
+        """Validate that required models are configured for the selected mode."""
+        mode = self.default_mode
+
+        if mode == "dense":
+            # No additional models required
+            pass
+        elif mode == "hybrid":
+            # Requires: dense + sparse + reranker
+            if self.sparse_model_name is None:
+                self.sparse_model_name = "bm25"  # Default to BM25
+            if self.reranker_model_name is None:
+                self.reranker_model_name = "L6"  # Default to L6
+        elif mode == "ultimate":
+            # Requires: dense + sparse + reranker + late_interaction
+            if self.sparse_model_name is None:
+                self.sparse_model_name = "bm25"
+            if self.reranker_model_name is None:
+                self.reranker_model_name = "L6"
+            if self.late_interaction_model_name is None:
+                self.late_interaction_model_name = "colbert"
+        elif mode == "graph":
+            # Same as ultimate + graph (graph handled separately)
+            if self.sparse_model_name is None:
+                self.sparse_model_name = "bm25"
+            if self.reranker_model_name is None:
+                self.reranker_model_name = "L6"
+            if self.late_interaction_model_name is None:
+                self.late_interaction_model_name = "colbert"
+
+    def _is_huggingface_model(self, model_name: str) -> bool:
+        """Check if model name is a HuggingFace model (contains /)."""
+        if model_name is None:
+            return False
+        return "/" in model_name and not model_name.startswith("vectrixdb/") and not model_name.startswith("github:")
+
+    def _is_github_model(self, model_name: str) -> bool:
+        """Check if model name is a GitHub release (starts with github:)."""
+        if model_name is None:
+            return False
+        return model_name.startswith("github:")
+
+    def _download_github_model(self, model_name: str, model_type: str) -> str:
+        """
+        Download model from GitHub release and return path.
+
+        Args:
+            model_name: Model name in format "github:release-tag"
+            model_type: Type of model ("sparse", "reranker", "late_interaction")
+
+        Returns:
+            Path to downloaded model directory
+        """
+        import tempfile
+        import zipfile
+        import urllib.request
+        import shutil
+
+        # Parse release tag
+        release_tag = model_name.replace("github:", "")
+
+        # GitHub release URL
+        github_repo = "knowusuboaky/VectrixDB"
+
+        # Map model types to expected zip file names
+        zip_names = {
+            "sparse": "sparse.zip",
+            "reranker": "reranker.zip",
+            "late_interaction": "late_interaction.zip",
+            "dense": "dense.zip",
+        }
+
+        zip_name = zip_names.get(model_type, f"{model_type}.zip")
+        url = f"https://github.com/{github_repo}/releases/download/{release_tag}/{zip_name}"
+
+        # Download to cache directory
+        cache_dir = Path.home() / ".cache" / "vectrixdb" / "github" / release_tag
+        model_dir = cache_dir / model_type
+
+        # Check if already downloaded
+        if model_dir.exists() and (model_dir / "model.onnx").exists():
+            return str(model_dir)
+
+        # Create cache directory
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # Download zip file
+        print(f"Downloading {model_type} model from GitHub release '{release_tag}'...")
+        zip_path = cache_dir / zip_name
+
+        try:
+            urllib.request.urlretrieve(url, zip_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to download model from {url}: {e}")
+
+        # Extract zip file
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(cache_dir)
+
+        # Clean up zip
+        zip_path.unlink()
+
+        # Find extracted model directory
+        for item in cache_dir.iterdir():
+            if item.is_dir() and (item / "model.onnx").exists():
+                # Rename to standard name
+                if item.name != model_type:
+                    target = cache_dir / model_type
+                    if target.exists():
+                        shutil.rmtree(target)
+                    item.rename(target)
+                    return str(target)
+                return str(item)
+
+        # Check if files are directly in cache_dir
+        if (cache_dir / "model.onnx").exists():
+            model_dir.mkdir(exist_ok=True)
+            for f in cache_dir.glob("*"):
+                if f.is_file():
+                    shutil.move(str(f), str(model_dir / f.name))
+            return str(model_dir)
+
+        raise RuntimeError(f"Model not found after extracting {zip_name}")
+
+    def _validate_search_mode(self, mode: str):
+        """Validate that the requested search mode is compatible with configured models."""
+        # Mode hierarchy: dense < hybrid < ultimate < graph
+        mode_levels = {"dense": 1, "sparse": 1, "hybrid": 2, "ultimate": 3, "graph": 4}
+        default_level = mode_levels.get(self.default_mode, 1)
+        requested_level = mode_levels.get(mode, 1)
+
+        if requested_level > default_level:
+            raise ValueError(
+                f"Cannot use '{mode}' mode. Instance configured for '{self.default_mode}' mode. "
+                f"You can only use modes at or below your configured level: "
+                f"{[m for m, l in mode_levels.items() if l <= default_level]}"
+            )
 
     def _parse_model(self, model: str, dimension: int):
         """Parse model identifier and set up embedding configuration."""
@@ -488,26 +700,154 @@ class Vectrix:
 
     @property
     def sparse_embedder(self):
-        """Lazy load sparse (BM25) embedder."""
-        if self._sparse_embedder is None:
-            from .models import SparseEmbedder
-            Vectrix._sparse_embedder = SparseEmbedder()
-        return self._sparse_embedder
+        """Lazy load sparse embedder with model selection."""
+        if self._instance_sparse_embedder is None:
+            model_name = self.sparse_model_name
+
+            # Check if it's a GitHub release model
+            if self._is_github_model(model_name):
+                model_path = self._download_github_model(model_name, "sparse")
+                from .models import SparseEmbedder
+                self._instance_sparse_embedder = SparseEmbedder(model_path=model_path)
+            # Check if it's a HuggingFace model
+            elif self._is_huggingface_model(model_name):
+                # Use HuggingFace SPLADE model
+                try:
+                    from transformers import AutoModelForMaskedLM, AutoTokenizer
+                    import torch
+
+                    class HuggingFaceSparseEmbedder:
+                        def __init__(self, model_id):
+                            self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+                            self.model = AutoModelForMaskedLM.from_pretrained(model_id)
+                            self.model.eval()
+
+                        def embed(self, texts):
+                            if isinstance(texts, str):
+                                texts = [texts]
+                            results = []
+                            with torch.no_grad():
+                                for text in texts:
+                                    inputs = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+                                    outputs = self.model(**inputs)
+                                    # SPLADE: log(1 + ReLU(logits)) * attention_mask
+                                    logits = outputs.logits
+                                    splade_rep = torch.log(1 + torch.relu(logits)) * inputs["attention_mask"].unsqueeze(-1)
+                                    splade_rep = torch.max(splade_rep, dim=1).values.squeeze()
+                                    # Convert to sparse dict
+                                    non_zero = torch.nonzero(splade_rep).squeeze(-1)
+                                    sparse_dict = {idx.item(): splade_rep[idx].item() for idx in non_zero}
+                                    results.append(sparse_dict)
+                            return results
+
+                    self._instance_sparse_embedder = HuggingFaceSparseEmbedder(model_name)
+                except ImportError:
+                    raise ImportError(
+                        f"Install transformers for HuggingFace models: pip install transformers torch"
+                    )
+            else:
+                # Use bundled ONNX model
+                from .models import SparseEmbedder
+                # Resolve alias to model name
+                resolved_model = self._SPARSE_ALIASES.get(model_name, model_name) if model_name else "sparse"
+                self._instance_sparse_embedder = SparseEmbedder(model=resolved_model)
+
+        return self._instance_sparse_embedder
 
     @property
     def reranker(self):
-        """Lazy load cross-encoder reranker (respects language setting)."""
+        """Lazy load cross-encoder reranker with model selection."""
         if self._instance_reranker is None:
-            from .models import RerankerEmbedder
-            self._instance_reranker = RerankerEmbedder(language=self.language)
+            model_name = self.reranker_model_name
+
+            # Check if it's a GitHub release model
+            if self._is_github_model(model_name):
+                model_path = self._download_github_model(model_name, "reranker")
+                from .models import RerankerEmbedder
+                self._instance_reranker = RerankerEmbedder(model_path=model_path)
+            # Check if it's a HuggingFace model
+            elif self._is_huggingface_model(model_name):
+                # Use HuggingFace cross-encoder
+                try:
+                    from sentence_transformers import CrossEncoder
+
+                    class HuggingFaceReranker:
+                        def __init__(self, model_id):
+                            self.model = CrossEncoder(model_id)
+
+                        def rerank(self, query: str, documents: list, limit: int = None):
+                            pairs = [[query, doc] for doc in documents]
+                            scores = self.model.predict(pairs)
+                            # Return sorted indices by score (descending)
+                            sorted_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+                            if limit:
+                                sorted_indices = sorted_indices[:limit]
+                            return [(idx, scores[idx]) for idx in sorted_indices]
+
+                    self._instance_reranker = HuggingFaceReranker(model_name)
+                except ImportError:
+                    raise ImportError(
+                        f"Install sentence-transformers for HuggingFace reranker: pip install sentence-transformers"
+                    )
+            else:
+                # Use bundled ONNX model
+                from .models import RerankerEmbedder
+                # Resolve alias to model name
+                resolved_model = self._RERANKER_ALIASES.get(model_name, model_name) if model_name else None
+                self._instance_reranker = RerankerEmbedder(model=resolved_model, language=self.language)
+
         return self._instance_reranker
 
     @property
     def late_interaction(self):
-        """Lazy load late interaction embedder (respects language setting)."""
+        """Lazy load late interaction (ColBERT) embedder with model selection."""
         if self._instance_late_interaction is None:
-            from .models import LateInteractionEmbedder
-            self._instance_late_interaction = LateInteractionEmbedder(language=self.language)
+            model_name = self.late_interaction_model_name
+
+            # Check if it's a GitHub release model
+            if self._is_github_model(model_name):
+                model_path = self._download_github_model(model_name, "late_interaction")
+                from .models import LateInteractionEmbedder
+                self._instance_late_interaction = LateInteractionEmbedder(model_path=model_path)
+            # Check if it's a HuggingFace model
+            elif self._is_huggingface_model(model_name):
+                # Use HuggingFace ColBERT
+                try:
+                    from colbert.infra import ColBERTConfig
+                    from colbert.modeling.checkpoint import Checkpoint
+
+                    class HuggingFaceColBERT:
+                        def __init__(self, model_id):
+                            config = ColBERTConfig(checkpoint=model_id)
+                            self.checkpoint = Checkpoint(model_id, colbert_config=config)
+
+                        def embed_query(self, query: str):
+                            return self.checkpoint.queryFromText([query])[0]
+
+                        def embed_documents(self, documents: list):
+                            return self.checkpoint.docFromText(documents)
+
+                        def score(self, query_emb, doc_emb):
+                            # MaxSim scoring
+                            import torch
+                            scores = torch.einsum("qd,pd->qp", query_emb, doc_emb)
+                            return scores.max(dim=-1).values.sum().item()
+
+                    self._instance_late_interaction = HuggingFaceColBERT(model_name)
+                except ImportError:
+                    # Fallback to fastembed
+                    try:
+                        from fastembed import LateInteractionTextEmbedding
+                        self._instance_late_interaction = LateInteractionTextEmbedding(model_name=model_name)
+                    except ImportError:
+                        raise ImportError(
+                            f"Install colbert-ai or fastembed for ColBERT: pip install colbert-ai[torch] or pip install fastembed"
+                        )
+            else:
+                # Use bundled ONNX model
+                from .models import LateInteractionEmbedder
+                self._instance_late_interaction = LateInteractionEmbedder(language=self.language)
+
         return self._instance_late_interaction
 
     def _generate_id(self, text: str) -> str:
@@ -616,7 +956,7 @@ class Vectrix:
         self,
         query: str,
         limit: int = 10,
-        mode: Literal["dense", "sparse", "hybrid", "ultimate", "neural"] = "hybrid",
+        mode: Literal["dense", "sparse", "hybrid", "ultimate", "graph"] = None,
         rerank: Literal[None, "mmr", "exact", "cross-encoder"] = None,
         filter: Dict[str, Any] = None,
         diversity: float = 0.7,
@@ -627,14 +967,14 @@ class Vectrix:
         Args:
             query: Search query text
             limit: Number of results (default: 10)
-            mode: Search mode
-                - "dense": Semantic search only
+            mode: Search mode (defaults to mode set in constructor)
+                - "dense": Semantic search only (fastest)
                 - "sparse": Keyword/BM25 only
-                - "hybrid": Dense + sparse combined (default)
-                - "ultimate": Full pipeline with cross-encoder reranking
-                - "neural": Advanced neural hybrid (ColBERT + cross-encoder)
-            rerank: Reranking method
-                - None: No reranking
+                - "hybrid": Dense + Sparse + Reranker (balanced)
+                - "ultimate": Dense + Sparse + Reranker + ColBERT (best quality)
+                - "graph": Ultimate + Knowledge Graph (for GraphRAG)
+            rerank: Additional reranking method (only for dense/sparse modes)
+                - None: No additional reranking
                 - "mmr": Maximal Marginal Relevance (diversity)
                 - "exact": Exact score recalculation
                 - "cross-encoder": Neural cross-encoder
@@ -645,22 +985,28 @@ class Vectrix:
             Results object with search results
 
         Example:
+            >>> # Uses default mode from constructor
             >>> results = db.search("python programming")
-            >>> results = db.search("AI", mode="ultimate", rerank="mmr")
-            >>> results = db.search("AI", mode="neural")  # Best quality
+            >>> # Override mode (can only downgrade, not upgrade)
+            >>> results = db.search("AI", mode="dense")
             >>> print(results.top.text)
         """
         import time
         start = time.time()
 
+        # Use default mode if not specified
+        if mode is None:
+            mode = self.default_mode
+
+        # Validate mode is compatible with configured models
+        self._validate_search_mode(mode)
+
         # Embed query
         query_vector = self._embed(query)[0]
 
         # Determine search strategy
-        if mode == "ultimate":
+        if mode == "ultimate" or mode == "graph":
             results = self._ultimate_search(query, query_vector, limit, filter, diversity)
-        elif mode == "neural":
-            results = self._neural_search(query, query_vector, limit, filter)
         elif mode == "dense":
             results = self._dense_search(query_vector, limit, filter)
         elif mode == "sparse":
@@ -668,10 +1014,10 @@ class Vectrix:
         elif mode == "hybrid":
             results = self._hybrid_search(query, query_vector, limit, filter)
         else:
-            raise ValueError(f"Unknown mode: {mode}. Use 'dense', 'sparse', 'hybrid', 'ultimate', or 'neural'")
+            raise ValueError(f"Unknown mode: {mode}. Use 'dense', 'sparse', 'hybrid', 'ultimate', or 'graph'")
 
-        # Apply reranking if requested
-        if rerank and mode != "ultimate":  # ultimate already includes reranking
+        # Apply additional reranking if requested (only for dense/sparse modes)
+        if rerank and mode in ("dense", "sparse"):
             results = self._rerank(query, query_vector, results, rerank, limit, diversity)
 
         elapsed = (time.time() - start) * 1000
@@ -734,28 +1080,93 @@ class Vectrix:
         filter: Dict = None
     ) -> List[Dict]:
         """
-        Enhanced hybrid dense + sparse search.
+        Hybrid search: Dense + Sparse + Reranker.
 
-        Uses optimized RRF fusion with:
-        - Balanced weights (0.5/0.5) for better combination
-        - Larger prefetch pool (10x limit)
-        - Intersection boost for documents found by both methods
+        Pipeline:
+        1. Dense semantic search (vector similarity)
+        2. Sparse keyword search (BM25/SPLADE)
+        3. RRF fusion with intersection boost
+        4. Cross-encoder reranking for final results
         """
-        results = self._collection.hybrid_search(
+        # Stage 1: Get candidates from dense and sparse search
+        prefetch_limit = min(limit * 10, max(self._collection.count(), 1))
+
+        # Dense search
+        dense_results = self._collection.search(
             query=query_vector,
-            query_text=query,
-            limit=limit,
-            vector_weight=0.5,  # Balanced weights work better
-            text_weight=0.5,
+            limit=prefetch_limit,
             filter=filter,
-            include_vectors=True,
-            rrf_k=60,
-            prefetch_multiplier=10,  # Get more candidates
+            include_vectors=True
         )
-        return [
-            {"id": r.id, "score": r.score, "metadata": r.metadata, "vector": r.vector}
-            for r in results.results
-        ]
+
+        # Sparse search
+        sparse_results = self._collection.keyword_search(
+            query_text=query,
+            limit=prefetch_limit,
+            filter=filter
+        )
+
+        # Stage 2: RRF Fusion with intersection boost
+        rrf_k = 60
+        scores = {}
+        vector_map = {r.id: r.vector for r in dense_results.results if r.vector is not None}
+        metadata_map = {r.id: r.metadata for r in dense_results.results}
+
+        for rank, r in enumerate(dense_results.results):
+            scores[r.id] = {"rrf_dense": 1.0 / (rrf_k + rank + 1), "rrf_sparse": 0, "metadata": r.metadata}
+
+        for rank, r in enumerate(sparse_results.results):
+            if r.id not in scores:
+                scores[r.id] = {"rrf_dense": 0, "rrf_sparse": 0, "metadata": r.metadata}
+                metadata_map[r.id] = r.metadata
+            scores[r.id]["rrf_sparse"] = 1.0 / (rrf_k + rank + 1)
+
+        # Calculate combined scores
+        for doc_id in scores:
+            combined = 0.5 * scores[doc_id]["rrf_dense"] + 0.5 * scores[doc_id]["rrf_sparse"]
+            if scores[doc_id]["rrf_dense"] > 0 and scores[doc_id]["rrf_sparse"] > 0:
+                combined *= 1.15  # 15% boost for appearing in both
+            scores[doc_id]["combined"] = combined
+
+        # Sort and build candidates
+        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x]["combined"], reverse=True)
+        rerank_limit = min(limit * 3, len(sorted_ids))
+
+        candidates = []
+        for doc_id in sorted_ids[:rerank_limit]:
+            text = self._texts.get(doc_id, "")
+            candidates.append({
+                "id": doc_id,
+                "score": scores[doc_id]["combined"],
+                "vector": vector_map.get(doc_id),
+                "metadata": metadata_map.get(doc_id, {}),
+                "text": text
+            })
+
+        # Stage 3: Cross-encoder reranking
+        if candidates and self.reranker_model_name:
+            try:
+                reranker = self.reranker
+                if hasattr(reranker, 'rerank'):
+                    # HuggingFace reranker
+                    docs = [c["text"] for c in candidates]
+                    reranked_indices = reranker.rerank(query, docs, limit=limit)
+                    return [candidates[idx] for idx, _ in reranked_indices]
+                else:
+                    # Bundled reranker - use cross-encoder scoring
+                    pairs = [(query, c["text"]) for c in candidates]
+                    scores_list = reranker.score_pairs(pairs)
+                    sorted_candidates = sorted(
+                        zip(candidates, scores_list),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )
+                    return [c for c, _ in sorted_candidates[:limit]]
+            except Exception:
+                # Fall back to RRF scores
+                pass
+
+        return candidates[:limit]
 
     def _ultimate_search(
         self,
@@ -766,18 +1177,17 @@ class Vectrix:
         diversity: float = 0.7
     ) -> List[Dict]:
         """
-        Ultimate search: dense + sparse + optimized RRF fusion + cross-encoder reranking.
+        Ultimate search: Dense + Sparse + Reranker + ColBERT.
 
-        Enhanced pipeline with:
-        - Larger prefetch pools (10x limit)
-        - Optimized RRF with intersection boost
-        - Optional cross-encoder reranking for best accuracy
+        This is the highest quality search mode, combining:
+        1. Dense semantic search (vector similarity)
+        2. Sparse keyword search (BM25/SPLADE)
+        3. RRF fusion with intersection boost
+        4. ColBERT late interaction scoring
+        5. Cross-encoder reranking for final results
         """
-        from .core.search import RRFFusion
-        from .core.advanced_search import Reranker, RerankConfig, RerankMethod
-
         # Stage 1: Get large candidate pools from multiple sources
-        prefetch_limit = min(limit * 10, self._collection.count())
+        prefetch_limit = min(limit * 10, max(self._collection.count(), 1))
 
         dense_results = self._collection.search(
             query=query_vector,
@@ -792,92 +1202,104 @@ class Vectrix:
             filter=filter
         )
 
-        # Stage 2: Enhanced RRF Fusion with intersection boost
+        # Stage 2: RRF Fusion with intersection boost
         rrf_k = 60
-        scores: Dict[str, Dict] = {}
-
-        # Build maps for metadata and vectors
+        scores = {}
         vector_map = {r.id: r.vector for r in dense_results.results if r.vector is not None}
         metadata_map = {r.id: r.metadata for r in dense_results.results}
 
-        # Add dense results with RRF scores
         for rank, r in enumerate(dense_results.results):
-            scores[r.id] = {
-                "rrf_dense": 1.0 / (rrf_k + rank + 1),
-                "rrf_sparse": 0,
-                "dense_score": r.score,
-                "sparse_score": 0,
-                "metadata": r.metadata
-            }
+            scores[r.id] = {"rrf_dense": 1.0 / (rrf_k + rank + 1), "rrf_sparse": 0, "metadata": r.metadata}
 
-        # Add sparse results with RRF scores
         for rank, r in enumerate(sparse_results.results):
             if r.id not in scores:
-                scores[r.id] = {
-                    "rrf_dense": 0,
-                    "rrf_sparse": 0,
-                    "dense_score": 0,
-                    "sparse_score": 0,
-                    "metadata": r.metadata
-                }
+                scores[r.id] = {"rrf_dense": 0, "rrf_sparse": 0, "metadata": r.metadata}
                 metadata_map[r.id] = r.metadata
             scores[r.id]["rrf_sparse"] = 1.0 / (rrf_k + rank + 1)
-            scores[r.id]["sparse_score"] = r.score
 
-        # Calculate combined scores with intersection boost
+        # Calculate combined scores
         for doc_id in scores:
-            rrf_dense = scores[doc_id]["rrf_dense"]
-            rrf_sparse = scores[doc_id]["rrf_sparse"]
-
-            # Equal weight combination (research shows this works best)
-            combined = 0.5 * rrf_dense + 0.5 * rrf_sparse
-
-            # Intersection boost: documents found by both methods get boosted
-            if rrf_dense > 0 and rrf_sparse > 0:
+            combined = 0.5 * scores[doc_id]["rrf_dense"] + 0.5 * scores[doc_id]["rrf_sparse"]
+            if scores[doc_id]["rrf_dense"] > 0 and scores[doc_id]["rrf_sparse"] > 0:
                 combined *= 1.15  # 15% boost for appearing in both
-
             scores[doc_id]["combined"] = combined
 
-        # Sort by combined score
+        # Sort and build candidates
         sorted_ids = sorted(scores.keys(), key=lambda x: scores[x]["combined"], reverse=True)
+        rerank_limit = min(limit * 5, len(sorted_ids))  # More candidates for ColBERT
 
-        # Build candidate list (top candidates for reranking)
-        rerank_limit = min(limit * 3, len(sorted_ids))
         candidates = []
         for doc_id in sorted_ids[:rerank_limit]:
-            if doc_id in vector_map:
-                candidates.append({
-                    "id": doc_id,
-                    "score": scores[doc_id]["combined"],
-                    "vector": vector_map[doc_id],
-                    "metadata": metadata_map.get(doc_id, {})
-                })
+            text = self._texts.get(doc_id, "")
+            candidates.append({
+                "id": doc_id,
+                "score": scores[doc_id]["combined"],
+                "vector": vector_map.get(doc_id),
+                "metadata": metadata_map.get(doc_id, {}),
+                "text": text
+            })
 
-        # Stage 3: Cross-encoder reranking (if available) or exact score reranking
-        if candidates:
-            # Try cross-encoder first for best results
+        # Stage 3: ColBERT late interaction scoring (if configured)
+        if candidates and self.late_interaction_model_name:
             try:
-                reranker = Reranker(RerankConfig(
-                    method=RerankMethod.CROSS_ENCODER,
-                ))
-                reranked = reranker.rerank(
-                    query_vector=query_vector,
-                    candidates=candidates,
-                    limit=limit,
-                    query_text=query
-                )
-                return reranked
+                colbert = self.late_interaction
+                doc_texts = [c["text"] for c in candidates]
+
+                # Score with ColBERT
+                if hasattr(colbert, 'embed_query') and hasattr(colbert, 'embed_documents'):
+                    # HuggingFace ColBERT
+                    query_emb = colbert.embed_query(query)
+                    doc_embs = colbert.embed_documents(doc_texts)
+                    colbert_scores = [colbert.score(query_emb, doc_emb) for doc_emb in doc_embs]
+                elif hasattr(colbert, 'embed'):
+                    # FastEmbed ColBERT
+                    query_emb = list(colbert.embed([query]))[0]
+                    doc_embs = list(colbert.embed(doc_texts))
+                    # MaxSim scoring
+                    colbert_scores = []
+                    for doc_emb in doc_embs:
+                        import numpy as np
+                        sim = np.dot(query_emb, doc_emb.T)
+                        max_sim = np.max(sim, axis=1)
+                        colbert_scores.append(float(np.sum(max_sim)))
+                else:
+                    # Bundled ColBERT
+                    colbert_scores = colbert.score(query, doc_texts)
+
+                # Combine RRF scores with ColBERT scores
+                for i, c in enumerate(candidates):
+                    rrf_score = c["score"]
+                    colbert_score = colbert_scores[i] if i < len(colbert_scores) else 0
+                    # Weighted combination: 60% RRF, 40% ColBERT
+                    c["score"] = 0.6 * rrf_score + 0.4 * (colbert_score / max(colbert_scores) if max(colbert_scores) > 0 else 0)
+
+                # Re-sort by combined score
+                candidates.sort(key=lambda x: x["score"], reverse=True)
+            except Exception as e:
+                # Continue without ColBERT if it fails
+                pass
+
+        # Stage 4: Cross-encoder reranking
+        if candidates and self.reranker_model_name:
+            try:
+                reranker = self.reranker
+                if hasattr(reranker, 'rerank'):
+                    # HuggingFace reranker
+                    docs = [c["text"] for c in candidates]
+                    reranked_indices = reranker.rerank(query, docs, limit=limit)
+                    return [candidates[idx] for idx, _ in reranked_indices]
+                else:
+                    # Bundled reranker
+                    pairs = [(query, c["text"]) for c in candidates]
+                    scores_list = reranker.score_pairs(pairs)
+                    sorted_candidates = sorted(
+                        zip(candidates, scores_list),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )
+                    return [c for c, _ in sorted_candidates[:limit]]
             except Exception:
-                # Fall back to exact score reranking
-                reranker = Reranker(RerankConfig(
-                    method=RerankMethod.EXACT,
-                ))
-                reranked = reranker.rerank(
-                    query_vector=query_vector,
-                    candidates=candidates,
-                    limit=limit
-                )
-                return reranked
+                pass
 
         return candidates[:limit]
 
