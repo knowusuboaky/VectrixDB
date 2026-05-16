@@ -649,6 +649,8 @@ class Collection:
         metadata: Optional[list[dict[str, Any]]] = None,
         texts: Optional[list[str]] = None,  # For hybrid search (BM25)
         sparse_vectors: Optional[list[Union[SparseVector, dict]]] = None,  # For dense+sparse hybrid
+        sparse_embeddings: Optional[list] = None,  # Sparse embeddings for storage backend
+        late_interaction_embeddings: Optional[list] = None,  # ColBERT embeddings for storage backend
         batch_size: int = 1000,
         on_progress: Optional[Callable[[int, int], None]] = None,
     ) -> int:
@@ -661,6 +663,8 @@ class Collection:
             metadata: Optional metadata for each vector
             texts: Optional text content for BM25 hybrid search
             sparse_vectors: Optional sparse vectors for dense+sparse hybrid search
+            sparse_embeddings: Optional sparse embeddings for storage backend (ultimate mode)
+            late_interaction_embeddings: Optional late interaction embeddings for storage backend
             batch_size: Process in batches of this size
             on_progress: Optional callback(current, total) for progress
 
@@ -691,6 +695,12 @@ class Collection:
         if sparse_vectors and len(sparse_vectors) != len(ids):
             raise ValueError(f"sparse_vectors ({len(sparse_vectors)}) must match ids ({len(ids)})")
 
+        if sparse_embeddings and len(sparse_embeddings) != len(ids):
+            raise ValueError(f"sparse_embeddings ({len(sparse_embeddings)}) must match ids ({len(ids)})")
+
+        if late_interaction_embeddings and len(late_interaction_embeddings) != len(ids):
+            raise ValueError(f"late_interaction_embeddings ({len(late_interaction_embeddings)}) must match ids ({len(ids)})")
+
         vectors = np.array(vectors, dtype=np.float32)
 
         if vectors.shape[1] != self.dimension:
@@ -699,6 +709,8 @@ class Collection:
         metadata = metadata or [{} for _ in ids]
         texts = texts or [None for _ in ids]
         sparse_vectors = sparse_vectors or [None for _ in ids]
+        sparse_embeddings = sparse_embeddings or [None for _ in ids]
+        late_interaction_embeddings = late_interaction_embeddings or [None for _ in ids]
 
         total_added = 0
         total = len(ids)
@@ -712,8 +724,13 @@ class Collection:
             batch_metadata = metadata[batch_start:batch_end]
             batch_texts = texts[batch_start:batch_end]
             batch_sparse = sparse_vectors[batch_start:batch_end]
+            batch_sparse_emb = sparse_embeddings[batch_start:batch_end]
+            batch_late_interaction = late_interaction_embeddings[batch_start:batch_end]
 
-            added = self._add_batch(batch_ids, batch_vectors, batch_metadata, batch_texts, batch_sparse)
+            added = self._add_batch(
+                batch_ids, batch_vectors, batch_metadata, batch_texts, batch_sparse,
+                batch_sparse_emb, batch_late_interaction
+            )
             total_added += added
 
             if on_progress:
@@ -728,9 +745,13 @@ class Collection:
         metadata: list[dict],
         texts: list[Optional[str]],
         sparse_vectors: Optional[list[Optional[Union[SparseVector, dict]]]] = None,
+        sparse_embeddings: Optional[list] = None,
+        late_interaction_embeddings: Optional[list] = None,
     ) -> int:
-        """Add a batch of vectors with optional sparse vectors."""
+        """Add a batch of vectors with optional sparse vectors and storage backend embeddings."""
         sparse_vectors = sparse_vectors or [None] * len(ids)
+        sparse_embeddings = sparse_embeddings or [None] * len(ids)
+        late_interaction_embeddings = late_interaction_embeddings or [None] * len(ids)
 
         with self._lock:
             # Invalidate cache since data is changing
@@ -743,8 +764,8 @@ class Collection:
             # Prepare batch data for storage backend
             backend_documents = []
 
-            for i, (id_, vector, meta, text, sparse) in enumerate(
-                zip(ids, vectors, metadata, texts, sparse_vectors)
+            for i, (id_, vector, meta, text, sparse, sparse_emb, late_emb) in enumerate(
+                zip(ids, vectors, metadata, texts, sparse_vectors, sparse_embeddings, late_interaction_embeddings)
             ):
                 # Handle sparse vector
                 if sparse is not None:
@@ -785,13 +806,28 @@ class Collection:
 
                 indices.append(idx)
 
-                # Prepare data for storage backend (with embedding)
+                # Prepare data for storage backend (with all embeddings)
                 if self._use_backend_for_vectors:
                     doc_data = {
                         **meta,
                         "_embedding": vector.tolist() if hasattr(vector, 'tolist') else list(vector),
                         "text_content": text,
                     }
+                    # Add sparse embedding for storage backend (hybrid/ultimate mode)
+                    if sparse_emb is not None:
+                        # Convert to list if numpy array
+                        if hasattr(sparse_emb, 'tolist'):
+                            doc_data["sparse_embedding"] = sparse_emb.tolist()
+                        elif isinstance(sparse_emb, dict):
+                            doc_data["sparse_embedding"] = sparse_emb
+                        else:
+                            doc_data["sparse_embedding"] = list(sparse_emb) if sparse_emb else None
+                    # Add late interaction embedding for storage backend (ultimate mode)
+                    if late_emb is not None:
+                        if hasattr(late_emb, 'tolist'):
+                            doc_data["late_interaction_embedding"] = late_emb.tolist()
+                        else:
+                            doc_data["late_interaction_embedding"] = list(late_emb) if late_emb else None
                     backend_documents.append((id_, doc_data))
 
             self._db.commit()
