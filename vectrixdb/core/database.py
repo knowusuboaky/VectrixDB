@@ -455,11 +455,22 @@ class VectrixDB:
             # Persist to storage backend (Lakebase/CosmosDB/DeltaLake)
             if self._storage:
                 try:
+                    # Infer mode from tags if provided
+                    mode = "dense"
+                    if tags:
+                        tags_lower = [t.lower() for t in tags]
+                        if "graph" in tags_lower:
+                            mode = "graph"
+                        elif "ultimate" in tags_lower:
+                            mode = "ultimate"
+                        elif "hybrid" in tags_lower:
+                            mode = "hybrid"
                     self._storage.create_collection(name, {
                         "dimension": dimension,
                         "description": description or "",
                         "metric": metric.value,
                         "tags": tags,
+                        "mode": mode,
                     })
                 except Exception as e:
                     print(f"[VectrixDB] Warning: Failed to persist collection to storage backend: {e}")
