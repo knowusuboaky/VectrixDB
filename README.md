@@ -141,6 +141,49 @@ db.add(
 results = db.search("smartphone", filter={"brand": "Apple"})
 ```
 
+## Storage Backends
+
+Use external storage backends (Lakebase, DeltaLake, CosmosDB) with full search mode support:
+
+```python
+from vectrixdb import Vectrix, VectrixDB
+
+# Connect to Lakebase (PostgreSQL + pgvector)
+lakebase = VectrixDB.with_lakebase(
+    host="your-lakebase-host",
+    database="vectrixdb",
+    user="your-user",
+    password="your-password",
+)
+
+# Use Vectrix with storage backend + ultimate mode
+db = Vectrix(
+    "products",
+    mode="ultimate",
+    dense_model="bge-small",
+    sparse_model="splade",
+    reranker_model="L6",
+    late_interaction_model="colbert",
+    storage_backend=lakebase,
+)
+
+db.add(texts=["Product A", "Product B"])
+results = db.search("query")  # Full ultimate search from Lakebase
+```
+
+### Adaptive Schema
+
+Schema adapts based on selected mode:
+
+| Mode | Columns Created |
+|------|-----------------|
+| `dense` | `dense_embedding` |
+| `hybrid` | `dense_embedding` + `sparse_embedding` |
+| `ultimate` | `dense_embedding` + `sparse_embedding` + `late_interaction_embedding` |
+| `graph` | Same as ultimate + graph tables |
+
+All modes store `text_content` for reranker (computed at query time).
+
 ## REST API
 
 Start the server:

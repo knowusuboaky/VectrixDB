@@ -247,6 +247,8 @@ class Vectrix:
         sparse_model: str = None,
         reranker_model: str = None,
         late_interaction_model: str = None,
+        # Storage backend (Lakebase, DeltaLake, CosmosDB, etc.)
+        storage_backend: Any = None,
     ):
         """
         Create or open a VectrixDB collection.
@@ -278,6 +280,13 @@ class Vectrix:
             late_interaction_model: ColBERT model (bundled alias or HuggingFace path)
                   Bundled: "colbert"
                   HuggingFace: "colbert-ir/colbertv2.0", etc.
+            storage_backend: External storage backend (VectrixDB instance with Lakebase, DeltaLake, etc.)
+                  When provided, uses external storage instead of local SQLite.
+                  Schema adapts based on mode:
+                  - dense: dense_embedding only
+                  - hybrid: dense_embedding + sparse_embedding
+                  - ultimate: + late_interaction_embedding
+                  - graph: + graph tables
 
         Examples:
             # Basic usage (bundled models, offline)
@@ -312,12 +321,28 @@ class Vectrix:
             ...     sparse_model="splade",     # Bundled
             ...     reranker_model="cross-encoder/ms-marco-TinyBERT-L-2-v2",  # HuggingFace
             ... )
+
+            # With storage backend (Lakebase)
+            >>> from vectrixdb import VectrixDB
+            >>> lakebase = VectrixDB.with_lakebase(host="...", database="...", user="...", password="...")
+            >>> db = Vectrix(
+            ...     "products",
+            ...     mode="ultimate",
+            ...     dense_model="bge-small",
+            ...     sparse_model="splade",
+            ...     reranker_model="L6",
+            ...     late_interaction_model="colbert",
+            ...     storage_backend=lakebase,
+            ... )
+            >>> db.add(texts=["Product A", "Product B"])  # Stores all embeddings in Lakebase
+            >>> results = db.search("query")  # Full ultimate search from Lakebase
         """
         self.name = name
         self.path = path
         self.embed_fn = embed_fn
         self.model_path = model_path
         self.language = language
+        self.storage_backend = storage_backend
 
         # Handle mode/tier (mode takes precedence)
         self.default_mode = mode.lower() if mode else (tier.lower() if tier else "dense")
@@ -585,9 +610,17 @@ class Vectrix:
 
     def _init_db(self):
         """Initialize the database and collection."""
-        from .core.database import VectrixDB
+        # Use storage backend if provided, otherwise use local SQLite
+        if self.storage_backend is not None:
+            self._db = self.storage_backend
+            self._using_storage_backend = True
+        else:
+            from .core.database import VectrixDB
+            self._db = VectrixDB(self.path)
+            self._using_storage_backend = False
 
-        self._db = VectrixDB(self.path)
+        # Determine schema based on mode
+        schema_config = self._get_schema_config()
 
         try:
             self._collection = self._db.get_collection(self.name)
@@ -596,8 +629,24 @@ class Vectrix:
                 name=self.name,
                 dimension=self.dimension,
                 metric="cosine",
-                enable_text_index=True
+                enable_text_index=True,
+                **schema_config
             )
+
+    def _get_schema_config(self) -> Dict[str, Any]:
+        """Get schema configuration based on mode for storage backends."""
+        if not self._using_storage_backend if hasattr(self, '_using_storage_backend') else self.storage_backend is None:
+            return {}  # Local SQLite doesn't need extra config
+
+        # Schema adapts based on mode
+        config = {
+            "mode": self.default_mode,
+            "store_dense": True,  # Always store dense
+            "store_sparse": self.default_mode in ("hybrid", "ultimate", "graph"),
+            "store_late_interaction": self.default_mode in ("ultimate", "graph"),
+            "store_text": True,  # Always store text for reranker
+        }
+        return config
 
     @property
     def model(self):
@@ -898,6 +947,37 @@ class Vectrix:
             texts = [texts]
         return self.sparse_embedder.embed(texts)
 
+    def _rerank_with_cross_encoder(
+        self,
+        query: str,
+        candidates: List[Dict],
+        limit: int
+    ) -> List[Dict]:
+        """Rerank candidates using cross-encoder."""
+        if not candidates or not self.reranker_model_name:
+            return candidates[:limit]
+
+        try:
+            reranker = self.reranker
+            if hasattr(reranker, 'rerank'):
+                # HuggingFace reranker
+                docs = [c["text"] for c in candidates]
+                reranked_indices = reranker.rerank(query, docs, limit=limit)
+                return [candidates[idx] for idx, _ in reranked_indices]
+            else:
+                # Bundled reranker - use cross-encoder scoring
+                pairs = [(query, c["text"]) for c in candidates]
+                scores_list = reranker.score_pairs(pairs)
+                sorted_candidates = sorted(
+                    zip(candidates, scores_list),
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+                return [c for c, _ in sorted_candidates[:limit]]
+        except Exception:
+            # Fall back to original scores
+            return candidates[:limit]
+
     # =========================================================================
     # Core Operations
     # =========================================================================
@@ -922,6 +1002,12 @@ class Vectrix:
         Example:
             >>> db = Vectrix("docs").add(["text 1", "text 2"])
             >>> db.add("another text", metadata={"source": "web"})
+
+        With storage backend, embeddings are generated based on mode:
+            - dense: dense_embedding only
+            - hybrid: dense_embedding + sparse_embedding
+            - ultimate: + late_interaction_embedding
+            - graph: + graph relationships
         """
         # Normalize inputs
         if isinstance(texts, str):
@@ -935,22 +1021,62 @@ class Vectrix:
         if ids is None:
             ids = [self._generate_id(t) for t in texts]
 
-        # Generate embeddings
-        vectors = self._embed(texts)
+        # Generate dense embeddings (always)
+        dense_vectors = self._embed(texts)
 
         # Store texts for retrieval
         for id_, text in zip(ids, texts):
             self._texts[id_] = text
 
-        # Add to collection
-        self._collection.add(
-            ids=ids,
-            vectors=vectors,
-            metadata=metadata,
-            texts=texts
-        )
+        # For storage backends, generate additional embeddings based on mode
+        if self._using_storage_backend if hasattr(self, '_using_storage_backend') else self.storage_backend is not None:
+            extra_embeddings = {}
+
+            # Generate sparse embeddings for hybrid/ultimate/graph modes
+            if self.default_mode in ("hybrid", "ultimate", "graph"):
+                sparse_vectors = self._embed_sparse(texts)
+                extra_embeddings["sparse_embeddings"] = sparse_vectors
+
+            # Generate late interaction embeddings for ultimate/graph modes
+            if self.default_mode in ("ultimate", "graph"):
+                late_interaction_vectors = self._embed_late_interaction(texts)
+                extra_embeddings["late_interaction_embeddings"] = late_interaction_vectors
+
+            # Add to collection with all embeddings
+            self._collection.add(
+                ids=ids,
+                vectors=dense_vectors,
+                metadata=metadata,
+                texts=texts,
+                **extra_embeddings
+            )
+        else:
+            # Local SQLite - just dense vectors
+            self._collection.add(
+                ids=ids,
+                vectors=dense_vectors,
+                metadata=metadata,
+                texts=texts
+            )
 
         return self  # Enable chaining
+
+    def _embed_late_interaction(self, texts: Union[str, List[str]]) -> List[np.ndarray]:
+        """Generate late interaction (ColBERT) embeddings."""
+        if isinstance(texts, str):
+            texts = [texts]
+
+        colbert = self.late_interaction
+
+        if hasattr(colbert, 'embed_documents'):
+            # HuggingFace ColBERT
+            return colbert.embed_documents(texts)
+        elif hasattr(colbert, 'embed'):
+            # FastEmbed or bundled ColBERT
+            return list(colbert.embed(texts))
+        else:
+            # Bundled ColBERT with encode method
+            return colbert.encode(texts)
 
     def search(
         self,
@@ -1005,14 +1131,17 @@ class Vectrix:
         query_vector = self._embed(query)[0]
 
         # Determine search strategy
+        # Use storage backend optimized search if available
+        use_backend = self._using_storage_backend if hasattr(self, '_using_storage_backend') else self.storage_backend is not None
+
         if mode == "ultimate" or mode == "graph":
-            results = self._ultimate_search(query, query_vector, limit, filter, diversity)
+            results = self._ultimate_search(query, query_vector, limit, filter, diversity, use_backend=use_backend)
         elif mode == "dense":
             results = self._dense_search(query_vector, limit, filter)
         elif mode == "sparse":
             results = self._sparse_search(query, limit, filter)
         elif mode == "hybrid":
-            results = self._hybrid_search(query, query_vector, limit, filter)
+            results = self._hybrid_search(query, query_vector, limit, filter, use_backend=use_backend)
         else:
             raise ValueError(f"Unknown mode: {mode}. Use 'dense', 'sparse', 'hybrid', 'ultimate', or 'graph'")
 
@@ -1077,19 +1206,37 @@ class Vectrix:
         query: str,
         query_vector: np.ndarray,
         limit: int,
-        filter: Dict = None
+        filter: Dict = None,
+        use_backend: bool = False
     ) -> List[Dict]:
         """
         Hybrid search: Dense + Sparse + Reranker.
 
         Pipeline:
         1. Dense semantic search (vector similarity)
-        2. Sparse keyword search (BM25/SPLADE)
+        2. Sparse keyword search (BM25/SPLADE) - uses pre-computed if storage backend
         3. RRF fusion with intersection boost
         4. Cross-encoder reranking for final results
         """
         # Stage 1: Get candidates from dense and sparse search
         prefetch_limit = min(limit * 10, max(self._collection.count(), 1))
+
+        # For storage backends, use optimized multi-embedding search if available
+        if use_backend and hasattr(self._collection, 'hybrid_search'):
+            # Generate sparse query embedding
+            query_sparse = self._embed_sparse(query)[0]
+            results = self._collection.hybrid_search(
+                dense_query=query_vector,
+                sparse_query=query_sparse,
+                limit=prefetch_limit,
+                filter=filter
+            )
+            # Rerank with cross-encoder
+            candidates = [
+                {"id": r.id, "score": r.score, "metadata": r.metadata, "text": r.text or self._texts.get(r.id, "")}
+                for r in results.results
+            ]
+            return self._rerank_with_cross_encoder(query, candidates, limit)
 
         # Dense search
         dense_results = self._collection.search(
@@ -1174,20 +1321,41 @@ class Vectrix:
         query_vector: np.ndarray,
         limit: int,
         filter: Dict = None,
-        diversity: float = 0.7
+        diversity: float = 0.7,
+        use_backend: bool = False
     ) -> List[Dict]:
         """
         Ultimate search: Dense + Sparse + Reranker + ColBERT.
 
         This is the highest quality search mode, combining:
         1. Dense semantic search (vector similarity)
-        2. Sparse keyword search (BM25/SPLADE)
+        2. Sparse keyword search (BM25/SPLADE) - uses pre-computed if storage backend
         3. RRF fusion with intersection boost
-        4. ColBERT late interaction scoring
+        4. ColBERT late interaction scoring - uses pre-computed if storage backend
         5. Cross-encoder reranking for final results
         """
         # Stage 1: Get large candidate pools from multiple sources
         prefetch_limit = min(limit * 10, max(self._collection.count(), 1))
+
+        # For storage backends, use optimized multi-embedding search if available
+        if use_backend and hasattr(self._collection, 'ultimate_search'):
+            # Generate query embeddings
+            query_sparse = self._embed_sparse(query)[0]
+            query_late_interaction = self._embed_late_interaction([query])[0]
+
+            results = self._collection.ultimate_search(
+                dense_query=query_vector,
+                sparse_query=query_sparse,
+                late_interaction_query=query_late_interaction,
+                limit=prefetch_limit,
+                filter=filter
+            )
+            # Rerank with cross-encoder
+            candidates = [
+                {"id": r.id, "score": r.score, "metadata": r.metadata, "text": r.text or self._texts.get(r.id, "")}
+                for r in results.results
+            ]
+            return self._rerank_with_cross_encoder(query, candidates, limit)
 
         dense_results = self._collection.search(
             query=query_vector,
