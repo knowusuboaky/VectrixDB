@@ -1716,10 +1716,11 @@ class LakebaseStorage(BaseStorage):
                         dimension = 384  # Default dimension
 
                 # Check if table exists and has correct schema
+                schema = self.config.lakebase_schema or "public"
                 cur.execute("""
                     SELECT column_name FROM information_schema.columns
-                    WHERE table_name = %s
-                """, (name,))
+                    WHERE table_schema = %s AND table_name = %s
+                """, (schema, name,))
                 existing_columns = {row["column_name"] for row in cur.fetchall()}
 
                 # If table exists but missing dense_embedding, drop and recreate
@@ -1842,10 +1843,11 @@ class LakebaseStorage(BaseStorage):
         with self._lock:
             with self._conn.cursor() as cur:
                 # Check which columns exist
+                schema = self.config.lakebase_schema or "public"
                 cur.execute(f"""
                     SELECT column_name FROM information_schema.columns
-                    WHERE table_name = %s
-                """, (collection,))
+                    WHERE table_schema = %s AND table_name = %s
+                """, (schema, collection,))
                 columns = {row["column_name"] for row in cur.fetchall()}
 
                 # Build dynamic INSERT based on available columns
@@ -1893,10 +1895,11 @@ class LakebaseStorage(BaseStorage):
         with self._lock:
             with self._conn.cursor() as cur:
                 # Check which columns exist
+                schema = self.config.lakebase_schema or "public"
                 cur.execute(f"""
                     SELECT column_name FROM information_schema.columns
-                    WHERE table_name = %s
-                """, (collection,))
+                    WHERE table_schema = %s AND table_name = %s
+                """, (schema, collection,))
                 columns = {row["column_name"] for row in cur.fetchall()}
                 has_sparse = "sparse_embedding" in columns
                 has_late_interaction = "late_interaction_embedding" in columns
