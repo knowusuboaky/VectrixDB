@@ -738,17 +738,29 @@ class DenseEmbedder:
         model_path = self.model_dir / self.onnx_file
         tokenizer_path = self.model_dir / self.tokenizer_file
 
-        # Bundled models that don't need download
-        BUNDLED_MODELS = {"dense_en", "bge_small_en", "e5_small"}
+        # Models that should be available (bundled or cached from GitHub)
+        BUNDLED_MODELS = {"dense_en", "bge_small_en", "e5_small", "bge_base_en"}
 
         if not model_path.exists():
             # Check if this is a bundled model
             if hasattr(self, '_config_key') and self._config_key in BUNDLED_MODELS:
-                raise FileNotFoundError(
-                    f"Dense model not found: {model_path}\n"
-                    f"This model should be bundled with the package.\n"
-                    f"Try reinstalling: pip install --force-reinstall vectrixdb"
-                )
+                # Check if it's a GitHub-hosted model vs truly bundled
+                github_models = {"bge_base_en"}
+                if self._config_key in github_models:
+                    raise FileNotFoundError(
+                        f"Dense model not found: {model_path}\n\n"
+                        f"This model must be downloaded from GitHub releases.\n"
+                        f"For Databricks, cache models to a Volume first:\n"
+                        f"  MODELS_VOLUME_PATH = '/Volumes/catalog/schema/vectrixdb_models/'\n"
+                        f"  os.environ['VECTRIXDB_MODELS_DIR'] = MODELS_VOLUME_PATH\n\n"
+                        f"Download: https://github.com/knowusuboaky/VectrixDB/releases/tag/v1.9.0"
+                    )
+                else:
+                    raise FileNotFoundError(
+                        f"Dense model not found: {model_path}\n"
+                        f"This model should be bundled with the package.\n"
+                        f"Try reinstalling: pip install --force-reinstall vectrixdb"
+                    )
             # Auto-download for multilingual models
             else:
                 print(f"Multilingual dense model not found. Downloading...")

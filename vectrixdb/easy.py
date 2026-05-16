@@ -521,7 +521,17 @@ class Vectrix:
             )
 
     # Bundled model folder names (in vectrixdb/models/data/)
-    _BUNDLED_MODEL_FOLDERS = {"dense_en", "colbert", "reranker_en", "sparse"}
+    # Model folder names that map to embedded ONNX models
+    # These are either bundled with the package or downloaded from GitHub releases
+    _BUNDLED_MODEL_FOLDERS = {
+        # Bundled with pip install
+        "dense_en", "colbert", "reranker_en", "sparse",
+        # Downloaded from GitHub releases (cached after first use)
+        "bge_base_en", "bge_small_en", "e5_small",
+        "bge_reranker_base", "reranker_en_l6",
+        "colbert_v2", "late_interaction_en",
+        "splade_pp_en",
+    }
 
     def _parse_model(self, model: str, dimension: int):
         """Parse model identifier and set up embedding configuration."""
@@ -553,7 +563,13 @@ class Vectrix:
         if resolved_model in self._BUNDLED_MODEL_FOLDERS:
             self.model_type = "embedded"
             self.model_name = resolved_model
-            self.dimension = dimension or 384
+            # Get dimension from model config or use default
+            model_dimensions = {
+                "bge_base_en": 768,  # bge-base-en-v1.5
+                "colbert_v2": 128,   # colbertv2.0 token embeddings
+                "late_interaction_en": 128,  # answerai-colbert-small-v1
+            }
+            self.dimension = dimension or model_dimensions.get(resolved_model, 384)
             return
 
         # Check if it's a github: model (needs download)
