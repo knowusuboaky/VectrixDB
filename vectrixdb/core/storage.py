@@ -1715,55 +1715,74 @@ class LakebaseStorage(BaseStorage):
                     else:
                         dimension = 384  # Default dimension
 
-                # Base columns (always present)
-                cur.execute(f"""
-                    CREATE TABLE IF NOT EXISTS "{name}" (
-                        id TEXT PRIMARY KEY,
-                        dense_embedding vector({dimension}),
-                        metadata JSONB,
-                        text_content TEXT,
-                        created_at TIMESTAMP DEFAULT NOW(),
-                        updated_at TIMESTAMP DEFAULT NOW()
-                    )
-                """)
+                # Check if table exists and has correct schema
+                cur.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = %s
+                """, (name,))
+                existing_columns = {row["column_name"] for row in cur.fetchall()}
 
-                # Add sparse_embedding column for hybrid/ultimate/graph modes
-                if mode in ("hybrid", "ultimate", "graph"):
-                    try:
-                        cur.execute(f"""
-                            ALTER TABLE "{name}" ADD COLUMN IF NOT EXISTS sparse_embedding JSONB
-                        """)
-                    except:
-                        pass  # Column may already exist
+                # If table exists but missing dense_embedding, drop and recreate
+                if existing_columns and "dense_embedding" not in existing_columns:
+                    cur.execute(f'DROP TABLE IF EXISTS "{name}" CASCADE')
+                    self._conn.commit()
+                    existing_columns = set()
 
-                # Add late_interaction_embedding column for ultimate/graph modes
-                if mode in ("ultimate", "graph"):
-                    try:
-                        cur.execute(f"""
-                            ALTER TABLE "{name}" ADD COLUMN IF NOT EXISTS late_interaction_embedding JSONB
-                        """)
-                    except:
-                        pass  # Column may already exist
+                # Create table if not exists
+                if not existing_columns:
+                    cur.execute(f"""
+                        CREATE TABLE "{name}" (
+                            id TEXT PRIMARY KEY,
+                            dense_embedding vector({dimension}),
+                            sparse_embedding JSONB,
+                            late_interaction_embedding JSONB,
+                            metadata JSONB,
+                            text_content TEXT,
+                            created_at TIMESTAMP DEFAULT NOW(),
+                            updated_at TIMESTAMP DEFAULT NOW()
+                        )
+                    """)
+                    self._conn.commit()
+                else:
+                    # Add missing columns to existing table
+                    if "dense_embedding" not in existing_columns:
+                        cur.execute(f'ALTER TABLE "{name}" ADD COLUMN dense_embedding vector({dimension})')
+                    if "sparse_embedding" not in existing_columns:
+                        cur.execute(f'ALTER TABLE "{name}" ADD COLUMN sparse_embedding JSONB')
+                    if "late_interaction_embedding" not in existing_columns:
+                        cur.execute(f'ALTER TABLE "{name}" ADD COLUMN late_interaction_embedding JSONB')
+                    if "metadata" not in existing_columns:
+                        cur.execute(f'ALTER TABLE "{name}" ADD COLUMN metadata JSONB')
+                    if "text_content" not in existing_columns:
+                        cur.execute(f'ALTER TABLE "{name}" ADD COLUMN text_content TEXT')
+                    self._conn.commit()
 
-                # Dense vector index (IVFFlat for pgvector)
-                cur.execute(f"""
-                    CREATE INDEX IF NOT EXISTS "{name}_dense_idx"
-                    ON "{name}" USING ivfflat (dense_embedding vector_cosine_ops)
-                    WITH (lists = 100)
-                """)
+                # Create indexes (use HNSW instead of IVFFlat - doesn't require data)
+                try:
+                    cur.execute(f"""
+                        CREATE INDEX IF NOT EXISTS "{name}_dense_idx"
+                        ON "{name}" USING hnsw (dense_embedding vector_cosine_ops)
+                    """)
+                except Exception:
+                    pass  # Index may already exist or pgvector not configured for HNSW
 
                 # JSONB index for metadata filtering
-                cur.execute(f"""
-                    CREATE INDEX IF NOT EXISTS "{name}_metadata_idx"
-                    ON "{name}" USING GIN (metadata)
-                """)
+                try:
+                    cur.execute(f"""
+                        CREATE INDEX IF NOT EXISTS "{name}_metadata_idx"
+                        ON "{name}" USING GIN (metadata)
+                    """)
+                except Exception:
+                    pass  # Index may already exist
 
                 # Sparse embedding index for hybrid search
-                if mode in ("hybrid", "ultimate", "graph"):
+                try:
                     cur.execute(f"""
                         CREATE INDEX IF NOT EXISTS "{name}_sparse_idx"
                         ON "{name}" USING GIN (sparse_embedding)
                     """)
+                except Exception:
+                    pass  # Index may already exist
 
                 self._conn.commit()
 
@@ -2667,35 +2686,49 @@ class DeltaLakeStorage(BaseStorage):
         - ultimate/graph: dense_embedding + sparse_embedding + late_interaction_embedding
         """
         with self._lock:
-            # Base columns with dense_embedding
-            self._cursor.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self._full_table_name(name)} (
-                    id STRING NOT NULL,
-                    data STRING,
-                    dense_embedding ARRAY<DOUBLE>,
-                    text_content STRING,
-                    created_at TIMESTAMP,
-                    updated_at TIMESTAMP
-                ) USING DELTA
-            """)
+            full_name = self._full_table_name(name)
 
-            # Add sparse_embedding for hybrid/ultimate/graph
-            if mode in ("hybrid", "ultimate", "graph"):
-                try:
-                    self._cursor.execute(f"""
-                        ALTER TABLE {self._full_table_name(name)} ADD COLUMN sparse_embedding STRING
-                    """)
-                except:
-                    pass  # Column may already exist
+            # Check if table exists
+            try:
+                self._cursor.execute(f"DESCRIBE TABLE {full_name}")
+                existing_columns = {row[0] for row in self._cursor.fetchall()}
+            except Exception:
+                existing_columns = set()
 
-            # Add late_interaction_embedding for ultimate/graph
-            if mode in ("ultimate", "graph"):
-                try:
-                    self._cursor.execute(f"""
-                        ALTER TABLE {self._full_table_name(name)} ADD COLUMN late_interaction_embedding STRING
-                    """)
-                except:
-                    pass  # Column may already exist
+            # If table exists but missing dense_embedding, drop and recreate
+            if existing_columns and "dense_embedding" not in existing_columns:
+                self._cursor.execute(f"DROP TABLE IF EXISTS {full_name}")
+                existing_columns = set()
+
+            # Create table with all columns
+            if not existing_columns:
+                self._cursor.execute(f"""
+                    CREATE TABLE {full_name} (
+                        id STRING NOT NULL,
+                        data STRING,
+                        dense_embedding ARRAY<DOUBLE>,
+                        sparse_embedding STRING,
+                        late_interaction_embedding STRING,
+                        metadata STRING,
+                        text_content STRING,
+                        created_at TIMESTAMP,
+                        updated_at TIMESTAMP
+                    ) USING DELTA
+                """)
+            else:
+                # Add missing columns
+                for col, col_type in [
+                    ("dense_embedding", "ARRAY<DOUBLE>"),
+                    ("sparse_embedding", "STRING"),
+                    ("late_interaction_embedding", "STRING"),
+                    ("metadata", "STRING"),
+                    ("text_content", "STRING"),
+                ]:
+                    if col not in existing_columns:
+                        try:
+                            self._cursor.execute(f"ALTER TABLE {full_name} ADD COLUMN {col} {col_type}")
+                        except Exception:
+                            pass  # Column may already exist
 
     def create_collection(self, name: str, config: Dict[str, Any]) -> None:
         mode = config.get("mode", "dense")
