@@ -452,6 +452,18 @@ class VectrixDB:
             )
             self._db.commit()
 
+            # Persist to storage backend (Lakebase/CosmosDB/DeltaLake)
+            if self._storage:
+                try:
+                    self._storage.create_collection(name, {
+                        "dimension": dimension,
+                        "description": description or "",
+                        "metric": metric.value,
+                        "tags": tags,
+                    })
+                except Exception as e:
+                    print(f"[VectrixDB] Warning: Failed to persist collection to storage backend: {e}")
+
             self._collections[name] = collection
 
             # Register with auto-scaler
