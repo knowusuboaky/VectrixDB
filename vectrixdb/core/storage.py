@@ -1031,6 +1031,35 @@ class CosmosDBStorage(BaseStorage):
     def flush(self) -> None:
         pass  # Cosmos DB auto-flushes
 
+    def vector_search(
+        self,
+        collection: str,
+        query_vector: List[float],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """
+        Vector search using cosine similarity.
+        NOTE: Cosmos DB doesn't have native vector search - this does client-side search.
+        For production, use Lakebase (pgvector) for fast vector search.
+        """
+        results = []
+        for id_, data in self.scan(collection, limit=10000):  # Scan up to 10k documents
+            embedding = data.pop("_embedding", None)
+            if embedding:
+                # Cosine similarity
+                dot = sum(a * b for a, b in zip(query_vector, embedding))
+                norm_q = sum(a * a for a in query_vector) ** 0.5
+                norm_e = sum(a * a for a in embedding) ** 0.5
+                if norm_q > 0 and norm_e > 0:
+                    similarity = dot / (norm_q * norm_e)
+                    # Convert to distance (1 - similarity) for consistency
+                    distance = 1 - similarity
+                    results.append((id_, data, distance))
+
+        # Sort by distance ascending (smaller = more similar)
+        results.sort(key=lambda x: x[2])
+        return results[:limit]
+
 
 class LakebaseStorage(BaseStorage):
     """
@@ -1088,11 +1117,13 @@ class LakebaseStorage(BaseStorage):
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
             self._conn.commit()
 
-        # Create metadata table
+        # Create metadata table with proper schema
         with self._conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS _vectrix_collections (
                     name TEXT PRIMARY KEY,
+                    dimension INTEGER,
+                    description TEXT,
                     config JSONB,
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW()
@@ -1105,38 +1136,64 @@ class LakebaseStorage(BaseStorage):
             self._conn.close()
             self._conn = None
 
-    def _ensure_collection_table(self, name: str) -> None:
-        """Create collection table if not exists."""
+    def _ensure_collection_table(self, name: str, dimension: int = None) -> None:
+        """Create collection table with proper schema for vectors and metadata."""
         with self._lock:
             with self._conn.cursor() as cur:
-                # Table for documents with JSONB data and vector support
+                # Get dimension from collection config if not provided
+                if dimension is None:
+                    cur.execute("SELECT config FROM _vectrix_collections WHERE name = %s", (name,))
+                    row = cur.fetchone()
+                    if row and row["config"]:
+                        dimension = row["config"].get("dimension", 384)
+                    else:
+                        dimension = 384  # Default dimension
+
+                # Collection table with clear column names
                 cur.execute(f"""
                     CREATE TABLE IF NOT EXISTS "{name}" (
                         id TEXT PRIMARY KEY,
-                        data JSONB NOT NULL,
-                        embedding vector,
+                        embedding vector({dimension}),
+                        metadata JSONB,
+                        text_content TEXT,
                         created_at TIMESTAMP DEFAULT NOW(),
                         updated_at TIMESTAMP DEFAULT NOW()
                     )
                 """)
-                # Index for vector similarity search
+
+                # Vector similarity index (IVFFlat for pgvector)
                 cur.execute(f"""
                     CREATE INDEX IF NOT EXISTS "{name}_embedding_idx"
                     ON "{name}" USING ivfflat (embedding vector_cosine_ops)
                     WITH (lists = 100)
                 """)
+
+                # JSONB index for metadata filtering
+                cur.execute(f"""
+                    CREATE INDEX IF NOT EXISTS "{name}_metadata_idx"
+                    ON "{name}" USING GIN (metadata)
+                """)
+
                 self._conn.commit()
 
     def create_collection(self, name: str, config: Dict[str, Any]) -> None:
+        dimension = config.get("dimension", 384)
+        description = config.get("description", "")
+
         with self._lock:
             with self._conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO _vectrix_collections (name, config, updated_at)
-                    VALUES (%s, %s, NOW())
-                    ON CONFLICT (name) DO UPDATE SET config = %s, updated_at = NOW()
-                """, (name, json.dumps(config), json.dumps(config)))
+                    INSERT INTO _vectrix_collections (name, dimension, description, config, updated_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    ON CONFLICT (name) DO UPDATE SET
+                        dimension = %s,
+                        description = %s,
+                        config = %s,
+                        updated_at = NOW()
+                """, (name, dimension, description, json.dumps(config),
+                      dimension, description, json.dumps(config)))
                 self._conn.commit()
-            self._ensure_collection_table(name)
+            self._ensure_collection_table(name, dimension=dimension)
 
     def delete_collection(self, name: str) -> None:
         with self._lock:
@@ -1159,23 +1216,23 @@ class LakebaseStorage(BaseStorage):
     def insert(self, collection: str, id: str, data: Dict[str, Any]) -> None:
         self._ensure_collection_table(collection)
 
-        # Extract embedding if present
+        # Extract special fields
         embedding = data.pop("_embedding", None)
+        text_content = data.pop("text_content", None)
+        metadata = data  # Remaining fields are metadata
 
         with self._lock:
             with self._conn.cursor() as cur:
-                if embedding:
-                    cur.execute(f"""
-                        INSERT INTO "{collection}" (id, data, embedding, updated_at)
-                        VALUES (%s, %s, %s, NOW())
-                        ON CONFLICT (id) DO UPDATE SET data = %s, embedding = %s, updated_at = NOW()
-                    """, (id, json.dumps(data), embedding, json.dumps(data), embedding))
-                else:
-                    cur.execute(f"""
-                        INSERT INTO "{collection}" (id, data, updated_at)
-                        VALUES (%s, %s, NOW())
-                        ON CONFLICT (id) DO UPDATE SET data = %s, updated_at = NOW()
-                    """, (id, json.dumps(data), json.dumps(data)))
+                cur.execute(f"""
+                    INSERT INTO "{collection}" (id, embedding, metadata, text_content, updated_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    ON CONFLICT (id) DO UPDATE SET
+                        embedding = COALESCE(%s, "{collection}".embedding),
+                        metadata = %s,
+                        text_content = COALESCE(%s, "{collection}".text_content),
+                        updated_at = NOW()
+                """, (id, embedding, json.dumps(metadata), text_content,
+                      embedding, json.dumps(metadata), text_content))
                 self._conn.commit()
 
     def insert_batch(self, collection: str, documents: List[Tuple[str, Dict[str, Any]]]) -> int:
@@ -1185,19 +1242,21 @@ class LakebaseStorage(BaseStorage):
             with self._conn.cursor() as cur:
                 count = 0
                 for id, data in documents:
+                    # Extract special fields
                     embedding = data.pop("_embedding", None)
-                    if embedding:
-                        cur.execute(f"""
-                            INSERT INTO "{collection}" (id, data, embedding, updated_at)
-                            VALUES (%s, %s, %s, NOW())
-                            ON CONFLICT (id) DO UPDATE SET data = %s, embedding = %s, updated_at = NOW()
-                        """, (id, json.dumps(data), embedding, json.dumps(data), embedding))
-                    else:
-                        cur.execute(f"""
-                            INSERT INTO "{collection}" (id, data, updated_at)
-                            VALUES (%s, %s, NOW())
-                            ON CONFLICT (id) DO UPDATE SET data = %s, updated_at = NOW()
-                        """, (id, json.dumps(data), json.dumps(data)))
+                    text_content = data.pop("text_content", None)
+                    metadata = data  # Remaining fields are metadata
+
+                    cur.execute(f"""
+                        INSERT INTO "{collection}" (id, embedding, metadata, text_content, updated_at)
+                        VALUES (%s, %s, %s, %s, NOW())
+                        ON CONFLICT (id) DO UPDATE SET
+                            embedding = COALESCE(%s, "{collection}".embedding),
+                            metadata = %s,
+                            text_content = COALESCE(%s, "{collection}".text_content),
+                            updated_at = NOW()
+                    """, (id, embedding, json.dumps(metadata), text_content,
+                          embedding, json.dumps(metadata), text_content))
                     count += 1
                 self._conn.commit()
                 return count
@@ -1205,17 +1264,27 @@ class LakebaseStorage(BaseStorage):
     def get(self, collection: str, id: str) -> Optional[Dict[str, Any]]:
         try:
             with self._conn.cursor() as cur:
-                cur.execute(f'SELECT data FROM "{collection}" WHERE id = %s', (id,))
+                cur.execute(f'SELECT metadata, text_content FROM "{collection}" WHERE id = %s', (id,))
                 row = cur.fetchone()
-                return row["data"] if row else None
+                if row:
+                    result = row["metadata"] or {}
+                    if row["text_content"]:
+                        result["text_content"] = row["text_content"]
+                    return result
+                return None
         except:
             return None
 
     def get_batch(self, collection: str, ids: List[str]) -> List[Optional[Dict[str, Any]]]:
         try:
             with self._conn.cursor() as cur:
-                cur.execute(f'SELECT id, data FROM "{collection}" WHERE id = ANY(%s)', (ids,))
-                results = {row["id"]: row["data"] for row in cur.fetchall()}
+                cur.execute(f'SELECT id, metadata, text_content FROM "{collection}" WHERE id = ANY(%s)', (ids,))
+                results = {}
+                for row in cur.fetchall():
+                    data = row["metadata"] or {}
+                    if row["text_content"]:
+                        data["text_content"] = row["text_content"]
+                    results[row["id"]] = data
                 return [results.get(id) for id in ids]
         except:
             return [None] * len(ids)
@@ -1225,18 +1294,19 @@ class LakebaseStorage(BaseStorage):
         if existing:
             existing.update(data)
             embedding = existing.pop("_embedding", None)
+            text_content = existing.pop("text_content", None)
+            metadata = existing
+
             with self._lock:
                 with self._conn.cursor() as cur:
-                    if embedding:
-                        cur.execute(f"""
-                            UPDATE "{collection}" SET data = %s, embedding = %s, updated_at = NOW()
-                            WHERE id = %s
-                        """, (json.dumps(existing), embedding, id))
-                    else:
-                        cur.execute(f"""
-                            UPDATE "{collection}" SET data = %s, updated_at = NOW()
-                            WHERE id = %s
-                        """, (json.dumps(existing), id))
+                    cur.execute(f"""
+                        UPDATE "{collection}" SET
+                            metadata = %s,
+                            embedding = COALESCE(%s, embedding),
+                            text_content = COALESCE(%s, text_content),
+                            updated_at = NOW()
+                        WHERE id = %s
+                    """, (json.dumps(metadata), embedding, text_content, id))
                     self._conn.commit()
                     return cur.rowcount > 0
         return False
@@ -1266,25 +1336,31 @@ class LakebaseStorage(BaseStorage):
             with self._conn.cursor() as cur:
                 if filter_func:
                     # Fetch all and filter in Python
-                    cur.execute(f'SELECT id, data FROM "{collection}" ORDER BY created_at')
+                    cur.execute(f'SELECT id, metadata, text_content FROM "{collection}" ORDER BY created_at')
                     count = 0
                     skipped = 0
                     for row in cur:
-                        if filter_func(row["data"]):
+                        data = row["metadata"] or {}
+                        if row["text_content"]:
+                            data["text_content"] = row["text_content"]
+                        if filter_func(data):
                             if skipped < offset:
                                 skipped += 1
                                 continue
-                            yield (row["id"], row["data"])
+                            yield (row["id"], data)
                             count += 1
                             if count >= limit:
                                 break
                 else:
                     cur.execute(
-                        f'SELECT id, data FROM "{collection}" ORDER BY created_at LIMIT %s OFFSET %s',
+                        f'SELECT id, metadata, text_content FROM "{collection}" ORDER BY created_at LIMIT %s OFFSET %s',
                         (limit, offset)
                     )
                     for row in cur:
-                        yield (row["id"], row["data"])
+                        data = row["metadata"] or {}
+                        if row["text_content"]:
+                            data["text_content"] = row["text_content"]
+                        yield (row["id"], data)
         except:
             return
 
@@ -1315,23 +1391,29 @@ class LakebaseStorage(BaseStorage):
             collection: Collection name
             query_vector: Query embedding vector
             limit: Max results to return
-            filter_sql: Optional SQL WHERE clause for filtering
+            filter_sql: Optional SQL WHERE clause for metadata filtering
 
         Returns:
-            List of (id, data, distance) tuples ordered by similarity
+            List of (id, metadata, distance) tuples ordered by similarity
         """
         try:
             with self._conn.cursor() as cur:
                 where_clause = f"AND {filter_sql}" if filter_sql else ""
                 cur.execute(f"""
-                    SELECT id, data, embedding <=> %s::vector AS distance
+                    SELECT id, metadata, text_content, embedding <=> %s::vector AS distance
                     FROM "{collection}"
                     WHERE embedding IS NOT NULL {where_clause}
                     ORDER BY distance
                     LIMIT %s
                 """, (query_vector, limit))
 
-                return [(row["id"], row["data"], row["distance"]) for row in cur.fetchall()]
+                results = []
+                for row in cur.fetchall():
+                    data = row["metadata"] or {}
+                    if row["text_content"]:
+                        data["text_content"] = row["text_content"]
+                    results.append((row["id"], data, row["distance"]))
+                return results
         except Exception as e:
             print(f"Vector search error: {e}")
             return []
@@ -1874,10 +1956,13 @@ class DeltaLakeStorage(BaseStorage):
                     yield row[0], data
                 offset += batch_size
 
-    def vector_search(self, collection: str, query_vector: List[float], limit: int = 10) -> List[Tuple[str, float, Dict[str, Any]]]:
+    def vector_search(self, collection: str, query_vector: List[float], limit: int = 10) -> List[Tuple[str, Dict[str, Any], float]]:
         """
         Vector search using cosine similarity.
         NOTE: This is SLOW in Delta Lake (full table scan). Use Lakebase for fast search.
+
+        Returns:
+            List of (id, data, distance) tuples ordered by distance ascending.
         """
         # Delta Lake doesn't have native vector search, so we do client-side
         results = []
@@ -1890,10 +1975,12 @@ class DeltaLakeStorage(BaseStorage):
                 norm_e = sum(a * a for a in embedding) ** 0.5
                 if norm_q > 0 and norm_e > 0:
                     similarity = dot / (norm_q * norm_e)
-                    results.append((id, similarity, data))
+                    # Convert to distance for consistency with LakebaseStorage
+                    distance = 1 - similarity
+                    results.append((id, data, distance))
 
-        # Sort by similarity descending
-        results.sort(key=lambda x: x[1], reverse=True)
+        # Sort by distance ascending (smaller = more similar)
+        results.sort(key=lambda x: x[2])
         return results[:limit]
 
     # Document Index methods
