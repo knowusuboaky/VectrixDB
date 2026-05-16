@@ -150,27 +150,27 @@ class Vectrix:
 
     # Bundled model aliases for easy selection
     _DENSE_ALIASES = {
-        "multilingual": "dense",
-        "multi": "dense",
-        "e5-small": "dense_en",
-        "bge-small": "bge_small_en",
-        "e5-small-fp32": "e5_small",
+        "multilingual": "github:dense-multi",  # Download from GitHub (113MB)
+        "multi": "github:dense-multi",
+        "e5-small": "dense_en",  # Bundled (33MB quantized)
+        "bge-small": "github:bge-small",  # Download from GitHub (127MB)
+        "e5-small-fp32": "github:e5-small",  # Download from GitHub (127MB)
     }
 
     _SPARSE_ALIASES = {
-        "bm25": "sparse",
-        "splade": "splade_pp_en",
-        "splade++": "splade_pp_en",
-        "neural": "splade_pp_en",  # Neural sparse (SPLADE++)
+        "bm25": "sparse",  # Bundled BM25 vocabulary (1MB)
+        "splade": "github:splade",  # Download from GitHub release (508MB)
+        "splade++": "github:splade",
+        "neural": "github:splade",  # Neural sparse (SPLADE++)
         # HuggingFace: "naver/splade-cocondenser-ensembledistil"
     }
 
     _RERANKER_ALIASES = {
-        "l6": "reranker_en_l6",
-        "L6": "reranker_en_l6",
-        "l12": "reranker_en",
+        "l6": "github:reranker-l6",  # Download from GitHub (87MB)
+        "L6": "github:reranker-l6",
+        "l12": "reranker_en",  # Bundled (33MB)
         "L12": "reranker_en",
-        "minilm-l6": "reranker_en_l6",
+        "minilm-l6": "github:reranker-l6",
         "minilm-l12": "reranker_en",
         # GitHub releases (download on first use):
         # "github:reranker-multi" -> mMiniLMv2-L12 (113MB, 15+ languages)

@@ -242,12 +242,17 @@ class BaseStorage(ABC):
 
 class InMemoryStorage(BaseStorage):
     """
-    In-memory storage backend.
+    In-memory storage backend with adaptive schema support.
 
     Fastest option, no persistence. Use for:
     - Testing
     - Temporary collections
     - As a cache layer
+
+    Supports adaptive schema based on mode:
+    - dense: dense_embedding only
+    - hybrid: dense_embedding + sparse_embedding
+    - ultimate/graph: + late_interaction_embedding
     """
 
     def __init__(self, config: StorageConfig):
@@ -280,8 +285,12 @@ class InMemoryStorage(BaseStorage):
         return self._collection_configs.get(name)
 
     def insert(self, collection: str, id: str, data: Dict[str, Any]) -> None:
+        """Insert with support for multi-embedding storage."""
         with self._lock:
             if collection in self._collections:
+                # Normalize embedding field names
+                if "_embedding" in data:
+                    data["dense_embedding"] = data.pop("_embedding")
                 self._collections[collection][id] = data
 
     def insert_batch(self, collection: str, documents: List[Tuple[str, Dict[str, Any]]]) -> int:
@@ -290,6 +299,9 @@ class InMemoryStorage(BaseStorage):
                 return 0
             count = 0
             for id, data in documents:
+                # Normalize embedding field names
+                if "_embedding" in data:
+                    data["dense_embedding"] = data.pop("_embedding")
                 self._collections[collection][id] = data
                 count += 1
             return count
@@ -348,6 +360,208 @@ class InMemoryStorage(BaseStorage):
 
     def flush(self) -> None:
         pass  # No-op for in-memory
+
+    def vector_search(
+        self,
+        collection: str,
+        query_vector: List[float],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """Dense vector search using cosine similarity."""
+        import math
+        results = []
+        with self._lock:
+            if collection not in self._collections:
+                return []
+            for id_, data in self._collections[collection].items():
+                embedding = data.get("dense_embedding") or data.get("_embedding")
+                if embedding:
+                    # Cosine similarity
+                    dot = sum(a * b for a, b in zip(query_vector, embedding))
+                    norm_q = math.sqrt(sum(a * a for a in query_vector))
+                    norm_e = math.sqrt(sum(a * a for a in embedding))
+                    if norm_q > 0 and norm_e > 0:
+                        similarity = dot / (norm_q * norm_e)
+                        distance = 1 - similarity
+                        result_data = {k: v for k, v in data.items() if not k.endswith("_embedding")}
+                        results.append((id_, result_data, distance))
+        results.sort(key=lambda x: x[2])
+        return results[:limit]
+
+    def hybrid_search(
+        self,
+        collection: str,
+        dense_query: List[float],
+        sparse_query: Dict[int, float],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """Hybrid search using dense + sparse with RRF fusion."""
+        import math
+        prefetch = limit * 10
+
+        # Dense search
+        dense_results = self.vector_search(collection, dense_query, prefetch)
+
+        # Sparse search
+        sparse_results = []
+        with self._lock:
+            if collection in self._collections:
+                for id_, data in self._collections[collection].items():
+                    sparse_emb = data.get("sparse_embedding")
+                    if sparse_emb:
+                        score = sum(sparse_query.get(int(k), 0) * v for k, v in sparse_emb.items())
+                        if score > 0:
+                            result_data = {k: v for k, v in data.items() if not k.endswith("_embedding")}
+                            sparse_results.append((id_, result_data, score))
+        sparse_results.sort(key=lambda x: x[2], reverse=True)
+        sparse_results = sparse_results[:prefetch]
+
+        # RRF Fusion
+        rrf_k = 60
+        scores = {}
+        data_map = {}
+
+        for rank, (id_, data, _) in enumerate(dense_results):
+            scores[id_] = {"dense": 1.0 / (rrf_k + rank + 1), "sparse": 0}
+            data_map[id_] = data
+
+        for rank, (id_, data, _) in enumerate(sparse_results):
+            if id_ not in scores:
+                scores[id_] = {"dense": 0, "sparse": 0}
+                data_map[id_] = data
+            scores[id_]["sparse"] = 1.0 / (rrf_k + rank + 1)
+
+        # Combined scores with intersection boost
+        results = []
+        for id_, s in scores.items():
+            combined = 0.5 * s["dense"] + 0.5 * s["sparse"]
+            if s["dense"] > 0 and s["sparse"] > 0:
+                combined *= 1.15  # 15% boost for appearing in both
+            results.append((id_, data_map[id_], combined))
+
+        results.sort(key=lambda x: x[2], reverse=True)
+        return results[:limit]
+
+    def ultimate_search(
+        self,
+        collection: str,
+        dense_query: List[float],
+        sparse_query: Dict[int, float],
+        late_interaction_query: List[List[float]],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """Ultimate search using dense + sparse + late interaction (ColBERT)."""
+        import numpy as np
+
+        # Get hybrid results first
+        hybrid_results = self.hybrid_search(collection, dense_query, sparse_query, limit * 3)
+
+        if not hybrid_results:
+            return []
+
+        # Score with ColBERT MaxSim
+        results = []
+        query_emb = np.array(late_interaction_query)
+
+        with self._lock:
+            for id_, data, hybrid_score in hybrid_results:
+                doc_data = self._collections.get(collection, {}).get(id_, {})
+                late_interaction_emb = doc_data.get("late_interaction_embedding")
+
+                if late_interaction_emb:
+                    doc_emb = np.array(late_interaction_emb)
+                    # MaxSim scoring
+                    sim = np.dot(query_emb, doc_emb.T)
+                    max_sim = np.max(sim, axis=1)
+                    colbert_score = float(np.sum(max_sim))
+
+                    # Combine hybrid + colbert scores
+                    max_colbert = max(colbert_score, 1e-6)
+                    combined = 0.6 * hybrid_score + 0.4 * (colbert_score / max_colbert)
+                else:
+                    combined = hybrid_score
+
+                results.append((id_, data, combined))
+
+        results.sort(key=lambda x: x[2], reverse=True)
+        return results[:limit]
+
+    # =========================================================================
+    # Document Index Methods (for Graph mode)
+    # =========================================================================
+
+    def ensure_document_tables(self) -> None:
+        """Create document and node storage for graph mode."""
+        with self._lock:
+            if "_documents" not in self._collections:
+                self._collections["_documents"] = {}
+            if "_nodes" not in self._collections:
+                self._collections["_nodes"] = {}
+
+    def save_document(self, doc_data: Dict[str, Any]) -> None:
+        """Save document metadata."""
+        self.ensure_document_tables()
+        doc_id = doc_data.get("doc_id")
+        if doc_id:
+            with self._lock:
+                self._collections["_documents"][doc_id] = {
+                    **doc_data,
+                    "updated_at": datetime.utcnow().isoformat()
+                }
+
+    def get_document(self, doc_id: str) -> Optional[Dict[str, Any]]:
+        """Get document by ID."""
+        with self._lock:
+            return self._collections.get("_documents", {}).get(doc_id)
+
+    def list_documents(self) -> List[Dict[str, Any]]:
+        """List all documents."""
+        with self._lock:
+            return list(self._collections.get("_documents", {}).values())
+
+    def delete_document(self, doc_id: str) -> bool:
+        """Delete a document."""
+        with self._lock:
+            if "_documents" in self._collections:
+                return self._collections["_documents"].pop(doc_id, None) is not None
+            return False
+
+    def save_node(self, node_data: Dict[str, Any]) -> None:
+        """Save a document node."""
+        self.ensure_document_tables()
+        node_id = node_data.get("node_id")
+        if node_id:
+            with self._lock:
+                self._collections["_nodes"][node_id] = {
+                    **node_data,
+                    "updated_at": datetime.utcnow().isoformat()
+                }
+
+    def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get node by ID."""
+        with self._lock:
+            return self._collections.get("_nodes", {}).get(node_id)
+
+    def get_document_nodes(self, doc_id: str) -> List[Dict[str, Any]]:
+        """Get all nodes for a document."""
+        with self._lock:
+            nodes = self._collections.get("_nodes", {})
+            return [n for n in nodes.values() if n.get("doc_id") == doc_id]
+
+    def get_child_nodes(self, parent_id: str) -> List[Dict[str, Any]]:
+        """Get child nodes of a parent."""
+        with self._lock:
+            nodes = self._collections.get("_nodes", {})
+            return [n for n in nodes.values() if n.get("parent_id") == parent_id]
+
+    def delete_document_nodes(self, doc_id: str) -> int:
+        """Delete all nodes for a document."""
+        with self._lock:
+            nodes = self._collections.get("_nodes", {})
+            to_delete = [nid for nid, n in nodes.items() if n.get("doc_id") == doc_id]
+            for nid in to_delete:
+                del nodes[nid]
+            return len(to_delete)
 
 
 class SQLiteStorage(BaseStorage):
@@ -580,6 +794,128 @@ class SQLiteStorage(BaseStorage):
                         conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                     except:
                         pass
+
+    # =========================================================================
+    # Vector Search Methods (Adaptive Schema Support)
+    # =========================================================================
+
+    def vector_search(
+        self,
+        collection: str,
+        query_vector: List[float],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """Dense vector search using cosine similarity."""
+        import math
+        results = []
+        for id_, data in self.scan(collection, limit=10000):
+            embedding = data.get("dense_embedding") or data.get("_embedding")
+            if embedding:
+                # Cosine similarity
+                dot = sum(a * b for a, b in zip(query_vector, embedding))
+                norm_q = math.sqrt(sum(a * a for a in query_vector))
+                norm_e = math.sqrt(sum(a * a for a in embedding))
+                if norm_q > 0 and norm_e > 0:
+                    similarity = dot / (norm_q * norm_e)
+                    distance = 1 - similarity
+                    result_data = {k: v for k, v in data.items() if not k.endswith("_embedding")}
+                    results.append((id_, result_data, distance))
+        results.sort(key=lambda x: x[2])
+        return results[:limit]
+
+    def hybrid_search(
+        self,
+        collection: str,
+        dense_query: List[float],
+        sparse_query: Dict[int, float],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """Hybrid search using dense + sparse with RRF fusion."""
+        prefetch = limit * 10
+
+        # Dense search
+        dense_results = self.vector_search(collection, dense_query, prefetch)
+
+        # Sparse search
+        sparse_results = []
+        for id_, data in self.scan(collection, limit=10000):
+            sparse_emb = data.get("sparse_embedding")
+            if sparse_emb:
+                score = sum(sparse_query.get(int(k), 0) * v for k, v in sparse_emb.items())
+                if score > 0:
+                    result_data = {k: v for k, v in data.items() if not k.endswith("_embedding")}
+                    sparse_results.append((id_, result_data, score))
+        sparse_results.sort(key=lambda x: x[2], reverse=True)
+        sparse_results = sparse_results[:prefetch]
+
+        # RRF Fusion
+        rrf_k = 60
+        scores = {}
+        data_map = {}
+
+        for rank, (id_, data, _) in enumerate(dense_results):
+            scores[id_] = {"dense": 1.0 / (rrf_k + rank + 1), "sparse": 0}
+            data_map[id_] = data
+
+        for rank, (id_, data, _) in enumerate(sparse_results):
+            if id_ not in scores:
+                scores[id_] = {"dense": 0, "sparse": 0}
+                data_map[id_] = data
+            scores[id_]["sparse"] = 1.0 / (rrf_k + rank + 1)
+
+        # Combined scores with intersection boost
+        results = []
+        for id_, s in scores.items():
+            combined = 0.5 * s["dense"] + 0.5 * s["sparse"]
+            if s["dense"] > 0 and s["sparse"] > 0:
+                combined *= 1.15  # 15% boost for appearing in both
+            results.append((id_, data_map[id_], combined))
+
+        results.sort(key=lambda x: x[2], reverse=True)
+        return results[:limit]
+
+    def ultimate_search(
+        self,
+        collection: str,
+        dense_query: List[float],
+        sparse_query: Dict[int, float],
+        late_interaction_query: List[List[float]],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """Ultimate search using dense + sparse + late interaction (ColBERT)."""
+        import numpy as np
+
+        # Get hybrid results first
+        hybrid_results = self.hybrid_search(collection, dense_query, sparse_query, limit * 3)
+
+        if not hybrid_results:
+            return []
+
+        # Score with ColBERT MaxSim
+        results = []
+        query_emb = np.array(late_interaction_query)
+
+        for id_, data, hybrid_score in hybrid_results:
+            full_data = self.get(collection, id_)
+            late_interaction_emb = full_data.get("late_interaction_embedding") if full_data else None
+
+            if late_interaction_emb:
+                doc_emb = np.array(late_interaction_emb)
+                # MaxSim scoring
+                sim = np.dot(query_emb, doc_emb.T)
+                max_sim = np.max(sim, axis=1)
+                colbert_score = float(np.sum(max_sim))
+
+                # Combine hybrid + colbert scores
+                max_colbert = max(colbert_score, 1e-6)
+                combined = 0.6 * hybrid_score + 0.4 * (colbert_score / max_colbert)
+            else:
+                combined = hybrid_score
+
+            results.append((id_, data, combined))
+
+        results.sort(key=lambda x: x[2], reverse=True)
+        return results[:limit]
 
     # =========================================================================
     # Document Index Methods
@@ -1042,23 +1378,246 @@ class CosmosDBStorage(BaseStorage):
         NOTE: Cosmos DB doesn't have native vector search - this does client-side search.
         For production, use Lakebase (pgvector) for fast vector search.
         """
+        import math
         results = []
         for id_, data in self.scan(collection, limit=10000):  # Scan up to 10k documents
-            embedding = data.pop("_embedding", None)
+            embedding = data.get("dense_embedding") or data.get("_embedding")
             if embedding:
                 # Cosine similarity
                 dot = sum(a * b for a, b in zip(query_vector, embedding))
-                norm_q = sum(a * a for a in query_vector) ** 0.5
-                norm_e = sum(a * a for a in embedding) ** 0.5
+                norm_q = math.sqrt(sum(a * a for a in query_vector))
+                norm_e = math.sqrt(sum(a * a for a in embedding))
                 if norm_q > 0 and norm_e > 0:
                     similarity = dot / (norm_q * norm_e)
-                    # Convert to distance (1 - similarity) for consistency
                     distance = 1 - similarity
-                    results.append((id_, data, distance))
+                    result_data = {k: v for k, v in data.items() if not k.endswith("_embedding")}
+                    results.append((id_, result_data, distance))
 
-        # Sort by distance ascending (smaller = more similar)
         results.sort(key=lambda x: x[2])
         return results[:limit]
+
+    def hybrid_search(
+        self,
+        collection: str,
+        dense_query: List[float],
+        sparse_query: Dict[int, float],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """Hybrid search using dense + sparse with RRF fusion."""
+        prefetch = limit * 10
+
+        # Dense search
+        dense_results = self.vector_search(collection, dense_query, prefetch)
+
+        # Sparse search
+        sparse_results = []
+        for id_, data in self.scan(collection, limit=10000):
+            sparse_emb = data.get("sparse_embedding")
+            if sparse_emb:
+                score = sum(sparse_query.get(int(k), 0) * v for k, v in sparse_emb.items())
+                if score > 0:
+                    result_data = {k: v for k, v in data.items() if not k.endswith("_embedding")}
+                    sparse_results.append((id_, result_data, score))
+        sparse_results.sort(key=lambda x: x[2], reverse=True)
+        sparse_results = sparse_results[:prefetch]
+
+        # RRF Fusion
+        rrf_k = 60
+        scores = {}
+        data_map = {}
+
+        for rank, (id_, data, _) in enumerate(dense_results):
+            scores[id_] = {"dense": 1.0 / (rrf_k + rank + 1), "sparse": 0}
+            data_map[id_] = data
+
+        for rank, (id_, data, _) in enumerate(sparse_results):
+            if id_ not in scores:
+                scores[id_] = {"dense": 0, "sparse": 0}
+                data_map[id_] = data
+            scores[id_]["sparse"] = 1.0 / (rrf_k + rank + 1)
+
+        # Combined scores with intersection boost
+        results = []
+        for id_, s in scores.items():
+            combined = 0.5 * s["dense"] + 0.5 * s["sparse"]
+            if s["dense"] > 0 and s["sparse"] > 0:
+                combined *= 1.15
+            results.append((id_, data_map[id_], combined))
+
+        results.sort(key=lambda x: x[2], reverse=True)
+        return results[:limit]
+
+    def ultimate_search(
+        self,
+        collection: str,
+        dense_query: List[float],
+        sparse_query: Dict[int, float],
+        late_interaction_query: List[List[float]],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """Ultimate search using dense + sparse + late interaction (ColBERT)."""
+        import numpy as np
+
+        # Get hybrid results first
+        hybrid_results = self.hybrid_search(collection, dense_query, sparse_query, limit * 3)
+
+        if not hybrid_results:
+            return []
+
+        # Score with ColBERT MaxSim
+        results = []
+        query_emb = np.array(late_interaction_query)
+
+        for id_, data, hybrid_score in hybrid_results:
+            full_data = self.get(collection, id_)
+            late_interaction_emb = full_data.get("late_interaction_embedding") if full_data else None
+
+            if late_interaction_emb:
+                doc_emb = np.array(late_interaction_emb)
+                sim = np.dot(query_emb, doc_emb.T)
+                max_sim = np.max(sim, axis=1)
+                colbert_score = float(np.sum(max_sim))
+
+                max_colbert = max(colbert_score, 1e-6)
+                combined = 0.6 * hybrid_score + 0.4 * (colbert_score / max_colbert)
+            else:
+                combined = hybrid_score
+
+            results.append((id_, data, combined))
+
+        results.sort(key=lambda x: x[2], reverse=True)
+        return results[:limit]
+
+    # =========================================================================
+    # Document Index Methods (for Graph mode)
+    # =========================================================================
+
+    def ensure_document_tables(self) -> None:
+        """Create document and node containers for graph mode."""
+        from azure.cosmos import PartitionKey
+        from azure.cosmos.exceptions import CosmosResourceExistsError
+
+        # Documents container
+        try:
+            self._containers["_documents"] = self._database.create_container(
+                id="_documents",
+                partition_key=PartitionKey(path="/doc_type"),
+                offer_throughput=self.config.cosmos_throughput
+            )
+        except CosmosResourceExistsError:
+            self._containers["_documents"] = self._database.get_container_client("_documents")
+
+        # Nodes container
+        try:
+            self._containers["_nodes"] = self._database.create_container(
+                id="_nodes",
+                partition_key=PartitionKey(path="/doc_id"),
+                offer_throughput=self.config.cosmos_throughput
+            )
+        except CosmosResourceExistsError:
+            self._containers["_nodes"] = self._database.get_container_client("_nodes")
+
+    def save_document(self, doc_data: Dict[str, Any]) -> None:
+        """Save document metadata."""
+        self.ensure_document_tables()
+        container = self._get_container("_documents")
+        item = {
+            "id": doc_data.get("doc_id"),
+            "doc_type": doc_data.get("doc_type", "text"),
+            **doc_data,
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        container.upsert_item(item)
+
+    def get_document(self, doc_id: str) -> Optional[Dict[str, Any]]:
+        """Get document by ID."""
+        try:
+            container = self._get_container("_documents")
+            # Query across partitions since we don't know doc_type
+            query = f"SELECT * FROM c WHERE c.id = '{doc_id}'"
+            items = list(container.query_items(query, enable_cross_partition_query=True))
+            if items:
+                return {k: v for k, v in items[0].items() if not k.startswith("_")}
+        except:
+            pass
+        return None
+
+    def list_documents(self) -> List[Dict[str, Any]]:
+        """List all documents."""
+        try:
+            container = self._get_container("_documents")
+            query = "SELECT * FROM c"
+            items = container.query_items(query, enable_cross_partition_query=True)
+            return [{k: v for k, v in item.items() if not k.startswith("_")} for item in items]
+        except:
+            return []
+
+    def delete_document(self, doc_id: str) -> bool:
+        """Delete a document."""
+        try:
+            doc = self.get_document(doc_id)
+            if doc:
+                container = self._get_container("_documents")
+                container.delete_item(item=doc_id, partition_key=doc.get("doc_type", "text"))
+                return True
+        except:
+            pass
+        return False
+
+    def save_node(self, node_data: Dict[str, Any]) -> None:
+        """Save a document node."""
+        self.ensure_document_tables()
+        container = self._get_container("_nodes")
+        item = {
+            "id": node_data.get("node_id"),
+            "doc_id": node_data.get("doc_id"),
+            **node_data,
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        container.upsert_item(item)
+
+    def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get node by ID."""
+        try:
+            container = self._get_container("_nodes")
+            query = f"SELECT * FROM c WHERE c.id = '{node_id}'"
+            items = list(container.query_items(query, enable_cross_partition_query=True))
+            if items:
+                return {k: v for k, v in items[0].items() if not k.startswith("_")}
+        except:
+            pass
+        return None
+
+    def get_document_nodes(self, doc_id: str) -> List[Dict[str, Any]]:
+        """Get all nodes for a document."""
+        try:
+            container = self._get_container("_nodes")
+            query = f"SELECT * FROM c WHERE c.doc_id = '{doc_id}' ORDER BY c.position"
+            items = container.query_items(query, partition_key=doc_id)
+            return [{k: v for k, v in item.items() if not k.startswith("_")} for item in items]
+        except:
+            return []
+
+    def get_child_nodes(self, parent_id: str) -> List[Dict[str, Any]]:
+        """Get child nodes of a parent."""
+        try:
+            container = self._get_container("_nodes")
+            query = f"SELECT * FROM c WHERE c.parent_id = '{parent_id}' ORDER BY c.position"
+            items = container.query_items(query, enable_cross_partition_query=True)
+            return [{k: v for k, v in item.items() if not k.startswith("_")} for item in items]
+        except:
+            return []
+
+    def delete_document_nodes(self, doc_id: str) -> int:
+        """Delete all nodes for a document."""
+        try:
+            container = self._get_container("_nodes")
+            nodes = self.get_document_nodes(doc_id)
+            for node in nodes:
+                container.delete_item(item=node["node_id"], partition_key=doc_id)
+            return len(nodes)
+        except:
+            return 0
 
 
 class LakebaseStorage(BaseStorage):
@@ -2099,21 +2658,47 @@ class DeltaLakeStorage(BaseStorage):
             self._conn.close()
             self._conn = None
 
-    def _ensure_collection_table(self, name: str) -> None:
-        """Create collection table if not exists."""
+    def _ensure_collection_table(self, name: str, mode: str = "dense") -> None:
+        """Create collection table with adaptive schema based on mode.
+
+        Schema adapts based on mode:
+        - dense: dense_embedding only
+        - hybrid: dense_embedding + sparse_embedding
+        - ultimate/graph: dense_embedding + sparse_embedding + late_interaction_embedding
+        """
         with self._lock:
-            # Table for documents with vector as array
+            # Base columns with dense_embedding
             self._cursor.execute(f"""
                 CREATE TABLE IF NOT EXISTS {self._full_table_name(name)} (
                     id STRING NOT NULL,
                     data STRING,
-                    embedding ARRAY<DOUBLE>,
+                    dense_embedding ARRAY<DOUBLE>,
+                    text_content STRING,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP
                 ) USING DELTA
             """)
 
+            # Add sparse_embedding for hybrid/ultimate/graph
+            if mode in ("hybrid", "ultimate", "graph"):
+                try:
+                    self._cursor.execute(f"""
+                        ALTER TABLE {self._full_table_name(name)} ADD COLUMN sparse_embedding STRING
+                    """)
+                except:
+                    pass  # Column may already exist
+
+            # Add late_interaction_embedding for ultimate/graph
+            if mode in ("ultimate", "graph"):
+                try:
+                    self._cursor.execute(f"""
+                        ALTER TABLE {self._full_table_name(name)} ADD COLUMN late_interaction_embedding STRING
+                    """)
+                except:
+                    pass  # Column may already exist
+
     def create_collection(self, name: str, config: Dict[str, Any]) -> None:
+        mode = config.get("mode", "dense")
         with self._lock:
             now = datetime.now().isoformat()
             self._cursor.execute(f"""
@@ -2124,7 +2709,7 @@ class DeltaLakeStorage(BaseStorage):
                 WHEN NOT MATCHED THEN INSERT (name, config, created_at, updated_at)
                 VALUES ('{name}', '{json.dumps(config)}', '{now}', '{now}')
             """)
-            self._ensure_collection_table(name)
+            self._ensure_collection_table(name, mode=mode)
 
     def delete_collection(self, name: str) -> None:
         with self._lock:
@@ -2144,18 +2729,31 @@ class DeltaLakeStorage(BaseStorage):
 
     def insert(self, collection: str, id: str, data: Dict[str, Any]) -> None:
         self._ensure_collection_table(collection)
-        embedding = data.pop("_embedding", None)
+        dense_embedding = data.pop("_embedding", None) or data.pop("dense_embedding", None)
+        sparse_embedding = data.pop("sparse_embedding", None)
+        late_interaction_embedding = data.pop("late_interaction_embedding", None)
+        text_content = data.pop("text_content", None)
         now = datetime.now().isoformat()
 
         with self._lock:
-            embedding_str = f"ARRAY({','.join(map(str, embedding))})" if embedding else "NULL"
+            dense_str = f"ARRAY({','.join(map(str, dense_embedding))})" if dense_embedding else "NULL"
+            sparse_str = f"'{json.dumps(sparse_embedding)}'" if sparse_embedding else "NULL"
+            late_str = f"'{json.dumps([e.tolist() if hasattr(e, 'tolist') else e for e in late_interaction_embedding])}'" if late_interaction_embedding else "NULL"
+            text_str = f"'{text_content}'" if text_content else "NULL"
+
             self._cursor.execute(f"""
                 MERGE INTO {self._full_table_name(collection)} AS target
                 USING (SELECT '{id}' AS id) AS source
                 ON target.id = source.id
-                WHEN MATCHED THEN UPDATE SET data = '{json.dumps(data)}', embedding = {embedding_str}, updated_at = '{now}'
-                WHEN NOT MATCHED THEN INSERT (id, data, embedding, created_at, updated_at)
-                VALUES ('{id}', '{json.dumps(data)}', {embedding_str}, '{now}', '{now}')
+                WHEN MATCHED THEN UPDATE SET
+                    data = '{json.dumps(data)}',
+                    dense_embedding = {dense_str},
+                    sparse_embedding = {sparse_str},
+                    late_interaction_embedding = {late_str},
+                    text_content = {text_str},
+                    updated_at = '{now}'
+                WHEN NOT MATCHED THEN INSERT (id, data, dense_embedding, sparse_embedding, late_interaction_embedding, text_content, created_at, updated_at)
+                VALUES ('{id}', '{json.dumps(data)}', {dense_str}, {sparse_str}, {late_str}, {text_str}, '{now}', '{now}')
             """)
 
     def insert_batch(self, collection: str, documents: List[Tuple[str, Dict[str, Any]]]) -> int:
@@ -2237,29 +2835,117 @@ class DeltaLakeStorage(BaseStorage):
 
     def vector_search(self, collection: str, query_vector: List[float], limit: int = 10) -> List[Tuple[str, Dict[str, Any], float]]:
         """
-        Vector search using cosine similarity.
+        Vector search using cosine similarity (dense only).
         NOTE: This is SLOW in Delta Lake (full table scan). Use Lakebase for fast search.
-
-        Returns:
-            List of (id, data, distance) tuples ordered by distance ascending.
         """
-        # Delta Lake doesn't have native vector search, so we do client-side
+        import math
         results = []
-        for id, data in self.iterate(collection):
-            embedding = data.pop("_embedding", None)
+        for id_, data in self.iterate(collection):
+            embedding = data.get("dense_embedding") or data.get("_embedding")
             if embedding:
-                # Cosine similarity
                 dot = sum(a * b for a, b in zip(query_vector, embedding))
-                norm_q = sum(a * a for a in query_vector) ** 0.5
-                norm_e = sum(a * a for a in embedding) ** 0.5
+                norm_q = math.sqrt(sum(a * a for a in query_vector))
+                norm_e = math.sqrt(sum(a * a for a in embedding))
                 if norm_q > 0 and norm_e > 0:
                     similarity = dot / (norm_q * norm_e)
-                    # Convert to distance for consistency with LakebaseStorage
                     distance = 1 - similarity
-                    results.append((id, data, distance))
+                    result_data = {k: v for k, v in data.items() if not k.endswith("_embedding")}
+                    results.append((id_, result_data, distance))
 
-        # Sort by distance ascending (smaller = more similar)
         results.sort(key=lambda x: x[2])
+        return results[:limit]
+
+    def hybrid_search(
+        self,
+        collection: str,
+        dense_query: List[float],
+        sparse_query: Dict[int, float],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """Hybrid search using dense + sparse with RRF fusion."""
+        prefetch = limit * 10
+
+        # Dense search
+        dense_results = self.vector_search(collection, dense_query, prefetch)
+
+        # Sparse search
+        sparse_results = []
+        for id_, data in self.iterate(collection):
+            sparse_emb = data.get("sparse_embedding")
+            if sparse_emb:
+                if isinstance(sparse_emb, str):
+                    sparse_emb = json.loads(sparse_emb)
+                score = sum(sparse_query.get(int(k), 0) * v for k, v in sparse_emb.items())
+                if score > 0:
+                    result_data = {k: v for k, v in data.items() if not k.endswith("_embedding")}
+                    sparse_results.append((id_, result_data, score))
+        sparse_results.sort(key=lambda x: x[2], reverse=True)
+        sparse_results = sparse_results[:prefetch]
+
+        # RRF Fusion
+        rrf_k = 60
+        scores = {}
+        data_map = {}
+
+        for rank, (id_, data, _) in enumerate(dense_results):
+            scores[id_] = {"dense": 1.0 / (rrf_k + rank + 1), "sparse": 0}
+            data_map[id_] = data
+
+        for rank, (id_, data, _) in enumerate(sparse_results):
+            if id_ not in scores:
+                scores[id_] = {"dense": 0, "sparse": 0}
+                data_map[id_] = data
+            scores[id_]["sparse"] = 1.0 / (rrf_k + rank + 1)
+
+        results = []
+        for id_, s in scores.items():
+            combined = 0.5 * s["dense"] + 0.5 * s["sparse"]
+            if s["dense"] > 0 and s["sparse"] > 0:
+                combined *= 1.15
+            results.append((id_, data_map[id_], combined))
+
+        results.sort(key=lambda x: x[2], reverse=True)
+        return results[:limit]
+
+    def ultimate_search(
+        self,
+        collection: str,
+        dense_query: List[float],
+        sparse_query: Dict[int, float],
+        late_interaction_query: List[List[float]],
+        limit: int = 10
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """Ultimate search using dense + sparse + late interaction (ColBERT)."""
+        import numpy as np
+
+        hybrid_results = self.hybrid_search(collection, dense_query, sparse_query, limit * 3)
+
+        if not hybrid_results:
+            return []
+
+        results = []
+        query_emb = np.array(late_interaction_query)
+
+        for id_, data, hybrid_score in hybrid_results:
+            full_data = self.get(collection, id_)
+            late_interaction_emb = full_data.get("late_interaction_embedding") if full_data else None
+
+            if late_interaction_emb:
+                if isinstance(late_interaction_emb, str):
+                    late_interaction_emb = json.loads(late_interaction_emb)
+                doc_emb = np.array(late_interaction_emb)
+                sim = np.dot(query_emb, doc_emb.T)
+                max_sim = np.max(sim, axis=1)
+                colbert_score = float(np.sum(max_sim))
+
+                max_colbert = max(colbert_score, 1e-6)
+                combined = 0.6 * hybrid_score + 0.4 * (colbert_score / max_colbert)
+            else:
+                combined = hybrid_score
+
+            results.append((id_, data, combined))
+
+        results.sort(key=lambda x: x[2], reverse=True)
         return results[:limit]
 
     # Document Index methods

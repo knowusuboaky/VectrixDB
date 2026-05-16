@@ -64,27 +64,24 @@ Customize models for each component. Models load from 3 sources:
 
 ### 1. Bundled Models (Offline)
 
-Pre-packaged ONNX models that work without internet:
+Pre-packaged ONNX models that work without internet (~100MB total):
 
 ```python
 db = Vectrix(
     "docs",
     mode="ultimate",
-    dense_model="bge-small",
-    sparse_model="splade",
-    reranker_model="L6",
+    dense_model="e5-small",
+    sparse_model="bm25",
+    reranker_model="L12",
     late_interaction_model="colbert",
 )
 ```
 
 | Component | Alias | Model | Size |
 |-----------|-------|-------|------|
-| Dense | `bge-small` | BAAI/bge-small-en-v1.5 | 127MB |
-| Dense | `e5-small` | intfloat/e5-small-v2 | 32MB |
-| Sparse | `splade` | SPLADE++ | 508MB |
+| Dense | `e5-small` | intfloat/e5-small-v2 | 33MB |
 | Sparse | `bm25` | BM25 vocabulary | 1MB |
-| Reranker | `L6` | ms-marco-MiniLM-L6-v2 | 87MB |
-| Reranker | `L12` | ms-marco-MiniLM-L12-v2 | 32MB |
+| Reranker | `L12` | ms-marco-MiniLM-L12-v2 | 33MB |
 | ColBERT | `colbert` | answerai-colbert-small-v1 | 33MB |
 
 ### 2. HuggingFace Models
@@ -109,22 +106,28 @@ db = Vectrix(
 
 ### 3. GitHub Release Models
 
-Multilingual models hosted on GitHub releases:
+Larger models hosted on GitHub releases (auto-downloaded on first use):
 
 ```python
 db = Vectrix(
     "docs",
     mode="ultimate",
+    dense_model="github:bge-small",
+    sparse_model="github:splade",
+    reranker_model="github:reranker-l6",
     late_interaction_model="github:bge-m3",
-    reranker_model="github:reranker-multi",
 )
 ```
 
 | Tag | Model | Type | Languages | Size |
 |-----|-------|------|-----------|------|
-| `github:bge-m3` | BGE-M3 | ColBERT | 100+ | 563MB |
-| `github:reranker-multi` | mMiniLMv2-L12 | Reranker | 15+ | 113MB |
+| `github:bge-small` | BAAI/bge-small-en-v1.5 | Dense | EN | 127MB |
+| `github:e5-small` | intfloat/e5-small-v2 FP32 | Dense | EN | 127MB |
 | `github:dense-multi` | multilingual-e5-small | Dense | 100+ | 113MB |
+| `github:splade` | SPLADE++ | Sparse | EN | 508MB |
+| `github:reranker-l6` | ms-marco-MiniLM-L6-v2 | Reranker | EN | 87MB |
+| `github:reranker-multi` | mMiniLMv2-L12 | Reranker | 15+ | 113MB |
+| `github:bge-m3` | BGE-M3 | ColBERT | 100+ | 563MB |
 
 ## Metadata & Filtering
 
