@@ -17,7 +17,8 @@ A lightweight, visual-first vector database with embedded ML models - no API key
 |---------|-----------|--------|--------|----------|
 | Beautiful Dashboard | Yes | Basic | No | No |
 | Embedded ML Models | Yes | No | No | No |
-| 4 Search Tiers | Yes | No | No | No |
+| 4 Search Modes | Yes | No | No | No |
+| Model Selection | Yes | No | No | No |
 | GraphRAG Built-in | Yes | No | No | No |
 | Zero Config | Yes | No | Yes | Yes |
 | No API Keys Needed | Yes | Yes | No | No |
@@ -25,70 +26,133 @@ A lightweight, visual-first vector database with embedded ML models - no API key
 
 ## Quick Start
 
-```bash
+\`\`\`bash
 pip install vectrixdb
-```
+\`\`\`
 
-```python
+\`\`\`python
 from vectrixdb import Vectrix
 
-# Create database with hybrid search (uses bundled English models)
-db = Vectrix("my_docs", tier="hybrid", language="en")
+# Basic usage (bundled models, offline)
+db = Vectrix("my_docs")
+db.add(["Python is great", "JavaScript powers the web", "Rust is fast"])
+results = db.search("programming")
+print(results.top.text)
 
-# Add documents
-db.add([
-    "Python is great for data science",
-    "JavaScript powers the web",
-    "Rust is known for memory safety"
-])
-
-# Search
+# With model selection
+db = Vectrix(
+    "my_docs",
+    mode="hybrid",
+    dense_model="bge-small",
+    sparse_model="splade",
+    reranker_model="L6",
+)
 results = db.search("programming languages")
-print(results.top.text)  # Best match
-```
+\`\`\`
 
 ## 4-Tier System
 
-| Tier | Features | Use Case |
-|------|----------|----------|
+| Mode | Components | Use Case |
+|------|------------|----------|
 | **dense** | Vector similarity | Fast semantic search |
-| **hybrid** | + BM25 sparse | Better keyword matching |
-| **ultimate** | + ColBERT late interaction | Maximum accuracy |
-| **graph** | + Knowledge graph | Complex reasoning (GraphRAG) |
+| **hybrid** | Dense + Sparse + Reranker | Better keyword matching |
+| **ultimate** | Dense + Sparse + Reranker + ColBERT | Maximum accuracy |
+| **graph** | Ultimate + Knowledge Graph | Complex reasoning (GraphRAG) |
 
-```python
-# Dense tier (fastest)
-db = Vectrix("docs", tier="dense")
+\`\`\`python
+# Dense mode (fastest)
+db = Vectrix("docs", mode="dense")
 
-# Hybrid tier (balanced)
-db = Vectrix("docs", tier="hybrid")
+# Hybrid mode (balanced)
+db = Vectrix("docs", mode="hybrid")
 
-# Ultimate tier (best quality)
-db = Vectrix("docs", tier="ultimate")
+# Ultimate mode (best quality)
+db = Vectrix("docs", mode="ultimate")
 
-# Graph tier (GraphRAG)
-db = Vectrix("docs", tier="graph")
-```
+# Graph mode (GraphRAG)
+db = Vectrix("docs", mode="graph")
+\`\`\`
 
-## Search Modes
+## Model Selection
 
-```python
-# Dense - vector similarity
-results = db.search("AI", mode="dense")
+Choose your models for each component:
 
-# Sparse - BM25 keyword
-results = db.search("machine learning", mode="sparse")
+\`\`\`python
+from vectrixdb import Vectrix
 
-# Hybrid - combined
-results = db.search("neural networks", mode="hybrid")
+# Bundled models (offline, no download)
+db = Vectrix(
+    "docs",
+    mode="ultimate",
+    dense_model="bge-small",        # or "e5-small", "multilingual"
+    sparse_model="splade",          # or "bm25"
+    reranker_model="L6",            # or "L12"
+    late_interaction_model="colbert",
+)
 
-# Rerank - with cross-encoder
-results = db.search("deep learning", mode="rerank")
-```
+# HuggingFace models (download on first use)
+db = Vectrix(
+    "docs",
+    mode="hybrid",
+    dense_model="BAAI/bge-large-en-v1.5",
+    sparse_model="naver/splade-cocondenser-ensembledistil",
+    reranker_model="cross-encoder/ms-marco-MiniLM-L-12-v2",
+)
+
+# GitHub releases (download on first use)
+db = Vectrix(
+    "docs",
+    mode="ultimate",
+    late_interaction_model="github:bge-m3",      # 100+ languages
+    reranker_model="github:reranker-multi",      # 15+ languages
+)
+\`\`\`
+
+### Available Models
+
+#### Bundled (Offline)
+
+| Component | Aliases | Model | Size |
+|-----------|---------|-------|------|
+| Dense | \`"bge-small"\` | BAAI/bge-small-en-v1.5 | 127MB |
+| Dense | \`"e5-small"\` | intfloat/e5-small-v2 | 32MB |
+| Sparse | \`"splade"\` | SPLADE++ (neural) | 508MB |
+| Sparse | \`"bm25"\` | BM25 vocabulary | 1MB |
+| Reranker | \`"L6"\` | ms-marco-MiniLM-L6-v2 | 87MB |
+| Reranker | \`"L12"\` | ms-marco-MiniLM-L12-v2 | 32MB |
+| Late Interaction | \`"colbert"\` | answerai-colbert-small-v1 | 33MB |
+
+#### GitHub Releases
+
+| Release Tag | Model | Type | Size |
+|-------------|-------|------|------|
+| \`github:bge-m3\` | BGE-M3 | Late Interaction | 563MB |
+| \`github:reranker-multi\` | mMiniLMv2-L12 | Reranker | 113MB |
+| \`github:dense-multi\` | multilingual-e5-small | Dense | 113MB |
+
+#### HuggingFace
+
+\`\`\`python
+# Dense models
+dense_model="BAAI/bge-large-en-v1.5"
+dense_model="intfloat/e5-large-v2"
+dense_model="sentence-transformers/all-mpnet-base-v2"
+
+# Sparse models
+sparse_model="naver/splade-cocondenser-ensembledistil"
+
+# Reranker models
+reranker_model="cross-encoder/ms-marco-MiniLM-L-12-v2"
+reranker_model="BAAI/bge-reranker-base"
+
+# Late interaction models
+late_interaction_model="jinaai/jina-colbert-v2"
+late_interaction_model="colbert-ir/colbertv2.0"
+\`\`\`
 
 ## With Metadata
 
-```python
+\`\`\`python
 db.add(
     texts=["iPhone 15", "Galaxy S24", "Pixel 8"],
     metadata=[
@@ -100,49 +164,19 @@ db.add(
 
 # Filter by metadata
 results = db.search("smartphone", filter={"brand": "Apple"})
-```
-
-## Embedded Models
-
-VectrixDB bundles English models (~386MB) - no downloads needed:
-
-| Model | Purpose | Size |
-|-------|---------|------|
-| e5-small-v2 | Dense embeddings | 129MB |
-| ms-marco-MiniLM | Reranking | 129MB |
-| answerai-colbert-small | Late interaction | 129MB |
-| BM25 vocab | Sparse search | 17KB |
-
-### Multilingual Models (auto-download)
-
-For 100+ languages, models download from GitHub on first use:
-
-```python
-# Multilingual (downloads ~450MB on first use)
-db = Vectrix("docs", tier="hybrid")  # or language="multi"
-
-# English only (bundled, no download)
-db = Vectrix("docs", tier="hybrid", language="en")
-```
-
-| Model | Purpose | Languages |
-|-------|---------|-----------|
-| multilingual-e5-small | Dense | 100+ |
-| mmarco-mMiniLMv2 | Reranking | 15+ |
-| BGE-M3 | Late interaction | 100+ |
-| mREBEL | GraphRAG extraction | 18 |
+\`\`\`
 
 ## REST API & Dashboard
 
-```bash
+\`\`\`bash
 # Start server
 VECTRIXDB_API_KEY=your_key vectrixdb serve --port 7337
 
 # Open dashboard
 # http://localhost:7337/dashboard
-```
+\`\`\`
 
-```bash
+\`\`\`bash
 # Create collection
 curl -X POST http://localhost:7337/api/v1/collections \
   -H "api-key: your_key" \
@@ -157,11 +191,11 @@ curl -X POST http://localhost:7337/api/v1/collections/docs/text-upsert \
 curl -X POST http://localhost:7337/api/v1/collections/docs/text-search \
   -H "api-key: your_key" \
   -d '{"query_text": "greeting", "limit": 10}'
-```
+\`\`\`
 
 ## Project Structure
 
-```
+\`\`\`
 VectrixDB/
 ├── vectrixdb/
 │   ├── core/           # Vector index, storage, search
@@ -169,20 +203,20 @@ VectrixDB/
 │   │   └── search/     # Search algorithms
 │   ├── api/            # FastAPI server
 │   ├── models/         # Embedded ONNX models
-│   │   └── data/       # Bundled English models
+│   │   └── data/       # Bundled models
 │   ├── dashboard/      # Web UI
 │   └── cli.py          # Command line
 ├── tests/              # Jupyter notebooks
 └── requirements.txt
-```
+\`\`\`
 
 ## Installation from Source
 
-```bash
+\`\`\`bash
 git clone https://github.com/knowusuboaky/VectrixDB.git
 cd VectrixDB
 pip install -e .
-```
+\`\`\`
 
 ## Requirements
 

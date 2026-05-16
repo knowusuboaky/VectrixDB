@@ -2,12 +2,20 @@
 Embedded Models for VectrixDB
 
 ONNX-based models that run locally with zero network calls.
-Core models bundled with pip install (~35MB).
+Core models bundled with pip install (~890MB).
 Additional models auto-downloaded from GitHub on first use.
 
-Bundled Models (no download needed):
+Bundled Dense Models (no download needed):
 - DenseEmbedder(language="en"): intfloat/e5-small-v2 (~33MB INT8)
-- SparseEmbedder: BM25 vocabulary-based (~1MB)
+- DenseEmbedder(model="bge-small"): BAAI/bge-small-en-v1.5 (~127MB FP32) - higher quality
+- DenseEmbedder(model="e5-small-fp32"): intfloat/e5-small-v2 (~127MB FP32)
+
+Bundled Sparse Models (no download needed):
+- SparseEmbedder(): BM25 vocabulary-based (~1MB)
+- SparseEmbedder(model="splade"): SPLADE++ neural sparse (~508MB FP32) - ~29% better than BM25
+
+Bundled Reranker Models (no download needed):
+- RerankerEmbedder(model="L6"): ms-marco-MiniLM-L-6-v2 (~87MB FP32) - smaller/faster
 
 English Models (auto-download from GitHub on first use):
 - RerankerEmbedder(language="en"): cross-encoder/ms-marco-MiniLM-L-12-v2 (~22MB INT8)
@@ -63,6 +71,32 @@ MODEL_CONFIG = {
         "languages": "english",
         "quantization": "int8",
     },
+    "bge_small_en": {
+        "name": "bge-small-en-v1.5",
+        "dimension": 384,
+        "max_length": 512,
+        "onnx_file": "model.onnx",
+        "tokenizer_file": "tokenizer.json",
+        "config_file": "config.json",
+        "size_mb": 127,
+        "huggingface_id": "BAAI/bge-small-en-v1.5",
+        "github_release": "bge-small-en",
+        "languages": "english",
+        "quantization": "fp32",
+    },
+    "e5_small": {
+        "name": "e5-small-v2",
+        "dimension": 384,
+        "max_length": 512,
+        "onnx_file": "model.onnx",
+        "tokenizer_file": "tokenizer.json",
+        "config_file": "config.json",
+        "size_mb": 127,
+        "huggingface_id": "intfloat/e5-small-v2",
+        "github_release": "e5-small",
+        "languages": "english",
+        "quantization": "fp32",
+    },
     "sparse": {
         "name": "bm25",
         "vocab_file": "vocab.json",
@@ -70,6 +104,20 @@ MODEL_CONFIG = {
         "config_file": "config.json",
         "size_mb": 1,
         "languages": "any",
+    },
+    "splade_pp_en": {
+        "name": "Splade_PP_en_v1",
+        "vocab_size": 30522,
+        "max_length": 256,
+        "onnx_file": "model.onnx",
+        "tokenizer_file": "tokenizer.json",
+        "config_file": "config.json",
+        "size_mb": 508,
+        "huggingface_id": "prithivida/Splade_PP_en_v1",
+        "github_release": "splade-en",
+        "languages": "english",
+        "quantization": "fp32",
+        "description": "Neural sparse embeddings (SPLADE++), ~29% better than BM25",
     },
     "reranker": {
         "name": "mmarco-mMiniLMv2-L12-H384-v1",
@@ -94,6 +142,19 @@ MODEL_CONFIG = {
         "github_release": "reranker-en",
         "languages": "english",
         "quantization": "int8",
+    },
+    "reranker_en_l6": {
+        "name": "ms-marco-MiniLM-L-6-v2",
+        "max_length": 512,
+        "onnx_file": "model.onnx",
+        "tokenizer_file": "tokenizer.json",
+        "config_file": "config.json",
+        "size_mb": 87,
+        "huggingface_id": "cross-encoder/ms-marco-MiniLM-L6-v2",
+        "github_release": "reranker-en-l6",
+        "languages": "english",
+        "quantization": "fp32",
+        "description": "Smaller/faster English reranker (L6 vs L12)",
     },
     "late_interaction": {
         "name": "bge-m3",
@@ -506,6 +567,12 @@ class DenseEmbedder:
     English model: intfloat/e5-small-v2 (384 dim, English-optimized)
     No network calls - uses bundled or custom ONNX model.
 
+    Available models:
+        - "multilingual" / "multi" / None: multilingual-e5-small (100+ languages, INT8)
+        - "e5-small" / "e5": e5-small-v2 (English, INT8, default for language="en")
+        - "bge-small" / "bge": bge-small-en-v1.5 (English, FP32, higher quality)
+        - "e5-small-fp32": e5-small-v2 (English, FP32)
+
     Usage:
         # Multilingual (default)
         embedder = DenseEmbedder()
@@ -515,10 +582,34 @@ class DenseEmbedder:
         embedder = DenseEmbedder(language="en")
         vectors = embedder.embed(["hello world"])
 
+        # BGE model (higher quality English embeddings)
+        embedder = DenseEmbedder(model="bge-small")
+        vectors = embedder.embed(["hello world"])
+
         # Custom ONNX model
         embedder = DenseEmbedder(model_dir="/path/to/my/model", dimension=768)
         vectors = embedder.embed(["hello world"])
     """
+
+    # Model name aliases
+    MODEL_ALIASES = {
+        # Multilingual
+        "multilingual": "dense",
+        "multi": "dense",
+        "multilingual-e5-small": "dense",
+        # English INT8 (default for language="en")
+        "e5-small": "dense_en",
+        "e5": "dense_en",
+        "e5-small-v2": "dense_en",
+        # BGE English FP32
+        "bge-small": "bge_small_en",
+        "bge": "bge_small_en",
+        "bge-small-en": "bge_small_en",
+        "bge-small-en-v1.5": "bge_small_en",
+        # E5 English FP32
+        "e5-small-fp32": "e5_small",
+        "e5-fp32": "e5_small",
+    }
 
     def __init__(
         self,
@@ -529,6 +620,7 @@ class DenseEmbedder:
         onnx_file: str = "model.onnx",
         tokenizer_file: str = "tokenizer.json",
         language: Optional[str] = None,
+        model: Optional[str] = None,
     ):
         """
         Initialize dense embedder.
@@ -542,16 +634,31 @@ class DenseEmbedder:
             tokenizer_file: Name of tokenizer file (default: tokenizer.json)
             language: Language variant - None/"multi" for multilingual (default),
                       "en"/"english" for English-optimized model
+            model: Specific model to use - "bge-small", "e5-small", "e5-small-fp32",
+                   "multilingual". Overrides language parameter if specified.
         """
-        # Determine which model to use based on language
+        # Determine which model to use
         self.language = language
-        if language in ("en", "english"):
+        self.model_name = model
+
+        # Model selection priority: model > language > default
+        if model:
+            # Resolve model alias
+            config_key = self.MODEL_ALIASES.get(model.lower(), model.lower())
+            if config_key not in MODEL_CONFIG:
+                raise ValueError(
+                    f"Unknown model: {model}. Available models: "
+                    f"{list(self.MODEL_ALIASES.keys())}"
+                )
+            default_dir = get_models_dir() / config_key
+        elif language in ("en", "english"):
             config_key = "dense_en"
             default_dir = get_models_dir() / "dense_en"
         else:
             config_key = "dense"
             default_dir = get_models_dir() / "dense"
 
+        self._config_key = config_key
         self.model_dir = Path(model_dir) if model_dir else default_dir
         self.device = device
         self.onnx_file = onnx_file
@@ -586,9 +693,19 @@ class DenseEmbedder:
         model_path = self.model_dir / self.onnx_file
         tokenizer_path = self.model_dir / self.tokenizer_file
 
+        # Bundled models that don't need download
+        BUNDLED_MODELS = {"dense_en", "bge_small_en", "e5_small"}
+
         if not model_path.exists():
+            # Check if this is a bundled model
+            if hasattr(self, '_config_key') and self._config_key in BUNDLED_MODELS:
+                raise FileNotFoundError(
+                    f"Dense model not found: {model_path}\n"
+                    f"This model should be bundled with the package.\n"
+                    f"Try reinstalling: pip install --force-reinstall vectrixdb"
+                )
             # Auto-download for multilingual models
-            if self.language not in ("en", "english"):
+            else:
                 print(f"Multilingual dense model not found. Downloading...")
                 try:
                     download_models(model_type="dense", progress=True)
@@ -598,15 +715,11 @@ class DenseEmbedder:
                         f"Options:\n"
                         f"  1. Manual download:  vectrixdb download-models --type dense\n"
                         f"  2. Use English model: DenseEmbedder(language='en')  [bundled, no download]\n"
-                        f"  3. Use custom model:  DenseEmbedder(model_dir='/path/to/model')\n\n"
+                        f"  3. Use BGE model: DenseEmbedder(model='bge-small')  [bundled, no download]\n"
+                        f"  4. Use custom model:  DenseEmbedder(model_dir='/path/to/model')\n\n"
                         f"Error: {e}\n\n"
-                        f"Note: If downloads are blocked, use language='en' for bundled English models."
+                        f"Note: If downloads are blocked, use bundled English models."
                     ) from e
-            else:
-                raise FileNotFoundError(
-                    f"Dense model not found: {model_path}\n"
-                    f"English models should be bundled. Try reinstalling: pip install --force-reinstall vectrixdb"
-                )
 
         # Set up ONNX Runtime session
         providers = ["CPUExecutionProvider"]
@@ -709,24 +822,36 @@ class DenseEmbedder:
 
 
 # =============================================================================
-# Sparse Embedder (BM25)
+# Sparse Embedder (BM25 + SPLADE)
 # =============================================================================
 
 class SparseEmbedder:
     """
-    Sparse BM25-based embeddings.
+    Sparse embedding model supporting BM25 and SPLADE.
 
-    No neural network - pure algorithmic BM25 with vocabulary-based tokenization.
-    No network calls - uses bundled or custom vocabulary.
+    Available models:
+        - "bm25" / None: Pure algorithmic BM25 (default, vocabulary-based)
+        - "splade": Neural SPLADE++ model (~29% better than BM25)
+
+    No network calls - uses bundled vocabulary/ONNX model.
 
     Usage:
-        # Bundled vocabulary (default)
+        # BM25 (default)
         embedder = SparseEmbedder()
         sparse_vectors = embedder.embed(["hello world"])
 
-        # Custom vocabulary
-        embedder = SparseEmbedder(model_dir="/path/to/my/vocab")
+        # SPLADE (neural, higher quality)
+        embedder = SparseEmbedder(model="splade")
+        sparse_vectors = embedder.embed(["hello world"])
     """
+
+    # Model aliases
+    MODEL_ALIASES = {
+        "bm25": "sparse",
+        "splade": "splade_pp_en",
+        "splade++": "splade_pp_en",
+        "splade-pp": "splade_pp_en",
+    }
 
     # BM25 parameters
     k1: float = 1.5
@@ -735,6 +860,8 @@ class SparseEmbedder:
     def __init__(
         self,
         model_dir: Optional[Path] = None,
+        model: Optional[str] = None,
+        device: str = "cpu",
         k1: float = 1.5,
         b: float = 0.75,
         vocab_file: str = "vocab.json",
@@ -746,26 +873,86 @@ class SparseEmbedder:
 
         Args:
             model_dir: Path to model directory (default: bundled)
+            model: Model to use - "bm25" (default) or "splade" (neural)
+            device: "cpu" or "cuda" (for SPLADE only)
             k1: BM25 k1 parameter (term frequency saturation)
             b: BM25 b parameter (length normalization)
-            vocab_file: Name of vocabulary file
-            idf_file: Name of IDF weights file
+            vocab_file: Name of vocabulary file (BM25 only)
+            idf_file: Name of IDF weights file (BM25 only)
             config_file: Name of config file
         """
-        self.model_dir = Path(model_dir) if model_dir else (get_models_dir() / "sparse")
-        self.k1 = k1
-        self.b = b
-        self.vocab_file = vocab_file
-        self.idf_file = idf_file
-        self.config_file = config_file
+        self.model_name = model
+        self.device = device
 
-        self._vocab: Dict[str, int] = {}
-        self._idf: Dict[str, float] = {}
-        self._avg_doc_len: float = 50.0
-        self._loaded = False
+        # Determine model type
+        if model:
+            config_key = self.MODEL_ALIASES.get(model.lower(), model.lower())
+        else:
+            config_key = "sparse"  # Default to BM25
+
+        self._config_key = config_key
+        self._is_splade = config_key == "splade_pp_en"
+
+        if self._is_splade:
+            # SPLADE neural model
+            self.model_dir = Path(model_dir) if model_dir else (get_models_dir() / "splade_pp_en")
+            config = MODEL_CONFIG.get("splade_pp_en", {})
+            self.max_length = config.get("max_length", 256)
+            self.vocab_size = config.get("vocab_size", 30522)
+            self._session = None
+            self._tokenizer = None
+            self._has_token_type_ids = True
+        else:
+            # BM25 vocabulary-based
+            self.model_dir = Path(model_dir) if model_dir else (get_models_dir() / "sparse")
+            self.k1 = k1
+            self.b = b
+            self.vocab_file = vocab_file
+            self.idf_file = idf_file
+            self.config_file = config_file
+            self._vocab: Dict[str, int] = {}
+            self._idf: Dict[str, float] = {}
+            self._avg_doc_len: float = 50.0
+            self._loaded = False
+
+    def _load_splade_model(self):
+        """Load SPLADE ONNX model and tokenizer."""
+        if self._session is not None:
+            return
+
+        import onnxruntime as ort
+
+        model_path = self.model_dir / "model.onnx"
+        tokenizer_path = self.model_dir / "tokenizer.json"
+
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"SPLADE model not found: {model_path}\n"
+                f"This model should be bundled with the package.\n"
+                f"Try reinstalling: pip install --force-reinstall vectrixdb"
+            )
+
+        providers = ["CPUExecutionProvider"]
+        if self.device == "cuda":
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_options.intra_op_num_threads = 4
+
+        self._session = ort.InferenceSession(
+            str(model_path),
+            sess_options=sess_options,
+            providers=providers
+        )
+
+        input_names = [inp.name for inp in self._session.get_inputs()]
+        self._has_token_type_ids = "token_type_ids" in input_names
+
+        self._tokenizer = SimpleTokenizer(tokenizer_path)
 
     def _load_vocab(self):
-        """Load vocabulary and IDF values."""
+        """Load vocabulary and IDF values for BM25."""
         if self._loaded:
             return
 
@@ -773,20 +960,16 @@ class SparseEmbedder:
         idf_path = self.model_dir / self.idf_file
         config_path = self.model_dir / self.config_file
 
-        # Load vocabulary
         if vocab_path.exists():
             with open(vocab_path, "r", encoding="utf-8") as f:
                 self._vocab = json.load(f)
         else:
-            # Create default vocabulary (will be built from usage)
             self._vocab = {}
 
-        # Load IDF values
         if idf_path.exists():
             with open(idf_path, "r", encoding="utf-8") as f:
                 self._idf = json.load(f)
 
-        # Load config
         if config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
@@ -798,62 +981,103 @@ class SparseEmbedder:
 
     def _tokenize(self, text: str) -> List[str]:
         """Simple tokenization for BM25."""
-        # Lowercase and split
         text = text.lower()
-        # Remove punctuation and split
         tokens = re.findall(r'\b\w+\b', text)
-        # Filter short tokens
         tokens = [t for t in tokens if len(t) > 1]
         return tokens
 
     def embed(
         self,
         texts: Union[str, List[str]],
+        batch_size: int = 32,
     ) -> List[Dict[int, float]]:
         """
-        Generate sparse BM25 embeddings.
+        Generate sparse embeddings.
 
         Args:
             texts: Single text or list of texts
+            batch_size: Batch size for SPLADE processing
 
         Returns:
             List of sparse vectors (dict of term_id -> weight)
         """
-        self._load_vocab()
-
         if isinstance(texts, str):
             texts = [texts]
 
-        results = []
+        if self._is_splade:
+            return self._embed_splade(texts, batch_size)
+        else:
+            return self._embed_bm25(texts)
 
+    def _embed_bm25(self, texts: List[str]) -> List[Dict[int, float]]:
+        """Generate BM25 sparse embeddings."""
+        self._load_vocab()
+
+        results = []
         for text in texts:
             tokens = self._tokenize(text)
             term_freqs = Counter(tokens)
             doc_len = len(tokens)
 
             sparse_vec = {}
-
             for term, tf in term_freqs.items():
-                # Get or create term ID
                 if term not in self._vocab:
                     self._vocab[term] = len(self._vocab)
 
                 term_id = self._vocab[term]
-
-                # Get IDF (default to 1.0 if not in corpus)
                 idf = self._idf.get(term, 1.0)
-
-                # BM25 formula
                 tf_component = (tf * (self.k1 + 1)) / (
                     tf + self.k1 * (1 - self.b + self.b * doc_len / self._avg_doc_len)
                 )
-
                 weight = idf * tf_component
                 sparse_vec[term_id] = weight
 
             results.append(sparse_vec)
 
         return results
+
+    def _embed_splade(self, texts: List[str], batch_size: int) -> List[Dict[int, float]]:
+        """Generate SPLADE sparse embeddings."""
+        self._load_splade_model()
+
+        all_results = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+
+            inputs = self._tokenizer.encode_batch(
+                batch,
+                max_length=self.max_length,
+                padding=True,
+                truncation=True,
+            )
+
+            # SPLADE uses different input names: input_mask, segment_ids
+            onnx_inputs = {
+                "input_ids": inputs["input_ids"],
+                "input_mask": inputs["attention_mask"],
+                "segment_ids": inputs["token_type_ids"],
+            }
+
+            outputs = self._session.run(None, onnx_inputs)
+            logits = outputs[0]
+
+            # SPLADE activation: log(1 + ReLU(x))
+            relu_log = np.log1p(np.maximum(logits, 0))
+
+            # Max pooling across sequence, masked
+            attention_mask = inputs["attention_mask"]
+            mask_expanded = np.expand_dims(attention_mask, axis=-1)
+            relu_log_masked = relu_log * mask_expanded + (1 - mask_expanded) * (-1e9)
+            sparse_vectors = np.max(relu_log_masked, axis=1)
+
+            for vec in sparse_vectors:
+                sparse_dict = {}
+                nonzero_indices = np.where(vec > 0)[0]
+                for idx in nonzero_indices:
+                    sparse_dict[int(idx)] = float(vec[idx])
+                all_results.append(sparse_dict)
+
+        return all_results
 
     def embed_dense(
         self,
@@ -881,25 +1105,33 @@ class SparseEmbedder:
 
         return dense
 
-    def get_terms(self, text: str) -> List[Tuple[str, float]]:
-        """Get terms with their BM25 weights."""
-        self._load_vocab()
+    def get_terms(self, text: str, top_k: int = 20) -> List[Tuple[str, float]]:
+        """Get terms with their weights."""
+        if self._is_splade:
+            self._load_splade_model()
+            sparse_vec = self.embed(text)[0]
+            sorted_items = sorted(sparse_vec.items(), key=lambda x: x[1], reverse=True)
+            results = []
+            for token_id, weight in sorted_items[:top_k]:
+                term = self._tokenizer._vocab_inv.get(token_id, f"[{token_id}]")
+                results.append((term, weight))
+            return results
+        else:
+            self._load_vocab()
+            tokens = self._tokenize(text)
+            term_freqs = Counter(tokens)
+            doc_len = len(tokens)
 
-        tokens = self._tokenize(text)
-        term_freqs = Counter(tokens)
-        doc_len = len(tokens)
+            results = []
+            for term, tf in term_freqs.items():
+                idf = self._idf.get(term, 1.0)
+                tf_component = (tf * (self.k1 + 1)) / (
+                    tf + self.k1 * (1 - self.b + self.b * doc_len / self._avg_doc_len)
+                )
+                weight = idf * tf_component
+                results.append((term, weight))
 
-        results = []
-
-        for term, tf in term_freqs.items():
-            idf = self._idf.get(term, 1.0)
-            tf_component = (tf * (self.k1 + 1)) / (
-                tf + self.k1 * (1 - self.b + self.b * doc_len / self._avg_doc_len)
-            )
-            weight = idf * tf_component
-            results.append((term, weight))
-
-        return sorted(results, key=lambda x: x[1], reverse=True)
+            return sorted(results, key=lambda x: x[1], reverse=True)[:top_k]
 
     def __call__(self, texts: Union[str, List[str]]) -> List[Dict[int, float]]:
         """Alias for embed()."""
@@ -915,7 +1147,10 @@ class RerankerEmbedder:
     Cross-encoder reranker using ONNX.
 
     Default model: cross-encoder/mmarco-mMiniLMv2-L12-H384-v1 (multilingual, 15+ languages)
-    English model: cross-encoder/ms-marco-MiniLM-L-12-v2 (English-optimized)
+    English models:
+        - "L12": cross-encoder/ms-marco-MiniLM-L-12-v2 (English, default for language="en")
+        - "L6": cross-encoder/ms-marco-MiniLM-L-6-v2 (English, smaller/faster)
+
     No network calls - uses bundled or custom ONNX model.
 
     Usage:
@@ -923,13 +1158,32 @@ class RerankerEmbedder:
         reranker = RerankerEmbedder()
         scores = reranker.score("query", ["doc1", "doc2", "doc3"])
 
-        # English-optimized (smaller, faster)
+        # English L12 (default English model)
         reranker = RerankerEmbedder(language="en")
+        scores = reranker.score("query", ["doc1", "doc2"])
+
+        # English L6 (smaller, faster)
+        reranker = RerankerEmbedder(model="L6")
         scores = reranker.score("query", ["doc1", "doc2"])
 
         # Custom ONNX model
         reranker = RerankerEmbedder(model_dir="/path/to/my/reranker")
     """
+
+    # Model aliases
+    MODEL_ALIASES = {
+        # Multilingual
+        "multi": "reranker",
+        "multilingual": "reranker",
+        # English L12 (default for language="en")
+        "l12": "reranker_en",
+        "L12": "reranker_en",
+        "en": "reranker_en",
+        # English L6 (smaller/faster)
+        "l6": "reranker_en_l6",
+        "L6": "reranker_en_l6",
+        "minilm-l6": "reranker_en_l6",
+    }
 
     def __init__(
         self,
@@ -939,6 +1193,7 @@ class RerankerEmbedder:
         onnx_file: str = "model.onnx",
         tokenizer_file: str = "tokenizer.json",
         language: Optional[str] = None,
+        model: Optional[str] = None,
     ):
         """
         Initialize reranker.
@@ -951,16 +1206,30 @@ class RerankerEmbedder:
             tokenizer_file: Name of tokenizer file
             language: Language variant - None/"multi" for multilingual (default),
                       "en"/"english" for English-optimized model
+            model: Specific model to use - "L6" for smaller/faster English model,
+                   "L12" for default English model. Overrides language parameter.
         """
-        # Determine which model to use based on language
+        # Determine which model to use
         self.language = language
-        if language in ("en", "english"):
+        self.model_name = model
+
+        # Model selection priority: model > language > default
+        if model:
+            config_key = self.MODEL_ALIASES.get(model, model.lower())
+            if config_key not in MODEL_CONFIG:
+                raise ValueError(
+                    f"Unknown model: {model}. Available models: "
+                    f"{list(self.MODEL_ALIASES.keys())}"
+                )
+            default_dir = get_models_dir() / config_key
+        elif language in ("en", "english"):
             config_key = "reranker_en"
             default_dir = get_models_dir() / "reranker_en"
         else:
             config_key = "reranker"
             default_dir = get_models_dir() / "reranker"
 
+        self._config_key = config_key
         self.model_dir = Path(model_dir) if model_dir else default_dir
         self.device = device
         self.max_length = max_length or MODEL_CONFIG[config_key]["max_length"]

@@ -554,20 +554,40 @@ class EmbeddedDenseProvider(BaseEmbeddingProvider):
 
     No network calls - uses models bundled with the package.
 
-    Model: sentence-transformers/all-MiniLM-L6-v2
+    Available models:
+        - "multilingual" / "multi": multilingual-e5-small (100+ languages, INT8)
+        - "e5-small" / "e5": e5-small-v2 (English, INT8, default for language="en")
+        - "bge-small" / "bge": bge-small-en-v1.5 (English, FP32, higher quality)
+        - "e5-small-fp32": e5-small-v2 (English, FP32)
+
     Dimension: 384
     """
 
-    def __init__(self, model_dir=None, device: str = "cpu"):
+    def __init__(
+        self,
+        model_dir=None,
+        device: str = "cpu",
+        language: str = None,
+        model: str = None,
+    ):
         """
         Initialize embedded provider.
 
         Args:
             model_dir: Path to model directory (default: bundled)
             device: "cpu" or "cuda"
+            language: Language variant - None/"multi" for multilingual,
+                      "en"/"english" for English-optimized model
+            model: Specific model to use - "bge-small", "e5-small", "e5-small-fp32",
+                   "multilingual". Overrides language parameter if specified.
         """
         from ...models import DenseEmbedder
-        self._embedder = DenseEmbedder(model_dir=model_dir, device=device)
+        self._embedder = DenseEmbedder(
+            model_dir=model_dir,
+            device=device,
+            language=language,
+            model=model,
+        )
 
     def embed(self, texts: List[str]) -> np.ndarray:
         """Generate embeddings using bundled ONNX model."""
@@ -644,6 +664,8 @@ class EmbeddedRerankerProvider:
 def get_embedded_provider(
     provider_type: str = "dense",
     device: str = "cpu",
+    language: str = None,
+    model: str = None,
 ) -> Union[EmbeddedDenseProvider, EmbeddedSparseProvider, EmbeddedRerankerProvider]:
     """
     Get an embedded model provider.
@@ -653,6 +675,10 @@ def get_embedded_provider(
     Args:
         provider_type: "dense", "sparse", or "reranker"
         device: "cpu" or "cuda"
+        language: Language variant for dense - None/"multi" for multilingual,
+                  "en"/"english" for English-optimized model
+        model: Specific model for dense - "bge-small", "e5-small", "e5-small-fp32",
+               "multilingual". Overrides language parameter if specified.
 
     Returns:
         Provider instance
@@ -660,9 +686,13 @@ def get_embedded_provider(
     Example:
         >>> dense = get_embedded_provider("dense")
         >>> vectors = dense.embed(["hello world"])
+
+        >>> # Use BGE model (higher quality English embeddings)
+        >>> dense = get_embedded_provider("dense", model="bge-small")
+        >>> vectors = dense.embed(["hello world"])
     """
     if provider_type == "dense":
-        return EmbeddedDenseProvider(device=device)
+        return EmbeddedDenseProvider(device=device, language=language, model=model)
     elif provider_type == "sparse":
         return EmbeddedSparseProvider()
     elif provider_type == "reranker":
