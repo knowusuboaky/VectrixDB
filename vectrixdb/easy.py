@@ -513,6 +513,9 @@ class Vectrix:
                 f"{[m for m, l in mode_levels.items() if l <= default_level]}"
             )
 
+    # Bundled model folder names (in vectrixdb/models/data/)
+    _BUNDLED_MODEL_FOLDERS = {"dense_en", "colbert", "reranker_en", "sparse"}
+
     def _parse_model(self, model: str, dimension: int):
         """Parse model identifier and set up embedding configuration."""
         # Custom embedding function provided
@@ -533,6 +536,23 @@ class Vectrix:
         if model is None:
             self.model_type = "embedded"
             self.model_name = "vectrixdb/all-MiniLM-L6-v2"
+            self.dimension = dimension or 384
+            return
+
+        # Resolve dense model aliases (e.g., "e5-small" -> "dense_en")
+        resolved_model = self._DENSE_ALIASES.get(model, model)
+
+        # Check if it's a bundled model folder name
+        if resolved_model in self._BUNDLED_MODEL_FOLDERS:
+            self.model_type = "embedded"
+            self.model_name = resolved_model
+            self.dimension = dimension or 384
+            return
+
+        # Check if it's a github: model (needs download)
+        if resolved_model.startswith("github:"):
+            self.model_type = "embedded"
+            self.model_name = resolved_model
             self.dimension = dimension or 384
             return
 
@@ -625,13 +645,15 @@ class Vectrix:
         try:
             self._collection = self._db.get_collection(self.name)
         except:
-            # Create collection with standard params only
-            # Schema config (mode, store_dense, etc.) is used internally by Vectrix
+            # Create collection with mode tag so storage backend knows the schema
+            # Tags are used by VectrixDB to infer mode for storage backends
+            mode_tags = [self.default_mode.capitalize()]  # e.g., ["Ultimate"]
             self._collection = self._db.create_collection(
                 name=self.name,
                 dimension=self.dimension,
                 metric="cosine",
                 enable_text_index=True,
+                tags=mode_tags,
             )
 
     def _get_schema_config(self) -> Dict[str, Any]:
@@ -679,7 +701,9 @@ class Vectrix:
                 # Use bundled ONNX model - NO NETWORK CALLS
                 try:
                     from .models import DenseEmbedder
-                    self._model = DenseEmbedder(language=self.language)
+                    # Pass the resolved model name (e.g., "dense_en", "colbert")
+                    # DenseEmbedder will resolve aliases and load from the correct folder
+                    self._model = DenseEmbedder(model=self.model_name, language=self.language)
                     self._model_cache[cache_key] = self._model
                 except Exception as e:
                     raise RuntimeError(
