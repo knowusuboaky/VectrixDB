@@ -170,7 +170,8 @@ class ModelDownloader:
 
         Args:
             model_type: "dense", "sparse", "reranker", "colbert", "late_interaction",
-                        "reranker_en", "late_interaction_en", or "rebel"
+                        "reranker_en", "late_interaction_en", "bge_base_en",
+                        "bge_reranker_base", "colbert_v2", or "rebel"
 
         Returns:
             Path to model directory
@@ -183,8 +184,14 @@ class ModelDownloader:
             return self._download_reranker()
         elif model_type == "reranker_en":
             return self._download_reranker_en()
+        elif model_type == "bge_base_en":
+            return self._download_bge_base_en()
+        elif model_type == "bge_reranker_base":
+            return self._download_bge_reranker_base()
         elif model_type == "colbert":
             return self._download_colbert()
+        elif model_type == "colbert_v2":
+            return self._download_colbert_v2()
         elif model_type == "late_interaction":
             return self._download_late_interaction()
         elif model_type == "late_interaction_en":
@@ -532,6 +539,81 @@ class ModelDownloader:
             f"Failed to download English ColBERT model from GitHub.\n"
             f"Please check your internet connection or try again later."
         )
+
+    def _download_bge_base_en(self) -> Path:
+        """Download BGE-base-en-v1.5 model (higher quality dense embeddings)."""
+        config = MODEL_CONFIG["bge_base_en"]
+        model_dir = self.models_dir / "bge_base_en"
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Downloading BGE-base dense model: {config['name']}...")
+        print("  This model provides +15-20% quality improvement over e5-small.")
+
+        # Try GitHub first (pre-converted ONNX INT8 models)
+        if self._download_from_github("bge_base_en", model_dir, config):
+            return model_dir
+
+        # Fallback to HuggingFace
+        print("  GitHub download failed, falling back to HuggingFace...")
+        try:
+            self._manual_dense_export(model_dir, config)
+            return model_dir
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to download BGE-base model.\n"
+                f"Error: {e}\n\n"
+                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type bge_base_en"
+            )
+
+    def _download_bge_reranker_base(self) -> Path:
+        """Download BGE-reranker-base model (higher quality reranker)."""
+        config = MODEL_CONFIG["bge_reranker_base"]
+        model_dir = self.models_dir / "bge_reranker_base"
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Downloading BGE reranker model: {config['name']}...")
+        print("  This model provides +10-15% quality improvement over L12.")
+
+        # Try GitHub first (pre-converted ONNX INT8 models)
+        if self._download_from_github("bge_reranker_base", model_dir, config):
+            return model_dir
+
+        # Fallback to HuggingFace
+        print("  GitHub download failed, falling back to HuggingFace...")
+        try:
+            self._manual_reranker_export(model_dir, config)
+            return model_dir
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to download BGE reranker model.\n"
+                f"Error: {e}\n\n"
+                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type bge_reranker_base"
+            )
+
+    def _download_colbert_v2(self) -> Path:
+        """Download ColBERT v2 model (higher quality late interaction)."""
+        config = MODEL_CONFIG["colbert_v2"]
+        model_dir = self.models_dir / "colbert_v2"
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Downloading ColBERT v2 model: {config['name']}...")
+        print("  This model provides +5-10% quality improvement over colbert-small.")
+
+        # Try GitHub first (pre-converted ONNX INT8 models)
+        if self._download_from_github("colbert_v2", model_dir, config):
+            return model_dir
+
+        # Fallback to HuggingFace
+        print("  GitHub download failed, falling back to HuggingFace...")
+        try:
+            self._manual_colbert_export(model_dir, config)
+            return model_dir
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to download ColBERT v2 model.\n"
+                f"Error: {e}\n\n"
+                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type colbert_v2"
+            )
 
     def _download_reranker(self) -> Path:
         """Download and convert reranker model to ONNX."""

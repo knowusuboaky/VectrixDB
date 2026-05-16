@@ -84,6 +84,20 @@ MODEL_CONFIG = {
         "languages": "english",
         "quantization": "fp32",
     },
+    "bge_base_en": {
+        "name": "bge-base-en-v1.5",
+        "dimension": 768,
+        "max_length": 512,
+        "onnx_file": "model.onnx",
+        "tokenizer_file": "tokenizer.json",
+        "config_file": "config.json",
+        "size_mb": 110,  # INT8 quantized
+        "huggingface_id": "BAAI/bge-base-en-v1.5",
+        "github_release": "bge-base-en",
+        "languages": "english",
+        "quantization": "int8",
+        "description": "Higher quality English embeddings (768 dim, +15-20% vs e5-small)",
+    },
     "e5_small": {
         "name": "e5-small-v2",
         "dimension": 384,
@@ -156,6 +170,19 @@ MODEL_CONFIG = {
         "quantization": "fp32",
         "description": "Smaller/faster English reranker (L6 vs L12)",
     },
+    "bge_reranker_base": {
+        "name": "bge-reranker-base",
+        "max_length": 512,
+        "onnx_file": "model.onnx",
+        "tokenizer_file": "tokenizer.json",
+        "config_file": "config.json",
+        "size_mb": 110,  # INT8 quantized
+        "huggingface_id": "BAAI/bge-reranker-base",
+        "github_release": "bge-reranker-base",
+        "languages": "english",
+        "quantization": "int8",
+        "description": "Higher quality English reranker (+10-15% vs L12)",
+    },
     "late_interaction": {
         "name": "bge-m3",
         "dimension": 1024,
@@ -181,6 +208,20 @@ MODEL_CONFIG = {
         "github_release": "colbert-en",
         "languages": "english",
         "quantization": "int8",
+    },
+    "colbert_v2": {
+        "name": "colbertv2.0",
+        "dimension": 128,
+        "max_length": 512,
+        "onnx_file": "model.onnx",
+        "tokenizer_file": "tokenizer.json",
+        "config_file": "config.json",
+        "size_mb": 110,  # INT8 quantized
+        "huggingface_id": "colbert-ir/colbertv2.0",
+        "github_release": "colbert-v2",
+        "languages": "english",
+        "quantization": "int8",
+        "description": "Higher quality ColBERT v2 late interaction (+5-10%)",
     },
     "rebel": {
         "name": "mrebel-base-int8",
@@ -601,11 +642,15 @@ class DenseEmbedder:
         "e5-small": "dense_en",
         "e5": "dense_en",
         "e5-small-v2": "dense_en",
-        # BGE English FP32
+        # BGE English FP32 (small)
         "bge-small": "bge_small_en",
-        "bge": "bge_small_en",
         "bge-small-en": "bge_small_en",
         "bge-small-en-v1.5": "bge_small_en",
+        # BGE English INT8 (base - higher quality)
+        "bge": "bge_base_en",
+        "bge-base": "bge_base_en",
+        "bge-base-en": "bge_base_en",
+        "bge-base-en-v1.5": "bge_base_en",
         # E5 English FP32
         "e5-small-fp32": "e5_small",
         "e5-fp32": "e5_small",
@@ -1183,6 +1228,11 @@ class RerankerEmbedder:
         "l6": "reranker_en_l6",
         "L6": "reranker_en_l6",
         "minilm-l6": "reranker_en_l6",
+        # BGE Reranker Base (higher quality)
+        "bge": "bge_reranker_base",
+        "bge-base": "bge_reranker_base",
+        "bge-reranker": "bge_reranker_base",
+        "bge-reranker-base": "bge_reranker_base",
     }
 
     def __init__(
@@ -1421,7 +1471,10 @@ class LateInteractionEmbedder:
     Late interaction embedder using ONNX (ColBERT-style MaxSim scoring).
 
     Default model: BAAI/bge-m3 (1024 dim, multilingual, 100+ languages)
-    English model: answerdotai/answerai-colbert-small-v1 (128 dim, English-only)
+    English models:
+        - "colbert" / language="en": answerai-colbert-small-v1 (128 dim, default English)
+        - "colbert-v2": colbertv2.0 (128 dim, higher quality +5-10%)
+
     No network calls - uses bundled or custom ONNX model.
 
     Produces token-level embeddings for MaxSim late interaction scoring.
@@ -1437,9 +1490,29 @@ class LateInteractionEmbedder:
         embedder = LateInteractionEmbedder(language="en")
         score = embedder.max_sim(query_emb, doc_emb)
 
+        # ColBERT v2 (higher quality English)
+        embedder = LateInteractionEmbedder(model="colbert-v2")
+        score = embedder.max_sim(query_emb, doc_emb)
+
         # Custom ONNX model
         embedder = LateInteractionEmbedder(model_dir="/path/to/my/model")
     """
+
+    # Model aliases
+    MODEL_ALIASES = {
+        # Multilingual
+        "multi": "late_interaction",
+        "multilingual": "late_interaction",
+        "bge-m3": "late_interaction",
+        # English ColBERT small (default for language="en")
+        "colbert": "late_interaction_en",
+        "colbert-small": "late_interaction_en",
+        "answerai-colbert": "late_interaction_en",
+        # ColBERT v2 (higher quality)
+        "colbert-v2": "colbert_v2",
+        "colbertv2": "colbert_v2",
+        "colbertv2.0": "colbert_v2",
+    }
 
     def __init__(
         self,
@@ -1450,6 +1523,7 @@ class LateInteractionEmbedder:
         onnx_file: str = "model.onnx",
         tokenizer_file: str = "tokenizer.json",
         language: Optional[str] = None,
+        model: Optional[str] = None,
     ):
         """
         Initialize late interaction embedder.
@@ -1463,16 +1537,36 @@ class LateInteractionEmbedder:
             tokenizer_file: Name of tokenizer file
             language: Language variant - None/"multi" for multilingual BGE-M3 (default),
                       "en"/"english" for English-optimized ColBERT model
+            model: Specific model to use - "colbert", "colbert-v2", "bge-m3".
+                   Overrides language parameter if specified.
         """
-        # Determine which model to use based on language
+        # Determine which model to use
         self.language = language
-        if language in ("en", "english"):
+        self.model_name = model
+
+        # Model selection priority: model > language > default
+        if model:
+            config_key = self.MODEL_ALIASES.get(model.lower(), model.lower())
+            if config_key not in MODEL_CONFIG:
+                raise ValueError(
+                    f"Unknown model: {model}. Available models: "
+                    f"{list(self.MODEL_ALIASES.keys())}"
+                )
+            # Determine directory name based on config_key
+            if config_key == "late_interaction_en":
+                default_dir = get_models_dir() / "colbert"
+            elif config_key == "colbert_v2":
+                default_dir = get_models_dir() / "colbert_v2"
+            else:
+                default_dir = get_models_dir() / "bge-m3"
+        elif language in ("en", "english"):
             config_key = "late_interaction_en"
             default_dir = get_models_dir() / "colbert"
         else:
             config_key = "late_interaction"
             default_dir = get_models_dir() / "bge-m3"
 
+        self._config_key = config_key
         self.model_dir = Path(model_dir) if model_dir else default_dir
         self.device = device
         self.onnx_file = onnx_file

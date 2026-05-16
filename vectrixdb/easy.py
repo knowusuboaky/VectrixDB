@@ -155,6 +155,10 @@ class Vectrix:
         "e5-small": "dense_en",  # Bundled (33MB quantized)
         "bge-small": "github:bge-small",  # Download from GitHub (127MB)
         "e5-small-fp32": "github:e5-small",  # Download from GitHub (127MB)
+        # NEW: Higher quality (v1.9.0)
+        "bge-base": "github:bge-base-en",  # Download from GitHub (~110MB INT8)
+        "bge-base-en-v1.5": "github:bge-base-en",
+        "bge": "github:bge-base-en",  # Default BGE now points to base (higher quality)
     }
 
     _SPARSE_ALIASES = {
@@ -172,6 +176,11 @@ class Vectrix:
         "L12": "reranker_en",
         "minilm-l6": "github:reranker-l6",
         "minilm-l12": "reranker_en",
+        # NEW: Higher quality (v1.9.0)
+        "bge": "github:bge-reranker-base",  # Download from GitHub (~110MB INT8)
+        "bge-base": "github:bge-reranker-base",
+        "bge-reranker": "github:bge-reranker-base",
+        "bge-reranker-base": "github:bge-reranker-base",
         # GitHub releases (download on first use):
         # "github:reranker-multi" -> mMiniLMv2-L12 (113MB, 15+ languages)
     }
@@ -180,6 +189,10 @@ class Vectrix:
         "colbert": "colbert",
         "colbert-small": "colbert",  # answerai-colbert-small-v1 (bundled, 33MB)
         "answerai-colbert": "colbert",
+        # NEW: Higher quality (v1.9.0)
+        "colbert-v2": "github:colbert-v2",  # Download from GitHub (~110MB INT8)
+        "colbertv2": "github:colbert-v2",
+        "colbertv2.0": "github:colbert-v2",
         # GitHub releases (download on first use):
         # "github:bge-m3" -> BGE-M3 (563MB, 100+ languages)
     }

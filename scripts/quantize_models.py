@@ -44,13 +44,33 @@ MODELS = {
         "path": MODELS_DIR / "dense" / "model.onnx",
         "description": "Dense embedder (all-MiniLM-L6-v2)",
     },
+    "dense_en": {
+        "path": MODELS_DIR / "dense_en" / "model.onnx",
+        "description": "Dense embedder EN (e5-small-v2)",
+    },
+    "bge_base_en": {
+        "path": MODELS_DIR / "bge_base_en" / "model.onnx",
+        "description": "BGE-base-en-v1.5 dense embedder (768 dim, higher quality)",
+    },
     "reranker": {
         "path": MODELS_DIR / "reranker" / "model.onnx",
         "description": "Cross-encoder reranker (ms-marco-MiniLM)",
     },
+    "reranker_en": {
+        "path": MODELS_DIR / "reranker_en" / "model.onnx",
+        "description": "Cross-encoder reranker EN (ms-marco-MiniLM-L-12-v2)",
+    },
+    "bge_reranker_base": {
+        "path": MODELS_DIR / "bge_reranker_base" / "model.onnx",
+        "description": "BGE-reranker-base cross-encoder (higher quality)",
+    },
     "colbert": {
         "path": MODELS_DIR / "colbert" / "model.onnx",
-        "description": "ColBERT late interaction embedder",
+        "description": "ColBERT late interaction embedder (answerai-colbert-small-v1)",
+    },
+    "colbert_v2": {
+        "path": MODELS_DIR / "colbert_v2" / "model.onnx",
+        "description": "ColBERT v2 late interaction embedder (higher quality)",
     },
     "rebel-encoder": {
         "path": MODELS_DIR / "rebel" / "encoder.onnx",
@@ -230,7 +250,8 @@ def main():
     )
     parser.add_argument(
         "--model",
-        choices=["all", "dense", "reranker", "colbert", "rebel-encoder", "rebel-decoder", "rebel"],
+        choices=["all", "dense", "dense_en", "bge_base_en", "reranker", "reranker_en",
+                 "bge_reranker_base", "colbert", "colbert_v2", "rebel-encoder", "rebel-decoder", "rebel"],
         default="all",
         help="Which model to quantize (default: all)"
     )
