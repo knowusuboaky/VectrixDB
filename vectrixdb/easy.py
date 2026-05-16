@@ -920,7 +920,14 @@ class Vectrix:
             else:
                 # Use bundled ONNX model
                 from .models import LateInteractionEmbedder
-                self._instance_late_interaction = LateInteractionEmbedder(language=self.language)
+                # Check if it's a bundled ColBERT alias (English model)
+                bundled_colbert_aliases = {"colbert", "colbert-small", "answerai-colbert"}
+                if model_name in bundled_colbert_aliases:
+                    # Use bundled English ColBERT (33MB)
+                    self._instance_late_interaction = LateInteractionEmbedder(language="en")
+                else:
+                    # Use specified language or default (multilingual)
+                    self._instance_late_interaction = LateInteractionEmbedder(language=self.language)
 
         return self._instance_late_interaction
 
