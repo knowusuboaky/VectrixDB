@@ -149,52 +149,46 @@ class Vectrix:
     _reranker = None
 
     # Bundled model aliases for easy selection
+    # These map to MODEL_CONFIG keys in embedded.py
     _DENSE_ALIASES = {
-        "multilingual": "github:dense-multi",  # Download from GitHub (113MB)
-        "multi": "github:dense-multi",
+        "multilingual": "dense",  # Multilingual (download on first use)
+        "multi": "dense",
         "e5-small": "dense_en",  # Bundled (33MB quantized)
-        "bge-small": "github:bge-small",  # Download from GitHub (127MB)
-        "e5-small-fp32": "github:e5-small",  # Download from GitHub (127MB)
-        # NEW: Higher quality (v1.9.0)
-        "bge-base": "github:bge-base-en",  # Download from GitHub (~110MB INT8)
-        "bge-base-en-v1.5": "github:bge-base-en",
-        "bge": "github:bge-base-en",  # Default BGE now points to base (higher quality)
+        "bge-small": "bge_small_en",  # Download from GitHub (127MB)
+        "e5-small-fp32": "e5_small",  # Download from GitHub (127MB)
+        # Higher quality (v1.9.0)
+        "bge-base": "bge_base_en",  # Download from GitHub (~110MB INT8)
+        "bge-base-en-v1.5": "bge_base_en",
+        "bge": "bge_base_en",  # Default BGE points to base (higher quality)
     }
 
     _SPARSE_ALIASES = {
         "bm25": "sparse",  # Bundled BM25 vocabulary (1MB)
-        "splade": "github:splade",  # Download from GitHub release (508MB)
-        "splade++": "github:splade",
-        "neural": "github:splade",  # Neural sparse (SPLADE++)
-        # HuggingFace: "naver/splade-cocondenser-ensembledistil"
+        "splade": "splade_pp_en",  # Download from GitHub release (508MB)
+        "splade++": "splade_pp_en",
+        "neural": "splade_pp_en",  # Neural sparse (SPLADE++)
     }
 
     _RERANKER_ALIASES = {
-        "l6": "github:reranker-l6",  # Download from GitHub (87MB)
-        "L6": "github:reranker-l6",
+        "l6": "reranker_en_l6",  # Download from GitHub (87MB)
+        "L6": "reranker_en_l6",
         "l12": "reranker_en",  # Bundled (33MB)
         "L12": "reranker_en",
-        "minilm-l6": "github:reranker-l6",
+        "minilm-l6": "reranker_en_l6",
         "minilm-l12": "reranker_en",
-        # NEW: Higher quality (v1.9.0)
-        "bge": "github:bge-reranker-base",  # Download from GitHub (~110MB INT8)
-        "bge-base": "github:bge-reranker-base",
-        "bge-reranker": "github:bge-reranker-base",
-        "bge-reranker-base": "github:bge-reranker-base",
-        # GitHub releases (download on first use):
-        # "github:reranker-multi" -> mMiniLMv2-L12 (113MB, 15+ languages)
+        # Higher quality (v1.9.0)
+        "bge-reranker": "bge_reranker_base",  # Download from GitHub (~110MB INT8)
+        "bge-reranker-base": "bge_reranker_base",
     }
 
     _LATE_INTERACTION_ALIASES = {
-        "colbert": "colbert",
-        "colbert-small": "colbert",  # answerai-colbert-small-v1 (bundled, 33MB)
-        "answerai-colbert": "colbert",
-        # NEW: Higher quality (v1.9.0)
-        "colbert-v2": "github:colbert-v2",  # Download from GitHub (~110MB INT8)
-        "colbertv2": "github:colbert-v2",
-        "colbertv2.0": "github:colbert-v2",
-        # GitHub releases (download on first use):
-        # "github:bge-m3" -> BGE-M3 (563MB, 100+ languages)
+        "colbert": "late_interaction_en",  # Bundled (33MB)
+        "colbert-small": "late_interaction_en",
+        "answerai-colbert": "late_interaction_en",
+        # Higher quality (v1.9.0)
+        "colbert-v2": "colbert_v2",  # Download from GitHub (~110MB INT8)
+        "colbertv2": "colbert_v2",
+        "colbertv2.0": "colbert_v2",
     }
 
     # Supported model prefixes and their handlers
