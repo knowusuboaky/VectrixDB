@@ -1676,10 +1676,13 @@ class LakebaseStorage(BaseStorage):
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
             self._conn.commit()
 
-        # Create metadata table with proper schema
+        # Create metadata table with proper schema qualification
+        schema = self.config.lakebase_schema or "public"
+        collections_table = f'"{schema}"._vectrix_collections'
         with self._conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS _vectrix_collections (
+            cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {collections_table} (
                     name TEXT PRIMARY KEY,
                     dimension INTEGER,
                     description TEXT,
@@ -1711,7 +1714,8 @@ class LakebaseStorage(BaseStorage):
 
                 # Get config from collection if not provided
                 if dimension is None:
-                    cur.execute("SELECT config FROM _vectrix_collections WHERE name = %s", (name,))
+                    collections_table = self._collections_table_ref()
+                    cur.execute(f"SELECT config FROM {collections_table} WHERE name = %s", (name,))
                     row = cur.fetchone()
                     if row and row["config"]:
                         dimension = row["config"].get("dimension", 384)
@@ -1798,9 +1802,10 @@ class LakebaseStorage(BaseStorage):
         mode = config.get("mode", "dense")
 
         with self._lock:
+            collections_table = self._collections_table_ref()
             with self._conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO _vectrix_collections (name, dimension, description, config, updated_at)
+                cur.execute(f"""
+                    INSERT INTO {collections_table} (name, dimension, description, config, updated_at)
                     VALUES (%s, %s, %s, %s, NOW())
                     ON CONFLICT (name) DO UPDATE SET
                         dimension = %s,
@@ -1815,20 +1820,23 @@ class LakebaseStorage(BaseStorage):
     def delete_collection(self, name: str) -> None:
         schema = self.config.lakebase_schema or "public"
         table_ref = f'"{schema}"."{name}"'
+        collections_table = self._collections_table_ref()
         with self._lock:
             with self._conn.cursor() as cur:
-                cur.execute("DELETE FROM _vectrix_collections WHERE name = %s", (name,))
+                cur.execute(f"DELETE FROM {collections_table} WHERE name = %s", (name,))
                 cur.execute(f'DROP TABLE IF EXISTS {table_ref}')
                 self._conn.commit()
 
     def list_collections(self) -> List[str]:
+        collections_table = self._collections_table_ref()
         with self._conn.cursor() as cur:
-            cur.execute("SELECT name FROM _vectrix_collections")
+            cur.execute(f"SELECT name FROM {collections_table}")
             return [row["name"] for row in cur.fetchall()]
 
     def get_collection_config(self, name: str) -> Optional[Dict[str, Any]]:
+        collections_table = self._collections_table_ref()
         with self._conn.cursor() as cur:
-            cur.execute("SELECT config FROM _vectrix_collections WHERE name = %s", (name,))
+            cur.execute(f"SELECT config FROM {collections_table} WHERE name = %s", (name,))
             row = cur.fetchone()
             return row["config"] if row else None
 
@@ -2303,8 +2311,13 @@ class LakebaseStorage(BaseStorage):
             return self.hybrid_search(collection, dense_query, sparse_query, limit, filter_sql)
 
     # =========================================================================
-    # Document Index Methods
+    # Schema-Qualified Table References
     # =========================================================================
+
+    def _collections_table_ref(self) -> str:
+        """Get schema-qualified collections metadata table reference."""
+        schema = self.config.lakebase_schema or "public"
+        return f'"{schema}"._vectrix_collections'
 
     def _doc_table_ref(self) -> str:
         """Get schema-qualified document table reference."""
