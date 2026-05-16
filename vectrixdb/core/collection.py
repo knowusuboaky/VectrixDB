@@ -466,6 +466,7 @@ class Collection:
         description: Optional[str] = None,
         enable_text_index: bool = True,
         tags: Optional[List[str]] = None,
+        storage_backend: Optional[Any] = None,  # Storage backend (Lakebase, Delta Lake, etc.)
     ):
         """
         Initialize a collection.
@@ -480,6 +481,8 @@ class Collection:
             m: HNSW M parameter (higher = better quality, more memory)
             description: Optional description
             enable_text_index: Enable full-text search for hybrid search
+            storage_backend: External storage backend (Lakebase, Delta Lake, CosmosDB)
+                            When provided, vectors are persisted to the backend.
         """
         self.name = name
         self.dimension = dimension
@@ -514,6 +517,10 @@ class Collection:
 
         # Cache (injected by VectrixDB)
         self._cache: Optional[Any] = None
+
+        # External storage backend for vector persistence (Lakebase, Delta Lake, etc.)
+        self._storage_backend = storage_backend
+        self._use_backend_for_vectors = storage_backend is not None and hasattr(storage_backend, 'vector_search')
 
         # Initialize storage
         self._init_storage()
@@ -733,6 +740,9 @@ class Collection:
             indices = []
             now = datetime.utcnow().isoformat()
 
+            # Prepare batch data for storage backend
+            backend_documents = []
+
             for i, (id_, vector, meta, text, sparse) in enumerate(
                 zip(ids, vectors, metadata, texts, sparse_vectors)
             ):
@@ -775,9 +785,25 @@ class Collection:
 
                 indices.append(idx)
 
+                # Prepare data for storage backend (with embedding)
+                if self._use_backend_for_vectors:
+                    doc_data = {
+                        **meta,
+                        "_embedding": vector.tolist() if hasattr(vector, 'tolist') else list(vector),
+                        "text_content": text,
+                    }
+                    backend_documents.append((id_, doc_data))
+
             self._db.commit()
 
-            # Add to vector index
+            # Persist vectors to storage backend (Lakebase, Delta Lake, etc.)
+            if self._use_backend_for_vectors and backend_documents:
+                try:
+                    self._storage_backend.insert_batch(self.name, backend_documents)
+                except Exception as e:
+                    print(f"[VectrixDB] Warning: Failed to persist vectors to storage backend: {e}")
+
+            # Add to local vector index (for fast in-memory search)
             indices = np.array(indices, dtype=np.uint64)
 
             if self._backend == "usearch":
@@ -907,6 +933,7 @@ class Collection:
         ef: Optional[int] = None,
         score_threshold: Optional[float] = None,
         use_cache: bool = True,
+        use_backend: Optional[bool] = None,  # None = auto, True = force backend, False = force local
     ) -> SearchResults:
         """
         Search for similar vectors.
@@ -919,6 +946,10 @@ class Collection:
             ef: Search accuracy parameter (higher = more accurate, slower)
             score_threshold: Minimum score threshold
             use_cache: Whether to use cached results if available
+            use_backend: Whether to use storage backend for search.
+                        None (default) = auto-detect (use backend if available and local index is empty)
+                        True = force use backend (Lakebase/pgvector)
+                        False = force use local HNSW index
 
         Returns:
             SearchResults with matches
@@ -944,6 +975,27 @@ class Collection:
             if cached:
                 cached.query_time_ms = (time.perf_counter() - start_time) * 1000
                 return cached
+
+        # Determine whether to use storage backend for search
+        # Auto-detect: use backend if available and local index is empty, or if explicitly requested
+        should_use_backend = use_backend if use_backend is not None else (
+            self._use_backend_for_vectors and self._count == 0
+        )
+
+        # Try backend search if configured and requested
+        if should_use_backend and self._use_backend_for_vectors:
+            try:
+                return self._search_backend(
+                    query=query,
+                    limit=limit,
+                    filter=filter,
+                    include_vectors=include_vectors,
+                    score_threshold=score_threshold,
+                    start_time=start_time,
+                )
+            except Exception as e:
+                print(f"[VectrixDB] Backend search failed, falling back to local: {e}")
+                # Fall through to local search
 
         with self._lock:
             # Set search parameter
@@ -1034,6 +1086,64 @@ class Collection:
                 )
 
             return search_results
+
+    def _search_backend(
+        self,
+        query: np.ndarray,
+        limit: int,
+        filter: Optional[dict[str, Any]],
+        include_vectors: bool,
+        score_threshold: Optional[float],
+        start_time: float,
+    ) -> SearchResults:
+        """Search using the storage backend (Lakebase/pgvector, Delta Lake, etc.)."""
+        query_list = query.flatten().tolist()
+
+        # Call storage backend's vector_search
+        backend_results = self._storage_backend.vector_search(
+            collection=self.name,
+            query_vector=query_list,
+            limit=limit * 2 if filter else limit,  # Get more if filtering
+        )
+
+        # Build results
+        results = []
+        filter_obj = Filter.from_dict(filter) if filter else None
+
+        for id_, data, distance in backend_results:
+            # Convert distance to similarity score (cosine distance: 1 - distance)
+            score = 1 - distance if distance >= 0 else distance
+
+            # Apply score threshold
+            if score_threshold is not None and score < score_threshold:
+                continue
+
+            # Extract metadata (remove internal fields)
+            metadata = {k: v for k, v in data.items() if not k.startswith('_')}
+
+            # Apply filter
+            if filter_obj and not filter_obj.matches(metadata):
+                continue
+
+            result = SearchResult(
+                id=id_,
+                score=float(score),
+                metadata=metadata,
+            )
+
+            results.append(result)
+
+            if len(results) >= limit:
+                break
+
+        query_time = (time.perf_counter() - start_time) * 1000
+
+        return SearchResults(
+            results=results,
+            query_time_ms=query_time,
+            total_searched=-1,  # Unknown when using backend
+            search_mode=SearchMode.VECTOR,
+        )
 
     def keyword_search(
         self,

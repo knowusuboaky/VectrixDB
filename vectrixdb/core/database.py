@@ -326,6 +326,7 @@ class VectrixDB:
                     ef_construction=index_config.hnsw_ef_construction if index_config else 200,
                     m=index_config.hnsw_m if index_config else 16,
                     tags=tags,
+                    storage_backend=self._storage,  # Pass storage backend for vector persistence
                 )
 
                 # Integrate cache
@@ -413,7 +414,7 @@ class VectrixDB:
             if collection_path:
                 os.makedirs(collection_path, exist_ok=True)
 
-            # Create collection with cache integration
+            # Create collection with cache integration and storage backend
             collection = Collection(
                 name=name,
                 dimension=dimension,
@@ -424,6 +425,7 @@ class VectrixDB:
                 m=index_config.hnsw_m,
                 enable_text_index=enable_text_index,
                 tags=tags,
+                storage_backend=self._storage,  # Pass storage backend for vector persistence
             )
 
             # Integrate cache with collection
