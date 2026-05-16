@@ -1099,9 +1099,11 @@ class Vectrix:
         elif hasattr(colbert, 'embed'):
             # FastEmbed or bundled ColBERT
             return list(colbert.embed(texts))
+        elif hasattr(colbert, 'encode_documents'):
+            # Bundled LateInteractionEmbedder
+            return colbert.encode_documents(texts)
         else:
-            # Bundled ColBERT with encode method
-            return colbert.encode(texts)
+            raise AttributeError(f"ColBERT embedder has no encode method. Available: {dir(colbert)}")
 
     def search(
         self,
