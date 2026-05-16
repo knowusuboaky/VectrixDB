@@ -1520,10 +1520,12 @@ class LateInteractionEmbedder:
         "colbert": "late_interaction_en",
         "colbert-small": "late_interaction_en",
         "answerai-colbert": "late_interaction_en",
+        "late_interaction_en": "late_interaction_en",  # Allow direct key
         # ColBERT v2 (higher quality)
         "colbert-v2": "colbert_v2",
         "colbertv2": "colbert_v2",
         "colbertv2.0": "colbert_v2",
+        "colbert_v2": "colbert_v2",  # Allow direct key (from easy.py resolution)
     }
 
     def __init__(
