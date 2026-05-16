@@ -1184,7 +1184,7 @@ class LakebaseStorage(BaseStorage):
             with self._conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO _vectrix_collections (name, dimension, description, config, updated_at)
-                    VALUES (%s, %s::vector, %s, %s, NOW())
+                    VALUES (%s, %s, %s, %s, NOW())
                     ON CONFLICT (name) DO UPDATE SET
                         dimension = %s,
                         description = %s,
