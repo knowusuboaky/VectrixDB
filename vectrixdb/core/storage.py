@@ -1705,6 +1705,10 @@ class LakebaseStorage(BaseStorage):
         """
         with self._lock:
             with self._conn.cursor() as cur:
+                # Get schema for all table operations
+                schema = self.config.lakebase_schema or "public"
+                table_ref = f'"{schema}"."{name}"'
+
                 # Get config from collection if not provided
                 if dimension is None:
                     cur.execute("SELECT config FROM _vectrix_collections WHERE name = %s", (name,))
@@ -1716,7 +1720,6 @@ class LakebaseStorage(BaseStorage):
                         dimension = 384  # Default dimension
 
                 # Check if table exists and has correct schema
-                schema = self.config.lakebase_schema or "public"
                 cur.execute("""
                     SELECT column_name FROM information_schema.columns
                     WHERE table_schema = %s AND table_name = %s
@@ -1725,14 +1728,16 @@ class LakebaseStorage(BaseStorage):
 
                 # If table exists but missing dense_embedding, drop and recreate
                 if existing_columns and "dense_embedding" not in existing_columns:
-                    cur.execute(f'DROP TABLE IF EXISTS "{name}" CASCADE')
+                    cur.execute(f'DROP TABLE IF EXISTS {table_ref} CASCADE')
                     self._conn.commit()
                     existing_columns = set()
 
-                # Create table if not exists
+                # Create table if not exists (with explicit schema)
                 if not existing_columns:
+                    # Ensure schema exists
+                    cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
                     cur.execute(f"""
-                        CREATE TABLE "{name}" (
+                        CREATE TABLE {table_ref} (
                             id TEXT PRIMARY KEY,
                             dense_embedding vector({dimension}),
                             sparse_embedding JSONB,
@@ -1747,22 +1752,22 @@ class LakebaseStorage(BaseStorage):
                 else:
                     # Add missing columns to existing table
                     if "dense_embedding" not in existing_columns:
-                        cur.execute(f'ALTER TABLE "{name}" ADD COLUMN dense_embedding vector({dimension})')
+                        cur.execute(f'ALTER TABLE {table_ref} ADD COLUMN dense_embedding vector({dimension})')
                     if "sparse_embedding" not in existing_columns:
-                        cur.execute(f'ALTER TABLE "{name}" ADD COLUMN sparse_embedding JSONB')
+                        cur.execute(f'ALTER TABLE {table_ref} ADD COLUMN sparse_embedding JSONB')
                     if "late_interaction_embedding" not in existing_columns:
-                        cur.execute(f'ALTER TABLE "{name}" ADD COLUMN late_interaction_embedding JSONB')
+                        cur.execute(f'ALTER TABLE {table_ref} ADD COLUMN late_interaction_embedding JSONB')
                     if "metadata" not in existing_columns:
-                        cur.execute(f'ALTER TABLE "{name}" ADD COLUMN metadata JSONB')
+                        cur.execute(f'ALTER TABLE {table_ref} ADD COLUMN metadata JSONB')
                     if "text_content" not in existing_columns:
-                        cur.execute(f'ALTER TABLE "{name}" ADD COLUMN text_content TEXT')
+                        cur.execute(f'ALTER TABLE {table_ref} ADD COLUMN text_content TEXT')
                     self._conn.commit()
 
                 # Create indexes (use HNSW instead of IVFFlat - doesn't require data)
                 try:
                     cur.execute(f"""
                         CREATE INDEX IF NOT EXISTS "{name}_dense_idx"
-                        ON "{name}" USING hnsw (dense_embedding vector_cosine_ops)
+                        ON {table_ref} USING hnsw (dense_embedding vector_cosine_ops)
                     """)
                 except Exception:
                     pass  # Index may already exist or pgvector not configured for HNSW
@@ -1771,7 +1776,7 @@ class LakebaseStorage(BaseStorage):
                 try:
                     cur.execute(f"""
                         CREATE INDEX IF NOT EXISTS "{name}_metadata_idx"
-                        ON "{name}" USING GIN (metadata)
+                        ON {table_ref} USING GIN (metadata)
                     """)
                 except Exception:
                     pass  # Index may already exist
@@ -1780,7 +1785,7 @@ class LakebaseStorage(BaseStorage):
                 try:
                     cur.execute(f"""
                         CREATE INDEX IF NOT EXISTS "{name}_sparse_idx"
-                        ON "{name}" USING GIN (sparse_embedding)
+                        ON {table_ref} USING GIN (sparse_embedding)
                     """)
                 except Exception:
                     pass  # Index may already exist
@@ -1808,10 +1813,12 @@ class LakebaseStorage(BaseStorage):
             self._ensure_collection_table(name, dimension=dimension, mode=mode)
 
     def delete_collection(self, name: str) -> None:
+        schema = self.config.lakebase_schema or "public"
+        table_ref = f'"{schema}"."{name}"'
         with self._lock:
             with self._conn.cursor() as cur:
                 cur.execute("DELETE FROM _vectrix_collections WHERE name = %s", (name,))
-                cur.execute(f'DROP TABLE IF EXISTS "{name}"')
+                cur.execute(f'DROP TABLE IF EXISTS {table_ref}')
                 self._conn.commit()
 
     def list_collections(self) -> List[str]:
@@ -1844,6 +1851,7 @@ class LakebaseStorage(BaseStorage):
             with self._conn.cursor() as cur:
                 # Check which columns exist
                 schema = self.config.lakebase_schema or "public"
+                table_ref = f'"{schema}"."{collection}"'
                 cur.execute(f"""
                     SELECT column_name FROM information_schema.columns
                     WHERE table_schema = %s AND table_name = %s
@@ -1853,44 +1861,50 @@ class LakebaseStorage(BaseStorage):
                 # Build dynamic INSERT based on available columns
                 if "sparse_embedding" in columns and "late_interaction_embedding" in columns:
                     cur.execute(f"""
-                        INSERT INTO "{collection}" (id, dense_embedding, sparse_embedding, late_interaction_embedding, metadata, text_content, updated_at)
+                        INSERT INTO {table_ref} (id, dense_embedding, sparse_embedding, late_interaction_embedding, metadata, text_content, updated_at)
                         VALUES (%s, %s::vector, %s::jsonb, %s::jsonb, %s, %s, NOW())
                         ON CONFLICT (id) DO UPDATE SET
-                            dense_embedding = COALESCE(%s::vector, "{collection}".dense_embedding),
-                            sparse_embedding = COALESCE(%s::jsonb, "{collection}".sparse_embedding),
-                            late_interaction_embedding = COALESCE(%s::jsonb, "{collection}".late_interaction_embedding),
+                            dense_embedding = COALESCE(%s::vector, {table_ref}.dense_embedding),
+                            sparse_embedding = COALESCE(%s::jsonb, {table_ref}.sparse_embedding),
+                            late_interaction_embedding = COALESCE(%s::jsonb, {table_ref}.late_interaction_embedding),
                             metadata = %s,
-                            text_content = COALESCE(%s, "{collection}".text_content),
+                            text_content = COALESCE(%s, {table_ref}.text_content),
                             updated_at = NOW()
                     """, (id, dense_str, sparse_json, late_interaction_json, json.dumps(metadata), text_content,
                           dense_str, sparse_json, late_interaction_json, json.dumps(metadata), text_content))
                 elif "sparse_embedding" in columns:
                     cur.execute(f"""
-                        INSERT INTO "{collection}" (id, dense_embedding, sparse_embedding, metadata, text_content, updated_at)
+                        INSERT INTO {table_ref} (id, dense_embedding, sparse_embedding, metadata, text_content, updated_at)
                         VALUES (%s, %s::vector, %s::jsonb, %s, %s, NOW())
                         ON CONFLICT (id) DO UPDATE SET
-                            dense_embedding = COALESCE(%s::vector, "{collection}".dense_embedding),
-                            sparse_embedding = COALESCE(%s::jsonb, "{collection}".sparse_embedding),
+                            dense_embedding = COALESCE(%s::vector, {table_ref}.dense_embedding),
+                            sparse_embedding = COALESCE(%s::jsonb, {table_ref}.sparse_embedding),
                             metadata = %s,
-                            text_content = COALESCE(%s, "{collection}".text_content),
+                            text_content = COALESCE(%s, {table_ref}.text_content),
                             updated_at = NOW()
                     """, (id, dense_str, sparse_json, json.dumps(metadata), text_content,
                           dense_str, sparse_json, json.dumps(metadata), text_content))
                 else:
                     cur.execute(f"""
-                        INSERT INTO "{collection}" (id, dense_embedding, metadata, text_content, updated_at)
+                        INSERT INTO {table_ref} (id, dense_embedding, metadata, text_content, updated_at)
                         VALUES (%s, %s::vector, %s, %s, NOW())
                         ON CONFLICT (id) DO UPDATE SET
-                            dense_embedding = COALESCE(%s::vector, "{collection}".dense_embedding),
+                            dense_embedding = COALESCE(%s::vector, {table_ref}.dense_embedding),
                             metadata = %s,
-                            text_content = COALESCE(%s, "{collection}".text_content),
+                            text_content = COALESCE(%s, {table_ref}.text_content),
                             updated_at = NOW()
                     """, (id, dense_str, json.dumps(metadata), text_content,
                           dense_str, json.dumps(metadata), text_content))
                 self._conn.commit()
 
+    def _table_ref(self, name: str) -> str:
+        """Get schema-qualified table reference."""
+        schema = self.config.lakebase_schema or "public"
+        return f'"{schema}"."{name}"'
+
     def insert_batch(self, collection: str, documents: List[Tuple[str, Dict[str, Any]]]) -> int:
         self._ensure_collection_table(collection)
+        table_ref = self._table_ref(collection)
 
         with self._lock:
             with self._conn.cursor() as cur:
@@ -1920,37 +1934,37 @@ class LakebaseStorage(BaseStorage):
 
                     if has_sparse and has_late_interaction:
                         cur.execute(f"""
-                            INSERT INTO "{collection}" (id, dense_embedding, sparse_embedding, late_interaction_embedding, metadata, text_content, updated_at)
+                            INSERT INTO {table_ref} (id, dense_embedding, sparse_embedding, late_interaction_embedding, metadata, text_content, updated_at)
                             VALUES (%s, %s::vector, %s::jsonb, %s::jsonb, %s, %s, NOW())
                             ON CONFLICT (id) DO UPDATE SET
-                                dense_embedding = COALESCE(%s::vector, "{collection}".dense_embedding),
-                                sparse_embedding = COALESCE(%s::jsonb, "{collection}".sparse_embedding),
-                                late_interaction_embedding = COALESCE(%s::jsonb, "{collection}".late_interaction_embedding),
+                                dense_embedding = COALESCE(%s::vector, {table_ref}.dense_embedding),
+                                sparse_embedding = COALESCE(%s::jsonb, {table_ref}.sparse_embedding),
+                                late_interaction_embedding = COALESCE(%s::jsonb, {table_ref}.late_interaction_embedding),
                                 metadata = %s,
-                                text_content = COALESCE(%s, "{collection}".text_content),
+                                text_content = COALESCE(%s, {table_ref}.text_content),
                                 updated_at = NOW()
                         """, (id, dense_str, sparse_json, late_interaction_json, json.dumps(metadata), text_content,
                               dense_str, sparse_json, late_interaction_json, json.dumps(metadata), text_content))
                     elif has_sparse:
                         cur.execute(f"""
-                            INSERT INTO "{collection}" (id, dense_embedding, sparse_embedding, metadata, text_content, updated_at)
+                            INSERT INTO {table_ref} (id, dense_embedding, sparse_embedding, metadata, text_content, updated_at)
                             VALUES (%s, %s::vector, %s::jsonb, %s, %s, NOW())
                             ON CONFLICT (id) DO UPDATE SET
-                                dense_embedding = COALESCE(%s::vector, "{collection}".dense_embedding),
-                                sparse_embedding = COALESCE(%s::jsonb, "{collection}".sparse_embedding),
+                                dense_embedding = COALESCE(%s::vector, {table_ref}.dense_embedding),
+                                sparse_embedding = COALESCE(%s::jsonb, {table_ref}.sparse_embedding),
                                 metadata = %s,
-                                text_content = COALESCE(%s, "{collection}".text_content),
+                                text_content = COALESCE(%s, {table_ref}.text_content),
                                 updated_at = NOW()
                         """, (id, dense_str, sparse_json, json.dumps(metadata), text_content,
                               dense_str, sparse_json, json.dumps(metadata), text_content))
                     else:
                         cur.execute(f"""
-                            INSERT INTO "{collection}" (id, dense_embedding, metadata, text_content, updated_at)
+                            INSERT INTO {table_ref} (id, dense_embedding, metadata, text_content, updated_at)
                             VALUES (%s, %s::vector, %s, %s, NOW())
                             ON CONFLICT (id) DO UPDATE SET
-                                dense_embedding = COALESCE(%s::vector, "{collection}".dense_embedding),
+                                dense_embedding = COALESCE(%s::vector, {table_ref}.dense_embedding),
                                 metadata = %s,
-                                text_content = COALESCE(%s, "{collection}".text_content),
+                                text_content = COALESCE(%s, {table_ref}.text_content),
                                 updated_at = NOW()
                         """, (id, dense_str, json.dumps(metadata), text_content,
                               dense_str, json.dumps(metadata), text_content))
@@ -1959,9 +1973,10 @@ class LakebaseStorage(BaseStorage):
                 return count
 
     def get(self, collection: str, id: str) -> Optional[Dict[str, Any]]:
+        table_ref = self._table_ref(collection)
         try:
             with self._conn.cursor() as cur:
-                cur.execute(f'SELECT metadata, text_content FROM "{collection}" WHERE id = %s', (id,))
+                cur.execute(f'SELECT metadata, text_content FROM {table_ref} WHERE id = %s', (id,))
                 row = cur.fetchone()
                 if row:
                     result = row["metadata"] or {}
@@ -1973,9 +1988,10 @@ class LakebaseStorage(BaseStorage):
             return None
 
     def get_batch(self, collection: str, ids: List[str]) -> List[Optional[Dict[str, Any]]]:
+        table_ref = self._table_ref(collection)
         try:
             with self._conn.cursor() as cur:
-                cur.execute(f'SELECT id, metadata, text_content FROM "{collection}" WHERE id = ANY(%s)', (ids,))
+                cur.execute(f'SELECT id, metadata, text_content FROM {table_ref} WHERE id = ANY(%s)', (ids,))
                 results = {}
                 for row in cur.fetchall():
                     data = row["metadata"] or {}
@@ -1987,6 +2003,7 @@ class LakebaseStorage(BaseStorage):
             return [None] * len(ids)
 
     def update(self, collection: str, id: str, data: Dict[str, Any]) -> bool:
+        table_ref = self._table_ref(collection)
         existing = self.get(collection, id)
         if existing:
             existing.update(data)
@@ -1997,7 +2014,7 @@ class LakebaseStorage(BaseStorage):
             with self._lock:
                 with self._conn.cursor() as cur:
                     cur.execute(f"""
-                        UPDATE "{collection}" SET
+                        UPDATE {table_ref} SET
                             metadata = %s,
                             embedding = COALESCE(%s::vector, embedding),
                             text_content = COALESCE(%s, text_content),
@@ -2009,16 +2026,18 @@ class LakebaseStorage(BaseStorage):
         return False
 
     def delete(self, collection: str, id: str) -> bool:
+        table_ref = self._table_ref(collection)
         with self._lock:
             with self._conn.cursor() as cur:
-                cur.execute(f'DELETE FROM "{collection}" WHERE id = %s', (id,))
+                cur.execute(f'DELETE FROM {table_ref} WHERE id = %s', (id,))
                 self._conn.commit()
                 return cur.rowcount > 0
 
     def delete_batch(self, collection: str, ids: List[str]) -> int:
+        table_ref = self._table_ref(collection)
         with self._lock:
             with self._conn.cursor() as cur:
-                cur.execute(f'DELETE FROM "{collection}" WHERE id = ANY(%s)', (ids,))
+                cur.execute(f'DELETE FROM {table_ref} WHERE id = ANY(%s)', (ids,))
                 self._conn.commit()
                 return cur.rowcount
 
@@ -2029,11 +2048,12 @@ class LakebaseStorage(BaseStorage):
         offset: int = 0,
         filter_func: Optional[callable] = None
     ) -> Iterator[Tuple[str, Dict[str, Any]]]:
+        table_ref = self._table_ref(collection)
         try:
             with self._conn.cursor() as cur:
                 if filter_func:
                     # Fetch all and filter in Python
-                    cur.execute(f'SELECT id, metadata, text_content FROM "{collection}" ORDER BY created_at')
+                    cur.execute(f'SELECT id, metadata, text_content FROM {table_ref} ORDER BY created_at')
                     count = 0
                     skipped = 0
                     for row in cur:
@@ -2050,7 +2070,7 @@ class LakebaseStorage(BaseStorage):
                                 break
                 else:
                     cur.execute(
-                        f'SELECT id, metadata, text_content FROM "{collection}" ORDER BY created_at LIMIT %s OFFSET %s',
+                        f'SELECT id, metadata, text_content FROM {table_ref} ORDER BY created_at LIMIT %s OFFSET %s',
                         (limit, offset)
                     )
                     for row in cur:
@@ -2062,9 +2082,10 @@ class LakebaseStorage(BaseStorage):
             return
 
     def count(self, collection: str) -> int:
+        table_ref = self._table_ref(collection)
         try:
             with self._conn.cursor() as cur:
-                cur.execute(f'SELECT COUNT(*) as cnt FROM "{collection}"')
+                cur.execute(f'SELECT COUNT(*) as cnt FROM {table_ref}')
                 row = cur.fetchone()
                 return row["cnt"] if row else 0
         except:
@@ -2093,12 +2114,13 @@ class LakebaseStorage(BaseStorage):
         Returns:
             List of (id, metadata, distance) tuples ordered by similarity
         """
+        table_ref = self._table_ref(collection)
         try:
             with self._conn.cursor() as cur:
                 where_clause = f"AND {filter_sql}" if filter_sql else ""
                 cur.execute(f"""
                     SELECT id, metadata, text_content, dense_embedding <=> %s::vector AS distance
-                    FROM "{collection}"
+                    FROM {table_ref}
                     WHERE dense_embedding IS NOT NULL {where_clause}
                     ORDER BY distance
                     LIMIT %s
@@ -2136,6 +2158,7 @@ class LakebaseStorage(BaseStorage):
         Returns:
             List of (id, metadata, score) tuples
         """
+        table_ref = self._table_ref(collection)
         try:
             with self._conn.cursor() as cur:
                 where_clause = f"AND {filter_sql}" if filter_sql else ""
@@ -2144,7 +2167,7 @@ class LakebaseStorage(BaseStorage):
                 # Dense search
                 cur.execute(f"""
                     SELECT id, metadata, text_content, dense_embedding <=> %s::vector AS distance
-                    FROM "{collection}"
+                    FROM {table_ref}
                     WHERE dense_embedding IS NOT NULL {where_clause}
                     ORDER BY distance
                     LIMIT %s
@@ -2154,7 +2177,7 @@ class LakebaseStorage(BaseStorage):
                 # Sparse search (if sparse embeddings exist)
                 cur.execute(f"""
                     SELECT id, metadata, text_content, sparse_embedding
-                    FROM "{collection}"
+                    FROM {table_ref}
                     WHERE sparse_embedding IS NOT NULL {where_clause}
                     LIMIT %s
                 """, (prefetch,))
@@ -2240,11 +2263,12 @@ class LakebaseStorage(BaseStorage):
 
             # Get late interaction embeddings for candidates
             candidate_ids = [r[0] for r in hybrid_results]
+            table_ref = self._table_ref(collection)
 
             with self._conn.cursor() as cur:
                 cur.execute(f"""
                     SELECT id, late_interaction_embedding
-                    FROM "{collection}"
+                    FROM {table_ref}
                     WHERE id = ANY(%s) AND late_interaction_embedding IS NOT NULL
                 """, (candidate_ids,))
 
@@ -2282,13 +2306,30 @@ class LakebaseStorage(BaseStorage):
     # Document Index Methods
     # =========================================================================
 
+    def _doc_table_ref(self) -> str:
+        """Get schema-qualified document table reference."""
+        schema = self.config.lakebase_schema or "public"
+        return f'"{schema}"._vectrix_documents'
+
+    def _node_table_ref(self) -> str:
+        """Get schema-qualified node table reference."""
+        schema = self.config.lakebase_schema or "public"
+        return f'"{schema}"._vectrix_nodes'
+
     def ensure_document_tables(self) -> None:
         """Create document and node tables if they don't exist."""
+        schema = self.config.lakebase_schema or "public"
+        doc_table = self._doc_table_ref()
+        node_table = self._node_table_ref()
+
         with self._lock:
             with self._conn.cursor() as cur:
+                # Ensure schema exists
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+
                 # Documents table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS _vectrix_documents (
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {doc_table} (
                         doc_id TEXT PRIMARY KEY,
                         title TEXT,
                         doc_type TEXT,
@@ -2307,8 +2348,8 @@ class LakebaseStorage(BaseStorage):
                 """)
 
                 # Nodes table
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS _vectrix_nodes (
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {node_table} (
                         node_id TEXT PRIMARY KEY,
                         doc_id TEXT NOT NULL,
                         parent_id TEXT,
@@ -2325,27 +2366,28 @@ class LakebaseStorage(BaseStorage):
                 """)
 
                 # Indexes
-                cur.execute("""
+                cur.execute(f"""
                     CREATE INDEX IF NOT EXISTS idx_vectrix_docs_type
-                    ON _vectrix_documents(doc_type)
+                    ON {doc_table}(doc_type)
                 """)
-                cur.execute("""
+                cur.execute(f"""
                     CREATE INDEX IF NOT EXISTS idx_vectrix_nodes_doc
-                    ON _vectrix_nodes(doc_id)
+                    ON {node_table}(doc_id)
                 """)
-                cur.execute("""
+                cur.execute(f"""
                     CREATE INDEX IF NOT EXISTS idx_vectrix_nodes_parent
-                    ON _vectrix_nodes(parent_id)
+                    ON {node_table}(parent_id)
                 """)
 
                 self._conn.commit()
 
     def save_document(self, doc_data: Dict[str, Any]) -> None:
         """Save document metadata."""
+        doc_table = self._doc_table_ref()
         with self._lock:
             with self._conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO _vectrix_documents
+                cur.execute(f"""
+                    INSERT INTO {doc_table}
                     (doc_id, title, doc_type, source_path, etag, content_hash,
                      page_count, section_count, node_count, indexed_at, last_synced,
                      metadata, updated_at)
@@ -2381,10 +2423,11 @@ class LakebaseStorage(BaseStorage):
 
     def get_document(self, doc_id: str) -> Optional[Dict[str, Any]]:
         """Get document by ID."""
+        doc_table = self._doc_table_ref()
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM _vectrix_documents WHERE doc_id = %s",
+                    f"SELECT * FROM {doc_table} WHERE doc_id = %s",
                     (doc_id,)
                 )
                 row = cur.fetchone()
@@ -2409,10 +2452,11 @@ class LakebaseStorage(BaseStorage):
 
     def list_documents(self) -> List[Dict[str, Any]]:
         """List all documents."""
+        doc_table = self._doc_table_ref()
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM _vectrix_documents ORDER BY indexed_at DESC"
+                    f"SELECT * FROM {doc_table} ORDER BY indexed_at DESC"
                 )
                 return [
                     {
@@ -2436,10 +2480,11 @@ class LakebaseStorage(BaseStorage):
 
     def delete_document(self, doc_id: str) -> bool:
         """Delete a document."""
+        doc_table = self._doc_table_ref()
         with self._lock:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM _vectrix_documents WHERE doc_id = %s",
+                    f"DELETE FROM {doc_table} WHERE doc_id = %s",
                     (doc_id,)
                 )
                 self._conn.commit()
@@ -2447,10 +2492,11 @@ class LakebaseStorage(BaseStorage):
 
     def save_node(self, node_data: Dict[str, Any]) -> None:
         """Save a document node."""
+        node_table = self._node_table_ref()
         with self._lock:
             with self._conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO _vectrix_nodes
+                cur.execute(f"""
+                    INSERT INTO {node_table}
                     (node_id, doc_id, parent_id, level, title, text, summary,
                      page_num, position, metadata, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
@@ -2481,10 +2527,11 @@ class LakebaseStorage(BaseStorage):
 
     def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Get node by ID."""
+        node_table = self._node_table_ref()
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM _vectrix_nodes WHERE node_id = %s",
+                    f"SELECT * FROM {node_table} WHERE node_id = %s",
                     (node_id,)
                 )
                 row = cur.fetchone()
@@ -2507,10 +2554,11 @@ class LakebaseStorage(BaseStorage):
 
     def get_document_nodes(self, doc_id: str) -> List[Dict[str, Any]]:
         """Get all nodes for a document."""
+        node_table = self._node_table_ref()
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM _vectrix_nodes WHERE doc_id = %s ORDER BY position",
+                    f"SELECT * FROM {node_table} WHERE doc_id = %s ORDER BY position",
                     (doc_id,)
                 )
                 return [
@@ -2533,10 +2581,11 @@ class LakebaseStorage(BaseStorage):
 
     def get_child_nodes(self, parent_id: str) -> List[Dict[str, Any]]:
         """Get child nodes of a parent."""
+        node_table = self._node_table_ref()
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM _vectrix_nodes WHERE parent_id = %s ORDER BY position",
+                    f"SELECT * FROM {node_table} WHERE parent_id = %s ORDER BY position",
                     (parent_id,)
                 )
                 return [
@@ -2559,10 +2608,11 @@ class LakebaseStorage(BaseStorage):
 
     def delete_document_nodes(self, doc_id: str) -> int:
         """Delete all nodes for a document."""
+        node_table = self._node_table_ref()
         with self._lock:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM _vectrix_nodes WHERE doc_id = %s",
+                    f"DELETE FROM {node_table} WHERE doc_id = %s",
                     (doc_id,)
                 )
                 self._conn.commit()
