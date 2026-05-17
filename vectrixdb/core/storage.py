@@ -1743,11 +1743,11 @@ class LakebaseStorage(BaseStorage):
                     cur.execute(f"""
                         CREATE TABLE {table_ref} (
                             id TEXT PRIMARY KEY,
+                            text_content TEXT,
+                            metadata JSONB,
                             dense_embedding vector({dimension}),
                             sparse_embedding JSONB,
                             late_interaction_embedding JSONB,
-                            metadata JSONB,
-                            text_content TEXT,
                             created_at TIMESTAMP DEFAULT NOW(),
                             updated_at TIMESTAMP DEFAULT NOW()
                         )
