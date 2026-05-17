@@ -256,6 +256,8 @@ class Vectrix:
         late_interaction_model: str = None,
         # Storage backend (Lakebase, DeltaLake, CosmosDB, etc.)
         storage_backend: Any = None,
+        # Collection metadata
+        description: str = None,
     ):
         """
         Create or open a VectrixDB collection.
@@ -294,6 +296,7 @@ class Vectrix:
                   - hybrid: dense_embedding + sparse_embedding
                   - ultimate: + late_interaction_embedding
                   - graph: + graph tables
+            description: Optional description for the collection (stored in _vectrix_collections)
 
         Examples:
             # Basic usage (bundled models, offline)
@@ -350,6 +353,7 @@ class Vectrix:
         self.model_path = model_path
         self.language = language
         self.storage_backend = storage_backend
+        self.description = description
 
         # Handle mode/tier (mode takes precedence)
         self.default_mode = mode.lower() if mode else (tier.lower() if tier else "dense")
@@ -675,6 +679,7 @@ class Vectrix:
                 name=self.name,
                 dimension=self.dimension,
                 metric="cosine",
+                description=self.description,
                 enable_text_index=True,
                 tags=mode_tags,
             )
@@ -1680,11 +1685,14 @@ class Vectrix:
             >>> db.clear()
         """
         self._db.delete_collection(self.name)
+        mode_tags = [self.default_mode.capitalize()]
         self._collection = self._db.create_collection(
             name=self.name,
             dimension=self.dimension,
             metric="cosine",
-            enable_text_index=True
+            description=self.description,
+            enable_text_index=True,
+            tags=mode_tags,
         )
         self._texts.clear()
         return self
