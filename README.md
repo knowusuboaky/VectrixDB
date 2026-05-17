@@ -42,7 +42,7 @@ pip install git+https://github.com/knowusuboaky/VectrixDB.git
 ### Specific Version from GitHub
 
 ```bash
-pip install git+https://github.com/knowusuboaky/VectrixDB.git@v1.9.9
+pip install git+https://github.com/knowusuboaky/VectrixDB.git@v2.0.0
 ```
 
 ### From Source
