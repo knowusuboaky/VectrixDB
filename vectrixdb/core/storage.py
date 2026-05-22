@@ -31,6 +31,8 @@ class StorageBackend(str, Enum):
     POSTGRESQL = "postgresql"
     LAKEBASE = "lakebase"  # Databricks Lakebase (PostgreSQL + pgvector)
     DELTA_LAKE = "delta_lake"  # Databricks Delta Lake + Unity Catalog
+    OPENSEARCH = "opensearch"  # AWS OpenSearch Serverless
+    AURORA_POSTGRESQL = "aurora_postgresql"  # AWS Aurora PostgreSQL with pgvector
 
 
 @dataclass
@@ -73,6 +75,24 @@ class StorageConfig:
     delta_schema: str = "vectrixdb"  # Schema name (created if not exists)
     delta_warehouse_id: Optional[str] = None  # SQL Warehouse ID (optional)
     delta_http_path: Optional[str] = None  # HTTP path for SQL Warehouse
+
+    # OpenSearch config (AWS OpenSearch Serverless)
+    opensearch_endpoint: Optional[str] = None  # e.g., "https://xxx.us-east-1.aoss.amazonaws.com"
+    opensearch_region: str = "us-east-1"
+    opensearch_service: str = "aoss"  # "aoss" for Serverless, "es" for managed
+    opensearch_index_prefix: str = "vectrix"
+    opensearch_aws_access_key_id: Optional[str] = None
+    opensearch_aws_secret_access_key: Optional[str] = None
+    opensearch_aws_session_token: Optional[str] = None
+
+    # Aurora PostgreSQL config (AWS Aurora with pgvector)
+    aurora_host: Optional[str] = None
+    aurora_port: int = 5432
+    aurora_database: str = "vectrixdb"
+    aurora_user: Optional[str] = None
+    aurora_password: Optional[str] = None
+    aurora_ssl: bool = True
+    aurora_schema: str = "public"
 
     # Performance
     batch_size: int = 1000
@@ -3159,6 +3179,435 @@ class DeltaLakeStorage(BaseStorage):
             return 0  # Delta Lake doesn't return row count easily
 
 
+# =============================================================================
+# OpenSearch Storage (AWS OpenSearch Serverless)
+# =============================================================================
+
+class OpenSearchStorage(BaseStorage):
+    """
+    AWS OpenSearch Serverless storage backend.
+
+    Uses OpenSearch k-NN for vector search. Supports dense and hybrid modes.
+    NOTE: Does NOT support ultimate/graph modes (no native ColBERT MaxSim).
+    """
+
+    def __init__(self, config: StorageConfig):
+        self.config = config
+        self._client = None
+        self._lock = threading.Lock()
+
+    def connect(self) -> None:
+        """Connect to OpenSearch using AWS credentials."""
+        try:
+            from opensearchpy import OpenSearch, RequestsHttpConnection
+            from requests_aws4auth import AWS4Auth
+            import boto3
+        except ImportError:
+            raise ImportError(
+                "Install OpenSearch dependencies: pip install opensearch-py boto3 requests-aws4auth"
+            )
+
+        region = self.config.opensearch_region
+        service = self.config.opensearch_service
+
+        if self.config.opensearch_aws_access_key_id:
+            credentials = boto3.Session(
+                aws_access_key_id=self.config.opensearch_aws_access_key_id,
+                aws_secret_access_key=self.config.opensearch_aws_secret_access_key,
+                aws_session_token=self.config.opensearch_aws_session_token,
+            ).get_credentials()
+        else:
+            credentials = boto3.Session().get_credentials()
+
+        auth = AWS4Auth(
+            credentials.access_key,
+            credentials.secret_key,
+            region,
+            service,
+            session_token=credentials.token,
+        )
+
+        endpoint = self.config.opensearch_endpoint
+        if endpoint.startswith("https://"):
+            endpoint = endpoint[8:]
+        if endpoint.startswith("http://"):
+            endpoint = endpoint[7:]
+
+        self._client = OpenSearch(
+            hosts=[{"host": endpoint, "port": 443}],
+            http_auth=auth,
+            use_ssl=True,
+            verify_certs=True,
+            connection_class=RequestsHttpConnection,
+        )
+
+    def close(self) -> None:
+        self._client = None
+
+    def _index_name(self, collection: str) -> str:
+        return f"{self.config.opensearch_index_prefix}_{collection}".lower()
+
+    def create_collection(self, name: str, metadata: Dict[str, Any] = None) -> None:
+        index_name = self._index_name(name)
+        dimension = metadata.get("dimension", 384) if metadata else 384
+
+        if self._client.indices.exists(index=index_name):
+            return
+
+        body = {
+            "settings": {
+                "index": {
+                    "knn": True,
+                    "knn.algo_param.ef_search": 100,
+                }
+            },
+            "mappings": {
+                "properties": {
+                    "id": {"type": "keyword"},
+                    "dense_embedding": {
+                        "type": "knn_vector",
+                        "dimension": dimension,
+                        "method": {
+                            "name": "hnsw",
+                            "space_type": "cosinesimil",
+                            "engine": "nmslib",
+                            "parameters": {"ef_construction": 128, "m": 24},
+                        },
+                    },
+                    "sparse_embedding": {"type": "object", "enabled": False},
+                    "text_content": {"type": "text"},
+                    "metadata": {"type": "object", "enabled": False},
+                    "created_at": {"type": "date"},
+                    "updated_at": {"type": "date"},
+                }
+            },
+        }
+
+        self._client.indices.create(index=index_name, body=body)
+        now = datetime.utcnow().isoformat()
+        self._client.index(
+            index=f"{self.config.opensearch_index_prefix}_collections",
+            body={"name": name, "dimension": dimension, "created_at": now},
+            id=name,
+            refresh=True,
+        )
+
+    def delete_collection(self, name: str) -> None:
+        index_name = self._index_name(name)
+        if self._client.indices.exists(index=index_name):
+            self._client.indices.delete(index=index_name)
+
+    def list_collections(self) -> List[str]:
+        prefix = f"{self.config.opensearch_index_prefix}_"
+        indices = self._client.indices.get_alias(index=f"{prefix}*")
+        return [name.replace(prefix, "") for name in indices.keys() if not name.endswith("_collections")]
+
+    def insert(self, collection: str, id: str, data: Dict[str, Any]) -> None:
+        index_name = self._index_name(collection)
+        now = datetime.utcnow().isoformat()
+        doc = {
+            "id": id,
+            "dense_embedding": data.get("dense_embedding"),
+            "sparse_embedding": data.get("sparse_embedding"),
+            "text_content": data.get("text_content", ""),
+            "metadata": data.get("metadata", {}),
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._client.index(index=index_name, body=doc, id=id, refresh=True)
+
+    def insert_batch(self, collection: str, items: List[Tuple[str, Dict[str, Any]]]) -> int:
+        index_name = self._index_name(collection)
+        now = datetime.utcnow().isoformat()
+        actions = []
+        for id_, data in items:
+            actions.append({"index": {"_index": index_name, "_id": id_}})
+            actions.append({
+                "id": id_,
+                "dense_embedding": data.get("dense_embedding"),
+                "sparse_embedding": data.get("sparse_embedding"),
+                "text_content": data.get("text_content", ""),
+                "metadata": data.get("metadata", {}),
+                "created_at": now,
+                "updated_at": now,
+            })
+        if actions:
+            self._client.bulk(body=actions, refresh=True)
+        return len(items)
+
+    def get(self, collection: str, id: str) -> Optional[Dict[str, Any]]:
+        index_name = self._index_name(collection)
+        try:
+            result = self._client.get(index=index_name, id=id)
+            return result["_source"]
+        except:
+            return None
+
+    def get_batch(self, collection: str, ids: List[str]) -> List[Optional[Dict[str, Any]]]:
+        return [self.get(collection, id) for id in ids]
+
+    def update(self, collection: str, id: str, data: Dict[str, Any]) -> bool:
+        index_name = self._index_name(collection)
+        data["updated_at"] = datetime.utcnow().isoformat()
+        try:
+            self._client.update(index=index_name, id=id, body={"doc": data}, refresh=True)
+            return True
+        except:
+            return False
+
+    def delete(self, collection: str, id: str) -> bool:
+        index_name = self._index_name(collection)
+        try:
+            self._client.delete(index=index_name, id=id, refresh=True)
+            return True
+        except:
+            return False
+
+    def delete_batch(self, collection: str, ids: List[str]) -> int:
+        count = 0
+        for id in ids:
+            if self.delete(collection, id):
+                count += 1
+        return count
+
+    def count(self, collection: str) -> int:
+        index_name = self._index_name(collection)
+        try:
+            result = self._client.count(index=index_name)
+            return result["count"]
+        except:
+            return 0
+
+    def iterate(self, collection: str, batch_size: int = 1000) -> Iterator[Tuple[str, Dict[str, Any]]]:
+        index_name = self._index_name(collection)
+        body = {"query": {"match_all": {}}, "size": batch_size}
+        result = self._client.search(index=index_name, body=body, scroll="2m")
+        scroll_id = result["_scroll_id"]
+        hits = result["hits"]["hits"]
+        while hits:
+            for hit in hits:
+                yield hit["_id"], hit["_source"]
+            result = self._client.scroll(scroll_id=scroll_id, scroll="2m")
+            scroll_id = result["_scroll_id"]
+            hits = result["hits"]["hits"]
+
+    def vector_search(self, collection: str, query_vector: List[float], limit: int = 10) -> List[Tuple[str, Dict[str, Any], float]]:
+        index_name = self._index_name(collection)
+        body = {
+            "size": limit,
+            "query": {
+                "knn": {
+                    "dense_embedding": {"vector": query_vector, "k": limit}
+                }
+            },
+        }
+        result = self._client.search(index=index_name, body=body)
+        return [
+            (hit["_id"], hit["_source"], 1.0 - hit["_score"])
+            for hit in result["hits"]["hits"]
+        ]
+
+
+# =============================================================================
+# Aurora PostgreSQL Storage (AWS Aurora with pgvector)
+# =============================================================================
+
+class AuroraPostgreSQLStorage(BaseStorage):
+    """
+    AWS Aurora PostgreSQL storage backend with pgvector.
+
+    Supports all modes including ultimate (ColBERT) and graph.
+    """
+
+    def __init__(self, config: StorageConfig):
+        self.config = config
+        self._conn = None
+        self._lock = threading.Lock()
+
+    def connect(self) -> None:
+        try:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+        except ImportError:
+            raise ImportError("Install psycopg2: pip install psycopg2-binary")
+
+        ssl_mode = "require" if self.config.aurora_ssl else "disable"
+        self._conn = psycopg2.connect(
+            host=self.config.aurora_host,
+            port=self.config.aurora_port,
+            database=self.config.aurora_database,
+            user=self.config.aurora_user,
+            password=self.config.aurora_password,
+            sslmode=ssl_mode,
+        )
+        self._conn.autocommit = True
+
+        with self._conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {self.config.aurora_schema}._vectrix_collections (
+                    name VARCHAR(255) PRIMARY KEY,
+                    dimension INTEGER,
+                    metadata JSONB,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+
+    def close(self) -> None:
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+
+    def _table_name(self, collection: str) -> str:
+        return f"{self.config.aurora_schema}.{collection}"
+
+    def _ensure_collection_table(self, collection: str, dimension: int = 384, mode: str = "dense") -> None:
+        table = self._table_name(collection)
+        with self._conn.cursor() as cur:
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table} (
+                    id VARCHAR(255) PRIMARY KEY,
+                    dense_embedding vector({dimension}),
+                    sparse_embedding JSONB,
+                    late_interaction_embedding JSONB,
+                    text_content TEXT,
+                    metadata JSONB,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            cur.execute(f"CREATE INDEX IF NOT EXISTS {collection}_hnsw_idx ON {table} USING hnsw (dense_embedding vector_cosine_ops)")
+            cur.execute(f"CREATE INDEX IF NOT EXISTS {collection}_metadata_idx ON {table} USING gin (metadata)")
+            if mode in ("hybrid", "ultimate", "graph"):
+                cur.execute(f"CREATE INDEX IF NOT EXISTS {collection}_sparse_idx ON {table} USING gin (sparse_embedding)")
+
+    def create_collection(self, name: str, metadata: Dict[str, Any] = None) -> None:
+        dimension = metadata.get("dimension", 384) if metadata else 384
+        mode = metadata.get("mode", "dense") if metadata else "dense"
+        self._ensure_collection_table(name, dimension, mode)
+
+        with self._conn.cursor() as cur:
+            cur.execute(f"""
+                INSERT INTO {self.config.aurora_schema}._vectrix_collections (name, dimension, metadata)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (name) DO NOTHING
+            """, (name, dimension, json.dumps(metadata or {})))
+
+    def delete_collection(self, name: str) -> None:
+        table = self._table_name(name)
+        with self._conn.cursor() as cur:
+            cur.execute(f"DROP TABLE IF EXISTS {table}")
+            cur.execute(f"DELETE FROM {self.config.aurora_schema}._vectrix_collections WHERE name = %s", (name,))
+
+    def list_collections(self) -> List[str]:
+        with self._conn.cursor() as cur:
+            cur.execute(f"SELECT name FROM {self.config.aurora_schema}._vectrix_collections")
+            return [row[0] for row in cur.fetchall()]
+
+    def insert(self, collection: str, id: str, data: Dict[str, Any]) -> None:
+        table = self._table_name(collection)
+        dense = data.get("dense_embedding")
+        sparse = json.dumps(data.get("sparse_embedding")) if data.get("sparse_embedding") else None
+        late = json.dumps(data.get("late_interaction_embedding")) if data.get("late_interaction_embedding") else None
+        text = data.get("text_content", "")
+        meta = json.dumps(data.get("metadata", {}))
+
+        with self._conn.cursor() as cur:
+            cur.execute(f"""
+                INSERT INTO {table} (id, dense_embedding, sparse_embedding, late_interaction_embedding, text_content, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    dense_embedding = EXCLUDED.dense_embedding,
+                    sparse_embedding = EXCLUDED.sparse_embedding,
+                    late_interaction_embedding = EXCLUDED.late_interaction_embedding,
+                    text_content = EXCLUDED.text_content,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = NOW()
+            """, (id, dense, sparse, late, text, meta))
+
+    def insert_batch(self, collection: str, items: List[Tuple[str, Dict[str, Any]]]) -> int:
+        for id_, data in items:
+            self.insert(collection, id_, data)
+        return len(items)
+
+    def get(self, collection: str, id: str) -> Optional[Dict[str, Any]]:
+        table = self._table_name(collection)
+        with self._conn.cursor() as cur:
+            cur.execute(f"SELECT * FROM {table} WHERE id = %s", (id,))
+            row = cur.fetchone()
+            if row:
+                cols = [desc[0] for desc in cur.description]
+                return dict(zip(cols, row))
+        return None
+
+    def get_batch(self, collection: str, ids: List[str]) -> List[Optional[Dict[str, Any]]]:
+        return [self.get(collection, id) for id in ids]
+
+    def update(self, collection: str, id: str, data: Dict[str, Any]) -> bool:
+        table = self._table_name(collection)
+        sets = []
+        values = []
+        for key, value in data.items():
+            if key in ("dense_embedding", "sparse_embedding", "late_interaction_embedding", "text_content", "metadata"):
+                if key in ("sparse_embedding", "late_interaction_embedding", "metadata"):
+                    value = json.dumps(value) if value else None
+                sets.append(f"{key} = %s")
+                values.append(value)
+        sets.append("updated_at = NOW()")
+        values.append(id)
+        with self._conn.cursor() as cur:
+            cur.execute(f"UPDATE {table} SET {', '.join(sets)} WHERE id = %s", values)
+            return cur.rowcount > 0
+
+    def delete(self, collection: str, id: str) -> bool:
+        table = self._table_name(collection)
+        with self._conn.cursor() as cur:
+            cur.execute(f"DELETE FROM {table} WHERE id = %s", (id,))
+            return cur.rowcount > 0
+
+    def delete_batch(self, collection: str, ids: List[str]) -> int:
+        count = 0
+        for id in ids:
+            if self.delete(collection, id):
+                count += 1
+        return count
+
+    def count(self, collection: str) -> int:
+        table = self._table_name(collection)
+        with self._conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM {table}")
+            return cur.fetchone()[0]
+
+    def iterate(self, collection: str, batch_size: int = 1000) -> Iterator[Tuple[str, Dict[str, Any]]]:
+        table = self._table_name(collection)
+        offset = 0
+        while True:
+            with self._conn.cursor() as cur:
+                cur.execute(f"SELECT * FROM {table} LIMIT %s OFFSET %s", (batch_size, offset))
+                rows = cur.fetchall()
+                if not rows:
+                    break
+                cols = [desc[0] for desc in cur.description]
+                for row in rows:
+                    data = dict(zip(cols, row))
+                    yield data["id"], data
+                offset += batch_size
+
+    def vector_search(self, collection: str, query_vector: List[float], limit: int = 10) -> List[Tuple[str, Dict[str, Any], float]]:
+        table = self._table_name(collection)
+        with self._conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT id, text_content, metadata, dense_embedding <=> %s::vector AS distance
+                FROM {table}
+                ORDER BY distance
+                LIMIT %s
+            """, (query_vector, limit))
+            results = []
+            for row in cur.fetchall():
+                results.append((row[0], {"text_content": row[1], "metadata": row[2]}, row[3]))
+            return results
+
+
 def create_storage(config: StorageConfig) -> BaseStorage:
     """Factory function to create storage backend."""
     if config.backend == StorageBackend.MEMORY:
@@ -3177,6 +3626,14 @@ def create_storage(config: StorageConfig) -> BaseStorage:
         return storage
     elif config.backend == StorageBackend.DELTA_LAKE:
         storage = DeltaLakeStorage(config)
+        storage.connect()
+        return storage
+    elif config.backend == StorageBackend.OPENSEARCH:
+        storage = OpenSearchStorage(config)
+        storage.connect()
+        return storage
+    elif config.backend == StorageBackend.AURORA_POSTGRESQL:
+        storage = AuroraPostgreSQLStorage(config)
         storage.connect()
         return storage
     else:

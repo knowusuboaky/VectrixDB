@@ -16,7 +16,7 @@ A lightweight vector database with embedded ML models, beautiful dashboard, and 
 ## Features
 
 - **4 Search Modes** - Dense, Hybrid, Ultimate, and Graph (GraphRAG)
-- **6 Storage Backends** - Memory, SQLite, Lakebase, DeltaLake, CosmosDB, PostgreSQL
+- **8 Storage Backends** - Memory, SQLite, Lakebase, DeltaLake, CosmosDB, PostgreSQL, OpenSearch, Aurora PostgreSQL
 - **Embedded Models** - Works offline with bundled ONNX models
 - **Model Selection** - Choose from bundled, HuggingFace, or GitHub release models
 - **Document Index** - Hierarchical document storage with chunking
@@ -182,16 +182,18 @@ db = Vectrix(
 
 ## Storage Backends
 
-VectrixDB supports 6 storage backends:
+VectrixDB supports 8 storage backends:
 
-| Backend | Type | Persistence | Best For |
-|---------|------|-------------|----------|
-| `memory` | In-Memory | No | Testing, small datasets |
-| `sqlite` | File-based | Yes | Local development |
-| `lakebase` | PostgreSQL + pgvector | Yes | Databricks Lakebase |
-| `delta_lake` | Delta Lake | Yes | Databricks Unity Catalog |
-| `cosmosdb` | Azure CosmosDB | Yes | Azure cloud |
-| `postgresql` | PostgreSQL + pgvector | Yes | Self-hosted PostgreSQL |
+| Backend | Type | Persistence | Modes | Best For |
+|---------|------|-------------|-------|----------|
+| `memory` | In-Memory | No | All | Testing, small datasets |
+| `sqlite` | File-based | Yes | All | Local development |
+| `lakebase` | PostgreSQL + pgvector | Yes | All | Databricks Lakebase |
+| `delta_lake` | Delta Lake | Yes | All | Databricks Unity Catalog |
+| `cosmosdb` | Azure CosmosDB | Yes | All | Azure cloud |
+| `postgresql` | PostgreSQL + pgvector | Yes | All | Self-hosted PostgreSQL |
+| `opensearch` | AWS OpenSearch | Yes | Dense, Hybrid | AWS managed search |
+| `aurora_postgresql` | AWS Aurora + pgvector | Yes | All | AWS managed PostgreSQL |
 
 ### Memory Storage (Default)
 
@@ -274,6 +276,36 @@ config = StorageConfig(
 )
 
 db = VectrixDB(storage_config=config)
+```
+
+### OpenSearch Storage (AWS)
+
+AWS OpenSearch Serverless with native k-NN vector search.
+
+> **Note**: OpenSearch supports `dense` and `hybrid` modes only.
+
+```python
+from vectrixdb import VectrixDB
+
+opensearch = VectrixDB.with_opensearch(
+    endpoint="https://xxx.us-east-1.aoss.amazonaws.com",
+    region="us-east-1",
+)
+```
+
+### Aurora PostgreSQL Storage (AWS)
+
+AWS Aurora PostgreSQL with pgvector. Supports all modes including `ultimate`.
+
+```python
+from vectrixdb import VectrixDB
+
+aurora = VectrixDB.with_aurora_postgresql(
+    host="cluster.xxx.us-east-1.rds.amazonaws.com",
+    database="vectrixdb",
+    user="admin",
+    password="password",
+)
 ```
 
 ### Adaptive Schema

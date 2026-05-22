@@ -373,6 +373,9 @@ class Vectrix:
         # Validate required models for the selected mode
         self._validate_mode_models()
 
+        # Validate storage backend compatibility with mode
+        self._validate_storage_backend_mode(storage_backend)
+
         # Parse model identifier (for dense model)
         self._parse_model(model or dense_model, dimension)
 
@@ -415,6 +418,35 @@ class Vectrix:
                 self.reranker_model_name = "L6"
             if self.late_interaction_model_name is None:
                 self.late_interaction_model_name = "colbert"
+
+    def _validate_storage_backend_mode(self, storage_backend):
+        """
+        Validate that the storage backend supports the selected mode.
+
+        OpenSearch does not support 'ultimate' or 'graph' modes because:
+        - ColBERT (late interaction) requires client-side MaxSim computation
+        - OpenSearch k-NN only supports dense vectors, not token-level embeddings
+        """
+        if storage_backend is None:
+            return
+
+        is_opensearch = False
+        if hasattr(storage_backend, '_storage'):
+            class_name = storage_backend._storage.__class__.__name__
+            if class_name == 'OpenSearchStorage':
+                is_opensearch = True
+        elif hasattr(storage_backend, '__class__'):
+            if storage_backend.__class__.__name__ == 'OpenSearchStorage':
+                is_opensearch = True
+
+        if is_opensearch and self.default_mode in ("ultimate", "graph"):
+            raise ValueError(
+                f"OpenSearch does not support '{self.default_mode}' mode. "
+                f"ColBERT (late interaction) requires MaxSim computation that "
+                f"OpenSearch k-NN cannot perform natively. "
+                f"Use mode='dense' or mode='hybrid' with OpenSearch, "
+                f"or switch to Aurora PostgreSQL for full mode support."
+            )
 
     def _is_huggingface_model(self, model_name: str) -> bool:
         """Check if model name is a HuggingFace model (contains /)."""

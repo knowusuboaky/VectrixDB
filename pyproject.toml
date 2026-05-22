@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vectrixdb"
-version = "2.0.2"
+version = "2.1.0"
 description = "Where vectors come alive - A lightweight, visual-first vector database with embedded ML models"
 readme = "README.md"
 license = "Apache-2.0"
@@ -83,7 +83,14 @@ embeddings = [
     "fastembed>=0.2.0",
     "sentence-transformers>=2.2.0",
 ]
-all = ["vectrixdb[dev,viz,hf,fastembed]"]
+# AWS storage backends
+aws = [
+    "opensearch-py>=2.0.0",
+    "boto3>=1.28.0",
+    "requests-aws4auth>=1.2.0",
+    "psycopg2-binary>=2.9.0",
+]
+all = ["vectrixdb[dev,viz,hf,fastembed,aws]"]
 
 [project.scripts]
 vectrixdb = "vectrixdb.cli:app"

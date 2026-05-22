@@ -46,7 +46,7 @@ Author: VectrixDB Team
 License: Apache 2.0
 """
 
-__version__ = "2.0.2"
+__version__ = "2.1.0"
 __author__ = "VectrixDB Team"
 __tagline__ = "Where vectors come alive"
 
@@ -106,6 +106,8 @@ from .core.storage import (
     SQLiteStorage,
     LakebaseStorage,
     DeltaLakeStorage,
+    OpenSearchStorage,
+    AuroraPostgreSQLStorage,
     create_storage,
 )
 
@@ -300,6 +302,8 @@ __all__ = [
     "SQLiteStorage",
     "LakebaseStorage",
     "DeltaLakeStorage",
+    "OpenSearchStorage",
+    "AuroraPostgreSQLStorage",
     "create_storage",
     # Cache
     "CacheBackend",

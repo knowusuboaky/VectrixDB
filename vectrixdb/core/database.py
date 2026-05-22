@@ -1310,6 +1310,101 @@ class VectrixDB:
         return cls(storage_config=storage_config, cache_config=cache_config)
 
     @classmethod
+    def with_opensearch(
+        cls,
+        endpoint: str,
+        region: str = "us-east-1",
+        service: str = "aoss",
+        index_prefix: str = "vectrix",
+        aws_access_key_id: Optional[str] = None,
+        aws_secret_access_key: Optional[str] = None,
+        aws_session_token: Optional[str] = None,
+        cache_config: Optional[CacheConfig] = None,
+    ) -> "VectrixDB":
+        """
+        Create database with AWS OpenSearch Serverless storage.
+
+        OpenSearch provides managed vector search with k-NN support.
+
+        NOTE: OpenSearch supports dense and hybrid modes ONLY.
+        For ultimate/graph modes, use with_aurora_postgresql().
+
+        Args:
+            endpoint: OpenSearch endpoint (e.g., https://xxx.us-east-1.aoss.amazonaws.com)
+            region: AWS region (default: us-east-1)
+            service: Service type - "aoss" for Serverless, "es" for managed
+            index_prefix: Prefix for index names (default: vectrix)
+            aws_access_key_id: AWS access key (optional, uses boto3 chain if not provided)
+            aws_secret_access_key: AWS secret key
+            aws_session_token: AWS session token (for temporary credentials)
+            cache_config: Optional cache configuration
+
+        Example:
+            db = VectrixDB.with_opensearch(
+                endpoint="https://xxx.us-east-1.aoss.amazonaws.com",
+                region="us-east-1",
+            )
+        """
+        storage_config = StorageConfig(
+            backend=StorageBackend.OPENSEARCH,
+            opensearch_endpoint=endpoint,
+            opensearch_region=region,
+            opensearch_service=service,
+            opensearch_index_prefix=index_prefix,
+            opensearch_aws_access_key_id=aws_access_key_id,
+            opensearch_aws_secret_access_key=aws_secret_access_key,
+            opensearch_aws_session_token=aws_session_token,
+        )
+        return cls(storage_config=storage_config, cache_config=cache_config)
+
+    @classmethod
+    def with_aurora_postgresql(
+        cls,
+        host: str,
+        database: str = "vectrixdb",
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        port: int = 5432,
+        ssl: bool = True,
+        schema: str = "public",
+        cache_config: Optional[CacheConfig] = None,
+    ) -> "VectrixDB":
+        """
+        Create database with AWS Aurora PostgreSQL + pgvector storage.
+
+        Aurora PostgreSQL supports ALL modes including ultimate (ColBERT) and graph.
+
+        Args:
+            host: Aurora cluster endpoint
+            database: Database name (default: vectrixdb)
+            user: Database user
+            password: Database password
+            port: Port (default: 5432)
+            ssl: Use SSL connection (default: True)
+            schema: Schema name (default: public)
+            cache_config: Optional cache configuration
+
+        Example:
+            db = VectrixDB.with_aurora_postgresql(
+                host="cluster.xxx.us-east-1.rds.amazonaws.com",
+                database="vectrixdb",
+                user="admin",
+                password="password",
+            )
+        """
+        storage_config = StorageConfig(
+            backend=StorageBackend.AURORA_POSTGRESQL,
+            aurora_host=host,
+            aurora_database=database,
+            aurora_user=user,
+            aurora_password=password,
+            aurora_port=port,
+            aurora_ssl=ssl,
+            aurora_schema=schema,
+        )
+        return cls(storage_config=storage_config, cache_config=cache_config)
+
+    @classmethod
     def with_auto_scaling(
         cls,
         path: Optional[Union[str, Path]] = None,
