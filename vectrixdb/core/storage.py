@@ -3285,11 +3285,10 @@ class OpenSearchStorage(BaseStorage):
 
         self._client.indices.create(index=index_name, body=body)
         now = datetime.utcnow().isoformat()
+        # Note: Serverless doesn't support custom _id or refresh=True
         self._client.index(
             index=f"{self.config.opensearch_index_prefix}_collections",
             body={"name": name, "dimension": dimension, "created_at": now},
-            id=name,
-            refresh=True,
         )
 
     def delete_collection(self, name: str) -> None:
@@ -3305,52 +3304,95 @@ class OpenSearchStorage(BaseStorage):
     def insert(self, collection: str, id: str, data: Dict[str, Any]) -> None:
         index_name = self._index_name(collection)
         now = datetime.utcnow().isoformat()
+        # Handle both _embedding and dense_embedding keys
+        dense_emb = data.get("dense_embedding") or data.get("_embedding")
         doc = {
-            "id": id,
-            "dense_embedding": data.get("dense_embedding"),
+            "id": id,  # Store our ID in document body (Serverless doesn't support custom _id)
+            "dense_embedding": dense_emb,
             "sparse_embedding": data.get("sparse_embedding"),
             "text_content": data.get("text_content", ""),
             "metadata": data.get("metadata", {}),
             "created_at": now,
             "updated_at": now,
         }
-        self._client.index(index=index_name, body=doc, id=id, refresh=True)
+        # No custom _id or refresh - Serverless limitations
+        self._client.index(index=index_name, body=doc)
 
     def insert_batch(self, collection: str, items: List[Tuple[str, Dict[str, Any]]]) -> int:
         index_name = self._index_name(collection)
         now = datetime.utcnow().isoformat()
+
+        # OpenSearch Serverless doesn't support custom _id at all
+        # Use bulk API without _id and store our ID in the doc body
         actions = []
         for id_, data in items:
-            actions.append({"index": {"_index": index_name, "_id": id_}})
+            # Handle both _embedding and dense_embedding keys (Collection uses _embedding)
+            dense_emb = data.get("dense_embedding") or data.get("_embedding")
+            # Extract metadata (everything except special fields)
+            metadata = {k: v for k, v in data.items()
+                       if k not in ("_embedding", "dense_embedding", "sparse_embedding",
+                                    "text_content", "late_interaction_embedding")}
+
+            # No _id in action - let OpenSearch auto-generate
+            actions.append({"index": {"_index": index_name}})
             actions.append({
-                "id": id_,
-                "dense_embedding": data.get("dense_embedding"),
+                "id": id_,  # Store our ID in document body for lookup
+                "dense_embedding": dense_emb,
                 "sparse_embedding": data.get("sparse_embedding"),
                 "text_content": data.get("text_content", ""),
-                "metadata": data.get("metadata", {}),
+                "metadata": metadata,
                 "created_at": now,
                 "updated_at": now,
             })
         if actions:
-            self._client.bulk(body=actions, refresh=True)
+            result = self._client.bulk(body=actions)  # No refresh for Serverless
+            # Check for bulk errors
+            if result.get("errors"):
+                error_items = [item for item in result.get("items", [])
+                              if item.get("index", {}).get("error")]
+                if error_items:
+                    first_error = error_items[0].get("index", {}).get("error", {})
+                    raise RuntimeError(f"Bulk insert failed: {first_error}")
         return len(items)
 
     def get(self, collection: str, id: str) -> Optional[Dict[str, Any]]:
+        """Get document by our custom id field (not _id which is auto-generated)."""
         index_name = self._index_name(collection)
         try:
-            result = self._client.get(index=index_name, id=id)
-            return result["_source"]
+            # Search by id field in document body
+            result = self._client.search(
+                index=index_name,
+                body={"query": {"term": {"id": id}}, "size": 1}
+            )
+            hits = result.get("hits", {}).get("hits", [])
+            return hits[0]["_source"] if hits else None
         except:
             return None
 
     def get_batch(self, collection: str, ids: List[str]) -> List[Optional[Dict[str, Any]]]:
         return [self.get(collection, id) for id in ids]
 
+    def _find_doc_id(self, index_name: str, id: str) -> Optional[str]:
+        """Find the OpenSearch _id for a document with our custom id field."""
+        try:
+            result = self._client.search(
+                index=index_name,
+                body={"query": {"term": {"id": id}}, "size": 1, "_source": False}
+            )
+            hits = result.get("hits", {}).get("hits", [])
+            return hits[0]["_id"] if hits else None
+        except:
+            return None
+
     def update(self, collection: str, id: str, data: Dict[str, Any]) -> bool:
         index_name = self._index_name(collection)
         data["updated_at"] = datetime.utcnow().isoformat()
         try:
-            self._client.update(index=index_name, id=id, body={"doc": data}, refresh=True)
+            # Find the OpenSearch _id first
+            doc_id = self._find_doc_id(index_name, id)
+            if not doc_id:
+                return False
+            self._client.update(index=index_name, id=doc_id, body={"doc": data})
             return True
         except:
             return False
@@ -3358,7 +3400,11 @@ class OpenSearchStorage(BaseStorage):
     def delete(self, collection: str, id: str) -> bool:
         index_name = self._index_name(collection)
         try:
-            self._client.delete(index=index_name, id=id, refresh=True)
+            # Find the OpenSearch _id first
+            doc_id = self._find_doc_id(index_name, id)
+            if not doc_id:
+                return False
+            self._client.delete(index=index_name, id=doc_id)
             return True
         except:
             return False
@@ -3546,8 +3592,8 @@ class OpenSearchStorage(BaseStorage):
         return self.iterate(collection, batch_size)
 
     def flush(self) -> None:
-        """Flush pending writes. OpenSearch refreshes are immediate with refresh=True."""
-        pass  # No-op: we use refresh=True on all writes
+        """Flush pending writes. OpenSearch Serverless handles this automatically."""
+        pass  # No-op: Serverless doesn't support explicit refresh
 
 
 # =============================================================================

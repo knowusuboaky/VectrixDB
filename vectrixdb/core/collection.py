@@ -837,7 +837,8 @@ class Collection:
                 try:
                     self._storage_backend.insert_batch(self.name, backend_documents)
                 except Exception as e:
-                    print(f"[VectrixDB] Warning: Failed to persist vectors to storage backend: {e}")
+                    # Re-raise to surface the actual error instead of silently failing
+                    raise RuntimeError(f"Failed to persist vectors to storage backend: {e}") from e
 
             # Add to local vector index (for fast in-memory search)
             indices = np.array(indices, dtype=np.uint64)
