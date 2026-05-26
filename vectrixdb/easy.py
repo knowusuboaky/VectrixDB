@@ -1324,21 +1324,42 @@ class Vectrix:
         prefetch_limit = min(limit * 10, max(self._collection.count(), 1))
 
         # For storage backends, use optimized multi-embedding search if available
-        if use_backend and hasattr(self._collection, 'hybrid_search'):
-            # Generate sparse query embedding
-            query_sparse = self._embed_sparse(query)[0]
-            results = self._collection.hybrid_search(
-                dense_query=query_vector,
-                sparse_query=query_sparse,
-                limit=prefetch_limit,
-                filter=filter
-            )
-            # Rerank with cross-encoder
-            candidates = [
-                {"id": r.id, "score": r.score, "metadata": r.metadata, "text": r.text or self._texts.get(r.id, "")}
-                for r in results.results
-            ]
-            return self._rerank_with_cross_encoder(query, candidates, limit)
+        # Check if using OpenSearchStorage which has its own hybrid_search
+        if use_backend and self._using_storage_backend:
+            storage = self.storage_backend._storage if hasattr(self.storage_backend, '_storage') else self.storage_backend
+            storage_class = storage.__class__.__name__
+
+            if storage_class == 'OpenSearchStorage' and hasattr(storage, 'hybrid_search'):
+                # OpenSearchStorage uses k-NN + BM25 hybrid
+                results_raw = storage.hybrid_search(
+                    collection=self.name,
+                    query_vector=query_vector,
+                    query_text=query,
+                    limit=prefetch_limit,
+                    dense_weight=0.7,
+                    sparse_weight=0.3,
+                )
+                # Convert to candidate format for reranking
+                candidates = [
+                    {"id": r[0], "score": r[2], "metadata": r[1].get("metadata", {}), "text": r[1].get("text_content", "")}
+                    for r in results_raw
+                ]
+                return self._rerank_with_cross_encoder(query, candidates, limit)
+            elif hasattr(self._collection, 'hybrid_search'):
+                # Other backends with hybrid_search
+                query_sparse = self._embed_sparse(query)[0]
+                results = self._collection.hybrid_search(
+                    dense_query=query_vector,
+                    sparse_query=query_sparse,
+                    limit=prefetch_limit,
+                    filter=filter
+                )
+                # Rerank with cross-encoder
+                candidates = [
+                    {"id": r.id, "score": r.score, "metadata": r.metadata, "text": r.text or self._texts.get(r.id, "")}
+                    for r in results.results
+                ]
+                return self._rerank_with_cross_encoder(query, candidates, limit)
 
         # Dense search
         dense_results = self._collection.search(
