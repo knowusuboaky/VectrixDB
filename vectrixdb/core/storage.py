@@ -3396,75 +3396,64 @@ class OpenSearchStorage(BaseStorage):
         collection: str,
         query_vector: List[float],
         limit: int = 10,
-        query_text: str = None,
-        hybrid: bool = False,
-        dense_weight: float = 0.7,
-        sparse_weight: float = 0.3,
     ) -> List[Tuple[str, Dict[str, Any], float]]:
         """
-        Search collection using dense vectors, optionally with hybrid (dense + BM25).
+        Pure k-NN vector search.
 
         Args:
             collection: Collection name
             query_vector: Dense embedding vector for k-NN search
             limit: Max results to return
-            query_text: Original query text for BM25 matching (required if hybrid=True)
-            hybrid: If True, combine k-NN with BM25 text search
-            dense_weight: Weight for dense vector score (default 0.7)
-            sparse_weight: Weight for BM25 text score (default 0.3)
 
         Returns:
             List of (id, data, distance) tuples
         """
         index_name = self._index_name(collection)
-
-        if hybrid and query_text:
-            # Hybrid search: k-NN + BM25 using bool query with boosting
-            # OpenSearch Serverless doesn't support script_score with cosineSimilarity
-            # So we use a bool query combining k-NN and match with boosts
-            body = {
-                "size": limit,
-                "query": {
-                    "bool": {
-                        "should": [
-                            # k-NN vector search with boost
-                            {
-                                "knn": {
-                                    "dense_embedding": {
-                                        "vector": query_vector,
-                                        "k": limit,
-                                        "boost": dense_weight
-                                    }
-                                }
-                            },
-                            # BM25 text match with boost
-                            {
-                                "match": {
-                                    "text_content": {
-                                        "query": query_text,
-                                        "boost": sparse_weight
-                                    }
-                                }
-                            }
-                        ],
-                        "minimum_should_match": 1
-                    }
+        body = {
+            "size": limit,
+            "query": {
+                "knn": {
+                    "dense_embedding": {"vector": query_vector, "k": limit}
                 }
-            }
-        else:
-            # Pure k-NN search (dense only)
-            body = {
-                "size": limit,
-                "query": {
-                    "knn": {
-                        "dense_embedding": {"vector": query_vector, "k": limit}
-                    }
-                },
-            }
-
+            },
+        }
         result = self._client.search(index=index_name, body=body)
         return [
-            (hit["_id"], hit["_source"], 1.0 - hit["_score"] if not hybrid else hit["_score"])
+            (hit["_id"], hit["_source"], hit["_score"])
+            for hit in result["hits"]["hits"]
+        ]
+
+    def text_search(
+        self,
+        collection: str,
+        query_text: str,
+        limit: int = 10,
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """
+        BM25 text search on text_content field.
+
+        Args:
+            collection: Collection name
+            query_text: Query text for BM25 matching
+            limit: Max results to return
+
+        Returns:
+            List of (id, data, score) tuples
+        """
+        index_name = self._index_name(collection)
+        body = {
+            "size": limit,
+            "query": {
+                "match": {
+                    "text_content": {
+                        "query": query_text
+                    }
+                }
+            },
+        }
+        result = self._client.search(index=index_name, body=body)
+        return [
+            (hit["_id"], hit["_source"], hit["_score"])
             for hit in result["hits"]["hits"]
         ]
 
@@ -3476,34 +3465,65 @@ class OpenSearchStorage(BaseStorage):
         limit: int = 10,
         dense_weight: float = 0.7,
         sparse_weight: float = 0.3,
+        rrf_k: int = 60,
     ) -> List[Tuple[str, Dict[str, Any], float]]:
         """
-        Hybrid search combining dense k-NN with BM25 text matching.
+        Hybrid search using Reciprocal Rank Fusion (RRF).
 
-        This provides better results than pure vector search by combining:
-        - Semantic similarity (dense vectors via k-NN)
-        - Lexical matching (BM25 on text_content)
+        Combines semantic search (k-NN) with lexical search (BM25) using RRF,
+        the industry-standard approach for hybrid retrieval. RRF is robust to
+        score distribution differences between retrieval methods.
+
+        Algorithm:
+        1. Run k-NN search to get top candidates by semantic similarity
+        2. Run BM25 search to get top candidates by keyword matching
+        3. Fuse results using weighted RRF: score = w1/(k+rank1) + w2/(k+rank2)
+        4. Return top results sorted by fused score
 
         Args:
             collection: Collection name
-            query_vector: Dense embedding vector
-            query_text: Original query text for BM25
-            limit: Max results
-            dense_weight: Weight for vector similarity (0-1)
-            sparse_weight: Weight for text matching (0-1)
+            query_vector: Dense embedding vector for semantic search
+            query_text: Query text for BM25 lexical search
+            limit: Max results to return
+            dense_weight: Weight for k-NN results in RRF (default 0.7)
+            sparse_weight: Weight for BM25 results in RRF (default 0.3)
+            rrf_k: RRF constant (default 60, standard value from literature)
 
         Returns:
-            List of (id, data, score) tuples sorted by combined score
+            List of (id, data, rrf_score) tuples sorted by fused score (descending)
         """
-        return self.vector_search(
-            collection=collection,
-            query_vector=query_vector,
-            limit=limit,
-            query_text=query_text,
-            hybrid=True,
-            dense_weight=dense_weight,
-            sparse_weight=sparse_weight,
-        )
+        # Prefetch more candidates for better fusion
+        prefetch = min(limit * 5, 100)
+
+        # Stage 1: Get candidates from both retrieval methods
+        dense_results = self.vector_search(collection, query_vector, prefetch)
+        sparse_results = self.text_search(collection, query_text, prefetch)
+
+        # Stage 2: Reciprocal Rank Fusion
+        # RRF score = sum of weight / (k + rank) for each retrieval method
+        scores = {}
+        doc_data = {}
+
+        # Process dense (k-NN) results
+        for rank, (doc_id, data, _score) in enumerate(dense_results):
+            rrf_score = dense_weight / (rrf_k + rank + 1)
+            scores[doc_id] = scores.get(doc_id, 0) + rrf_score
+            doc_data[doc_id] = data
+
+        # Process sparse (BM25) results
+        for rank, (doc_id, data, _score) in enumerate(sparse_results):
+            rrf_score = sparse_weight / (rrf_k + rank + 1)
+            scores[doc_id] = scores.get(doc_id, 0) + rrf_score
+            if doc_id not in doc_data:
+                doc_data[doc_id] = data
+
+        # Stage 3: Sort by fused score and return top results
+        sorted_results = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:limit]
+
+        return [
+            (doc_id, doc_data[doc_id], score)
+            for doc_id, score in sorted_results
+        ]
 
     def get_collection_config(self, name: str) -> Optional[Dict[str, Any]]:
         """Get collection configuration from metadata index."""
