@@ -3407,6 +3407,30 @@ class OpenSearchStorage(BaseStorage):
             for hit in result["hits"]["hits"]
         ]
 
+    def get_collection_config(self, name: str) -> Optional[Dict[str, Any]]:
+        """Get collection configuration from metadata index."""
+        try:
+            result = self._client.get(
+                index=f"{self.config.opensearch_index_prefix}_collections",
+                id=name
+            )
+            return result["_source"]
+        except:
+            return None
+
+    def scan(
+        self,
+        collection: str,
+        batch_size: int = 1000,
+        filter_expr: Optional[str] = None,
+    ) -> Iterator[Tuple[str, Dict[str, Any]]]:
+        """Scan all documents in collection. Alias for iterate()."""
+        return self.iterate(collection, batch_size)
+
+    def flush(self) -> None:
+        """Flush pending writes. OpenSearch refreshes are immediate with refresh=True."""
+        pass  # No-op: we use refresh=True on all writes
+
 
 # =============================================================================
 # Aurora PostgreSQL Storage (AWS Aurora with pgvector)
