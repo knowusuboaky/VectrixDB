@@ -3419,35 +3419,35 @@ class OpenSearchStorage(BaseStorage):
         index_name = self._index_name(collection)
 
         if hybrid and query_text:
-            # Hybrid search: k-NN + BM25 using script_score for weighted combination
+            # Hybrid search: k-NN + BM25 using bool query with boosting
+            # OpenSearch Serverless doesn't support script_score with cosineSimilarity
+            # So we use a bool query combining k-NN and match with boosts
             body = {
                 "size": limit,
                 "query": {
-                    "script_score": {
-                        "query": {
-                            "bool": {
-                                "should": [
-                                    # BM25 text match on text_content
-                                    {
-                                        "match": {
-                                            "text_content": {
-                                                "query": query_text,
-                                                "boost": sparse_weight
-                                            }
-                                        }
+                    "bool": {
+                        "should": [
+                            # k-NN vector search with boost
+                            {
+                                "knn": {
+                                    "dense_embedding": {
+                                        "vector": query_vector,
+                                        "k": limit,
+                                        "boost": dense_weight
                                     }
-                                ],
-                                "filter": [
-                                    # Ensure we have vectors to score
-                                    {"exists": {"field": "dense_embedding"}}
-                                ]
+                                }
+                            },
+                            # BM25 text match with boost
+                            {
+                                "match": {
+                                    "text_content": {
+                                        "query": query_text,
+                                        "boost": sparse_weight
+                                    }
+                                }
                             }
-                        },
-                        "script": {
-                            # Combine BM25 score with k-NN cosine similarity
-                            "source": f"_score * {sparse_weight} + (1.0 + cosineSimilarity(params.query_vector, 'dense_embedding')) * {dense_weight}",
-                            "params": {"query_vector": query_vector}
-                        }
+                        ],
+                        "minimum_should_match": 1
                     }
                 }
             }
