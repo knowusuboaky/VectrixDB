@@ -3391,21 +3391,119 @@ class OpenSearchStorage(BaseStorage):
             scroll_id = result["_scroll_id"]
             hits = result["hits"]["hits"]
 
-    def vector_search(self, collection: str, query_vector: List[float], limit: int = 10) -> List[Tuple[str, Dict[str, Any], float]]:
+    def vector_search(
+        self,
+        collection: str,
+        query_vector: List[float],
+        limit: int = 10,
+        query_text: str = None,
+        hybrid: bool = False,
+        dense_weight: float = 0.7,
+        sparse_weight: float = 0.3,
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """
+        Search collection using dense vectors, optionally with hybrid (dense + BM25).
+
+        Args:
+            collection: Collection name
+            query_vector: Dense embedding vector for k-NN search
+            limit: Max results to return
+            query_text: Original query text for BM25 matching (required if hybrid=True)
+            hybrid: If True, combine k-NN with BM25 text search
+            dense_weight: Weight for dense vector score (default 0.7)
+            sparse_weight: Weight for BM25 text score (default 0.3)
+
+        Returns:
+            List of (id, data, distance) tuples
+        """
         index_name = self._index_name(collection)
-        body = {
-            "size": limit,
-            "query": {
-                "knn": {
-                    "dense_embedding": {"vector": query_vector, "k": limit}
+
+        if hybrid and query_text:
+            # Hybrid search: k-NN + BM25 using script_score for weighted combination
+            body = {
+                "size": limit,
+                "query": {
+                    "script_score": {
+                        "query": {
+                            "bool": {
+                                "should": [
+                                    # BM25 text match on text_content
+                                    {
+                                        "match": {
+                                            "text_content": {
+                                                "query": query_text,
+                                                "boost": sparse_weight
+                                            }
+                                        }
+                                    }
+                                ],
+                                "filter": [
+                                    # Ensure we have vectors to score
+                                    {"exists": {"field": "dense_embedding"}}
+                                ]
+                            }
+                        },
+                        "script": {
+                            # Combine BM25 score with k-NN cosine similarity
+                            "source": f"_score * {sparse_weight} + (1.0 + cosineSimilarity(params.query_vector, 'dense_embedding')) * {dense_weight}",
+                            "params": {"query_vector": query_vector}
+                        }
+                    }
                 }
-            },
-        }
+            }
+        else:
+            # Pure k-NN search (dense only)
+            body = {
+                "size": limit,
+                "query": {
+                    "knn": {
+                        "dense_embedding": {"vector": query_vector, "k": limit}
+                    }
+                },
+            }
+
         result = self._client.search(index=index_name, body=body)
         return [
-            (hit["_id"], hit["_source"], 1.0 - hit["_score"])
+            (hit["_id"], hit["_source"], 1.0 - hit["_score"] if not hybrid else hit["_score"])
             for hit in result["hits"]["hits"]
         ]
+
+    def hybrid_search(
+        self,
+        collection: str,
+        query_vector: List[float],
+        query_text: str,
+        limit: int = 10,
+        dense_weight: float = 0.7,
+        sparse_weight: float = 0.3,
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
+        """
+        Hybrid search combining dense k-NN with BM25 text matching.
+
+        This provides better results than pure vector search by combining:
+        - Semantic similarity (dense vectors via k-NN)
+        - Lexical matching (BM25 on text_content)
+
+        Args:
+            collection: Collection name
+            query_vector: Dense embedding vector
+            query_text: Original query text for BM25
+            limit: Max results
+            dense_weight: Weight for vector similarity (0-1)
+            sparse_weight: Weight for text matching (0-1)
+
+        Returns:
+            List of (id, data, score) tuples sorted by combined score
+        """
+        return self.vector_search(
+            collection=collection,
+            query_vector=query_vector,
+            limit=limit,
+            query_text=query_text,
+            hybrid=True,
+            dense_weight=dense_weight,
+            sparse_weight=sparse_weight,
+        )
 
     def get_collection_config(self, name: str) -> Optional[Dict[str, Any]]:
         """Get collection configuration from metadata index."""
