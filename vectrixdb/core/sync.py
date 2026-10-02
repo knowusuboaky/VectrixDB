@@ -64,6 +64,13 @@ class SyncResult:
     #: compare against, so everything was copied. True for a full sync, which
     #: never intended to filter, and for an incremental one that could.
     filtered: bool = True
+    #: Rows removed from the target because the source no longer has them.
+    #: Only cdc() deletes; full() and incremental() only ever copy.
+    rows_deleted: int = 0
+    #: One line per collection cdc() could not read a change feed for, saying
+    #: why. Each was compared row for row instead, which is correct but reads
+    #: the whole collection on both sides.
+    fallbacks: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -144,6 +151,10 @@ class VectrixSync:
         self._scheduler_thread: Optional[threading.Thread] = None
         self._stop_scheduler = threading.Event()
         self._lock = threading.RLock()
+        # The source table version each collection has been brought up to by
+        # cdc(). A collection missing here has never been through cdc() on
+        # this instance, so its first pass compares the whole collection.
+        self._cdc_versions: Dict[str, int] = {}
 
     @staticmethod
     def _changed_since(point_data: Dict[str, Any], since: Optional[datetime]) -> bool:
@@ -502,23 +513,197 @@ class VectrixSync:
             self._scheduler_thread.join(timeout=5)
             self._scheduler_thread = None
 
-    def start_cdc(self) -> None:
+    def cdc(self, collections: Optional[List[str]] = None) -> SyncResult:
         """
-        Start Change Data Capture for near real-time sync.
+        Bring the target up to date with the source, deletes included.
 
-        Uses Delta Lake Change Data Feed to capture INSERT, UPDATE, DELETE
-        and replicate to target.
+        full() and incremental() only ever copy, so a row deleted or revoked
+        in the source stayed searchable in the target for good. This applies
+        inserts, updates and deletes alike.
 
-        Note: Requires Delta Lake CDF to be enabled on source tables.
+        On Delta Lake it reads the table's change data feed from the version
+        the last pass reached. Everywhere else, and on the first pass for a
+        collection, it copies every source row and deletes every target row
+        the source does not have. When a feed cannot answer (it was off at
+        that version, or VACUUM removed what it needs) the collection is
+        compared the same way and named in ``fallbacks``.
+
+        Vector collections only; the document index is not touched.
+
+        Args:
+            collections: Optional list of collection names. None means all.
+
+        Returns:
+            SyncResult with rows copied, rows deleted and any fallbacks.
         """
-        # TODO: Implement CDC using Delta Lake Change Data Feed
-        # This would require:
-        # 1. Enable CDF on Delta tables: TBLPROPERTIES (delta.enableChangeDataFeed = true)
-        # 2. Query table_changes() function
-        # 3. Apply changes to target
-        raise NotImplementedError(
-            "CDC sync not yet implemented. Use incremental() or start_scheduler() instead."
+        start_time = time.time()
+        errors: List[str] = []
+        fallbacks: List[str] = []
+        rows_synced = 0
+        rows_deleted = 0
+        collections_synced: List[str] = []
+
+        with self._lock:
+            self._is_running = True
+
+        try:
+            target_names = {c.name for c in self.target.list_collections()}
+            for coll_info in self.source.list_collections():
+                coll_name = coll_info.name
+                if collections is not None and coll_name not in collections:
+                    continue
+
+                try:
+                    if coll_name not in target_names:
+                        self.target.create_collection(
+                            name=coll_name,
+                            dimension=coll_info.dimension,
+                            metric=coll_info.metric,
+                        )
+                        target_names.add(coll_name)
+
+                    source_coll = self.source.get_collection(coll_name)
+                    target_coll = self.target.get_collection(coll_name)
+                    if source_coll is None or target_coll is None:
+                        continue
+                    source = source_coll._storage_backend
+                    target = target_coll._storage_backend
+
+                    copied, deleted, note = self._apply_changes(coll_name, source, target)
+                    rows_synced += copied
+                    rows_deleted += deleted
+                    if note:
+                        fallbacks.append(f"{coll_name}: {note}")
+                    collections_synced.append(coll_name)
+
+                except Exception as e:
+                    errors.append(f"Collection {coll_name}: {str(e)}")
+
+            self._last_sync = utcnow_iso()
+
+        except Exception as e:
+            errors.append(f"Collections: {str(e)}")
+
+        finally:
+            with self._lock:
+                self._is_running = False
+
+        return SyncResult(
+            success=len(errors) == 0,
+            rows_synced=rows_synced,
+            collections_synced=collections_synced,
+            documents_synced=0,
+            nodes_synced=0,
+            duration_seconds=time.time() - start_time,
+            errors=errors,
+            rows_deleted=rows_deleted,
+            fallbacks=fallbacks,
         )
+
+    def _apply_changes(self, name: str, source: Any, target: Any) -> Tuple[int, int, Optional[str]]:
+        """One collection's cdc() pass: (rows copied, rows deleted, fallback note)."""
+        changes = getattr(source, "changes", None)
+        head_of = getattr(source, "current_version", None)
+        if not (callable(changes) and callable(head_of)):
+            copied, deleted = self._reconcile(name, source, target)
+            return copied, deleted, None
+
+        # Read the head before anything else, so a write landing during this
+        # pass is replayed next time rather than skipped. Replaying is safe:
+        # an upsert or a delete applied twice ends where it did once.
+        head = int(head_of(name))
+        reached = self._cdc_versions.get(name)
+        note = None
+        if reached is None:
+            copied, deleted = self._reconcile(name, source, target)
+        elif head < reached:
+            # The table is not the one the last pass read: it was dropped and
+            # made again, so its versions started over.
+            note = f"table version went back from {reached} to {head}; compared every row"
+            copied, deleted = self._reconcile(name, source, target)
+        elif head == reached:
+            copied, deleted = 0, 0
+        else:
+            try:
+                latest: Dict[str, Optional[Dict[str, Any]]] = {}
+                for _version, kind, point_id, data in changes(name, reached + 1, head):
+                    latest[point_id] = data if kind == "upsert" else None
+            except Exception as exc:
+                note = f"change feed unavailable from version {reached + 1} ({exc}); compared every row"
+                copied, deleted = self._reconcile(name, source, target)
+            else:
+                copied, deleted = self._write(name, target, latest)
+        self._cdc_versions[name] = head
+        return copied, deleted, note
+
+    def _write(
+        self, name: str, target: Any, latest: Dict[str, Optional[Dict[str, Any]]]
+    ) -> Tuple[int, int]:
+        """Apply the last change seen for each id: copy it, or delete it."""
+        upserts = [(pid, data) for pid, data in latest.items() if data is not None]
+        deletes = [pid for pid, data in latest.items() if data is None]
+        for i in range(0, len(upserts), self.batch_size):
+            target.insert_batch(name, upserts[i : i + self.batch_size])
+        if deletes:
+            target.delete_batch(name, deletes)
+        return len(upserts), len(deletes)
+
+    def _reconcile(self, name: str, source: Any, target: Any) -> Tuple[int, int]:
+        """Copy every source row, then delete the target rows the source lacks."""
+        source_ids = set()
+        copied = 0
+        batch: List[Tuple[str, Dict[str, Any]]] = []
+        for point_id, data in self._read_points(source, name):
+            source_ids.add(point_id)
+            batch.append((point_id, data))
+            if len(batch) >= self.batch_size:
+                target.insert_batch(name, batch)
+                copied += len(batch)
+                batch = []
+        if batch:
+            target.insert_batch(name, batch)
+            copied += len(batch)
+
+        # Collected before deleting, so the scan's pages do not shift under it.
+        stale = [pid for pid, _ in self._read_points(target, name) if pid not in source_ids]
+        if stale:
+            target.delete_batch(name, stale)
+        return copied, len(stale)
+
+    def start_cdc(self, interval_seconds: float = 30.0) -> None:
+        """
+        Run cdc() in the background every ``interval_seconds``.
+
+        The near real-time counterpart of start_scheduler(), and the one that
+        carries deletes. stop_cdc() stops it. Only one background loop runs
+        per instance, so this refuses while the scheduler is running.
+
+        Args:
+            interval_seconds: Seconds between passes (default: 30)
+        """
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be positive")
+        if self._scheduler_thread is not None and self._scheduler_thread.is_alive():
+            raise RuntimeError("a sync loop is already running; stop it first")
+
+        self._stop_scheduler.clear()
+
+        def cdc_loop():
+            while not self._stop_scheduler.is_set():
+                try:
+                    result = self.cdc()
+                    for error in result.errors:
+                        logger.error("cdc pass: %s", error)
+                except Exception as e:
+                    logger.error("cdc pass failed: %s", e, exc_info=True)
+                self._stop_scheduler.wait(timeout=interval_seconds)
+
+        self._scheduler_thread = threading.Thread(target=cdc_loop, daemon=True)
+        self._scheduler_thread.start()
+
+    def stop_cdc(self) -> None:
+        """Stop the background loop start_cdc() started."""
+        self.stop_scheduler()
 
 
 # Convenience function

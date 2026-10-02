@@ -16,6 +16,22 @@ may change at any time.
 
 ### Added
 
+- **`VectrixSync.cdc()` carries deletes to the target.** `full()` and
+  `incremental()` only ever copied, so a chunk deleted or revoked in the
+  governed Delta Lake source stayed searchable in the Lakebase copy for good.
+  `cdc()` reads Delta Lake's change data feed from the version the last pass
+  reached and applies inserts, updates and deletes alike; on any other source,
+  and on a collection's first pass, it copies every row and deletes the target
+  rows the source lacks. A feed that cannot answer, off at that version or
+  vacuumed, is compared the same way and named in the new
+  `SyncResult.fallbacks`; `SyncResult.rows_deleted` counts what left.
+  `start_cdc(interval_seconds=30)` runs it in the background, replacing the
+  `NotImplementedError` it raised, and `stop_cdc()` stops it. Delta Lake
+  collection tables are created with the feed on, and
+  `DeltaLakeStorage.enable_change_feed()` turns it on for one made before.
+  The test fake for databricks-sql-connector records a feed as Delta does;
+  nothing here has run against a live warehouse.
+
 - **`scripts/dashboard_shots.py` retakes the dashboard's pictures.** The
   twelve pictures in the docs were taken by hand and went stale as the pages
   changed. The script fills a sample server in a folder of its own, with four
