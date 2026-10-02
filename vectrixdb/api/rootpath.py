@@ -49,9 +49,13 @@ def _without_the_prefix(scope: dict) -> str:
 #: above says the same thing, for a Starlette that keeps it somewhere else.
 _starlette_route_path: Optional[Callable[[Any], str]]
 try:
-    from starlette._utils import get_route_path as _starlette_route_path
-except ImportError:  # pragma: no cover - older Starlette
+    from starlette import _utils as _starlette_utils
+except ImportError:  # pragma: no cover - no Starlette
     _starlette_route_path = None
+else:
+    # getattr, not a from-import: an annotated name rebound by an import is a
+    # redefinition to mypy, and Starlette may move it without notice.
+    _starlette_route_path = getattr(_starlette_utils, "get_route_path", None)
 
 
 def route_path(request: Any) -> str:
@@ -93,5 +97,7 @@ class RootPathMiddleware:
                 raw = scope.get("raw_path")
                 if isinstance(raw, bytes):
                     head = path[: len(path) - len(rest)].encode()
-                    scope["raw_path"] = root.encode() + (raw[len(head) :] if head and raw.startswith(head) else raw)
+                    scope["raw_path"] = root.encode() + (
+                        raw[len(head) :] if head and raw.startswith(head) else raw
+                    )
         return await self.app(scope, receive, send)

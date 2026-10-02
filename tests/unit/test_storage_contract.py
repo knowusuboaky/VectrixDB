@@ -748,7 +748,13 @@ class TestCosmosDocumentContainers:
         monkeypatch.setattr(database, "create_container", counting)
         for i in range(3):
             storage.save_document(
-                {"doc_id": f"d{i}", "title": "T", "doc_type": "pdf", "page_count": 1, "metadata": {}}
+                {
+                    "doc_id": f"d{i}",
+                    "title": "T",
+                    "doc_type": "pdf",
+                    "page_count": 1,
+                    "metadata": {},
+                }
             )
             storage.save_node(
                 {"node_id": f"n{i}", "doc_id": f"d{i}", "title": "t", "text": "x", "position": 0}

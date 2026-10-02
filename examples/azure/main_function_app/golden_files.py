@@ -174,7 +174,13 @@ def golden_request(body: Any) -> Optional[Dict[str, Any]]:
 
 def evaluation_message(golden: str, collections: Sequence[str]) -> str:
     """The queue message that asks for an evaluation: the golden file's address, and the collections to ask."""
-    return json.dumps({"vectrixdb": "evaluate", "golden": str(golden), "collections": [str(c) for c in collections]})
+    return json.dumps(
+        {
+            "vectrixdb": "evaluate",
+            "golden": str(golden),
+            "collections": [str(c) for c in collections],
+        }
+    )
 
 
 def evaluation_request(body: Any) -> Optional[Dict[str, Any]]:
@@ -188,7 +194,9 @@ def evaluation_request(body: Any) -> Optional[Dict[str, Any]]:
     named = asked.get("collections")
     return {
         "golden": str(asked.get("golden") or "").strip(),
-        "collections": [str(c).strip() for c in named if str(c).strip()] if isinstance(named, list) else [],
+        "collections": [str(c).strip() for c in named if str(c).strip()]
+        if isinstance(named, list)
+        else [],
     }
 
 
@@ -212,7 +220,15 @@ def chunking_job() -> str:
 
 def chunking_message(golden: str, collections: Sequence[str], job: str, at: int = 0) -> str:
     """The queue message that asks for one build of a chunking comparison: the ``at``-th of the plan, in ``job``."""
-    return json.dumps({"vectrixdb": "chunking", "golden": str(golden), "collections": [str(c) for c in collections], "job": str(job), "at": int(at)})
+    return json.dumps(
+        {
+            "vectrixdb": "chunking",
+            "golden": str(golden),
+            "collections": [str(c) for c in collections],
+            "job": str(job),
+            "at": int(at),
+        }
+    )
 
 
 def chunking_request(body: Any) -> Optional[Dict[str, Any]]:
@@ -231,7 +247,9 @@ def chunking_request(body: Any) -> Optional[Dict[str, Any]]:
         at = 0
     return {
         "golden": str(asked.get("golden") or "").strip(),
-        "collections": [str(c).strip() for c in named if str(c).strip()] if isinstance(named, list) else [],
+        "collections": [str(c).strip() for c in named if str(c).strip()]
+        if isinstance(named, list)
+        else [],
         "job": "".join(ch for ch in str(asked.get("job") or "") if ch.isalnum() or ch in "-_"),
         "at": at,
     }
@@ -260,20 +278,32 @@ def chunking_turn(
     """
     job = asked.get("job") or chunking_job()
     at = int(asked.get("at") or 0)
-    said = {"golden": asked.get("golden") or "", "collections": list(asked.get("collections") or []), "job": job}
+    said = {
+        "golden": asked.get("golden") or "",
+        "collections": list(asked.get("collections") or []),
+        "job": job,
+    }
     if at < len(plan):
         one = plan[at]
         kept = f"{CHUNKING_WORK}/{job}/{one['key']}.json"
         if not folder.exists(kept):
-            folder.status("running", into=CHUNKING_STATUS, build=at + 1, of=len(plan), key=one["key"], **said)
+            folder.status(
+                "running", into=CHUNKING_STATUS, build=at + 1, of=len(plan), key=one["key"], **said
+            )
             folder.write(kept, json.dumps(build(dict(one)), ensure_ascii=False).encode("utf-8"))
         if at + 1 < len(plan):
             send(chunking_message(said["golden"], said["collections"], job, at + 1))
-            return folder.status("running", into=CHUNKING_STATUS, build=at + 1, of=len(plan), key=one["key"], **said)
+            return folder.status(
+                "running", into=CHUNKING_STATUS, build=at + 1, of=len(plan), key=one["key"], **said
+            )
     results = []
     for one in plan:
         data = folder.read(f"{CHUNKING_WORK}/{job}/{one['key']}.json")
-        results.append(json.loads(data.decode("utf-8")) if data else {**one, "questions": 0, "error": "this build was not kept"})
+        results.append(
+            json.loads(data.decode("utf-8"))
+            if data
+            else {**one, "questions": 0, "error": "this build was not kept"}
+        )
     report = finish(results)
     for one in plan:
         folder.remove(f"{CHUNKING_WORK}/{job}/{one['key']}.json")
@@ -284,7 +314,10 @@ def chunking_turn(
         run=report.get("id"),
         scored=report.get("scored"),
         best=techniques[0]["name"] if techniques else None,
-        techniques=[f"{t['rank']}. {t['name']}, {t.get('right', 0)} of {t.get('questions', 0)}{' (a tie)' if t.get('tie') else ''}" for t in techniques],
+        techniques=[
+            f"{t['rank']}. {t['name']}, {t.get('right', 0)} of {t.get('questions', 0)}{' (a tie)' if t.get('tie') else ''}"
+            for t in techniques
+        ],
         failed=[f"{b['key']}: {b['error']}" for b in report.get("builds") or [] if b.get("error")],
         **({"picked": report["picked"]} if report.get("picked") else {}),
         **said,
@@ -324,7 +357,13 @@ def chunking_in_force(setting: Optional[str], picks: Optional[Mapping[str, Any]]
         return {"key": value, "by": "pinned", "why": "INGEST_CHUNKING names it"}
     chosen = dict((picks or {}).get("chunking") or {})
     if chosen.get("key"):
-        return {"key": str(chosen["key"]), "by": "auto", "run": chosen.get("run"), "why": chosen.get("why"), "at": chosen.get("at")}
+        return {
+            "key": str(chosen["key"]),
+            "by": "auto",
+            "run": chosen.get("run"),
+            "why": chosen.get("why"),
+            "at": chosen.get("at"),
+        }
     return {
         "key": None,
         "by": "auto",
@@ -332,7 +371,9 @@ def chunking_in_force(setting: Optional[str], picks: Optional[Mapping[str, Any]]
     }
 
 
-def retrieval_in_force(setting: Optional[str], picks: Optional[Mapping[str, Any]], collection: str) -> Dict[str, Any]:
+def retrieval_in_force(
+    setting: Optional[str], picks: Optional[Mapping[str, Any]], collection: str
+) -> Dict[str, Any]:
     """How step ten searches one collection, and why: ``{"search": kwargs or None, "setup": ..., "by": ..., ...}``.
 
     ``setting`` is ``RETRIEVAL_SETUP``. ``auto``, or nothing, is the
@@ -348,7 +389,14 @@ def retrieval_in_force(setting: Optional[str], picks: Optional[Mapping[str, Any]
         chosen = dict(((picks or {}).get("retrieval") or {}).get(collection) or {})
         one = dict((chosen.get("picks") or {}).get(role) or {})
         if one.get("search") is not None:
-            return {"search": dict(one["search"]), "setup": one.get("key"), "by": "auto", "role": role, "run": chosen.get("run"), "at": chosen.get("at")}
+            return {
+                "search": dict(one["search"]),
+                "setup": one.get("key"),
+                "by": "auto",
+                "role": role,
+                "run": chosen.get("run"),
+                "at": chosen.get("at"),
+            }
         return {
             "search": None,
             "setup": None,
@@ -356,7 +404,12 @@ def retrieval_in_force(setting: Optional[str], picks: Optional[Mapping[str, Any]
             "role": role,
             "why": f"no retrieval run over checked questions has named {role} for {collection} yet, so step ten searches the way step five searched every cut",
         }
-    return {"search": search_of(value), "setup": value, "by": "pinned", "why": "RETRIEVAL_SETUP names it"}
+    return {
+        "search": search_of(value),
+        "setup": value,
+        "by": "pinned",
+        "why": "RETRIEVAL_SETUP names it",
+    }
 
 
 def recorded_cut(key: str) -> Dict[str, Any]:
@@ -376,20 +429,39 @@ def recorded_cut(key: str) -> Dict[str, Any]:
     return cut
 
 
-def with_chunking_pick(picks: Optional[Mapping[str, Any]], *, key: str, run: Optional[str], why: str, questions: int) -> Dict[str, Any]:
+def with_chunking_pick(
+    picks: Optional[Mapping[str, Any]], *, key: str, run: Optional[str], why: str, questions: int
+) -> Dict[str, Any]:
     """``picks`` with a cut in force: its key, the run that chose it, why, over how many checked questions, and when."""
-    return {**dict(picks or {}), "chunking": {"key": key, "run": run, "why": why, "questions": int(questions), "at": _now()}}
+    return {
+        **dict(picks or {}),
+        "chunking": {"key": key, "run": run, "why": why, "questions": int(questions), "at": _now()},
+    }
 
 
-def with_retrieval_picks(picks: Optional[Mapping[str, Any]], collection: str, report: Mapping[str, Any], questions: int) -> Dict[str, Any]:
+def with_retrieval_picks(
+    picks: Optional[Mapping[str, Any]], collection: str, report: Mapping[str, Any], questions: int
+) -> Dict[str, Any]:
     """``picks`` with a collection's three named by a run: each pick's setup and the ``search()`` arguments that run it."""
     setups = {str(s.get("key")): s for s in report.get("setups") or []}
     named = {
-        role: {"key": key, "search": dict(setups[key].get("search") or {}), "label": setups[key].get("method_label")}
+        role: {
+            "key": key,
+            "search": dict(setups[key].get("search") or {}),
+            "label": setups[key].get("method_label"),
+        }
         for role, key in (report.get("picks") or {}).items()
         if key in setups
     }
-    retrieval = {**dict((picks or {}).get("retrieval") or {}), collection: {"run": report.get("id"), "picks": named, "questions": int(questions), "at": _now()}}
+    retrieval = {
+        **dict((picks or {}).get("retrieval") or {}),
+        collection: {
+            "run": report.get("id"),
+            "picks": named,
+            "questions": int(questions),
+            "at": _now(),
+        },
+    }
     return {**dict(picks or {}), "retrieval": retrieval}
 
 
@@ -406,7 +478,9 @@ def with_retrieval_picks(picks: Optional[Mapping[str, Any]], collection: str, re
 
 def apply_message(key: str, collections: Sequence[str]) -> str:
     """The queue message that asks for every kept document of these collections to be cut the way ``key`` names."""
-    return json.dumps({"vectrixdb": "apply", "key": str(key), "collections": [str(c) for c in collections]})
+    return json.dumps(
+        {"vectrixdb": "apply", "key": str(key), "collections": [str(c) for c in collections]}
+    )
 
 
 def apply_request(body: Any) -> Optional[Dict[str, Any]]:
@@ -420,7 +494,12 @@ def apply_request(body: Any) -> Optional[Dict[str, Any]]:
     except ValueError:
         return None
     named = asked.get("collections")
-    return {"key": key, "collections": [str(c).strip() for c in named if str(c).strip()] if isinstance(named, list) else []}
+    return {
+        "key": key,
+        "collections": [str(c).strip() for c in named if str(c).strip()]
+        if isinstance(named, list)
+        else [],
+    }
 
 
 # ============================================================================
@@ -486,7 +565,11 @@ class GoldenFolder:
         data = self.read(EXAMPLES)
         if not data:
             return []
-        return [line.strip() for line in data.decode("utf-8-sig", errors="replace").splitlines() if line.strip()]
+        return [
+            line.strip()
+            for line in data.decode("utf-8-sig", errors="replace").splitlines()
+            if line.strip()
+        ]
 
     def fetch_answers(self, local: str) -> None:
         """The answers kept in the container, copied to ``local``; one left there from an earlier run is removed when the container has none.
@@ -511,7 +594,11 @@ class GoldenFolder:
 
     def status(self, state: str, into: str = STATUS, **said: Any) -> Dict[str, Any]:
         """Say how a job is going, in ``golden.status.json`` or the file ``into`` names, and give it back."""
-        record = {"state": state, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **said}
+        record = {
+            "state": state,
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            **said,
+        }
         self.write(into, json.dumps(record, indent=2, ensure_ascii=False).encode("utf-8"))
         return record
 
@@ -537,7 +624,9 @@ class GoldenFolder:
         return found if isinstance(found, dict) else {}
 
     def write_picks(self, picks: Mapping[str, Any]) -> None:
-        self.write(PICKS_FILE, json.dumps(dict(picks), indent=2, ensure_ascii=False).encode("utf-8"))
+        self.write(
+            PICKS_FILE, json.dumps(dict(picks), indent=2, ensure_ascii=False).encode("utf-8")
+        )
 
     def busy(self, within_seconds: float = 3600.0, into: str = STATUS) -> bool:
         """Whether a job was asked for or began within the function's hour: one at a time, and one that died long ago does not block."""

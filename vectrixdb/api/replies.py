@@ -55,7 +55,11 @@ def message_of(detail: Any) -> str:
         said = []
         for entry in detail:
             if isinstance(entry, Mapping):
-                where = ".".join(str(part) for part in entry.get("loc", ()) if part not in ("body", "query", "path", "header"))
+                where = ".".join(
+                    str(part)
+                    for part in entry.get("loc", ())
+                    if part not in ("body", "query", "path", "header")
+                )
                 what = str(entry.get("msg") or "is not valid")
                 said.append(f"{where}: {what}" if where else what)
             else:
@@ -68,11 +72,27 @@ def message_of(detail: Any) -> str:
 
 def refusal_content(message: str, *, detail: Any = None, data: Any = None) -> dict:
     """The body of a refusal. ``detail`` defaults to the message itself."""
-    return {"ok": False, "message": message, "data": data, "detail": message if detail is None else detail}
+    return {
+        "ok": False,
+        "message": message,
+        "data": data,
+        "detail": message if detail is None else detail,
+    }
 
 
-def refusal(status: int, message: str, *, detail: Any = None, data: Any = None, headers: Optional[Mapping[str, str]] = None) -> JSONResponse:
-    return JSONResponse(status_code=status, content=refusal_content(message, detail=detail, data=data), headers=dict(headers) if headers else None)
+def refusal(
+    status: int,
+    message: str,
+    *,
+    detail: Any = None,
+    data: Any = None,
+    headers: Optional[Mapping[str, str]] = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status,
+        content=refusal_content(message, detail=detail, data=data),
+        headers=dict(headers) if headers else None,
+    )
 
 
 def collection_not_found(name: str) -> JSONResponse:

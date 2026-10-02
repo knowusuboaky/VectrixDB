@@ -83,6 +83,25 @@ class TestStrategies:
         for word in PROSE.split():
             assert word in covered
 
+    @pytest.mark.parametrize(
+        "text, strategy, size, overlap",
+        [
+            # An earlier "alpha" inside the previous chunk matched the
+            # piece first: the last word was lost and one span claimed twice.
+            ("beta \n\n gamma Hello! alpha alpha", "sentence", 22, 2),
+            ("Sub ## Sub beta beta beta x", "recursive", 16, 3),
+            ("a.b ## Sub alpha alpha alpha Hello! alpha Hello! gamma", "recursive", 16, 14),
+            ("gamma \n x \n " + "supercalifragilistic" * 4, "recursive", 46, 32),
+        ],
+    )
+    def test_repeated_words_are_all_covered(self, text, strategy, size, overlap):
+        chunks = chunk(text, strategy, size=size, overlap=overlap)
+        _check_invariants(text, chunks, size)
+        covered = set()
+        for c in chunks:
+            covered.update(range(c.start, c.end))
+        assert all(i in covered for i, ch in enumerate(text) if ch.isalnum())
+
     def test_sentence_strategy_never_cuts_a_sentence(self):
         for c in chunk(PROSE, "sentence", size=150, overlap=0):
             assert c.text[-1] in ".!?", c.text
@@ -327,7 +346,9 @@ class TestEmbeddingCache:
         """A collection kept in Azure Search, Cosmos and Blob wrote nothing to /tmp before its cache opened: every file failed."""
         cache = EmbeddingCache(tmp_path / "vectrixdb" / "financial" / "_embed_cache.db")
         cache.put_many("m", ["a"], np.array([[1.0, 2.0]], dtype=np.float32))
-        assert len(cache) == 1 and (tmp_path / "vectrixdb" / "financial" / "_embed_cache.db").exists()
+        assert (
+            len(cache) == 1 and (tmp_path / "vectrixdb" / "financial" / "_embed_cache.db").exists()
+        )
         cache.close()
 
 

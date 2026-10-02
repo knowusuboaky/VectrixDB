@@ -50,14 +50,25 @@ def opened(monkeypatch, tmp_path, **options):
 
     fake = FakeIndexClient()
     storage = AzureSearchStorage(
-        StorageConfig(backend=StorageBackend.AZURE_SEARCH, azure_search_index_prefix="t", azure_search_filter_fields={"client_id": "string"}),
+        StorageConfig(
+            backend=StorageBackend.AZURE_SEARCH,
+            azure_search_index_prefix="t",
+            azure_search_filter_fields={"client_id": "string"},
+        ),
         index_client=fake,
         client_factory=fake.get_search_client,
     )
     storage.connect()
     monkeypatch.setattr("vectrixdb.core.database.create_storage", lambda config: storage)
     backend = VectrixDB.with_azure_search("https://svc.search.windows.net", key="k")
-    docs = Vectrix("memos", storage_backend=backend, path=str(tmp_path), embed_fn=embed, dimension=4, **{"mode": "hybrid", **options})
+    docs = Vectrix(
+        "memos",
+        storage_backend=backend,
+        path=str(tmp_path),
+        embed_fn=embed,
+        dimension=4,
+        **{"mode": "hybrid", **options},
+    )
     return docs, fake, storage
 
 
@@ -95,8 +106,16 @@ class TestOneHome:
         docs, fake, storage = homes
         only_in_the_store(docs, storage, monkeypatch, "a")
         only_here(fake, "b")
-        assert [h.id for h in docs.search("alpha", limit=4, mode="dense", homes="store")] == ["a", "c", "d"]
-        assert [h.id for h in docs.search("alpha", limit=4, mode="dense", homes="local")] == ["b", "c", "d"]
+        assert [h.id for h in docs.search("alpha", limit=4, mode="dense", homes="store")] == [
+            "a",
+            "c",
+            "d",
+        ]
+        assert [h.id for h in docs.search("alpha", limit=4, mode="dense", homes="local")] == [
+            "b",
+            "c",
+            "d",
+        ]
 
     def test_the_local_home_never_calls_the_service(self, homes, monkeypatch):
         docs, _, storage = homes
@@ -115,7 +134,9 @@ class TestOneHome:
 
     def test_left_out_nothing_changes(self, homes):
         docs, _, _ = homes
-        assert [h.id for h in docs.search("alpha", limit=4)] == [h.id for h in docs.search("alpha", limit=4, homes="local")]
+        assert [h.id for h in docs.search("alpha", limit=4)] == [
+            h.id for h in docs.search("alpha", limit=4, homes="local")
+        ]
 
 
 class TestBothHomes:
@@ -127,7 +148,9 @@ class TestBothHomes:
         assert {h.id for h in found} == {"a", "b", "c", "d"}, "what either home holds"
         ranks = {h.id: h.explain["home_ranks"] for h in found}
         assert ranks["a"] == {"store": 1} and ranks["b"] == {"local": 1}
-        assert set(ranks["c"]) == {"store", "local"} and "did not answer" not in (found.degraded or "")
+        assert set(ranks["c"]) == {"store", "local"} and "did not answer" not in (
+            found.degraded or ""
+        )
         by_id = {h.id: h.score for h in found}
         assert by_id["c"] > by_id["a"], "found by both, second in each, beats first in one"
         assert [h.score for h in found] == sorted((h.score for h in found), reverse=True)
@@ -135,15 +158,25 @@ class TestBothHomes:
     def test_a_result_keeps_its_text_metadata_and_relevance(self, homes):
         docs, _, _ = homes
         top = docs.search("alpha", limit=1, homes="both").items[0]
-        assert top.id == "a" and top.text == TEXTS["a"] and top.metadata["client_id"] == "acme" and top.relevance is not None
+        assert (
+            top.id == "a"
+            and top.text == TEXTS["a"]
+            and top.metadata["client_id"] == "acme"
+            and top.relevance is not None
+        )
 
-    def test_when_the_service_does_not_answer_the_local_index_does_and_says_so(self, homes, monkeypatch):
+    def test_when_the_service_does_not_answer_the_local_index_does_and_says_so(
+        self, homes, monkeypatch
+    ):
         docs, _, storage = homes
         unreachable(storage, monkeypatch)
         for mode in ("dense", "sparse", "hybrid"):
             found = docs.search("alpha", limit=3, mode=mode, homes="both", rerank=False)
             assert [h.id for h in found][:1] == ["a"], mode
-            assert "the store did not answer (ConnectionError)" in found.degraded and "local index alone" in found.degraded
+            assert (
+                "the store did not answer (ConnectionError)" in found.degraded
+                and "local index alone" in found.degraded
+            )
 
     def test_the_limit_the_filter_and_the_budget_still_apply(self, homes):
         docs, _, _ = homes
@@ -173,7 +206,9 @@ class TestWhatIsRefused:
         with pytest.raises(ConfigurationError, match="'store', 'local' or 'both'"):
             homes[0].search("alpha", homes="azure")
 
-    def test_a_mistake_in_the_call_is_not_taken_for_the_service_being_away(self, monkeypatch, tmp_path):
+    def test_a_mistake_in_the_call_is_not_taken_for_the_service_being_away(
+        self, monkeypatch, tmp_path
+    ):
         dense, _, _ = opened(monkeypatch, tmp_path, mode="dense")
         dense.add(["alpha"], ids=["a"])
         with pytest.raises(ValueError, match="Cannot use 'hybrid' mode"):
@@ -187,9 +222,13 @@ class TestWhatIsRefused:
     def test_not_under_an_entitlement_policy(self, monkeypatch, tmp_path):
         from vectrixdb.policy import Overlap, Policy
 
-        docs, _, _ = opened(monkeypatch, tmp_path, policy=Policy([Overlap("client_id", "clients", scope=True)]))
+        docs, _, _ = opened(
+            monkeypatch, tmp_path, policy=Policy([Overlap("client_id", "clients", scope=True)])
+        )
         docs.add(["alpha memo"], ids=["a"], metadata=[{"client_id": "acme"}])
         with pytest.raises(ConfigurationError, match="not offered under one"):
             docs.as_principal({"clients": ["acme"]}).search("alpha", homes="both")
-        assert [h.id for h in docs.as_principal({"clients": ["acme"]}).search("alpha")] == ["a"], "and the usual search is untouched"
+        assert [h.id for h in docs.as_principal({"clients": ["acme"]}).search("alpha")] == ["a"], (
+            "and the usual search is untouched"
+        )
         docs.close()

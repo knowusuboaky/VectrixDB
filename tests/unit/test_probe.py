@@ -33,11 +33,20 @@ def app_behind(tmp_path, monkeypatch):
     """The server, told its public address, and a way to make gateways in front of it."""
     from vectrixdb.api.server import create_app
 
-    one = Vectrix("handbook", path=str(tmp_path), dimension=4, embed_fn=_embed, embedding_cache=False)
+    one = Vectrix(
+        "handbook", path=str(tmp_path), dimension=4, embed_fn=_embed, embedding_cache=False
+    )
     one.add(["alpha"], ids=["a"])
     one.close()
 
-    def make(public=PUBLIC, strips_prefix=False, drop=(), error_page=False, extra_cors=False, dashboard=True):
+    def make(
+        public=PUBLIC,
+        strips_prefix=False,
+        drop=(),
+        error_page=False,
+        extra_cors=False,
+        dashboard=True,
+    ):
         monkeypatch.setenv("VECTRIXDB_API_KEY", KEY)
         monkeypatch.delenv("VECTRIXDB_AUDIT_JSONL", raising=False)
         if public:
@@ -45,13 +54,15 @@ def app_behind(tmp_path, monkeypatch):
         else:
             monkeypatch.delenv("VECTRIXDB_PUBLIC_URL", raising=False)
         monkeypatch.setenv("VECTRIXDB_ALLOW_OPEN", "1")
-        client = TestClient(create_app(db_path=str(tmp_path), enable_dashboard=dashboard), follow_redirects=False)
+        client = TestClient(
+            create_app(db_path=str(tmp_path), enable_dashboard=dashboard), follow_redirects=False
+        )
         client.__enter__()
 
         def gateway(url, headers):
-            path = url[len("https://apim.company.test"):]
+            path = url[len("https://apim.company.test") :]
             if strips_prefix:
-                path = path[len("/vectrixdb"):] or "/"
+                path = path[len("/vectrixdb") :] or "/"
             sent = {k: v for k, v in headers.items() if k.lower() not in drop}
             reply = client.get(path, headers=sent)
             out = {k.lower(): v for k, v in reply.headers.items()}
@@ -87,9 +98,18 @@ def said(findings, level):
 class TestADeploymentThatIsRight:
     def test_a_gateway_that_forwards_the_path(self, app_behind):
         findings = probe(PUBLIC, app_behind())
-        assert "error" not in levels(findings) and "warn" not in levels(findings), said(findings, "error") + said(findings, "warn")
+        assert "error" not in levels(findings) and "warn" not in levels(findings), said(
+            findings, "error"
+        ) + said(findings, "warn")
         everything = said(findings, "ok")
-        for expected in ("reaches the server", "under /vectrixdb", "sent as api-key is refused by the server itself", "sent as Authorization: Bearer is refused by the server itself", "dashboard is served", "redirect keeps the path"):
+        for expected in (
+            "reaches the server",
+            "under /vectrixdb",
+            "sent as api-key is refused by the server itself",
+            "sent as Authorization: Bearer is refused by the server itself",
+            "dashboard is served",
+            "redirect keeps the path",
+        ):
             assert expected in everything, expected
 
     def test_a_gateway_that_strips_the_path(self, app_behind):
@@ -105,8 +125,12 @@ class TestADeploymentThatIsRight:
 class TestWhatAGatewayGetsWrong:
     def test_the_key_header_stripped_on_the_way_in(self, app_behind):
         findings = probe(PUBLIC, app_behind(drop=("api-key",)))
-        assert "sent as api-key got 200" in said(findings, "warn"), "a keys-only server lets a read through with no key"
-        assert "sent as Authorization: Bearer is refused by the server itself" in said(findings, "ok"), "the other header still arrives"
+        assert "sent as api-key got 200" in said(findings, "warn"), (
+            "a keys-only server lets a read through with no key"
+        )
+        assert "sent as Authorization: Bearer is refused by the server itself" in said(
+            findings, "ok"
+        ), "the other header still arrives"
 
     def test_the_gateways_own_error_page_in_place_of_the_servers_refusal(self, app_behind):
         findings = probe(PUBLIC, app_behind(error_page=True))

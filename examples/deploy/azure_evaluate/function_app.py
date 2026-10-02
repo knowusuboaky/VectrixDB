@@ -118,9 +118,15 @@ def _reports_for(golden_url: str) -> str:
     return os.environ.get("EVAL_REPORTS") or golden_url.rsplit("/", 1)[0]
 
 
-async def _start(client: df.DurableOrchestrationClient, url: str, instance: str, sha256: str) -> str:
+async def _start(
+    client: df.DurableOrchestrationClient, url: str, instance: str, sha256: str
+) -> str:
     status = await client.get_status(instance)
-    if status is not None and status.runtime_status is not None and status.runtime_status.name in RUNNING + ("Completed",):
+    if (
+        status is not None
+        and status.runtime_status is not None
+        and status.runtime_status.name in RUNNING + ("Completed",)
+    ):
         return f"{instance} already ran or is running"
     await client.start_new("evaluate_golden", instance, {"url": url, "sha256": sha256})
     return f"started {instance}"
@@ -135,18 +141,30 @@ async def golden_changed(event: func.EventGridEvent, client: df.DurableOrchestra
     if not url.endswith(GOLDEN_NAME) or event.event_type != "Microsoft.Storage.BlobCreated":
         return
     sha256 = read_golden(url).sha256
-    print(json.dumps({"golden": url, "sha256": sha256, "then": await _start(client, url, _instance(sha256), sha256)}))
+    print(
+        json.dumps(
+            {
+                "golden": url,
+                "sha256": sha256,
+                "then": await _start(client, url, _instance(sha256), sha256),
+            }
+        )
+    )
 
 
 @app.route(route="evaluate-now", methods=["POST"])
 @app.durable_client_input(client_name="client")
-async def evaluate_now(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
+async def evaluate_now(
+    req: func.HttpRequest, client: df.DurableOrchestrationClient
+) -> func.HttpResponse:
     """Run again with the golden file as it is: what an ingestion calls when it finishes."""
     url = os.environ["EVAL_GOLDEN_URL"]
     sha256 = read_golden(url).sha256
     stamp = datetime.now(timezone.utc).strftime("-%Y%m%d%H%M%S")
     said = await _start(client, url, _instance(sha256, stamp), sha256)
-    return func.HttpResponse(json.dumps({"said": said}), mimetype="application/json", status_code=202)
+    return func.HttpResponse(
+        json.dumps({"said": said}), mimetype="application/json", status_code=202
+    )
 
 
 @app.orchestration_trigger(context_name="context")
@@ -158,7 +176,9 @@ def evaluate_golden(context: df.DurableOrchestrationContext):
     if now != job["sha256"]:
         return {"skipped": "a newer save replaced the file, and its own run covers it"}
     setups = yield context.call_activity("list_setups", job)
-    results = yield context.task_all([context.call_activity("run_one_setup", {"url": job["url"], "setup": s}) for s in setups])
+    results = yield context.task_all(
+        [context.call_activity("run_one_setup", {"url": job["url"], "setup": s}) for s in setups]
+    )
     return (yield context.call_activity("save_report", {"job": job, "results": results}))
 
 
@@ -198,7 +218,11 @@ def save_report(work: dict) -> dict:
     # miss on every setup. Named here, in the run and in the function's output.
     missing = missing_documents(targets(), golden.labelled)
     report = build_report(
-        work["results"], golden.describe(), question_ids=[str(q.id) for q in golden.labelled], targets=described, missing=missing
+        work["results"],
+        golden.describe(),
+        question_ids=[str(q.id) for q in golden.labelled],
+        targets=described,
+        missing=missing,
     )
     run = report_store(_reports_for(job["url"])).save(report, golden=golden.raw)
     return {"run": run, "picks": report["picks"], "missing": missing}

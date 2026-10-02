@@ -205,16 +205,22 @@ def _services(db: Any, collection: Any, name: str, *, with_extractors: bool) -> 
             from .documents import store_for
 
             store = store_for(name)
-            for entry in (store.entries().values() if store is not None else ()):
+            for entry in store.entries().values() if store is not None else ():
                 raw = str(entry.get("extractor") or "").strip()
                 if not raw:
                     continue
-                shown = _EXTRACTOR_NAMES.get(raw, raw.split("//")[-1].split("/")[0] if "://" in raw else raw)
+                shown = _EXTRACTOR_NAMES.get(
+                    raw, raw.split("//")[-1].split("/")[0] if "://" in raw else raw
+                )
                 if shown not in extracted:
                     extracted.append(shown)
         except Exception:  # a card is not worth a failed health check
             extracted = []
-    return {"stored_in": _STORE_NAMES.get(label, label.replace("Storage", "")), "embedded_by": embedded, "extracted_by": extracted[:6]}
+    return {
+        "stored_in": _STORE_NAMES.get(label, label.replace("Storage", "")),
+        "embedded_by": embedded,
+        "extracted_by": extracted[:6],
+    }
 
 
 @router.get("/api/v1/collections/{name}/health", tags=["inspect"])
@@ -252,7 +258,10 @@ async def collection_health(name: str):
         },
     }
     if policy is not None:
-        return {"ok": True, "data": {**common, "detail": "counts withheld: this API resolves no principals"}}
+        return {
+            "ok": True,
+            "data": {**common, "detail": "counts withheld: this API resolves no principals"},
+        }
 
     ratio = collection.tombstone_ratio
     state = "healthy"
@@ -508,7 +517,9 @@ def _why_low(text: str) -> list[str]:
     # In the order that tells a reader most. Noise fails nearly everything at
     # once, and "symbols" is the word for it, not "few ordinary words", which
     # is what a clean table of figures fails and nothing else does.
-    return [_SIGNAL_WORDS[name] for name in _SIGNAL_WORDS if signals.get(name, 1.0) < _WEAK_SIGNAL][:2]
+    return [_SIGNAL_WORDS[name] for name in _SIGNAL_WORDS if signals.get(name, 1.0) < _WEAK_SIGNAL][
+        :2
+    ]
 
 
 @router.get("/api/v1/collections/{name}/quality", tags=["inspect"])
@@ -536,7 +547,10 @@ async def collection_quality(
         # Only the scores from the chunk store, and the text of the few shown.
         rows: Iterator[tuple] = ((q, point_id, None) for point_id, q in store.scores())
     else:
-        rows = (((p.metadata or {}).get("_vx_quality"), str(p.id), _text_of(p)) for p in _each_point(collection))
+        rows = (
+            ((p.metadata or {}).get("_vx_quality"), str(p.id), _text_of(p))
+            for p in _each_point(collection)
+        )
     bins = [0] * 20
     below = 0
     scored = 0
@@ -554,10 +568,11 @@ async def collection_quality(
         lowest.append((q, point_id, body))
         if len(lowest) > (offset + worst) * 4:
             lowest.sort()
-            del lowest[offset + worst:]
+            del lowest[offset + worst :]
     lowest.sort()
     shown: list[tuple[float, str, str]] = [
-        (q, i, full if full is not None else _stored_text(store, i)) for q, i, full in lowest[offset:offset + worst]
+        (q, i, full if full is not None else _stored_text(store, i))
+        for q, i, full in lowest[offset : offset + worst]
     ]
     return {
         "ok": True,
@@ -596,7 +611,9 @@ async def collection_quality(
 
 
 @router.get("/api/v1/collections/{name}/provenance/{point_id}", tags=["inspect"])
-async def chunk_provenance(name: str, point_id: str, req: Request, text: bool = Query(default=True)):
+async def chunk_provenance(
+    name: str, point_id: str, req: Request, text: bool = Query(default=True)
+):
     """Where one chunk came from, as its metadata records it.
 
     ``text=false`` leaves the excerpt out. Where a chunk came from and what it
@@ -639,7 +656,10 @@ async def rebuild_collection(name: str):
     except NotImplementedError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     await srv.ws_manager.broadcast("index_rebuilt", {"collection": name, "vectors": rebuilt})
-    return {"ok": True, "data": {"name": name, "vectors": rebuilt, "tombstone_ratio": collection.tombstone_ratio}}
+    return {
+        "ok": True,
+        "data": {"name": name, "vectors": rebuilt, "tombstone_ratio": collection.tombstone_ratio},
+    }
 
 
 # ============================================================================
@@ -750,7 +770,12 @@ def _holding(records: list, q: Optional[str]) -> list:
     needle = (q or "").strip().lower()
     if not needle:
         return records
-    return [r for r in records if needle in " ".join(str(v) for v in r.values() if isinstance(v, (str, int, float))).lower()]
+    return [
+        r
+        for r in records
+        if needle
+        in " ".join(str(v) for v in r.values() if isinstance(v, (str, int, float))).lower()
+    ]
 
 
 def _decisions_a_day(records: list, days: int, now: Optional[float] = None) -> dict:
@@ -781,13 +806,26 @@ def _decisions_a_day(records: list, days: int, now: Optional[float] = None) -> d
         if not first <= day <= today:
             continue
         outcome = str(rec.get("outcome") or "")
-        name = "denied" if outcome.startswith("denied") else "refused" if outcome.startswith(("refused", "undecidable")) else "allowed"
+        name = (
+            "denied"
+            if outcome.startswith("denied")
+            else "refused"
+            if outcome.startswith(("refused", "undecidable"))
+            else "allowed"
+        )
         daily[name][day - first] += 1
-        row = by.setdefault(str(rec.get("collection") or ""), {"allowed": 0, "denied": 0, "refused": 0})
+        row = by.setdefault(
+            str(rec.get("collection") or ""), {"allowed": 0, "denied": 0, "refused": 0}
+        )
         row[name] += 1
     ranked = sorted(by.items(), key=lambda item: (-sum(item[1].values()), item[0]))
     return {
-        "daily": {"days": [_time.strftime("%Y-%m-%d", _time.gmtime(d * 86400)) for d in range(first, today + 1)], **daily},
+        "daily": {
+            "days": [
+                _time.strftime("%Y-%m-%d", _time.gmtime(d * 86400)) for d in range(first, today + 1)
+            ],
+            **daily,
+        },
         "by_collection": [{"collection": name, **row} for name, row in ranked],
     }
 
@@ -797,9 +835,17 @@ async def audit_trail(
     req: Request,
     limit: int = Query(default=100, gt=0, le=1000),
     offset: int = Query(default=0, ge=0),
-    q: Optional[str] = Query(default=None, description="A find: records that hold this in their collection, principal, outcome or id."),
+    q: Optional[str] = Query(
+        default=None,
+        description="A find: records that hold this in their collection, principal, outcome or id.",
+    ),
     collection: Optional[str] = None,
-    days: int = Query(default=14, gt=0, le=90, description="How many days the counts a day and by collection go back."),
+    days: int = Query(
+        default=14,
+        gt=0,
+        le=90,
+        description="How many days the counts a day and by collection go back.",
+    ),
 ):
     """The most recent audit records, newest first, a page at a time, from where the server records them.
 
@@ -830,7 +876,10 @@ async def audit_trail(
     if where is None:
         return {
             "ok": True,
-            "data": {"available": False, "reason": f"set VECTRIXDB_AUDIT_STORE to where decisions are recorded, or {AUDIT_PATH_ENV} to a JSONL file"},
+            "data": {
+                "available": False,
+                "reason": f"set VECTRIXDB_AUDIT_STORE to where decisions are recorded, or {AUDIT_PATH_ENV} to a JSONL file",
+            },
         }
     from ..audit import audit_records_at, describe_audit_store
 
@@ -839,12 +888,28 @@ async def audit_trail(
         return {"ok": True, "data": {"available": False, "reason": f"{where} does not exist"}}
     try:
         found = audit_records_at(where)
-    except Exception as exc:  # the store's own error, whichever store it is: the page says so rather than failing
-        return {"ok": True, "data": {"available": False, "reason": f"{shown} could not be read ({type(exc).__name__}): {exc}"}}
+    except (
+        Exception
+    ) as exc:  # the store's own error, whichever store it is: the page says so rather than failing
+        return {
+            "ok": True,
+            "data": {
+                "available": False,
+                "reason": f"{shown} could not be read ({type(exc).__name__}): {exc}",
+            },
+        }
     if found is None:
-        return {"ok": True, "data": {"available": False, "reason": f"{shown} is written with INSERT only, so its records are read where they are kept"}}
+        return {
+            "ok": True,
+            "data": {
+                "available": False,
+                "reason": f"{shown} is written with INSERT only, so its records are read where they are kept",
+            },
+        }
 
-    records: list[dict] = [_allowed(rec) for rec in found if not collection or rec.get("collection") == collection]
+    records: list[dict] = [
+        _allowed(rec) for rec in found if not collection or rec.get("collection") == collection
+    ]
     records.reverse()
     trend = _decisions_a_day(records, max(1, min(days, 90)))
     counts = {"decisions": 0, "ingestions": 0, "denied": 0, "undecidable": 0, "refused": 0}

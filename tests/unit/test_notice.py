@@ -39,7 +39,9 @@ class TestTheNotice:
         for model in sorted(ids):
             line = next((row for row in text.splitlines() if model in row.split()), None)
             assert line is not None, f"{model} is not in NOTICE"
-            assert re.search(r"\b(MIT|Apache-2\.0|CC-BY-NC-SA-4\.0)\b", line), f"{model} has no licence beside it"
+            assert re.search(r"\b(MIT|Apache-2\.0|CC-BY-NC-SA-4\.0)\b", line), (
+                f"{model} has no licence beside it"
+            )
 
     def test_the_non_commercial_model_is_said_plainly(self):
         text = NOTICE.read_text(encoding="utf-8")

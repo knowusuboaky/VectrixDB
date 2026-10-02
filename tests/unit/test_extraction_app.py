@@ -61,8 +61,16 @@ def speech(sent=None):
     def transport(method, url, headers, body, timeout):
         sent.append(body)
         phrases = [
-            {"offsetMilliseconds": 0, "durationMilliseconds": 4200, "text": "Welcome to the quarterly results."},
-            {"offsetMilliseconds": 4200, "durationMilliseconds": 4800, "text": "Revenue grew in every region."},
+            {
+                "offsetMilliseconds": 0,
+                "durationMilliseconds": 4200,
+                "text": "Welcome to the quarterly results.",
+            },
+            {
+                "offsetMilliseconds": 4200,
+                "durationMilliseconds": 4800,
+                "text": "Revenue grew in every region.",
+            },
         ]
         return 200, {}, json.dumps({"phrases": phrases}).encode()
 
@@ -78,13 +86,42 @@ def picture(data, name):
 def translator():
     def transport(method, url, headers, body, timeout):
         if "/languages" in url:
-            return 200, {}, json.dumps({"translation": {"fr": {"name": "French", "nativeName": "Français", "dir": "ltr"}}}).encode()
+            return (
+                200,
+                {},
+                json.dumps(
+                    {
+                        "translation": {
+                            "fr": {"name": "French", "nativeName": "Français", "dir": "ltr"}
+                        }
+                    }
+                ).encode(),
+            )
         texts = [item["Text"] for item in json.loads(body)]
         if "/detect" in url:
-            return 200, {}, json.dumps([{"language": "fr", "score": 1.0, "isTranslationSupported": True} for _ in texts]).encode()
-        return 200, {}, json.dumps(
-            [{"translations": [{"text": f"[en] {t}", "to": "en"}], "detectedLanguage": {"language": "fr", "score": 0.9}} for t in texts]
-        ).encode()
+            return (
+                200,
+                {},
+                json.dumps(
+                    [
+                        {"language": "fr", "score": 1.0, "isTranslationSupported": True}
+                        for _ in texts
+                    ]
+                ).encode(),
+            )
+        return (
+            200,
+            {},
+            json.dumps(
+                [
+                    {
+                        "translations": [{"text": f"[en] {t}", "to": "en"}],
+                        "detectedLanguage": {"language": "fr", "score": 0.9},
+                    }
+                    for t in texts
+                ]
+            ).encode(),
+        )
 
     return AzureTranslator("k", transport=transport)
 
@@ -97,15 +134,32 @@ class Downloader:
         self.asked.append(url)
         path = Path(folder) / f"{VIDEO}.m4a"
         path.write_bytes(b"sound")
-        return str(path), {"id": VIDEO, "title": "Quarterly results, explained", "channel": "TD Bank", "duration": 212}
+        return str(path), {
+            "id": VIDEO,
+            "title": "Quarterly results, explained",
+            "channel": "TD Bank",
+            "duration": 212,
+        }
 
 
 PAGES = {
-    "https://www.td.com/about.html": (200, {"Content-Type": "text/html"}, b"<html><body><h1>About TD</h1><p>A bank.</p></body></html>"),
+    "https://www.td.com/about.html": (
+        200,
+        {"Content-Type": "text/html"},
+        b"<html><body><h1>About TD</h1><p>A bank.</p></body></html>",
+    ),
     "https://www.td.com/logo.png": (200, {"Content-Type": "image/png"}, b"\x89PNG" + bytes(64)),
     "https://www.td.com/call.wav": (200, {"Content-Type": "audio/wav"}, b"RIFF" + bytes(64)),
-    "https://www.td.com/ad.mp4": (200, {"Content-Type": "video/mp4"}, b"\x00\x00\x00 ftyp" + bytes(64)),
-    "https://www.td.com/notes.txt": (200, {"Content-Type": "text/plain"}, b"Plain notes about rates."),
+    "https://www.td.com/ad.mp4": (
+        200,
+        {"Content-Type": "video/mp4"},
+        b"\x00\x00\x00 ftyp" + bytes(64),
+    ),
+    "https://www.td.com/notes.txt": (
+        200,
+        {"Content-Type": "text/plain"},
+        b"Plain notes about rates.",
+    ),
 }
 
 
@@ -153,7 +207,12 @@ def client(keyed, service):
 
 class TestItWillNotBeBuiltOpen:
     def test_no_key_and_no_sign_in_is_refused(self, monkeypatch, service):
-        for name in ("VECTRIXDB_API_KEY", "VECTRIXDB_API_KEY_SHA256", "VECTRIXDB_SIGNIN", "VECTRIXDB_ALLOW_OPEN"):
+        for name in (
+            "VECTRIXDB_API_KEY",
+            "VECTRIXDB_API_KEY_SHA256",
+            "VECTRIXDB_SIGNIN",
+            "VECTRIXDB_ALLOW_OPEN",
+        ):
             monkeypatch.delenv(name, raising=False)
         with pytest.raises(ConfigurationError, match="refusing to build the extraction service"):
             create_extraction_app(service)
@@ -178,10 +237,15 @@ class TestTheDoor:
         assert client.post("/extract/txt", content=b"hello").status_code == 401
 
     def test_a_wrong_key_is_refused(self, client):
-        assert client.post("/extract/txt", content=b"hello", headers={"api-key": "wrong"}).status_code == 401
+        assert (
+            client.post("/extract/txt", content=b"hello", headers={"api-key": "wrong"}).status_code
+            == 401
+        )
 
     def test_a_bearer_token_is_the_same_key(self, client):
-        response = client.post("/extract/txt", content=b"hello", headers={"Authorization": f"Bearer {KEY}"})
+        response = client.post(
+            "/extract/txt", content=b"hello", headers={"Authorization": f"Bearer {KEY}"}
+        )
         assert response.status_code == 200
 
     def test_a_read_only_key_cannot_spend_money(self, monkeypatch, service):
@@ -189,7 +253,10 @@ class TestTheDoor:
         monkeypatch.setenv("VECTRIXDB_API_KEY", KEY)
         monkeypatch.setenv("VECTRIXDB_READ_ONLY_API_KEY", "read-only")
         app = TestClient(create_extraction_app(service))
-        assert app.post("/extract/txt", content=b"hello", headers={"api-key": "read-only"}).status_code == 403
+        assert (
+            app.post("/extract/txt", content=b"hello", headers={"api-key": "read-only"}).status_code
+            == 403
+        )
 
 
 # ========================================================== the documents ===
@@ -212,7 +279,9 @@ def word_doc(text: str) -> tuple:
 
 class TestExtract:
     def test_a_text_file_answers_markdown(self, client):
-        response = client.post("/extract/txt", content=b"Late fees are charged monthly.", headers=SIGNED)
+        response = client.post(
+            "/extract/txt", content=b"Late fees are charged monthly.", headers=SIGNED
+        )
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/markdown")
         assert response.text == "Late fees are charged monthly."
@@ -220,27 +289,38 @@ class TestExtract:
     def test_json_when_accept_asks_for_it_first(self, client):
         """The shape HttpExtractor reads, so a library reading through this keeps its structure."""
         response = client.post(
-            "/extract/txt", content=b"hello", headers={**SIGNED, "Accept": "application/json, text/plain;q=0.9"}
+            "/extract/txt",
+            content=b"hello",
+            headers={**SIGNED, "Accept": "application/json, text/plain;q=0.9"},
         )
         body = response.json()
         assert set(body) == {"text", "pages", "headings", "metadata", "segments"}
         assert body["text"] == "hello"
 
     def test_markdown_for_a_caller_that_asks_for_anything(self, client):
-        assert client.post("/extract/txt", content=b"hi", headers={**SIGNED, "Accept": "*/*"}).text == "hi"
+        assert (
+            client.post("/extract/txt", content=b"hi", headers={**SIGNED, "Accept": "*/*"}).text
+            == "hi"
+        )
 
     def test_a_spreadsheet_row_reads_as_its_headers(self, client):
-        response = client.post("/extract/csv", content=b"Region,Revenue\nEMEA,1200\n", headers=SIGNED)
+        response = client.post(
+            "/extract/csv", content=b"Region,Revenue\nEMEA,1200\n", headers=SIGNED
+        )
         assert "EMEA" in response.text and "1200" in response.text
 
     def test_an_old_word_file(self, client, monkeypatch):
-        monkeypatch.setattr("vectrixdb.ingest._doc_streams", lambda path: word_doc("Quarterly summary\r"))
+        monkeypatch.setattr(
+            "vectrixdb.ingest._doc_streams", lambda path: word_doc("Quarterly summary\r")
+        )
         response = client.post("/extract/doc", content=b"the bytes of a .doc", headers=SIGNED)
         assert response.status_code == 200 and response.text == "Quarterly summary"
 
     def test_the_route_decides_the_reader_not_the_file_name(self, client):
         """A .txt route reads text whatever the caller named the file."""
-        response = client.post("/extract/txt", content=b"plain", headers={**SIGNED, "X-Filename": "report.pdf"})
+        response = client.post(
+            "/extract/txt", content=b"plain", headers={**SIGNED, "X-Filename": "report.pdf"}
+        )
         assert response.text == "plain"
 
     def test_an_empty_body_is_refused(self, client):
@@ -258,7 +338,10 @@ class TestExtract:
 
 class TestTranscribeFiles:
     def test_a_picture_is_its_words(self, client):
-        assert client.post("/transcribe/image", content=b"\x89PNG", headers=SIGNED).text == "Total assets 1200"
+        assert (
+            client.post("/transcribe/image", content=b"\x89PNG", headers=SIGNED).text
+            == "Total assets 1200"
+        )
 
     def test_and_what_it_shows_when_vision_is_there(self, keyed, service):
         service.describer = lambda data, context: {"description": "A bar chart of revenue."}
@@ -267,7 +350,9 @@ class TestTranscribeFiles:
         assert said.startswith("A bar chart of revenue.") and "Total assets 1200" in said
 
     def test_a_recording_is_a_timed_transcript(self, client):
-        said = client.post("/transcribe/audio", content=b"RIFF", headers={**SIGNED, "X-Filename": "call.wav"}).text
+        said = client.post(
+            "/transcribe/audio", content=b"RIFF", headers={**SIGNED, "X-Filename": "call.wav"}
+        ).text
         assert said.startswith("# Transcript: call.wav")
         assert "**[0:00 → 0:04]** Welcome to the quarterly results." in said
 
@@ -276,7 +361,9 @@ class TestTranscribeFiles:
         app.post("/transcribe/audio?language=fr-FR", content=b"RIFF", headers=SIGNED)
         app.post("/transcribe/audio", content=b"RIFF", headers=SIGNED)
         assert b'{"locales": ["fr-FR"]}' in service.audio.sent[0]
-        assert b'{"locales": ["en-US"]}' in service.audio.sent[1], "the shared engine is not changed"
+        assert b'{"locales": ["en-US"]}' in service.audio.sent[1], (
+            "the shared engine is not changed"
+        )
 
     def test_a_video_has_its_sound_taken_out(self, client, monkeypatch):
         seen = []
@@ -290,7 +377,9 @@ class TestTranscribeFiles:
                 return self.audio(data, name)
 
         monkeypatch.setattr("vectrixdb.extract.engines.Video", FakeVideo)
-        response = client.post("/transcribe/video", content=b"mp4", headers={**SIGNED, "X-Filename": "ad.mp4"})
+        response = client.post(
+            "/transcribe/video", content=b"mp4", headers={**SIGNED, "X-Filename": "ad.mp4"}
+        )
         assert seen == ["ad.mp4"] and "## Segments" in response.text
 
     def test_a_chart_is_its_description_its_values_as_rows_and_its_words(self, keyed, service):
@@ -301,16 +390,25 @@ class TestTranscribeFiles:
             "by": "gpt-5.4-mini",
         }
         app = TestClient(create_extraction_app(service))
-        body = app.post("/transcribe/image", content=b"\x89PNG", headers={**SIGNED, "Accept": "application/json"}).json()
+        body = app.post(
+            "/transcribe/image",
+            content=b"\x89PNG",
+            headers={**SIGNED, "Accept": "application/json"},
+        ).json()
         assert body["text"] == (
             "[Figure: Revenue by region]\n\nA bar chart of revenue by region, EMEA the largest.\n\n"
             "Region: EMEA; Revenue: 1200\nRegion: APAC; Revenue: 900\n\nTotal assets 1200"
         ), "the reader's own words are exact, so the describer's copy of them is left out"
-        assert body["metadata"]["described"] is True and body["metadata"]["described_by"] == "gpt-5.4-mini"
+        assert (
+            body["metadata"]["described"] is True
+            and body["metadata"]["described_by"] == "gpt-5.4-mini"
+        )
 
     def test_a_picture_with_no_words_keeps_the_ones_the_describer_saw(self, keyed, service):
         service.image = lambda data, name: LoadedDocument(text="")
-        service.describer = lambda data, context: {"description": "A photo of a branch front.\nWords in the picture: TD Bank"}
+        service.describer = lambda data, context: {
+            "description": "A photo of a branch front.\nWords in the picture: TD Bank"
+        }
         app = TestClient(create_extraction_app(service))
         said = app.post("/transcribe/image", content=b"\x89PNG", headers=SIGNED).text
         assert said == "A photo of a branch front.\nWords in the picture: TD Bank"
@@ -337,7 +435,11 @@ class TestTranscribeFiles:
 
     def test_no_language_asked_for_is_none_claimed(self, client):
         """Speech hears which of its languages it was; the call does not claim one for it."""
-        body = client.post("/transcribe/audio", content=b"RIFF", headers={**SIGNED, "X-Filename": "call.wav", "Accept": "application/json"}).json()
+        body = client.post(
+            "/transcribe/audio",
+            content=b"RIFF",
+            headers={**SIGNED, "X-Filename": "call.wav", "Accept": "application/json"},
+        ).json()
         assert "language" not in body["metadata"]
 
 
@@ -352,11 +454,15 @@ class TestPagesReadBySight:
     def test_vision_reads_the_unsure_pages_with_the_describers_model(self):
         made = ExtractionService.from_environment(self.AZURE, jobs=None, describer=None)
         assert made.page_reader.label == "gpt-5.4-mini" and made.every_page is False
-        every = ExtractionService.from_environment({**self.AZURE, "VECTRIXDB_VISION_PAGES": "all"}, jobs=None, describer=None)
+        every = ExtractionService.from_environment(
+            {**self.AZURE, "VECTRIXDB_VISION_PAGES": "all"}, jobs=None, describer=None
+        )
         assert every.every_page is True
 
     def test_with_nothing_that_can_see_pdfs_are_read_by_the_rules_and_it_says_so(self, caplog):
-        made = ExtractionService.from_environment({"VECTRIXDB_EXTRACT_PDF": "vision"}, jobs=None, describer=None)
+        made = ExtractionService.from_environment(
+            {"VECTRIXDB_EXTRACT_PDF": "vision"}, jobs=None, describer=None
+        )
         assert made.page_reader is None and "needs a chat model that can see" in caplog.text
 
     def test_the_route_reads_the_unsure_pages_by_sight(self, keyed, service, tmp_path):
@@ -365,7 +471,10 @@ class TestPagesReadBySight:
         doc = fitz.open()
         page = doc.new_page(width=612, height=792)
         page.insert_text((72, 90), "The year in brief, as the board reported it.", fontsize=10)
-        for top, figure, label in ((160, "4.6%", "2025 Dividend Yield"), (240, "25.9%", "Total Shareholder Return")):
+        for top, figure, label in (
+            (160, "4.6%", "2025 Dividend Yield"),
+            (240, "25.9%", "Total Shareholder Return"),
+        ):
             page.insert_text((72, top), figure, fontsize=28)
             page.insert_text((72, top + 25), label, fontsize=10)
         data = doc.tobytes()
@@ -374,26 +483,46 @@ class TestPagesReadBySight:
             "The year in brief, as the board reported it.\n\n- 4.6% 2025 dividend yield\n- 25.9% total shareholder return"
         )
         app = TestClient(create_extraction_app(service))
-        body = app.post("/extract/pdf", content=data, headers={**SIGNED, "Accept": "application/json"}).json()
-        assert "- 4.6% 2025 dividend yield" in body["text"] and body["metadata"]["pages_read_by_sight"] == [1]
+        body = app.post(
+            "/extract/pdf", content=data, headers={**SIGNED, "Accept": "application/json"}
+        ).json()
+        assert "- 4.6% 2025 dividend yield" in body["text"] and body["metadata"][
+            "pages_read_by_sight"
+        ] == [1]
 
 
 class TestSpeechAndVideoSettings:
     @staticmethod
     def env(**more):
-        return {"AZURE_SPEECH_ENDPOINT": "https://s.cognitiveservices.azure.com", "AZURE_SPEECH_KEY": "k", **more}
+        return {
+            "AZURE_SPEECH_ENDPOINT": "https://s.cognitiveservices.azure.com",
+            "AZURE_SPEECH_KEY": "k",
+            **more,
+        }
 
     def test_english_and_french_four_voices_and_twelve_frames_unless_told(self):
         made = ExtractionService.from_environment(self.env(), jobs=None, describer=None)
-        assert made.audio.locales == ["en-US", "fr-CA"] and made.audio.speakers == 4 and made.video_frames == 12
+        assert (
+            made.audio.locales == ["en-US", "fr-CA"]
+            and made.audio.speakers == 4
+            and made.video_frames == 12
+        )
 
     def test_each_is_a_setting(self):
         made = ExtractionService.from_environment(
-            self.env(VECTRIXDB_SPEECH_LOCALES="en-GB, de-DE", VECTRIXDB_SPEECH_SPEAKERS="0", VECTRIXDB_VIDEO_FRAMES="0"),
+            self.env(
+                VECTRIXDB_SPEECH_LOCALES="en-GB, de-DE",
+                VECTRIXDB_SPEECH_SPEAKERS="0",
+                VECTRIXDB_VIDEO_FRAMES="0",
+            ),
             jobs=None,
             describer=None,
         )
-        assert made.audio.locales == ["en-GB", "de-DE"] and made.audio.speakers == 0 and made.video_frames == 0
+        assert (
+            made.audio.locales == ["en-GB", "de-DE"]
+            and made.audio.speakers == 0
+            and made.video_frames == 0
+        )
 
 
 # ========================================================== the addresses ===
@@ -402,29 +531,50 @@ class TestSpeechAndVideoSettings:
 class TestAddresses:
     def test_a_page_on_an_allowed_host(self, client):
         response = client.post(
-            "/transcribe/webpage", json={"url": "https://www.td.com/about.html"}, headers={**SIGNED, "Accept": "application/json"}
+            "/transcribe/webpage",
+            json={"url": "https://www.td.com/about.html"},
+            headers={**SIGNED, "Accept": "application/json"},
         )
         body = response.json()
         assert "About TD" in body["text"]
-        assert body["metadata"]["embedded_media"] == "not read", "said, rather than silently skipped"
+        assert body["metadata"]["embedded_media"] == "not read", (
+            "said, rather than silently skipped"
+        )
 
     def test_a_host_not_allowed_is_refused(self, client):
-        response = client.post("/transcribe/webpage", json={"url": "http://169.254.169.254/latest/meta-data/"}, headers=SIGNED)
+        response = client.post(
+            "/transcribe/webpage",
+            json={"url": "http://169.254.169.254/latest/meta-data/"},
+            headers=SIGNED,
+        )
         assert response.status_code == 403
 
     def test_with_no_hosts_allowed_nothing_is_fetched(self, keyed, service):
         service.url_hosts = ()
         app = TestClient(create_extraction_app(service))
-        response = app.post("/transcribe/webpage", json={"url": "https://www.td.com/about.html"}, headers=SIGNED)
-        assert response.status_code == 403 and "VECTRIXDB_EXTRACT_URL_HOSTS" in response.json()["message"]
+        response = app.post(
+            "/transcribe/webpage", json={"url": "https://www.td.com/about.html"}, headers=SIGNED
+        )
+        assert (
+            response.status_code == 403
+            and "VECTRIXDB_EXTRACT_URL_HOSTS" in response.json()["message"]
+        )
 
     def test_image_audio_and_video_by_address(self, client, monkeypatch):
         monkeypatch.setattr(
-            "vectrixdb.extract.engines.Video", lambda audio=None, ffmpeg=None: (lambda data, name: audio(data, name))
+            "vectrixdb.extract.engines.Video",
+            lambda audio=None, ffmpeg=None: lambda data, name: audio(data, name),
         )
-        assert client.post("/transcribe/image_url", json={"url": "https://www.td.com/logo.png"}, headers=SIGNED).text == "Total assets 1200"
+        assert (
+            client.post(
+                "/transcribe/image_url", json={"url": "https://www.td.com/logo.png"}, headers=SIGNED
+            ).text
+            == "Total assets 1200"
+        )
         for route, url in (("audio_url", "call.wav"), ("video_url", "ad.mp4")):
-            said = client.post(f"/transcribe/{route}", json={"url": f"https://www.td.com/{url}"}, headers=SIGNED).text
+            said = client.post(
+                f"/transcribe/{route}", json={"url": f"https://www.td.com/{url}"}, headers=SIGNED
+            ).text
             assert "**[0:00 → 0:04]**" in said and "- URL: https://www.td.com/" in said
 
     @pytest.mark.parametrize(
@@ -468,27 +618,73 @@ class TestARedirectCannotLeaveTheAllowedHosts:
             server.shutdown()
 
 
+class _Large(BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 - http.server's name
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"x" * 5000)
+
+    def log_message(self, *args):
+        pass
+
+
+class TestALargeBodyIsNotReadWhole:
+    """A body past the limit is read one byte past it and no further, on a real socket."""
+
+    def test_the_read_stops_one_byte_past_the_limit(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _Large)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/big.txt"
+            _status, _headers, body = _guarded_transport(["127.0.0.1"], max_bytes=100)(
+                "GET", url, {}, b"", 5.0
+            )
+            assert len(body) == 101
+            service = ExtractionService(url_hosts=("127.0.0.1",), max_bytes=100)
+            with pytest.raises(_Refused, match="larger than 100 bytes"):
+                service.fetch(url)
+        finally:
+            server.shutdown()
+
+
 # ================================================================ YouTube ===
 
 
 class TestYouTube:
     def test_a_video_is_the_references_transcript(self, client):
-        said = client.post("/transcribe/youtube", json={"url": f"https://youtu.be/{VIDEO}", "language": "en-US"}, headers=SIGNED).text
+        said = client.post(
+            "/transcribe/youtube",
+            json={"url": f"https://youtu.be/{VIDEO}", "language": "en-US"},
+            headers=SIGNED,
+        ).text
         assert said.startswith("# YouTube: Quarterly results, explained")
-        assert "- Channel: TD Bank" in said and "**[0:04 → 0:09]** Revenue grew in every region." in said
+        assert (
+            "- Channel: TD Bank" in said
+            and "**[0:04 → 0:09]** Revenue grew in every region." in said
+        )
 
     def test_an_address_that_is_not_one_video_is_refused(self, client):
-        response = client.post("/transcribe/youtube", json={"url": "https://www.youtube.com/playlist?list=PL1"}, headers=SIGNED)
+        response = client.post(
+            "/transcribe/youtube",
+            json={"url": "https://www.youtube.com/playlist?list=PL1"},
+            headers=SIGNED,
+        )
         assert response.status_code == 422
 
     def test_saving_is_a_job(self, client):
-        response = client.post("/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED)
+        response = client.post(
+            "/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED
+        )
         assert response.status_code == 202
         started = response.json()
         assert started["status"] == "queued" and started["check"] == f"/jobs/{started['job']}"
 
     def test_the_finished_job_carries_what_a_synchronous_save_answered(self, client, tmp_path):
-        job = client.post("/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED).json()["job"]
+        job = client.post(
+            "/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED
+        ).json()["job"]
         done = client.get(f"/jobs/{job}", headers=SIGNED).json()
         assert done["status"] == "done"
         result = done["result"]
@@ -520,23 +716,47 @@ class TestYouTube:
 
         service.download = refuse
         app = TestClient(create_extraction_app(service))
-        job = app.post("/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED).json()["job"]
+        job = app.post(
+            "/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED
+        ).json()["job"]
         failed = app.get(f"/jobs/{job}", headers=SIGNED).json()
         assert failed["status"] == "failed" and "Video unavailable" in failed["error"]
 
 
 class TestAuto:
     def test_a_youtube_address_is_a_video(self, client):
-        said = client.post("/transcribe/auto", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED).text
+        said = client.post(
+            "/transcribe/auto", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED
+        ).text
         assert said.startswith("# YouTube:")
 
     def test_anything_else_is_read_by_what_it_turns_out_to_be(self, client):
-        assert client.post("/transcribe/auto", json={"url": "https://www.td.com/logo.png"}, headers=SIGNED).text == "Total assets 1200"
-        assert "About TD" in client.post("/transcribe/auto", json={"url": "https://www.td.com/about.html"}, headers=SIGNED).text
-        assert client.post("/transcribe/auto", json={"url": "https://www.td.com/notes.txt"}, headers=SIGNED).text == "Plain notes about rates."
+        assert (
+            client.post(
+                "/transcribe/auto", json={"url": "https://www.td.com/logo.png"}, headers=SIGNED
+            ).text
+            == "Total assets 1200"
+        )
+        assert (
+            "About TD"
+            in client.post(
+                "/transcribe/auto", json={"url": "https://www.td.com/about.html"}, headers=SIGNED
+            ).text
+        )
+        assert (
+            client.post(
+                "/transcribe/auto", json={"url": "https://www.td.com/notes.txt"}, headers=SIGNED
+            ).text
+            == "Plain notes about rates."
+        )
 
     def test_it_is_held_to_the_same_hosts(self, client):
-        assert client.post("/transcribe/auto", json={"url": "https://evil.test/x.pdf"}, headers=SIGNED).status_code == 403
+        assert (
+            client.post(
+                "/transcribe/auto", json={"url": "https://evil.test/x.pdf"}, headers=SIGNED
+            ).status_code
+            == 403
+        )
 
 
 # ============================================================ translation ===
@@ -544,24 +764,43 @@ class TestAuto:
 
 class TestTranslate:
     def test_text_answers_the_references_shape(self, client):
-        body = client.post("/translate/text", json={"text": ["Bonjour"], "to": "en"}, headers=SIGNED).json()
+        body = client.post(
+            "/translate/text", json={"text": ["Bonjour"], "to": "en"}, headers=SIGNED
+        ).json()
         assert body == {
-            "translations": [{"text": "[en] Bonjour", "to": "en", "detected_language": "fr", "detected_score": 0.9}],
+            "translations": [
+                {
+                    "text": "[en] Bonjour",
+                    "to": "en",
+                    "detected_language": "fr",
+                    "detected_score": 0.9,
+                }
+            ],
             "from_language": "auto-detected",
             "to_language": "en",
         }
 
     def test_one_text_is_a_list_of_one(self, client):
-        body = client.post("/translate/text", json={"text": "Bonjour", "to": "en", "from_lang": "fr"}, headers=SIGNED).json()
+        body = client.post(
+            "/translate/text",
+            json={"text": "Bonjour", "to": "en", "from_lang": "fr"},
+            headers=SIGNED,
+        ).json()
         assert len(body["translations"]) == 1 and body["from_language"] == "fr"
 
     def test_detect(self, client):
         body = client.post("/translate/detect", json={"text": "Bonjour"}, headers=SIGNED).json()
-        assert body["detections"][0]["language"] == "fr" and body["detections"][0]["is_translation_supported"] is True
+        assert (
+            body["detections"][0]["language"] == "fr"
+            and body["detections"][0]["is_translation_supported"] is True
+        )
 
     def test_languages(self, client):
         body = client.get("/translate/languages", headers=SIGNED).json()
-        assert body == {"languages": {"fr": {"name": "French", "native_name": "Français", "dir": "ltr"}}, "count": 1}
+        assert body == {
+            "languages": {"fr": {"name": "French", "native_name": "Français", "dir": "ltr"}},
+            "count": 1,
+        }
 
     def test_not_set_up_says_which_setting(self, keyed, service):
         service.translator = None
@@ -592,7 +831,11 @@ class Container:
         self.blobs = {}
 
     def upload_blob(self, name, data, overwrite=False):
-        self.blobs[name] = data.read() if hasattr(data, "read") else (data.encode() if isinstance(data, str) else data)
+        self.blobs[name] = (
+            data.read()
+            if hasattr(data, "read")
+            else (data.encode() if isinstance(data, str) else data)
+        )
 
     def download_blob(self, name):
         if name not in self.blobs:
@@ -612,30 +855,46 @@ class TestAzureJobs:
     """What a function app uses: records in a container, work on a queue, any instance can answer."""
 
     def service(self, tmp_path):
-        return ExtractionService(audio=speech(), jobs=AzureJobs(Container(), Queue()), download=Downloader(), url_hosts=())
+        return ExtractionService(
+            audio=speech(),
+            jobs=AzureJobs(Container(), Queue()),
+            download=Downloader(),
+            url_hosts=(),
+        )
 
     def test_the_route_writes_a_record_and_a_message_and_does_no_work(self, keyed, tmp_path):
         service = self.service(tmp_path)
         app = TestClient(create_extraction_app(service))
-        job = app.post("/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED).json()["job"]
+        job = app.post(
+            "/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED
+        ).json()["job"]
         assert json.loads(service.jobs._queue.sent[0]) == {"job": job}
         assert app.get(f"/jobs/{job}", headers=SIGNED).json()["status"] == "queued"
         assert service.download.asked == [], "the work waits for the queue"
 
-    def test_the_queue_trigger_finishes_it_and_the_result_is_in_the_container(self, keyed, tmp_path):
+    def test_the_queue_trigger_finishes_it_and_the_result_is_in_the_container(
+        self, keyed, tmp_path
+    ):
         service = self.service(tmp_path)
         app = TestClient(create_extraction_app(service))
-        job = app.post("/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED).json()["job"]
+        job = app.post(
+            "/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED
+        ).json()["job"]
         run_extraction_job(service.jobs._queue.sent[0].encode(), service)
         done = app.get(f"/jobs/{job}", headers=SIGNED).json()
         assert done["status"] == "done"
-        assert done["result"]["transcript_file"] == f"{Container.url}/transcripts/output/{VIDEO}_transcript.md"
+        assert (
+            done["result"]["transcript_file"]
+            == f"{Container.url}/transcripts/output/{VIDEO}_transcript.md"
+        )
         assert f"transcripts/output/{VIDEO}_transcript.md" in service.jobs._container.blobs
 
     def test_a_message_delivered_twice_is_not_a_job_run_twice(self, keyed, tmp_path):
         service = self.service(tmp_path)
         app = TestClient(create_extraction_app(service))
-        app.post("/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED)
+        app.post(
+            "/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED
+        )
         message = service.jobs._queue.sent[0]
         run_extraction_job(message, service)
         run_extraction_job(message, service)
@@ -650,7 +909,9 @@ class TestAzureJobs:
 
         service.download = refuse
         app = TestClient(create_extraction_app(service))
-        job = app.post("/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED).json()["job"]
+        job = app.post(
+            "/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED
+        ).json()["job"]
         run_extraction_job(service.jobs._queue.sent[0], service)
         assert app.get(f"/jobs/{job}", headers=SIGNED).json()["status"] == "failed"
 
@@ -676,15 +937,26 @@ class TestALibraryReadsThroughIt:
             response = client.request(method, path, headers=headers, content=body)
             return response.status_code, dict(response.headers), response.content
 
-        return HttpExtractor("https://app1.test", routes=routes, body="raw", headers={"api-key": KEY}, transport=transport)
+        return HttpExtractor(
+            "https://app1.test",
+            routes=routes,
+            body="raw",
+            headers={"api-key": KEY},
+            transport=transport,
+        )
 
     def test_a_document_comes_back_as_a_document(self, client):
-        doc = self.extractor(client, {".txt": "/extract/txt"})(b"Late fees are charged monthly.", "fees.txt")
+        doc = self.extractor(client, {".txt": "/extract/txt"})(
+            b"Late fees are charged monthly.", "fees.txt"
+        )
         assert doc.text == "Late fees are charged monthly."
 
     def test_a_recording_keeps_every_phrase_and_its_time(self, client):
         doc = self.extractor(client, {".wav": "/transcribe/audio"})(b"RIFF", "call.wav")
-        assert doc.segments == [(0.0, 4.2, "Welcome to the quarterly results."), (4.2, 9.0, "Revenue grew in every region.")]
+        assert doc.segments == [
+            (0.0, 4.2, "Welcome to the quarterly results."),
+            (4.2, 9.0, "Revenue grew in every region."),
+        ]
         assert doc.pages == [(0, 1)], "cited by minute, as it was on the other side"
 
 
@@ -717,8 +989,12 @@ class TestTheDeploymentChoosesThePath:
             ("/one/two", "", "/one/two/extract/txt"),  # a prefix of more than one part
         ],
     )
-    def test_it_answers_however_the_request_arrives(self, keyed, monkeypatch, service, prefix, proxy, arrives):
-        response = self.app(monkeypatch, service, prefix=prefix, proxy=proxy).post(arrives, content=b"hello", headers=SIGNED)
+    def test_it_answers_however_the_request_arrives(
+        self, keyed, monkeypatch, service, prefix, proxy, arrives
+    ):
+        response = self.app(monkeypatch, service, prefix=prefix, proxy=proxy).post(
+            arrives, content=b"hello", headers=SIGNED
+        )
         assert response.status_code == 200 and response.text == "hello"
 
     def test_the_prefix_can_come_from_the_environment(self, keyed, monkeypatch, service):
@@ -742,23 +1018,36 @@ class TestTheDeploymentChoosesThePath:
         assert app.post("/company/extract/txt", content=b"hello").status_code == 401
 
     @pytest.mark.parametrize("prefix", ["", "/company"])
-    def test_a_slash_too_many_is_not_found_and_not_redirected(self, keyed, monkeypatch, service, prefix):
+    def test_a_slash_too_many_is_not_found_and_not_redirected(
+        self, keyed, monkeypatch, service, prefix
+    ):
         """A redirect names the host the app sees, which behind a gateway sends the caller around it."""
         app = self.app(monkeypatch, service, prefix=prefix)
-        response = app.post(f"{prefix}/extract/txt/", content=b"hello", headers=SIGNED, follow_redirects=False)
+        response = app.post(
+            f"{prefix}/extract/txt/", content=b"hello", headers=SIGNED, follow_redirects=False
+        )
         assert response.status_code == 404 and "location" not in response.headers
 
     def test_the_address_of_a_job_is_the_one_the_caller_uses(self, keyed, monkeypatch, service):
         app = self.app(monkeypatch, service, prefix="/company", proxy="/proxy")
         started = app.post(
-            "/proxy/company/transcribe/youtube_save", json={"url": f"https://youtu.be/{VIDEO}"}, headers=SIGNED
+            "/proxy/company/transcribe/youtube_save",
+            json={"url": f"https://youtu.be/{VIDEO}"},
+            headers=SIGNED,
         ).json()
         assert started["check"] == f"/proxy/company/jobs/{started['job']}"
         assert app.get(started["check"], headers=SIGNED).json()["status"] == "done"
 
     @pytest.mark.parametrize(
         "written, meant",
-        [("api", "/api"), ("/api/", "/api"), ("//one//two/", "/one/two"), ("", ""), ("/", ""), (None, "")],
+        [
+            ("api", "/api"),
+            ("/api/", "/api"),
+            ("//one//two/", "/one/two"),
+            ("", ""),
+            ("/", ""),
+            (None, ""),
+        ],
     )
     def test_a_prefix_however_it_is_written(self, written, meant):
         assert route_prefix(written) == meant
@@ -794,13 +1083,18 @@ class TestEachEndpointHasAGatewayPathOfItsOwn:
             "/acme/extract/txt",  # it takes the path off, or nothing stands in front
         ],
     )
-    def test_a_listed_route_answers_with_its_path_or_without_it(self, keyed, monkeypatch, service, arrives):
+    def test_a_listed_route_answers_with_its_path_or_without_it(
+        self, keyed, monkeypatch, service, arrives
+    ):
         response = self.app(monkeypatch, service).post(arrives, content=b"hello", headers=SIGNED)
         assert response.status_code == 200 and response.text == "hello"
 
     def test_each_endpoint_answers_under_a_path_of_its_own(self, keyed, monkeypatch, service):
         app = self.app(monkeypatch, service)
-        assert app.post("/files/text/acme/extract/txt", content=b"hello", headers=SIGNED).status_code == 200
+        assert (
+            app.post("/files/text/acme/extract/txt", content=b"hello", headers=SIGNED).status_code
+            == 200
+        )
         assert self.save(app)["status"] in ("queued", "done")
 
     @pytest.mark.parametrize(
@@ -812,17 +1106,29 @@ class TestEachEndpointHasAGatewayPathOfItsOwn:
         ],
     )
     def test_a_path_opens_its_own_route_and_no_other(self, keyed, monkeypatch, service, wrong):
-        assert self.app(monkeypatch, service).post(wrong, content=b"hello", headers=SIGNED).status_code == 404
+        assert (
+            self.app(monkeypatch, service).post(wrong, content=b"hello", headers=SIGNED).status_code
+            == 404
+        )
 
     def test_a_gateway_path_is_not_read_as_part_of_another_route(self, keyed, monkeypatch, service):
         """With no prefix, /jobs in front of /health looks like the job route asked for a job called health."""
         app = self.app(monkeypatch, service, "health=/jobs", prefix="")
         assert app.get("/jobs/health").json()["status"] == "healthy"
 
-    def test_a_route_that_is_not_listed_answers_under_the_prefix_alone(self, keyed, monkeypatch, service):
-        assert self.app(monkeypatch, service).get("/acme/translate/languages", headers=SIGNED).json()["count"] == 1
+    def test_a_route_that_is_not_listed_answers_under_the_prefix_alone(
+        self, keyed, monkeypatch, service
+    ):
+        assert (
+            self.app(monkeypatch, service)
+            .get("/acme/translate/languages", headers=SIGNED)
+            .json()["count"]
+            == 1
+        )
 
-    def test_the_address_of_a_job_starts_with_the_job_routes_own_path(self, keyed, monkeypatch, service):
+    def test_the_address_of_a_job_starts_with_the_job_routes_own_path(
+        self, keyed, monkeypatch, service
+    ):
         """The caller puts the host it was given in front, and the app answers the same address itself."""
         app = self.app(monkeypatch, service)
         started = self.save(app)
@@ -830,13 +1136,22 @@ class TestEachEndpointHasAGatewayPathOfItsOwn:
         assert app.get(started["check"], headers=SIGNED).json()["status"] == "done"
         assert app.get(f"/acme/jobs/{started['job']}", headers=SIGNED).json()["status"] == "done"
 
-    def test_with_no_path_for_jobs_the_address_is_under_the_prefix(self, keyed, monkeypatch, service):
+    def test_with_no_path_for_jobs_the_address_is_under_the_prefix(
+        self, keyed, monkeypatch, service
+    ):
         started = self.save(self.app(monkeypatch, service, "transcribe/youtube_save=/media/save"))
         assert started["check"] == f"/acme/jobs/{started['job']}"
 
-    def test_a_proxy_path_in_front_of_every_route_still_comes_first(self, keyed, monkeypatch, service):
+    def test_a_proxy_path_in_front_of_every_route_still_comes_first(
+        self, keyed, monkeypatch, service
+    ):
         app = self.app(monkeypatch, service, proxy="/proxy")
-        assert app.post("/proxy/files/text/acme/extract/txt", content=b"hello", headers=SIGNED).status_code == 200
+        assert (
+            app.post(
+                "/proxy/files/text/acme/extract/txt", content=b"hello", headers=SIGNED
+            ).status_code
+            == 200
+        )
         started = self.save(app, "/proxy/media/save/acme/transcribe/youtube_save")
         assert started["check"] == f"/proxy/media/jobs/v1/acme/jobs/{started['job']}"
         assert app.get(started["check"], headers=SIGNED).json()["status"] == "done"
@@ -847,7 +1162,9 @@ class TestEachEndpointHasAGatewayPathOfItsOwn:
         assert app.get("/probe/acme/health").json()["status"] == "healthy"
         assert app.post("/files/text/acme/extract/txt", content=b"hello").status_code == 401
 
-    def test_the_description_lists_each_route_once_under_the_prefix(self, keyed, monkeypatch, service):
+    def test_the_description_lists_each_route_once_under_the_prefix(
+        self, keyed, monkeypatch, service
+    ):
         """It is what a gateway imports, and a gateway path in it would be imported as a route of its own."""
         paths = self.app(monkeypatch, service).get("/acme/openapi.json").json()["paths"]
         assert "/acme/extract/txt" in paths and "/acme/jobs/{job}" in paths
@@ -857,13 +1174,21 @@ class TestEachEndpointHasAGatewayPathOfItsOwn:
         monkeypatch.setenv("VECTRIXDB_EXTRACT_PREFIX", "/acme")
         monkeypatch.setenv("VECTRIXDB_EXTRACT_GATEWAY_PATHS", "extract/txt=/files/text")
         app = TestClient(create_extraction_app(service))
-        assert app.post("/files/text/acme/extract/txt", content=b"hello", headers=SIGNED).status_code == 200
+        assert (
+            app.post("/files/text/acme/extract/txt", content=b"hello", headers=SIGNED).status_code
+            == 200
+        )
 
     def test_a_mapping_does_as_well_as_the_written_form(self, keyed, monkeypatch, service):
         app = self.app(monkeypatch, service, {"extract/txt": "/files/text"})
-        assert app.post("/files/text/acme/extract/txt", content=b"hello", headers=SIGNED).status_code == 200
+        assert (
+            app.post("/files/text/acme/extract/txt", content=b"hello", headers=SIGNED).status_code
+            == 200
+        )
 
-    def test_a_route_that_is_not_served_is_refused_when_the_app_is_built(self, keyed, monkeypatch, service):
+    def test_a_route_that_is_not_served_is_refused_when_the_app_is_built(
+        self, keyed, monkeypatch, service
+    ):
         """A typing mistake is found at start-up, and not by the first caller."""
         with pytest.raises(ConfigurationError, match="no route called extract/pfd"):
             self.app(monkeypatch, service, "extract/pfd=/files/pdf")
@@ -892,12 +1217,18 @@ class TestEveryFileHasOneRoute:
     """The suffix decides the route, from one table, so a caller never keeps a list of its own."""
 
     def test_markdown_and_html_have_routes_of_their_own(self, client):
-        markdown = client.post("/extract/md", content=b"# Late fees\n\nCharged monthly.", headers=SIGNED)
-        page = client.post("/extract/html", content=b"<h1>Late fees</h1><p>Charged monthly.</p>", headers=SIGNED)
+        markdown = client.post(
+            "/extract/md", content=b"# Late fees\n\nCharged monthly.", headers=SIGNED
+        )
+        page = client.post(
+            "/extract/html", content=b"<h1>Late fees</h1><p>Charged monthly.</p>", headers=SIGNED
+        )
         assert markdown.status_code == page.status_code == 200
         assert "Charged monthly." in markdown.text and "Charged monthly." in page.text
 
-    def test_a_workbook_with_macros_is_read_by_the_workbook_route_under_its_own_name(self, client, tmp_path):
+    def test_a_workbook_with_macros_is_read_by_the_workbook_route_under_its_own_name(
+        self, client, tmp_path
+    ):
         openpyxl = pytest.importorskip("openpyxl")
         book = openpyxl.Workbook()
         book.active.append(["Region", "Revenue"])
@@ -908,7 +1239,10 @@ class TestEveryFileHasOneRoute:
             content=(tmp_path / "book.xlsx").read_bytes(),
             headers={**SIGNED, "X-Filename": "book.xlsm", "Accept": "application/json"},
         )
-        assert "EMEA" in response.json()["text"] and response.json()["metadata"]["filename"] == "book.xlsm"
+        assert (
+            "EMEA" in response.json()["text"]
+            and response.json()["metadata"]["filename"] == "book.xlsm"
+        )
 
     def test_the_table_is_the_routes_the_app_serves(self, keyed, service):
         """Held equal, so a route added to the app is a suffix a caller can send, and never one it cannot."""
@@ -917,26 +1251,52 @@ class TestEveryFileHasOneRoute:
             path
             for path, operations in described.items()
             if "post" in operations
-            and (path.startswith("/extract/") or path in ("/transcribe/image", "/transcribe/audio", "/transcribe/video"))
+            and (
+                path.startswith("/extract/")
+                or path in ("/transcribe/image", "/transcribe/audio", "/transcribe/video")
+            )
         }
         assert reading and set(extraction_routes().values()) == reading
 
     def test_every_file_the_library_reads_has_a_route(self):
         from vectrixdb.extract.engines import AUDIO_SUFFIXES, IMAGE_SUFFIXES, VIDEO_SUFFIXES
 
-        documents = (".md", ".markdown", ".txt", ".html", ".htm", ".csv", ".pptx", ".pdf", ".docx", ".doc", ".xlsx", ".xlsm")
-        assert set(documents + IMAGE_SUFFIXES + AUDIO_SUFFIXES + VIDEO_SUFFIXES) == set(extraction_routes())
+        documents = (
+            ".md",
+            ".markdown",
+            ".txt",
+            ".html",
+            ".htm",
+            ".csv",
+            ".pptx",
+            ".pdf",
+            ".docx",
+            ".doc",
+            ".xlsx",
+            ".xlsm",
+        )
+        assert set(documents + IMAGE_SUFFIXES + AUDIO_SUFFIXES + VIDEO_SUFFIXES) == set(
+            extraction_routes()
+        )
 
     def test_each_kind_goes_to_its_reader(self):
         table = extraction_routes()
         assert table[".pdf"] == "/extract/pdf" and table[".xlsm"] == "/extract/xlsx"
-        assert table[".markdown"] == table[".md"] == "/extract/md" and table[".htm"] == "/extract/html"
-        assert table[".jpeg"] == "/transcribe/image" and table[".flac"] == "/transcribe/audio" and table[".mkv"] == "/transcribe/video"
+        assert (
+            table[".markdown"] == table[".md"] == "/extract/md" and table[".htm"] == "/extract/html"
+        )
+        assert (
+            table[".jpeg"] == "/transcribe/image"
+            and table[".flac"] == "/transcribe/audio"
+            and table[".mkv"] == "/transcribe/video"
+        )
 
     def test_with_a_prefix_and_gateway_paths_the_paths_are_the_callers(self):
         table = extraction_routes("/acme", "extract/pdf=/files/pdf, transcribe/audio=/media/sound")
         assert table[".pdf"] == "/files/pdf/acme/extract/pdf"
-        assert table[".docx"] == "/acme/extract/docx", "a route with no gateway path is under the prefix alone"
+        assert table[".docx"] == "/acme/extract/docx", (
+            "a route with no gateway path is under the prefix alone"
+        )
         assert table[".wav"] == table[".flac"] == "/media/sound/acme/transcribe/audio"
 
     def test_the_app_answers_every_path_the_table_names(self, keyed, service):
@@ -960,7 +1320,9 @@ class TestAPictureInADocumentIsDescribedWhereItSits:
         from PIL import Image
 
         rng = random.Random(3)
-        image = Image.frombytes("RGB", (120, 90), bytes(rng.randrange(256) for _ in range(120 * 90 * 3)))
+        image = Image.frombytes(
+            "RGB", (120, 90), bytes(rng.randrange(256) for _ in range(120 * 90 * 3))
+        )
         buffer = io.BytesIO()
         image.save(buffer, "PNG")
         document = docx.Document()
@@ -979,15 +1341,26 @@ class TestAPictureInADocumentIsDescribedWhereItSits:
             headers={**SIGNED, "X-Filename": "report.docx", "Accept": "application/json"},
         ).json()
         assert "A bar chart of revenue by region." in body["text"]
-        assert body["text"].index("Revenue grew") < body["text"].index("A bar chart") < body["text"].index("Unaudited.")
+        assert (
+            body["text"].index("Revenue grew")
+            < body["text"].index("A bar chart")
+            < body["text"].index("Unaudited.")
+        )
         assert set(body) == {"text", "pages", "headings", "metadata", "segments", "figures"}
         # Descriptions travel, and where each figure is; pictures do not.
-        assert all(set(info) <= {"caption", "src", "described", "described_by"} for _at, info in body["figures"])
+        assert all(
+            set(info) <= {"caption", "src", "described", "described_by"}
+            for _at, info in body["figures"]
+        )
 
     def test_without_vision_the_pictures_are_not_opened(self, keyed, service, tmp_path):
         """A file with no describer to hand is read the regular way, and costs nothing more."""
         app = TestClient(create_extraction_app(service))
-        text = app.post("/extract/docx", content=self.document(tmp_path), headers={**SIGNED, "X-Filename": "report.docx"}).text
+        text = app.post(
+            "/extract/docx",
+            content=self.document(tmp_path),
+            headers={**SIGNED, "X-Filename": "report.docx"},
+        ).text
         assert "Figure" not in text and "Revenue grew" in text and "Unaudited." in text
 
 
@@ -1005,24 +1378,57 @@ class TestMaskingOnRequest:
         plain = masking.post("/extract/txt", content=body, headers=SIGNED)
         assert plain.status_code == 200 and "078-05-1120" in plain.text, "not asked, not masked"
         shown = masking.post("/extract/txt?mask=1", content=body, headers=SIGNED)
-        assert shown.status_code == 200 and shown.text.strip() == "Call Ada on •••-•••-0199, SSN [SSN], key [API_KEY]."
+        assert (
+            shown.status_code == 200
+            and shown.text.strip() == "Call Ada on •••-•••-0199, SSN [SSN], key [API_KEY]."
+        )
         about = json.loads(shown.headers["x-masking"])
-        assert about["engine"] == "regex" and about["counts"] == {"phone": 1, "ssn": 1, "api_key": 1} and about["score"] == 1.0
-        as_json = masking.post("/extract/txt?mask=1&types=ssn", content=body, headers={**SIGNED, "Accept": "application/json"}).json()
-        assert as_json["text"].strip() == "Call Ada on 416-555-0199, SSN [SSN], key AKIAIOSFODNN7EXAMPLE." and as_json["masking"]["counts"] == {"ssn": 1}
+        assert (
+            about["engine"] == "regex"
+            and about["counts"] == {"phone": 1, "ssn": 1, "api_key": 1}
+            and about["score"] == 1.0
+        )
+        as_json = masking.post(
+            "/extract/txt?mask=1&types=ssn",
+            content=body,
+            headers={**SIGNED, "Accept": "application/json"},
+        ).json()
+        assert as_json[
+            "text"
+        ].strip() == "Call Ada on 416-555-0199, SSN [SSN], key AKIAIOSFODNN7EXAMPLE." and as_json[
+            "masking"
+        ]["counts"] == {"ssn": 1}
         assert "text" not in as_json["masking"], "the text is said once"
 
     def test_any_text_through_the_mask_route(self, masking):
-        said = masking.post("/mask", json={"text": "ada@example.com, IBAN GB82 WEST 1234 5698 7654 32", "types": "all", "language": "fr"}, headers=SIGNED)
+        said = masking.post(
+            "/mask",
+            json={
+                "text": "ada@example.com, IBAN GB82 WEST 1234 5698 7654 32",
+                "types": "all",
+                "language": "fr",
+            },
+            headers=SIGNED,
+        )
         assert said.status_code == 200, said.text
-        assert said.json()["text"] == "a•••@example.com, IBAN [IBAN]" and said.json()["language"] == "fr" and said.json()["regex_only"] is False
+        assert (
+            said.json()["text"] == "a•••@example.com, IBAN [IBAN]"
+            and said.json()["language"] == "fr"
+            and said.json()["regex_only"] is False
+        )
         bad = masking.post("/mask", json={"text": "x", "types": "hairstyle"}, headers=SIGNED)
         assert bad.status_code == 422 and "not a type" in bad.json()["message"]
-        assert masking.post("/mask", json={"text": "x"}).status_code == 401, "the door is the same one"
+        assert masking.post("/mask", json={"text": "x"}).status_code == 401, (
+            "the door is the same one"
+        )
 
     def test_the_health_reply_says_which_engine_loaded(self, masking):
         said = masking.get("/health").json()["masking"]
-        assert said["engine"] == "regex" and said["languages"] == {"en": True, "fr": True} and said["patterns_last"] is True
+        assert (
+            said["engine"] == "regex"
+            and said["languages"] == {"en": True, "fr": True}
+            and said["patterns_last"] is True
+        )
 
     def test_a_bad_engine_setting_stops_the_app_at_start(self, keyed, service, monkeypatch):
         from vectrixdb.exceptions import ConfigurationError
@@ -1031,4 +1437,3 @@ class TestMaskingOnRequest:
         monkeypatch.delenv("AZURE_LANGUAGE_ENDPOINT", raising=False)
         with pytest.raises(ConfigurationError, match="AZURE_LANGUAGE_ENDPOINT"):
             create_extraction_app(service)
-

@@ -96,7 +96,9 @@ def register(az: Any, wait: float = 240.0) -> None:
 
     state_of = {}
     for namespace in PROVIDERS:
-        found = az("provider", "show", "--namespace", namespace, reads=True, quiet=True, allow_fail=True)
+        found = az(
+            "provider", "show", "--namespace", namespace, reads=True, quiet=True, allow_fail=True
+        )
         state_of[namespace] = (found or {}).get("registrationState", "Unknown")
     missing = [n for n, s in state_of.items() if s != "Registered"]
     if not missing:
@@ -115,7 +117,15 @@ def register(az: Any, wait: float = 240.0) -> None:
     while left and time.time() - began < wait:
         time.sleep(10)
         for namespace in list(left):
-            found = az("provider", "show", "--namespace", namespace, reads=True, quiet=True, allow_fail=True)
+            found = az(
+                "provider",
+                "show",
+                "--namespace",
+                namespace,
+                reads=True,
+                quiet=True,
+                allow_fail=True,
+            )
             if (found or {}).get("registrationState") == "Registered":
                 done(namespace)
                 left.remove(namespace)
@@ -201,7 +211,7 @@ def settings() -> Dict[str, str]:
     if not SETTINGS.exists():
         stop(
             f"There is no {SETTINGS.name} yet.\n"
-            f"  copy {EXAMPLE.name} to {SETTINGS.name} and read it through: it is eleven lines.\n"
+            f"  copy {EXAMPLE.name} to {SETTINGS.name} and read it through.\n"
             f"  cp {EXAMPLE} {SETTINGS}"
         )
     found: Dict[str, str] = {}
@@ -217,7 +227,10 @@ def settings() -> Dict[str, str]:
     # says which, rather than being quietly half read.
     old = [f"  {name}  is now  {RENAMED[name]}" for name in RENAMED if name in found]
     if old:
-        stop("settings.env has names that changed. Rename these lines and run this again:\n" + "\n".join(old))
+        stop(
+            "settings.env has names that changed. Rename these lines and run this again:\n"
+            + "\n".join(old)
+        )
 
     prefix = found.get("VX_PREFIX", "").strip().lower()
     if not prefix.isalnum() or not 4 <= len(prefix) <= 16 or not prefix[0].isalpha():
@@ -266,14 +279,22 @@ def settings() -> Dict[str, str]:
     found["VX_TRANSLATOR_NAME"] = found.get("VX_TRANSLATOR_NAME") or f"{prefix}-translator"
     # Cosmos account names are lower case, letters, digits and hyphens.
     found["VX_COSMOS_NAME"] = found.get("VX_COSMOS_NAME") or f"{prefix}-cosmos"
-    found["AZURE_OPENAI_VISION_DEPLOYMENT"] = found.get("AZURE_OPENAI_VISION_DEPLOYMENT") or "gpt-5.4-mini"
-    found["AZURE_OPENAI_EMBED_DEPLOYMENT"] = found.get("AZURE_OPENAI_EMBED_DEPLOYMENT") or "text-embedding-3-small"
+    found["AZURE_OPENAI_VISION_DEPLOYMENT"] = (
+        found.get("AZURE_OPENAI_VISION_DEPLOYMENT") or "gpt-5.4-mini"
+    )
+    found["AZURE_OPENAI_EMBED_DEPLOYMENT"] = (
+        found.get("AZURE_OPENAI_EMBED_DEPLOYMENT") or "text-embedding-3-small"
+    )
     found["VX_SECOND_VECTOR"] = found.get("VX_SECOND_VECTOR") or "yes"
-    found["AZURE_OPENAI_WRITER_DEPLOYMENT"] = found.get("AZURE_OPENAI_WRITER_DEPLOYMENT") or "gpt-5.4-mini"
+    found["AZURE_OPENAI_WRITER_DEPLOYMENT"] = (
+        found.get("AZURE_OPENAI_WRITER_DEPLOYMENT") or "gpt-5.4-mini"
+    )
     found["VX_DETAILED_PICTURES"] = found.get("VX_DETAILED_PICTURES") or "no"
 
     if found["VX_SEARCH_TIER"] not in ("free", "basic"):
-        stop(f"VX_SEARCH_TIER is free or basic, not {found['VX_SEARCH_TIER']!r}. See the README on what each costs.")
+        stop(
+            f"VX_SEARCH_TIER is free or basic, not {found['VX_SEARCH_TIER']!r}. See the README on what each costs."
+        )
     return found
 
 
@@ -284,7 +305,9 @@ def collections(config: Dict[str, str]) -> List[str]:
         stop("VX_COLLECTIONS is empty. It is a comma separated list, financial,media,misc")
     for name in named:
         if not name.replace("-", "").isalnum():
-            stop(f"{name!r} is not a collection name: letters, digits and dashes, because it names an index too")
+            stop(
+                f"{name!r} is not a collection name: letters, digits and dashes, because it names an index too"
+            )
     return named
 
 
@@ -367,7 +390,9 @@ class Az:
                 "  Install it, then open a new terminal: https://aka.ms/installazurecli"
             )
 
-    def __call__(self, *args: str, reads: bool = False, quiet: bool = False, allow_fail: bool = False) -> Any:
+    def __call__(
+        self, *args: str, reads: bool = False, quiet: bool = False, allow_fail: bool = False
+    ) -> Any:
         """Run one command. ``reads`` parses the JSON it prints and says nothing."""
         command = ["az", *args]
         if not (reads and quiet):
@@ -443,7 +468,9 @@ class Az:
         if not isinstance(answer, dict):
             return ""
         # This CLI returns the ARM shape, with everything under properties.
-        found = answer.get("provisioningState") or (answer.get("properties") or {}).get("provisioningState")
+        found = answer.get("provisioningState") or (answer.get("properties") or {}).get(
+            "provisioningState"
+        )
         return str(found or "")
 
 
@@ -516,7 +543,15 @@ def _no_region(what: str, tries: list) -> str:
 #: Whatever follows one of these is a secret, and so is the value half of a
 #: NAME=value whose name reads like one. The first live run printed a storage
 #: account key in full, three times, because the command was printed as it was.
-SECRET_FLAGS = ("--account-key", "--password", "--key", "--secret", "--admin-key", "--connection-string", "--sas-token")
+SECRET_FLAGS = (
+    "--account-key",
+    "--password",
+    "--key",
+    "--secret",
+    "--admin-key",
+    "--connection-string",
+    "--sas-token",
+)
 SECRET_NAMES = ("key", "secret", "password", "token", "connectionstring", "totp")
 
 
@@ -606,9 +641,14 @@ def tenant_domain(az: Any) -> str:
     if domain:
         return domain
     answer = az(
-        "rest", "--method", "get",
-        "--url", "https://graph.microsoft.com/v1.0/domains?$select=id,isDefault",
-        reads=True, quiet=True, allow_fail=True,
+        "rest",
+        "--method",
+        "get",
+        "--url",
+        "https://graph.microsoft.com/v1.0/domains?$select=id,isDefault",
+        reads=True,
+        quiet=True,
+        allow_fail=True,
     )
     for entry in (answer or {}).get("value", []):
         if entry.get("isDefault"):
@@ -630,7 +670,10 @@ def portal(
     to a search box.
     """
     kept = state() if kept is None else kept
-    subscription, group = kept.get("subscription", ""), (config or {}).get("VX_RESOURCE_GROUP", kept.get("resource_group", ""))
+    subscription, group = (
+        kept.get("subscription", ""),
+        (config or {}).get("VX_RESOURCE_GROUP", kept.get("resource_group", "")),
+    )
     if not (subscription and group):
         return ""
     providers = {
@@ -663,7 +706,9 @@ def subscription_link(what: str, kept: Optional[Dict[str, Any]] = None) -> str:
     if what == "cost":
         return f"{PORTAL}/{_at(kept)}/view/Microsoft_Azure_CostManagement/Menu/~/costanalysis/scope/{scope}"
     if what == "budgets":
-        return f"{PORTAL}/{_at(kept)}/view/Microsoft_Azure_CostManagement/Menu/~/budgets/scope/{scope}"
+        return (
+            f"{PORTAL}/{_at(kept)}/view/Microsoft_Azure_CostManagement/Menu/~/budgets/scope/{scope}"
+        )
     return ""
 
 
@@ -730,8 +775,14 @@ def arguments(description: str, extra: Optional[Any] = None) -> Any:
     """The options every script takes, and any of its own."""
     import argparse
 
-    parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dry-run", action="store_true", help="print every command that would change something, and run none of them")
+    parser = argparse.ArgumentParser(
+        description=description, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print every command that would change something, and run none of them",
+    )
     if extra is not None:
         extra(parser)
     return parser.parse_args()
@@ -763,7 +814,14 @@ def local_files(folder: Path) -> List[Path]:
 # A file already there is left alone, so a second push sends only what is new.
 
 
-def push_raw(az: Any, config: Dict[str, str], *, folder: Optional[Path] = None, again: bool = False, also: Sequence[Tuple[Path, str]] = ()) -> int:
+def push_raw(
+    az: Any,
+    config: Dict[str, str],
+    *,
+    folder: Optional[Path] = None,
+    again: bool = False,
+    also: Sequence[Tuple[Path, str]] = (),
+) -> int:
     """Upload what the ingestion container does not already have, and say what went.
 
     The path under the mirror is the path under ``raw/`` in the container, so
@@ -792,12 +850,34 @@ def push_raw(az: Any, config: Dict[str, str], *, folder: Optional[Path] = None, 
     named = collections(config)
     key = None
     if az.pretend:
-        keys = az.look("storage", "account", "keys", "list", "--account-name", account, "--resource-group", group)
+        keys = az.look(
+            "storage",
+            "account",
+            "keys",
+            "list",
+            "--account-name",
+            account,
+            "--resource-group",
+            group,
+        )
         key = keys[0]["value"] if isinstance(keys, list) and keys else None
         if key is None:
-            note(f"could not look inside {account}, so every file below is planned as if the container had none of them")
+            note(
+                f"could not look inside {account}, so every file below is planned as if the container had none of them"
+            )
     else:
-        keys = az("storage", "account", "keys", "list", "--account-name", account, "--resource-group", group, reads=True, quiet=True)
+        keys = az(
+            "storage",
+            "account",
+            "keys",
+            "list",
+            "--account-name",
+            account,
+            "--resource-group",
+            group,
+            reads=True,
+            quiet=True,
+        )
         key = keys[0]["value"] if keys else None
         if key is None:
             stop(f"Could not read a key for {account}. Run 01_create_resources.py first.")
@@ -811,22 +891,47 @@ def push_raw(az: Any, config: Dict[str, str], *, folder: Optional[Path] = None, 
         blob = f"{RAW}/{inside}"
         collection = inside.split("/")[0] if "/" in inside else ""
         if not collection:
-            note(f"{blob} sits in no collection folder, so it is not uploaded. Move it into one of: {', '.join(named)}")
+            note(
+                f"{blob} sits in no collection folder, so it is not uploaded. Move it into one of: {', '.join(named)}"
+            )
             continue
         if collection not in named:
-            note(f"{blob} is in a folder called {collection}, which is not one of: {', '.join(named)}")
+            note(
+                f"{blob} is in a folder called {collection}, which is not one of: {', '.join(named)}"
+            )
             continue
         there = None
         if not again and key:
-            asked = with_key("storage", "blob", "show", "--container-name", INGESTION, "--name", blob)
-            there = az.look(*asked) if az.pretend else az(*asked, reads=True, quiet=True, allow_fail=True)
-        if isinstance(there, dict) and there.get("properties", {}).get("contentLength") == path.stat().st_size:
+            asked = with_key(
+                "storage", "blob", "show", "--container-name", INGESTION, "--name", blob
+            )
+            there = (
+                az.look(*asked)
+                if az.pretend
+                else az(*asked, reads=True, quiet=True, allow_fail=True)
+            )
+        if (
+            isinstance(there, dict)
+            and there.get("properties", {}).get("contentLength") == path.stat().st_size
+        ):
             skipped(f"{blob}, same size already there")
             continue
         az(
-            *with_key("storage", "blob", "upload", "--container-name", INGESTION, "--name", blob, "--file", str(path)),
-            "--overwrite", "true",
-            "--output", "none",
+            *with_key(
+                "storage",
+                "blob",
+                "upload",
+                "--container-name",
+                INGESTION,
+                "--name",
+                blob,
+                "--file",
+                str(path),
+            ),
+            "--overwrite",
+            "true",
+            "--output",
+            "none",
         )
         if az.pretend:
             print(f"  would upload {blob}, {size(path.stat().st_size)}")
@@ -893,12 +998,16 @@ def push_records(az: Any, config: Dict[str, str], *, by: str, again: bool = Fals
 
     files = record_files(config)
     if not wants(config, "VX_COSMOS"):
-        note("VX_COSMOS is not yes, so the records stay here and each collection keeps its policy in its own metadata")
+        note(
+            "VX_COSMOS is not yes, so the records stay here and each collection keeps its policy in its own metadata"
+        )
         return 0
     try:
         from vectrixdb.collection_records import CollectionRecord, CollectionRecords
     except ImportError:
-        stop("Each record goes up through the library, which is not installed here. From this folder: pip install -r requirements.txt")
+        stop(
+            "Each record goes up through the library, which is not installed here. From this folder: pip install -r requirements.txt"
+        )
 
     named = collections(config)
     records = []
@@ -908,7 +1017,9 @@ def push_records(az: Any, config: Dict[str, str], *, by: str, again: bool = Fals
         except Exception as exc:  # noqa: BLE001 - a file somebody wrote: say which and what
             stop(f"{path.relative_to(LOCAL).as_posix()} cannot be a collection's record: {exc}")
         if record.name not in named:
-            note(f"{path.name} is the record for {record.name}, which is not one of: {', '.join(named)}. It is not sent")
+            note(
+                f"{path.name} is the record for {record.name}, which is not one of: {', '.join(named)}. It is not sent"
+            )
             continue
         records.append(record)
 
@@ -926,7 +1037,9 @@ def push_records(az: Any, config: Dict[str, str], *, by: str, again: bool = Fals
         try:
             import azure.cosmos  # noqa: F401 - what CollectionRecords writes with
         except ImportError:
-            stop("Writing an item into Cosmos DB needs its SDK on this machine. From this folder: pip install -r requirements.txt")
+            stop(
+                "Writing an item into Cosmos DB needs its SDK on this machine. From this folder: pip install -r requirements.txt"
+            )
         store = CollectionRecords.open(address, key=_cosmos_key(az, account, group))
     sent = 0
     try:
@@ -947,7 +1060,9 @@ def push_records(az: Any, config: Dict[str, str], *, by: str, again: bool = Fals
             else:
                 changed = "policy" if wanted.policy != there.policy else "record"
                 if az.pretend:
-                    print(f"  would write collection.{record.name}, {changed} now {_rules_of(wanted)}")
+                    print(
+                        f"  would write collection.{record.name}, {changed} now {_rules_of(wanted)}"
+                    )
                 else:
                     store.put(wanted, by=by)
                     done(f"collection.{record.name}, {changed} now {_rules_of(wanted)}")
@@ -972,27 +1087,74 @@ def _look_at_records(az: Any, address: str, account: str, group: str) -> Any:
     try:
         import azure.cosmos  # noqa: F401 - what CollectionRecords reads with
     except ImportError:
-        note("the Cosmos DB SDK is not on this machine, so the plan cannot look at the records and lists each as it would be written")
+        note(
+            "the Cosmos DB SDK is not on this machine, so the plan cannot look at the records and lists each as it would be written"
+        )
         return None
-    there = az.look("cosmosdb", "sql", "container", "show", "--account-name", account, "--resource-group", group,
-                    "--database-name", DATA, "--name", COLLECTION_RECORDS)
-    keys = az.look("cosmosdb", "keys", "list", "--name", account, "--resource-group", group, "--type", "keys") if there else None
+    there = az.look(
+        "cosmosdb",
+        "sql",
+        "container",
+        "show",
+        "--account-name",
+        account,
+        "--resource-group",
+        group,
+        "--database-name",
+        DATA,
+        "--name",
+        COLLECTION_RECORDS,
+    )
+    keys = (
+        az.look(
+            "cosmosdb",
+            "keys",
+            "list",
+            "--name",
+            account,
+            "--resource-group",
+            group,
+            "--type",
+            "keys",
+        )
+        if there
+        else None
+    )
     key = keys.get("primaryMasterKey") if isinstance(keys, dict) else None
     if not key:
-        note(f"could not look at the records in {account}, or there are none there yet, so each is listed as it would be written")
+        note(
+            f"could not look at the records in {account}, or there are none there yet, so each is listed as it would be written"
+        )
         return None
     try:
         return CollectionRecords.open(address, key=str(key))
     except Exception as exc:  # noqa: BLE001 - a plan that cannot look lists everything rather than stopping
-        note(f"could not open the records in {account} ({type(exc).__name__}), so each is listed as it would be written")
+        note(
+            f"could not open the records in {account} ({type(exc).__name__}), so each is listed as it would be written"
+        )
         return None
 
 
 def _cosmos_key(az: Any, account: str, group: str) -> str:
-    keys = az("cosmosdb", "keys", "list", "--name", account, "--resource-group", group, "--type", "keys", reads=True, quiet=True, allow_fail=True)
+    keys = az(
+        "cosmosdb",
+        "keys",
+        "list",
+        "--name",
+        account,
+        "--resource-group",
+        group,
+        "--type",
+        "keys",
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
     key = (keys or {}).get("primaryMasterKey") if isinstance(keys, dict) else None
     if not key:
-        stop(f"Could not read a key for the Cosmos account {account}. Run 03_create_ai_services.py first.")
+        stop(
+            f"Could not read a key for the Cosmos account {account}. Run 03_create_ai_services.py first."
+        )
     return str(key)
 
 
@@ -1017,7 +1179,12 @@ def size(count: int) -> str:
     return f"{count:.1f} GB"
 
 
-def wheel_ready(app: Path, needs: Dict[str, str], dry_run: bool = False, installs: Optional[Dict[str, str]] = None) -> None:
+def wheel_ready(
+    app: Path,
+    needs: Dict[str, str],
+    dry_run: bool = False,
+    installs: Optional[Dict[str, str]] = None,
+) -> None:
     """The library wheel beside an app's code, new enough for what the app imports and asks for.
 
     ``requirements.txt`` installs the wheel it names from the app's folder.
@@ -1040,11 +1207,28 @@ def wheel_ready(app: Path, needs: Dict[str, str], dry_run: bool = False, install
     text = (app / "requirements.txt").read_text(encoding="utf-8")
     wanted = re.search(r"^\./(vectrixdb-[^\[\s]+\.whl)(?:\[([^\]]*)\])?", text, re.M)
     if wanted is None:
-        stop(f"{app.name}/requirements.txt names no vectrixdb wheel, so there is nothing to install")
+        stop(
+            f"{app.name}/requirements.txt names no vectrixdb wheel, so there is nothing to install"
+        )
     name = wanted.group(1)
     extras = {extra.strip() for extra in (wanted.group(2) or "").split(",") if extra.strip()}
+    # The line is pinned to the wheel that is actually here, not to whatever
+    # version was typed when the file was written: a bump of the library
+    # with the old name left in this file would publish the old wheel, or
+    # none, without a word.
+    fresh = newest_wheel(app, name)
+    if fresh != name:
+        print(f"  $ pin {app.name}/requirements.txt to {fresh}   (it said {name})")
+        if not dry_run:
+            (app / "requirements.txt").write_text(
+                text.replace(f"./{name}", f"./{fresh}"), encoding="utf-8"
+            )
+        name = fresh
     here = app / name
-    for source in (REPO / "dist" / name, *(folder / name for folder in (MAIN_FUNCTION_APP, EXTRACTION_APP) if folder != app)):
+    for source in (
+        REPO / "dist" / name,
+        *(folder / name for folder in (MAIN_FUNCTION_APP, EXTRACTION_APP) if folder != app),
+    ):
         if source.exists() and (not here.exists() or source.stat().st_mtime > here.stat().st_mtime):
             print(f"  $ copy {source} {here}")
             if not dry_run:
@@ -1052,25 +1236,47 @@ def wheel_ready(app: Path, needs: Dict[str, str], dry_run: bool = False, install
             break
     if dry_run:
         return
-    rebuild = f"  build it: cd {REPO} && python -m build --no-isolation --wheel\n  then run this again"
+    rebuild = (
+        f"  build it: cd {REPO} && python -m build --no-isolation --wheel\n  then run this again"
+    )
     if not here.exists():
         stop(f"There is no {name} to install.\n{rebuild}")
     with zipfile.ZipFile(here) as wheel:
         inside = set(wheel.namelist())
         missing = [
-            path for path, line in needs.items()
+            path
+            for path, line in needs.items()
             if path not in inside or line not in wheel.read(path).decode("utf-8", errors="replace")
         ]
-        about = next((wheel.read(n).decode("utf-8", errors="replace") for n in sorted(inside) if n.endswith(".dist-info/METADATA")), "")
+        about = next(
+            (
+                wheel.read(n).decode("utf-8", errors="replace")
+                for n in sorted(inside)
+                if n.endswith(".dist-info/METADATA")
+            ),
+            "",
+        )
     if missing:
-        stop(f"{name} was built before what {app.name} imports ({', '.join(missing)}), so it would load nothing.\n{rebuild}")
-    offered = {line.split(":", 1)[1].strip() for line in about.splitlines() if line.startswith("Provides-Extra:")}
+        stop(
+            f"{name} was built before what {app.name} imports ({', '.join(missing)}), so it would load nothing.\n{rebuild}"
+        )
+    offered = {
+        line.split(":", 1)[1].strip()
+        for line in about.splitlines()
+        if line.startswith("Provides-Extra:")
+    }
     unoffered = sorted(extras - offered)
     if unoffered:
-        stop(f"{name} offers no {', '.join(unoffered)} extra, so pip would install it without {'them' if len(unoffered) > 1 else 'it'}.\n{rebuild}")
+        stop(
+            f"{name} offers no {', '.join(unoffered)} extra, so pip would install it without {'them' if len(unoffered) > 1 else 'it'}.\n{rebuild}"
+        )
     done(f"{name}, with what {app.name} imports and the extras it asks for")
     if installs:
-        own = {_package(line) for line in text.splitlines() if line.strip() and not line.lstrip().startswith(("#", "-", "."))}
+        own = {
+            _package(line)
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith(("#", "-", "."))
+        }
         brought = _brought(about, extras) | own
         for package, why in installs.items():
             if _package(package) not in brought:
@@ -1079,6 +1285,37 @@ def wheel_ready(app: Path, needs: Dict[str, str], dry_run: bool = False, install
                     f"  add it on a line of its own: {package}\n  then run this again"
                 )
             done(f"{package}, which {why}")
+
+
+def newest_wheel(app: Path, named: str) -> str:
+    """The wheel ``requirements.txt`` should name: the newest in dist/, else one already beside an app, else this library's version.
+
+    ``named`` is what the file says now, and is what comes back when the
+    library cannot be imported and no wheel is anywhere, which is the one
+    case there is nothing better to say.
+    """
+
+    def version_of(wheel: Path) -> Tuple[Any, ...]:
+        # 2.2.0 before 2.10.0: by number, not by letter; and a newer file wins a tie.
+        found = re.match(r"vectrixdb-([0-9][^-]*)-", wheel.name)
+        return (
+            tuple(int(part) for part in re.findall(r"\d+", found.group(1))) if found else (),
+            wheel.stat().st_mtime,
+        )
+
+    for folder in (
+        REPO / "dist",
+        app,
+        *(other for other in (MAIN_FUNCTION_APP, EXTRACTION_APP) if other != app),
+    ):
+        wheels = sorted(folder.glob("vectrixdb-*.whl"), key=version_of) if folder.is_dir() else []
+        if wheels:
+            return wheels[-1].name
+    try:
+        from vectrixdb import __version__
+    except ImportError:
+        return named
+    return f"vectrixdb-{__version__}-py3-none-any.whl"
 
 
 def _package(requirement: str) -> str:
@@ -1107,12 +1344,18 @@ def _brought(metadata: str, extras: set) -> set:
     while more:
         more = False
         for requirement, extra in requires:
-            inner = re.search(r"\[([^\]]*)\]", requirement) if extra in asked and _package(requirement) == "vectrixdb" else None
+            inner = (
+                re.search(r"\[([^\]]*)\]", requirement)
+                if extra in asked and _package(requirement) == "vectrixdb"
+                else None
+            )
             for named in (part.strip() for part in (inner.group(1).split(",") if inner else [])):
                 if named and named not in asked:
                     asked.add(named)
                     more = True
-    return {_package(requirement) for requirement, extra in requires if extra is None or extra in asked}
+    return {
+        _package(requirement) for requirement, extra in requires if extra is None or extra in asked
+    }
 
 
 # ============================================================================
@@ -1237,10 +1480,17 @@ def brand_of(config: Dict[str, str]) -> Dict[str, str]:
     """The company's name, logo, colours and line, for both dashboards: set once, on the query app."""
     import base64
 
-    out = {theirs: str(config[ours]).strip() for ours, theirs in BRAND_WORDS if str(config.get(ours, "")).strip()}
+    out = {
+        theirs: str(config[ours]).strip()
+        for ours, theirs in BRAND_WORDS
+        if str(config.get(ours, "")).strip()
+    }
     if wants(config, "VX_BRAND_WORDMARK"):
         out["VECTRIXDB_BRAND_WORDMARK"] = "on"
-    for ours, theirs in (("VX_BRAND_LOGO", "VECTRIXDB_BRAND_LOGO"), ("VX_BRAND_LOGO_DARK", "VECTRIXDB_BRAND_LOGO_DARK")):
+    for ours, theirs in (
+        ("VX_BRAND_LOGO", "VECTRIXDB_BRAND_LOGO"),
+        ("VX_BRAND_LOGO_DARK", "VECTRIXDB_BRAND_LOGO_DARK"),
+    ):
         given = str(config.get(ours, "")).strip()
         if given:
             out[theirs] = given if given.startswith("data:") else data_address(given, ours)
@@ -1250,9 +1500,13 @@ def brand_of(config: Dict[str, str]) -> Dict[str, str]:
             json.loads(palette)
         except ValueError as exc:
             stop(f"settings.env: VX_BRAND_PALETTE is not JSON: {exc}")
-        out["VECTRIXDB_BRAND_PALETTE"] = "data:application/json;base64," + base64.b64encode(palette.encode("utf-8")).decode("ascii")
+        out["VECTRIXDB_BRAND_PALETTE"] = "data:application/json;base64," + base64.b64encode(
+            palette.encode("utf-8")
+        ).decode("ascii")
     elif palette:
-        out["VECTRIXDB_BRAND_PALETTE"] = palette if palette.startswith("data:") else data_address(palette, "VX_BRAND_PALETTE")
+        out["VECTRIXDB_BRAND_PALETTE"] = (
+            palette if palette.startswith("data:") else data_address(palette, "VX_BRAND_PALETTE")
+        )
     return out
 
 
@@ -1268,7 +1522,10 @@ def sso_alone(config: Dict[str, str]) -> bool:
 
 def query_address(config: Dict[str, str]) -> str:
     """The address people type for the query app: the gateway's, when there is one, else the app's own."""
-    return str(config.get("VX_GATEWAY_URL", "")).strip().rstrip("/") or f"https://{config['VX_QUERY_APP']}.azurewebsites.net"
+    return (
+        str(config.get("VX_GATEWAY_URL", "")).strip().rstrip("/")
+        or f"https://{config['VX_QUERY_APP']}.azurewebsites.net"
+    )
 
 
 def dashboard_address(config: Dict[str, str]) -> str:
@@ -1317,7 +1574,11 @@ def env_of(config: Dict[str, str], kept: Dict[str, Any], secrets: Dict[str, str]
         # The company's own look, set once here and shown by both dashboards.
         **brand_of(config),
         # A gateway in front, when there is one: the prefix and each route's own path.
-        **{theirs: str(config[ours]).strip() for ours, theirs in GATEWAY_SETTINGS if str(config.get(ours, "")).strip()},
+        **{
+            theirs: str(config[ours]).strip()
+            for ours, theirs in GATEWAY_SETTINGS
+            if str(config.get(ours, "")).strip()
+        },
     }
     if str(config.get("VX_GATEWAY_URL", "")).strip():
         # Where people reach the app, which is what single sign-on returns to and the links carry.
@@ -1350,7 +1611,11 @@ def env_of(config: Dict[str, str], kept: Dict[str, Any], secrets: Dict[str, str]
             # sso is the enterprise way: the company's sign-in and the People
             # list's own passkeys and codes, from one list. sso-only is the
             # company's sign-in alone.
-            setting["VECTRIXDB_SIGNIN"] = ("oidc" if sso_alone(config) else "oidc,email") if single_sign_on(config) else "email"
+            setting["VECTRIXDB_SIGNIN"] = (
+                ("oidc" if sso_alone(config) else "oidc,email")
+                if single_sign_on(config)
+                else "email"
+            )
             setting["VECTRIXDB_PUBLIC_URL"] = query_address(config)
             if str(config.get("VX_SIGNIN_USERS", "")).strip():
                 # The People list: who may sign in, whichever way, and each one's
@@ -1363,11 +1628,19 @@ def env_of(config: Dict[str, str], kept: Dict[str, Any], secrets: Dict[str, str]
             if single_sign_on(config):
                 # The platform's owners sign in with the company's account,
                 # and only those on the list: a group alone is not enough.
-                setting.update({theirs: str(config[ours]).strip() for ours, theirs in OIDC_SETTINGS if str(config.get(ours, "")).strip()})
+                setting.update(
+                    {
+                        theirs: str(config[ours]).strip()
+                        for ours, theirs in OIDC_SETTINGS
+                        if str(config.get(ours, "")).strip()
+                    }
+                )
                 if not sso_alone(config) and str(config.get("VX_SSO_RECHECK_DAYS", "")).strip():
                     # A passkey or a code works only for somebody the company's
                     # sign-in let in within this many days, so a leaver's stops too.
-                    setting["VECTRIXDB_SSO_RECHECK_DAYS"] = str(config["VX_SSO_RECHECK_DAYS"]).strip()
+                    setting["VECTRIXDB_SSO_RECHECK_DAYS"] = str(
+                        config["VX_SSO_RECHECK_DAYS"]
+                    ).strip()
             elif wants(config, "VX_SIGNIN_PASSWORDS"):
                 # No single sign-on: after the work email, the sign-in box asks
                 # for a password and the authenticator's code, the two together.
@@ -1378,13 +1651,21 @@ def env_of(config: Dict[str, str], kept: Dict[str, Any], secrets: Dict[str, str]
                 # Nothing links to it. The app is given the hash of the
                 # password, never the password.
                 setting["VECTRIXDB_BREAK_GLASS"] = "on"
-                setting.update({theirs: str(config[ours]).strip() for ours, theirs in BREAK_GLASS_SETTINGS if str(config.get(ours, "")).strip()})
+                setting.update(
+                    {
+                        theirs: str(config[ours]).strip()
+                        for ours, theirs in BREAK_GLASS_SETTINGS
+                        if str(config.get(ours, "")).strip()
+                    }
+                )
     if kept.get("blob_account") and kept.get("audit_container"):
         # What was decided and who looked, a line each, appended to one blob a
         # day in the audit container, whose policy keeps every line as it was
         # written. The hosted API writes both, and its Audit and Access pages
         # read them back; the steps write the decisions they make too.
-        setting["VECTRIXDB_AUDIT_STORE"] = f"{kept['blob_account']}/{kept['audit_container']}/decisions"
+        setting["VECTRIXDB_AUDIT_STORE"] = (
+            f"{kept['blob_account']}/{kept['audit_container']}/decisions"
+        )
         setting["VECTRIXDB_ACCESS_LOG"] = f"{kept['blob_account']}/{kept['audit_container']}/access"
     if kept.get("blob_account"):
         # The Markdown each file was indexed from, where the function keeps
@@ -1428,3 +1709,147 @@ def env_of(config: Dict[str, str], kept: Dict[str, Any], secrets: Dict[str, str]
             setting["AZURE_OPENAI_API_VERSION"] = config["AZURE_OPENAI_API_VERSION"]
     setting.update(secrets)
     return setting
+
+
+# ============================================================================
+# THE SEARCH INDEXES: what the service holds, and a leftover taken away
+# ============================================================================
+#
+# INPUT   the search service, its admin key read fresh from Azure
+# OUTPUT  each index with how many documents it holds; an empty index from
+#         before the prefix was set to nothing deleted, and a full one left
+#         alone and said so
+#
+# The ``az`` command line makes and deletes search services, not indexes, so
+# an index is reached the way the service itself is: its REST API, through
+# ``az rest``, with the admin key in the api-key header, which is printed as
+# dots like every other key. Nothing here needs the library.
+
+#: The catalog index the library names when AZURE_SEARCH_INDEX_PREFIX is left
+#: out: its default prefix is "vectrix", and the catalog is <prefix>-collections.
+#: 06 sets the prefix empty, so the catalog this walkthrough uses is plain
+#: "collections", and a vectrix-collections left by a run from before that is
+#: an empty index nobody reads.
+OLD_CATALOG = "vectrix-collections"
+#: The catalog index the app uses, with the empty prefix 06 sets.
+CATALOG = "collections"
+#: The search service's REST API version these calls speak.
+SEARCH_API = "2024-07-01"
+
+
+def search_admin_key(az: Any, config: Dict[str, str]) -> str:
+    """The service's primary admin key, read from Azure and never written down; "" when it cannot be read."""
+    found = az(
+        "search",
+        "admin-key",
+        "show",
+        "--service-name",
+        config["VX_SEARCH"],
+        "--resource-group",
+        config["VX_RESOURCE_GROUP"],
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
+    return str((found or {}).get("primaryKey") or "") if isinstance(found, dict) else ""
+
+
+def _search_rest(
+    az: Any, config: Dict[str, str], key: str, method: str, path: str, **more: Any
+) -> Any:
+    """One call to the search service's REST API, through ``az rest``, with the admin key hidden when printed."""
+    return az(
+        "rest",
+        "--method",
+        method,
+        "--url",
+        f"https://{config['VX_SEARCH']}.search.windows.net/{path.lstrip('/')}?api-version={SEARCH_API}",
+        "--skip-authorization-header",
+        "--headers",
+        f"api-key={key}",
+        **more,
+    )
+
+
+def search_indexes(
+    az: Any, config: Dict[str, str], key: str = ""
+) -> Optional[List[Dict[str, Any]]]:
+    """Every index in the service, each with its document count and size: ``[{"name", "documents", "bytes"}]``.
+
+    None when the service cannot be asked: in a dry run, with no key, or
+    with no service yet. A list, possibly empty, when it answered.
+    """
+    key = key or search_admin_key(az, config)
+    if not key:
+        return None
+    listed = _search_rest(
+        az, config, key, "get", "indexes?$select=name", reads=True, quiet=True, allow_fail=True
+    )
+    if not isinstance(listed, dict):
+        return None
+    out: List[Dict[str, Any]] = []
+    for index in listed.get("value") or []:
+        name = str((index or {}).get("name") or "")
+        if not name:
+            continue
+        stats = (
+            _search_rest(
+                az,
+                config,
+                key,
+                "get",
+                f"indexes/{name}/stats",
+                reads=True,
+                quiet=True,
+                allow_fail=True,
+            )
+            or {}
+        )
+        out.append(
+            {
+                "name": name,
+                "documents": int(stats.get("documentCount") or 0),
+                "bytes": int(stats.get("storageSize") or 0),
+            }
+        )
+    return out
+
+
+def tidy_old_catalog(az: Any, config: Dict[str, str], prefix: str) -> Optional[str]:
+    """Delete the empty ``vectrix-collections`` a run from before the empty prefix left, and only that.
+
+    INPUT
+    -----
+    The prefix the app is being given. With any prefix but the empty one the
+    catalog is ``<prefix>-collections`` and nothing here is a leftover, so
+    nothing is looked at.
+
+    OUTPUT
+    ------
+    What was done, in words: ``deleted``, ``kept``, ``unknown`` when the
+    service could not be asked, as in a dry run; or None when there was
+    nothing to do. An index
+    of that name holding documents is never deleted: it is said to be there,
+    with its count, and left for a person. Deleting is one ``az rest``
+    call, allowed to fail, because a service that has not got the index
+    answers 404 and that is the state wanted.
+    """
+    if prefix:
+        return None
+    found = search_indexes(az, config)
+    if found is None:
+        return "unknown"
+    leftover = next((index for index in found if index["name"] == OLD_CATALOG), None)
+    if leftover is None:
+        return None
+    if leftover["documents"]:
+        note(
+            f"{OLD_CATALOG} holds {leftover['documents']} documents, so it is left alone: the app reads {CATALOG}, and that one is yours to look at"
+        )
+        return "kept"
+    key = search_admin_key(az, config)
+    _search_rest(az, config, key, "delete", f"indexes/{OLD_CATALOG}", allow_fail=True)
+    done(
+        f"{OLD_CATALOG} deleted: empty, from a run before the prefix was set to nothing; the app reads {CATALOG}"
+    )
+    return "deleted"

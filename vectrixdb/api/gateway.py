@@ -92,7 +92,9 @@ def route_prefix(value: Optional[str]) -> str:
     return _names(value, "a route prefix")
 
 
-def read_gateway_paths(value: Union[None, str, Mapping[str, str]], setting: Optional[str] = None) -> Dict[str, str]:
+def read_gateway_paths(
+    value: Union[None, str, Mapping[str, str]], setting: Optional[str] = None
+) -> Dict[str, str]:
     """Each route's own gateway path, ``{"api/v1": "/files/search"}``, whatever it was written as.
 
     The written form is the one a gateway's team hands over, ``route=path``
@@ -113,7 +115,9 @@ def read_gateway_paths(value: Union[None, str, Mapping[str, str]], setting: Opti
                 continue
             route, equals, path = entry.partition("=")
             if not equals:
-                raise ConfigurationError(f"{lead}a gateway path is route=path, not {entry.strip()!r}")
+                raise ConfigurationError(
+                    f"{lead}a gateway path is route=path, not {entry.strip()!r}"
+                )
             pairs.append((route, path))
     paths: Dict[str, str] = {}
     for route, path in pairs:
@@ -123,7 +127,9 @@ def read_gateway_paths(value: Union[None, str, Mapping[str, str]], setting: Opti
             raise ConfigurationError(f"{lead}{exc}") from None
         if not name or not where:
             given = f"{str(route or '').strip()}={str(path or '').strip()}"
-            raise ConfigurationError(f"{lead}a gateway path is route=path with both given, not {given!r}")
+            raise ConfigurationError(
+                f"{lead}a gateway path is route=path with both given, not {given!r}"
+            )
         if name in paths:
             raise ConfigurationError(f"{lead}{name} is given two gateway paths")
         paths[name] = where
@@ -136,7 +142,10 @@ def declared_paths(routes: Iterable[Any], prefix: str = "") -> List[str]:
     for route in routes:
         inner = getattr(route, "original_router", None)
         if inner is not None:
-            found += declared_paths(inner.routes, prefix + str(getattr(getattr(route, "include_context", None), "prefix", "") or ""))
+            found += declared_paths(
+                inner.routes,
+                prefix + str(getattr(getattr(route, "include_context", None), "prefix", "") or ""),
+            )
         elif isinstance(getattr(route, "path", None), str):
             found.append(prefix + route.path)
     return found
@@ -197,7 +206,9 @@ class Gateway:
         return cls(
             root=root,
             prefix=route_prefix(source.get("VECTRIXDB_PREFIX", "")),
-            paths=read_gateway_paths(source.get("VECTRIXDB_GATEWAY_PATHS", ""), "VECTRIXDB_GATEWAY_PATHS"),
+            paths=read_gateway_paths(
+                source.get("VECTRIXDB_GATEWAY_PATHS", ""), "VECTRIXDB_GATEWAY_PATHS"
+            ),
             key_header=_header(source, "VECTRIXDB_KEY_HEADER", DEFAULT_KEY_HEADER),
             token_header=_header(source, "VECTRIXDB_TOKEN_HEADER", DEFAULT_TOKEN_HEADER),
             origin=f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else "",
@@ -207,7 +218,10 @@ class Gateway:
     def at(cls, public_url: Optional[str]) -> "Gateway":
         """No prefix and no gateway paths: every route at the public address, the way a server without these settings has them."""
         parts = urlsplit(str(public_url or "").strip().rstrip("/"))
-        return cls(root=_names(parts.path, "the public address's path"), origin=f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else "")
+        return cls(
+            root=_names(parts.path, "the public address's path"),
+            origin=f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else "",
+        )
 
     @property
     def shaped(self) -> bool:
@@ -224,7 +238,9 @@ class Gateway:
         path = route.split("?", 1)[0].split("#", 1)[0].strip("/")
         best: Optional[str] = None
         for name in self.paths:
-            if (path == name or path.startswith(name + "/")) and (best is None or len(name) > len(best)):
+            if (path == name or path.startswith(name + "/")) and (
+                best is None or len(name) > len(best)
+            ):
                 best = name
         return best
 
@@ -248,7 +264,11 @@ class Gateway:
         and a part in braces stands for any name, so one collection's route may be listed on its own.
         """
         served = [[part for part in route.strip("/").split("/") if part] for route in routes]
-        unknown = sorted(name for name in self.paths if not any(_falls_under(name.split("/"), route) for route in served))
+        unknown = sorted(
+            name
+            for name in self.paths
+            if not any(_falls_under(name.split("/"), route) for route in served)
+        )
         if unknown:
             raise ConfigurationError(
                 f"VECTRIXDB_GATEWAY_PATHS names {', '.join(unknown)}, which no route here falls under. "
@@ -302,14 +322,14 @@ class GatewayPathsMiddleware:
             # The host's own path may still be in front, when the gateway passes it on.
             root = self.gateway.root
             lead = root if root and (path == root or path.startswith(root + "/")) else ""
-            inner = path[len(lead):] or "/"
+            inner = path[len(lead) :] or "/"
             for where in self._wheres:
                 if inner == where or inner.startswith(where + "/"):
-                    rest = inner[len(where):] or "/"
+                    rest = inner[len(where) :] or "/"
                     route = rest
                     prefix = self.gateway.prefix
                     if prefix and (route == prefix or route.startswith(prefix + "/")):
-                        route = route[len(prefix):] or "/"
+                        route = route[len(prefix) :] or "/"
                     name = self.gateway.name_of(route)
                     if name is None or self.gateway.paths.get(name) != where:
                         # A gateway path opens only its own routes.
@@ -320,7 +340,7 @@ class GatewayPathsMiddleware:
                     if isinstance(raw, bytes):
                         head = (lead + where).encode()
                         if raw.startswith(head):
-                            scope["raw_path"] = lead.encode() + (raw[len(head):] or b"/")
+                            scope["raw_path"] = lead.encode() + (raw[len(head) :] or b"/")
                     break
         return await self.app(scope, receive, send)
 
@@ -329,6 +349,17 @@ class GatewayPathsMiddleware:
         if scope.get("type") == "websocket":
             await send({"type": "websocket.close", "code": 4404})
             return
-        body = json.dumps({"ok": False, "message": "Not Found", "data": None, "detail": "Not Found"}).encode()
-        await send({"type": "http.response.start", "status": 404, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        body = json.dumps(
+            {"ok": False, "message": "Not Found", "data": None, "detail": "Not Found"}
+        ).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 404,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
         await send({"type": "http.response.body", "body": body})

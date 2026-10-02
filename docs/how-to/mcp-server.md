@@ -41,7 +41,7 @@ A client that starts its servers as commands takes the command and its arguments
 | `remember(text, session, role, pinned)` | Store a turn, or a pinned fact. |
 | `feedback(id, outcome, correction)` | Grade a memory: `useful`, `dead_end`, `corrected`. |
 | `context(query, session, token_budget, recent_turns)` | A ready context block: pinned facts, recent turns, relevant memories. |
-| `forget(session, older_than_days, ids, superseded)` | Delete memories for good: by ids, by age within a session, or only superseded facts. The one tool that deletes. |
+| `forget(session, older_than_days, ids, superseded, all_sessions)` | Delete memories for good: by ids, by age within a session, or only superseded facts. A call with none of these deletes nothing unless `all_sessions=true`. The one tool that deletes. |
 
 Every tool takes a `token_budget` and every answer starts with a line that says whether anything was cut:
 

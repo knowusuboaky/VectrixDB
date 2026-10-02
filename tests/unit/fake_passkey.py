@@ -72,7 +72,9 @@ def cbor(value: Any) -> bytes:
     if isinstance(value, (list, tuple)):
         return _head(4, len(value)) + b"".join(cbor(item) for item in value)
     if isinstance(value, dict):
-        return _head(5, len(value)) + b"".join(cbor(key) + cbor(item) for key, item in value.items())
+        return _head(5, len(value)) + b"".join(
+            cbor(key) + cbor(item) for key, item in value.items()
+        )
     raise TypeError(f"no CBOR here for a {type(value).__name__}")
 
 
@@ -107,7 +109,13 @@ def cose_key(alg: int, public_key: Any) -> dict:
     """The public half as the COSE key map an authenticator writes into its data."""
     if alg == ES256:
         numbers = public_key.public_numbers()
-        return {1: 2, 3: ES256, -1: 1, -2: numbers.x.to_bytes(32, "big"), -3: numbers.y.to_bytes(32, "big")}
+        return {
+            1: 2,
+            3: ES256,
+            -1: 1,
+            -2: numbers.x.to_bytes(32, "big"),
+            -3: numbers.y.to_bytes(32, "big"),
+        }
     if alg == EDDSA:
         return {1: 1, 3: EDDSA, -1: 6, -2: public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)}
     if alg == RS256:
@@ -158,7 +166,13 @@ class FakePasskey:
 
     def copy(self) -> "FakePasskey":
         """A second device holding the same key, id, handle and count: what a copied passkey is."""
-        twin = FakePasskey(self.origin, alg=self.alg, counts=self.counts, credential_id=self.credential_id, key=self.key)
+        twin = FakePasskey(
+            self.origin,
+            alg=self.alg,
+            counts=self.counts,
+            credential_id=self.credential_id,
+            key=self.key,
+        )
         twin.sign_count, twin.user_handle = self.sign_count, self.user_handle
         return twin
 
@@ -183,9 +197,18 @@ class FakePasskey:
         user = options.get("user") or {}
         if "id" in user:
             self.user_handle = unb64u(user["id"])
-        auth = self._auth_data(rp_id if rp_id is not None else self._rp((options.get("rp") or {}).get("id")), flags, self._count(sign_count, advance=False))
+        auth = self._auth_data(
+            rp_id if rp_id is not None else self._rp((options.get("rp") or {}).get("id")),
+            flags,
+            self._count(sign_count, advance=False),
+        )
         if flags & AT:
-            auth += bytes(16) + struct.pack(">H", len(self.credential_id)) + self.credential_id + cbor(self.cose_key())
+            auth += (
+                bytes(16)
+                + struct.pack(">H", len(self.credential_id))
+                + self.credential_id
+                + cbor(self.cose_key())
+            )
         client = self._client_data(client_type, challenge, options, origin, cross_origin)
         raw = self.credential_id if raw_id is None else raw_id
         return {
@@ -221,9 +244,15 @@ class FakePasskey:
         replaces the signature outright; ``user_handle=None`` leaves it out.
         """
         options = options or {}
-        auth = self._auth_data(rp_id if rp_id is not None else self._rp(options.get("rpId")), flags, self._count(sign_count, advance=True))
+        auth = self._auth_data(
+            rp_id if rp_id is not None else self._rp(options.get("rpId")),
+            flags,
+            self._count(sign_count, advance=True),
+        )
         client = self._client_data(client_type, challenge, options, origin, cross_origin)
-        made = sign(self.alg, key if key is not None else self.key, auth + hashlib.sha256(client).digest())
+        made = sign(
+            self.alg, key if key is not None else self.key, auth + hashlib.sha256(client).digest()
+        )
         handle = self.user_handle if user_handle is _SAME else user_handle
         raw = self.credential_id if raw_id is None else raw_id
         response = {
@@ -254,15 +283,33 @@ class FakePasskey:
         if named is None:
             return self.host
         if self.host != named and not self.host.endswith("." + named):
-            raise AssertionError(f"a browser on {self.origin} refuses to make or use a passkey for {named!r}")
+            raise AssertionError(
+                f"a browser on {self.origin} refuses to make or use a passkey for {named!r}"
+            )
         return named
 
     @staticmethod
     def _auth_data(rp_id: str, flags: int, count: int) -> bytes:
-        return hashlib.sha256(rp_id.encode("utf-8")).digest() + bytes([flags]) + struct.pack(">I", count)
+        return (
+            hashlib.sha256(rp_id.encode("utf-8")).digest()
+            + bytes([flags])
+            + struct.pack(">I", count)
+        )
 
-    def _client_data(self, kind: str, challenge: Optional[bytes], options: dict, origin: Optional[str], cross_origin: bool) -> bytes:
+    def _client_data(
+        self,
+        kind: str,
+        challenge: Optional[bytes],
+        options: dict,
+        origin: Optional[str],
+        cross_origin: bool,
+    ) -> bytes:
         if challenge is None:
             challenge = unb64u(options["challenge"])
-        data = {"type": kind, "challenge": b64u(challenge), "origin": self.origin if origin is None else origin, "crossOrigin": cross_origin}
+        data = {
+            "type": kind,
+            "challenge": b64u(challenge),
+            "origin": self.origin if origin is None else origin,
+            "crossOrigin": cross_origin,
+        }
         return json.dumps(data, separators=(",", ":")).encode("utf-8")

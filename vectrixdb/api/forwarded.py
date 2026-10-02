@@ -58,7 +58,9 @@ def parse_proxies(value: Optional[str]) -> Tuple[Any, ...]:
         try:
             out.append(ipaddress.ip_network(raw, strict=False))
         except ValueError as exc:  # noqa: PERF203 - the message names the offender
-            raise ValueError(f"{ENV}: {raw!r} is not an address or a network, such as 10.0.0.0/8") from exc
+            raise ValueError(
+                f"{ENV}: {raw!r} is not an address or a network, such as 10.0.0.0/8"
+            ) from exc
     return tuple(out)
 
 

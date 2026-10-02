@@ -44,6 +44,19 @@ class TestCitationStrings:
         assert citation_for("guide", "d1", heading="Offline") == "guide#Offline"
         assert citation_for("guide", "d1", heading="[Not] this") == "guide#Not this"
 
+    def test_brackets_in_a_file_name_are_dropped(self):
+        """``Invoice [final].pdf`` inside a citation's brackets ended it early,
+        so no answer citing it could validate."""
+        from vectrixdb.citations import readable_citation_for
+
+        cite = citation_for("scans/Invoice [final].pdf", "d1", page=2)
+        assert cite == "Invoice final.pdf#page=2"
+        assert (
+            readable_citation_for("Invoice [final].pdf", "d1", page=2) == "Invoice final.pdf, p. 2"
+        )
+        c = validate_answer(f"Due in 30 days [{cite}].", [cite])
+        assert c.cited == [cite] and c.clean
+
     def test_page_wins_over_heading(self):
         assert citation_for("manual.docx", "d1", page=2, heading="Setup") == "manual.docx#page=2"
 
@@ -56,7 +69,10 @@ class TestCitationStrings:
         assert citation_for("HR handbook 2026", "d1") == "HR handbook 2026"
 
     def test_citation_of_prefers_the_stamp(self):
-        assert citation_of({"_vx_citation": "x.pdf#page=2", "source": "y.pdf", "page": 9}, "id") == "x.pdf#page=2"
+        assert (
+            citation_of({"_vx_citation": "x.pdf#page=2", "source": "y.pdf", "page": 9}, "id")
+            == "x.pdf#page=2"
+        )
         assert citation_of({"filename": "y.pdf", "page": 9}, "id") == "y.pdf#page=9"
         assert citation_of({}, "chunk-7") == "chunk-7"
 
@@ -68,12 +84,16 @@ class TestParsingAndValidation:
         assert parse_citations("a [x] b [y] c [x]") == ["x", "y", "x"]
 
     def test_valid_brackets_stay_and_are_listed_once(self):
-        c = validate_answer("Offline is a hard rule [guide#Offline]. Again [guide#Offline].", self.SOURCES)
+        c = validate_answer(
+            "Offline is a hard rule [guide#Offline]. Again [guide#Offline].", self.SOURCES
+        )
         assert c.text == "Offline is a hard rule [guide#Offline]. Again [guide#Offline]."
         assert c.cited == ["guide#Offline"] and c.rejected == [] and c.clean
 
     def test_an_invented_source_becomes_text_and_is_reported(self):
-        c = validate_answer("It is fast [benchmarks.pdf#page=9] and offline [guide#Offline].", self.SOURCES)
+        c = validate_answer(
+            "It is fast [benchmarks.pdf#page=9] and offline [guide#Offline].", self.SOURCES
+        )
         assert c.text == "It is fast benchmarks.pdf#page=9 and offline [guide#Offline]."
         assert c.rejected == ["benchmarks.pdf#page=9"]
         assert c.cited == ["guide#Offline"]
@@ -89,7 +109,9 @@ class TestParsingAndValidation:
         assert c.rejected == ["3.pdf#page=3"]
 
     def test_numbered_footnotes(self):
-        c = validate_answer("A [q3.pdf#page=3]. B [guide#Offline]. A again [q3.pdf#page=3].", self.SOURCES)
+        c = validate_answer(
+            "A [q3.pdf#page=3]. B [guide#Offline]. A again [q3.pdf#page=3].", self.SOURCES
+        )
         text, order = c.numbered()
         assert text == "A [1]. B [2]. A again [1]."
         assert order == ["q3.pdf#page=3", "guide#Offline"]
@@ -98,11 +120,16 @@ class TestParsingAndValidation:
         class Hit:
             citation = "a.pdf#page=1"
 
-        c = validate_answer("[a.pdf#page=1] [b] [c.md#Top]", [Hit(), "b", {"_vx_citation": "c.md#Top"}])
+        c = validate_answer(
+            "[a.pdf#page=1] [b] [c.md#Top]", [Hit(), "b", {"_vx_citation": "c.md#Top"}]
+        )
         assert c.cited == ["a.pdf#page=1", "b", "c.md#Top"]
 
     def test_the_instruction_names_the_bracket_convention(self):
-        assert "square brackets" in CITATION_INSTRUCTION and "[report.pdf#page=3]" in CITATION_INSTRUCTION
+        assert (
+            "square brackets" in CITATION_INSTRUCTION
+            and "[report.pdf#page=3]" in CITATION_INSTRUCTION
+        )
 
     def test_cited_is_a_plain_dataclass(self):
         assert Cited(text="t").clean is True

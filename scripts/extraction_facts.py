@@ -42,8 +42,16 @@ def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("pdf", type=Path, help="the document the facts are printed in")
     parser.add_argument("facts", type=Path, help="a JSON file of facts: page, number, label")
-    parser.add_argument("--sight", action="store_true", help="read the unsure pages with the chat model the settings name (paid)")
-    parser.add_argument("--save", type=Path, help="a folder to write each reading's text to, rules.md and sight.md, to read them side by side")
+    parser.add_argument(
+        "--sight",
+        action="store_true",
+        help="read the unsure pages with the chat model the settings name (paid)",
+    )
+    parser.add_argument(
+        "--save",
+        type=Path,
+        help="a folder to write each reading's text to, rules.md and sight.md, to read them side by side",
+    )
     return parser.parse_args()
 
 
@@ -101,7 +109,9 @@ def main() -> int:
 
         reader = PageReader.from_environment()
         if reader is None:
-            print("--sight needs AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY and AZURE_OPENAI_VISION_DEPLOYMENT in the environment")
+            print(
+                "--sight needs AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY and AZURE_OPENAI_VISION_DEPLOYMENT in the environment"
+            )
             return 2
     with tempfile.TemporaryDirectory() as folder:
         part = cut(args.pdf, pages, Path(folder))
@@ -113,11 +123,15 @@ def main() -> int:
         for name, doc in readings:
             starts = [offset for offset, _n in doc.pages] + [len(doc.text)]
             written = "\n\n".join(
-                f"<!-- page {pages[i]} -->\n\n{doc.text[starts[i]:starts[i + 1]].strip()}" for i in range(len(doc.pages))
+                f"<!-- page {pages[i]} -->\n\n{doc.text[starts[i] : starts[i + 1]].strip()}"
+                for i in range(len(doc.pages))
             )
             (args.save / f"{name}.md").write_text(written + "\n", encoding="utf-8")
     print(f"{len(wanted)} facts on pages {', '.join(str(p) for p in pages)} of {args.pdf.name}\n")
-    print(f"  {'page':>4}  {'number':<14} {'label':<40} " + "  ".join(f"{name:>5}" for name, _doc in readings))
+    print(
+        f"  {'page':>4}  {'number':<14} {'label':<40} "
+        + "  ".join(f"{name:>5}" for name, _doc in readings)
+    )
     kept = {name: 0 for name, _doc in readings}
     for fact in wanted:
         marks = []
@@ -125,16 +139,23 @@ def main() -> int:
             ok = read(fact, paragraphs(doc, where[int(fact["page"])]))
             kept[name] += ok
             marks.append(f"{'yes' if ok else 'no':>5}")
-        print(f"  {fact['page']:>4}  {fact['number']:<14} {fact['label'][:40]:<40} " + "  ".join(marks))
+        print(
+            f"  {fact['page']:>4}  {fact['number']:<14} {fact['label'][:40]:<40} "
+            + "  ".join(marks)
+        )
     print()
     for name, doc in readings:
         print(f"  {name:<6} {kept[name]} of {len(wanted)} facts kept with what they measure")
         if name == "sight":
             meta = doc.metadata
             read_pages = [pages[n - 1] for n in meta.get("pages_read_by_sight", [])]
-            left = {pages[int(n) - 1]: why for n, why in (meta.get("pages_kept_by_rules") or {}).items()}
-            print(f"         read by sight: pages {read_pages or 'none'}; left to the rules: {left or 'none'}; "
-                  f"numbers taken out as not on the page: {meta.get('numbers_not_on_page', 0)}")
+            left = {
+                pages[int(n) - 1]: why for n, why in (meta.get("pages_kept_by_rules") or {}).items()
+            }
+            print(
+                f"         read by sight: pages {read_pages or 'none'}; left to the rules: {left or 'none'}; "
+                f"numbers taken out as not on the page: {meta.get('numbers_not_on_page', 0)}"
+            )
     return 0
 
 

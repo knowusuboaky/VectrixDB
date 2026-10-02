@@ -151,8 +151,22 @@ function evEmpty() {
     <div>Runs come from the library. Write the questions once and every way the collection can be searched is timed and ranked, with three picks to choose from.</div>
     <pre class="ev-code">vectrixdb golden template docs --out golden.jsonl
 vectrixdb evaluate docs --golden golden.jsonl</pre>
-    ${EV.where ? `<div class="faint">Runs are read from <span class="mono">${esc(EV.where)}</span>.</div>` : ''}
+    ${EV.where ? `<div class="faint">Runs are read from <span class="mono">${esc(evWhereLabel(EV.where))}</span>${evWhereIsLocal(EV.where) ? ' under the data folder' : ''}.</div>` : ''}
   </div>`;
+}
+
+/* The runs' folder as the page names it. The server's reply carries the
+   folder as it is on the server, so other tooling can find it; a viewer of
+   the dashboard is not shown the machine's own path, only the part from
+   'evaluations' on, which is where the data folder keeps them. An address
+   (s3://, https://) is not a path and is shown as it is. */
+function evWhereIsLocal(where) { return !/^[a-z][a-z0-9+.-]*:\/\//i.test(String(where)); }
+function evWhereLabel(where) {
+  const text = String(where);
+  if (!evWhereIsLocal(text)) return text;
+  const parts = text.split(/[\\/]+/).filter(Boolean);
+  const at = parts.lastIndexOf('evaluations');
+  return (at >= 0 ? parts.slice(at) : parts.slice(-1)).join('/');
 }
 
 /* ------------------------------------------------------------ pieces */

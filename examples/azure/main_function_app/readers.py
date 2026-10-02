@@ -88,7 +88,9 @@ def extraction_app_from_environment(env: Optional[Dict[str, str]] = None) -> Opt
     from vectrixdb.api.extraction import extraction_routes
     from vectrixdb.extract import HttpExtractor
 
-    table = extraction_routes(env.get("EXTRACTION_PREFIX", ""), env.get("EXTRACTION_GATEWAY_PATHS", ""))
+    table = extraction_routes(
+        env.get("EXTRACTION_PREFIX", ""), env.get("EXTRACTION_GATEWAY_PATHS", "")
+    )
     return HttpExtractor.from_environment(env, routes=table)
 
 
@@ -154,7 +156,10 @@ def page_reader_from_environment(env: Optional[Dict[str, str]] = None) -> Option
     the document with it.
     """
     env = dict(os.environ if env is None else env)
-    endpoint, key = env.get("AZURE_DOCINTEL_ENDPOINT", "").strip(), env.get("AZURE_DOCINTEL_KEY", "").strip()
+    endpoint, key = (
+        env.get("AZURE_DOCINTEL_ENDPOINT", "").strip(),
+        env.get("AZURE_DOCINTEL_KEY", "").strip(),
+    )
     if not (endpoint and key):
         return None
     from azure.ai.documentintelligence import DocumentIntelligenceClient
@@ -196,11 +201,20 @@ def extractors_from_environment(env: Optional[Dict[str, str]] = None) -> Dict[st
         )
         return {suffix: reader for suffix in service.suffixes()}
     env = dict(os.environ if env is None else env)
-    from vectrixdb.extract.engines import AUDIO_SUFFIXES, IMAGE_SUFFIXES, VIDEO_SUFFIXES, AzureSpeech, Video
+    from vectrixdb.extract.engines import (
+        AUDIO_SUFFIXES,
+        IMAGE_SUFFIXES,
+        VIDEO_SUFFIXES,
+        AzureSpeech,
+        Video,
+    )
 
     readers: Dict[str, Any] = {}
 
-    docintel, docintel_key = env.get("AZURE_DOCINTEL_ENDPOINT", "").strip(), env.get("AZURE_DOCINTEL_KEY", "").strip()
+    docintel, docintel_key = (
+        env.get("AZURE_DOCINTEL_ENDPOINT", "").strip(),
+        env.get("AZURE_DOCINTEL_KEY", "").strip(),
+    )
     if docintel and docintel_key:
         from azure.ai.documentintelligence import DocumentIntelligenceClient
         from azure.core.credentials import AzureKeyCredential
@@ -210,11 +224,15 @@ def extractors_from_environment(env: Optional[Dict[str, str]] = None) -> Dict[st
         # prebuilt-read, not prebuilt-layout: a photograph has no tables to
         # find, and read is a sixth of the price when the free pages run out.
         picture_reader = AzureDocumentIntelligence(
-            DocumentIntelligenceClient(docintel, AzureKeyCredential(docintel_key)), model="prebuilt-read"
+            DocumentIntelligenceClient(docintel, AzureKeyCredential(docintel_key)),
+            model="prebuilt-read",
         )
         readers.update({suffix: picture_reader for suffix in IMAGE_SUFFIXES})
 
-    speech, speech_key = env.get("AZURE_SPEECH_ENDPOINT", "").strip(), env.get("AZURE_SPEECH_KEY", "").strip()
+    speech, speech_key = (
+        env.get("AZURE_SPEECH_ENDPOINT", "").strip(),
+        env.get("AZURE_SPEECH_KEY", "").strip(),
+    )
     if speech and speech_key:
         listener = AzureSpeech(speech.rstrip("/"), speech_key)
         readers.update({suffix: listener for suffix in AUDIO_SUFFIXES})
@@ -242,4 +260,6 @@ def what_reads_what(readers: Dict[str, Any]) -> str:
     by_reader: Dict[str, List[str]] = {}
     for suffix, reader in sorted(readers.items()):
         by_reader.setdefault(getattr(reader, "label", type(reader).__name__), []).append(suffix)
-    return "; ".join(f"{label}: {' '.join(suffixes)}" for label, suffixes in sorted(by_reader.items()))
+    return "; ".join(
+        f"{label}: {' '.join(suffixes)}" for label, suffixes in sorted(by_reader.items())
+    )

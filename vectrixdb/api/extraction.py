@@ -183,7 +183,9 @@ def allowed_host(url: str, hosts: Sequence[str]) -> bool:
     return False
 
 
-def _guarded_transport(hosts: Sequence[str]) -> Callable[..., Tuple[int, Mapping[str, str], bytes]]:
+def _guarded_transport(
+    hosts: Sequence[str], max_bytes: Optional[int] = None
+) -> Callable[..., Tuple[int, Mapping[str, str], bytes]]:
     """urllib, following a redirect only to another allowed host.
 
     The library's own transport follows every redirect, which is right for an
@@ -196,7 +198,9 @@ def _guarded_transport(hosts: Sequence[str]) -> Callable[..., Tuple[int, Mapping
     class _AllowedRedirects(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001 - urllib's signature
             if not allowed_host(newurl, hosts):
-                raise _Refused(403, f"{req.full_url} redirected to {newurl}, which is not an allowed host")
+                raise _Refused(
+                    403, f"{req.full_url} redirected to {newurl}, which is not an allowed host"
+                )
             return super().redirect_request(req, fp, code, msg, headers, newurl)
 
     opener = urllib.request.build_opener(_AllowedRedirects)
@@ -205,7 +209,13 @@ def _guarded_transport(hosts: Sequence[str]) -> Callable[..., Tuple[int, Mapping
         request = urllib.request.Request(url, data=body or None, headers=headers, method=method)
         try:
             with opener.open(request, timeout=timeout) as reply:
-                return reply.status, dict(reply.headers.items()), reply.read()
+                # One byte past the limit is enough to say it is too large;
+                # reading the whole body first let any allowed host fill memory.
+                return (
+                    reply.status,
+                    dict(reply.headers.items()),
+                    reply.read() if max_bytes is None else reply.read(max_bytes + 1),
+                )
         except urllib.error.HTTPError as exc:
             return exc.code, dict(exc.headers.items()) if exc.headers else {}, exc.read()
 
@@ -232,7 +242,9 @@ def _new_record(kind: str, params: Mapping[str, Any]) -> Dict[str, Any]:
 
 def _public(record: Mapping[str, Any]) -> Dict[str, Any]:
     """A job as a caller sees it: what it was asked, how it went, and what it made."""
-    shown = {key: record[key] for key in ("job", "kind", "status", "created", "updated") if key in record}
+    shown = {
+        key: record[key] for key in ("job", "kind", "status", "created", "updated") if key in record
+    }
     if record.get("result") is not None:
         shown["result"] = record["result"]
     if record.get("error"):
@@ -252,9 +264,13 @@ class MemoryJobs:
         self.output = Path(output)
         self._records: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
-        self._executor = executor or concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="vectrixdb-job")
+        self._executor = executor or concurrent.futures.ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="vectrixdb-job"
+        )
 
-    def submit(self, kind: str, params: Mapping[str, Any], runner: Callable[[Mapping[str, Any]], Any]) -> Dict[str, Any]:
+    def submit(
+        self, kind: str, params: Mapping[str, Any], runner: Callable[[Mapping[str, Any]], Any]
+    ) -> Dict[str, Any]:
         record = _new_record(kind, params)
         with self._lock:
             self._records[record["job"]] = record
@@ -322,7 +338,9 @@ class AzureJobs:
         default, and both are made when they are not there.
         """
         found = os.environ if env is None else env
-        where = str(found.get("VECTRIXDB_EXTRACT_STORAGE") or found.get("AzureWebJobsStorage") or "").strip()
+        where = str(
+            found.get("VECTRIXDB_EXTRACT_STORAGE") or found.get("AzureWebJobsStorage") or ""
+        ).strip()
         if not where:
             raise ConfigurationError(
                 "AzureJobs needs VECTRIXDB_EXTRACT_STORAGE: a storage connection string, or an account URL "
@@ -332,7 +350,9 @@ class AzureJobs:
             from azure.storage.blob import BlobServiceClient
             from azure.storage.queue import QueueServiceClient
         except ImportError as exc:
-            raise DependencyError(getattr(exc, "name", None) or "azure-storage-queue", "jobs-azure") from exc
+            raise DependencyError(
+                getattr(exc, "name", None) or "azure-storage-queue", "jobs-azure"
+            ) from exc
         container_name = str(found.get("VECTRIXDB_EXTRACT_CONTAINER") or "extraction")
         queue_name = str(found.get("VECTRIXDB_EXTRACT_QUEUE") or "extract-jobs")
         if where.startswith("https://"):
@@ -355,7 +375,9 @@ class AzureJobs:
         return cls(container, queue)
 
     def _write(self, record: Mapping[str, Any]) -> None:
-        self._container.upload_blob(f"jobs/{record['job']}.json", json.dumps(record, default=str), overwrite=True)
+        self._container.upload_blob(
+            f"jobs/{record['job']}.json", json.dumps(record, default=str), overwrite=True
+        )
 
     def submit(self, kind: str, params: Mapping[str, Any], runner: Any = None) -> Dict[str, Any]:
         record = _new_record(kind, params)
@@ -369,7 +391,11 @@ class AzureJobs:
         try:
             return json.loads(self._container.download_blob(f"jobs/{job}.json").readall())
         except Exception as exc:  # noqa: BLE001 - not there is None; anything else is raised
-            if "not" in str(exc).lower() and "found" in str(exc).lower() or getattr(exc, "status_code", None) == 404:
+            if (
+                "not" in str(exc).lower()
+                and "found" in str(exc).lower()
+                or getattr(exc, "status_code", None) == 404
+            ):
                 return None
             raise
 
@@ -442,10 +468,12 @@ class ExtractionService:
 
     def __post_init__(self) -> None:
         self.url_hosts = tuple(h for h in (self.url_hosts or ()) if str(h).strip())
-        self._fetch = self.transport or _guarded_transport(self.url_hosts)
+        self._fetch = self.transport or _guarded_transport(self.url_hosts, self.max_bytes)
 
     @classmethod
-    def from_environment(cls, env: Optional[Mapping[str, str]] = None, **given: Any) -> "ExtractionService":
+    def from_environment(
+        cls, env: Optional[Mapping[str, str]] = None, **given: Any
+    ) -> "ExtractionService":
         """Every service whose settings are there; ``given`` wins over the environment.
 
         Azure first: Document Intelligence for pictures and scanned pages,
@@ -464,15 +492,28 @@ class ExtractionService:
         pieces["image"] = docintel if docintel is not None else RapidOcr()
         if docintel is not None:
             pieces["page_ocr"] = _page_reader(docintel)
-        speech, speech_key = found.get("AZURE_SPEECH_ENDPOINT", "").strip(), found.get("AZURE_SPEECH_KEY", "").strip()
+        speech, speech_key = (
+            found.get("AZURE_SPEECH_ENDPOINT", "").strip(),
+            found.get("AZURE_SPEECH_KEY", "").strip(),
+        )
         # The languages a recording may be in, when a caller names none: Speech
         # hears which one it is. Up to four voices told apart, "Speaker 1:".
-        locales = [part.strip() for part in found.get("VECTRIXDB_SPEECH_LOCALES", "en-US,fr-CA").split(",") if part.strip()]
+        locales = [
+            part.strip()
+            for part in found.get("VECTRIXDB_SPEECH_LOCALES", "en-US,fr-CA").split(",")
+            if part.strip()
+        ]
         speakers = int(found.get("VECTRIXDB_SPEECH_SPEAKERS", "4") or 0)
-        pieces["audio"] = AzureSpeech(speech, speech_key, locales=locales, speakers=speakers) if speech and speech_key else Whisper()
+        pieces["audio"] = (
+            AzureSpeech(speech, speech_key, locales=locales, speakers=speakers)
+            if speech and speech_key
+            else Whisper()
+        )
         pieces["video_frames"] = int(found.get("VECTRIXDB_VIDEO_FRAMES", "12") or 0)
         pieces["translator"] = AzureTranslator.from_environment(found)
-        pieces["url_hosts"] = tuple(h.strip() for h in found.get("VECTRIXDB_EXTRACT_URL_HOSTS", "").split(",") if h.strip())
+        pieces["url_hosts"] = tuple(
+            h.strip() for h in found.get("VECTRIXDB_EXTRACT_URL_HOSTS", "").split(",") if h.strip()
+        )
         jobs = found.get("VECTRIXDB_EXTRACT_JOBS", "memory").strip().lower()
         if "jobs" not in given:
             if jobs == "azure":
@@ -489,19 +530,27 @@ class ExtractionService:
             from ..extract.describers import describer_from_environment
 
             pieces["describer"] = describer_from_environment(found, reader=pieces.get("image"))
-        if found.get("VECTRIXDB_EXTRACT_PDF", "").strip().lower() == "vision" and "page_reader" not in given:
+        if (
+            found.get("VECTRIXDB_EXTRACT_PDF", "").strip().lower() == "vision"
+            and "page_reader" not in given
+        ):
             # The pages a person would have to look at to read, read by a
             # model that can see them, held to each page's own words.
             from ..extract.page_reader import PageReader
 
             pieces["page_reader"] = PageReader.from_environment(found)
-            pieces["every_page"] = found.get("VECTRIXDB_VISION_PAGES", "hard").strip().lower() == "all"
+            pieces["every_page"] = (
+                found.get("VECTRIXDB_VISION_PAGES", "hard").strip().lower() == "all"
+            )
             if pieces["page_reader"] is None:
                 logger.warning(
                     "VECTRIXDB_EXTRACT_PDF=vision needs a chat model that can see: AZURE_OPENAI_VISION_DEPLOYMENT "
                     "with AZURE_OPENAI_ENDPOINT, or VECTRIXDB_DESCRIBER_URL; PDFs are read by the rules alone"
                 )
-        if found.get("VECTRIXDB_EXTRACT_PDF", "").strip().lower() == "layout" and "pdf_layout" not in given:
+        if (
+            found.get("VECTRIXDB_EXTRACT_PDF", "").strip().lower() == "layout"
+            and "pdf_layout" not in given
+        ):
             client = getattr(pieces.get("image"), "client", None)
             if client is None:
                 logger.warning(
@@ -522,7 +571,9 @@ class ExtractionService:
     def listening_in(self, language: Optional[str]) -> Any:
         """The sound engine for this call's language, the shared one untouched."""
         if self.audio is None:
-            raise _Refused(503, "nothing reads sound: set AZURE_SPEECH_ENDPOINT and AZURE_SPEECH_KEY")
+            raise _Refused(
+                503, "nothing reads sound: set AZURE_SPEECH_ENDPOINT and AZURE_SPEECH_KEY"
+            )
         if not language:
             return self.audio
         from ..extract.youtube import _listening_in
@@ -540,8 +591,13 @@ class ExtractionService:
             _pdf_extras(data, doc)
         else:
             doc = load_bytes(
-                data, name, kind=DOCUMENT_KINDS[kind], images=describe, ocr=self.page_ocr,
-                page_reader=self.page_reader, every_page=self.every_page,
+                data,
+                name,
+                kind=DOCUMENT_KINDS[kind],
+                images=describe,
+                ocr=self.page_ocr,
+                page_reader=self.page_reader,
+                every_page=self.every_page,
             )
         if describe and doc.figures:
             doc = describe_figures(doc, self.describer, name=name)
@@ -551,7 +607,9 @@ class ExtractionService:
         from ..ingest import LoadedDocument
 
         if self.image is None:
-            raise _Refused(503, "nothing reads pictures: set AZURE_DOCINTEL_ENDPOINT and AZURE_DOCINTEL_KEY")
+            raise _Refused(
+                503, "nothing reads pictures: set AZURE_DOCINTEL_ENDPOINT and AZURE_DOCINTEL_KEY"
+            )
         doc = self.image(data, name)
         # Its words were read just now, so the words-only last resort is not asked again.
         describer = getattr(self.describer, "seeing", self.describer)
@@ -561,10 +619,17 @@ class ExtractionService:
             description = str(found.get("description") or "")
             if doc.text.strip():
                 # The reader's words are exact; the describer's list of them is a second, rougher copy.
-                description = "\n".join(line for line in description.splitlines() if not line.startswith("Words in the picture:"))
+                description = "\n".join(
+                    line
+                    for line in description.splitlines()
+                    if not line.startswith("Words in the picture:")
+                )
             from ..ingest import _header_rows_lines
 
-            parts = [f"[Figure: {found['caption']}]" if found.get("caption") else "", description.strip()]
+            parts = [
+                f"[Figure: {found['caption']}]" if found.get("caption") else "",
+                description.strip(),
+            ]
             rows = found.get("table")
             if rows:
                 # A chart's values or a table's rows, the way a sheet's rows are written.
@@ -593,15 +658,28 @@ class ExtractionService:
     def fetch(self, url: str) -> Tuple[bytes, str, str]:
         """An allowed address's bytes, the name to read them by, and their content type."""
         if not self.url_hosts:
-            raise _Refused(403, "no address may be fetched: set VECTRIXDB_EXTRACT_URL_HOSTS to the hosts that may")
+            raise _Refused(
+                403,
+                "no address may be fetched: set VECTRIXDB_EXTRACT_URL_HOSTS to the hosts that may",
+            )
         if not allowed_host(url, self.url_hosts):
-            raise _Refused(403, f"{urlparse(url).hostname or url} is not one of the hosts this service fetches from")
+            raise _Refused(
+                403,
+                f"{urlparse(url).hostname or url} is not one of the hosts this service fetches from",
+            )
         status, headers, body = self._fetch("GET", url, {"Accept": "*/*"}, b"", self.timeout)
         if not 200 <= int(status) < 300:
             raise _Refused(502, f"{url} answered {status}")
         if len(body) > self.max_bytes:
             raise _Refused(413, f"{url} is larger than {self.max_bytes:,} bytes")
-        content_type = next((str(v).lower() for k, v in (headers or {}).items() if str(k).lower() == "content-type"), "")
+        content_type = next(
+            (
+                str(v).lower()
+                for k, v in (headers or {}).items()
+                if str(k).lower() == "content-type"
+            ),
+            "",
+        )
         return bytes(body), PurePosixPath(urlparse(url).path).name, content_type
 
     # -- jobs
@@ -644,7 +722,10 @@ class ExtractionService:
 
 
 def _docintel(env: Mapping[str, str]) -> Any:
-    endpoint, key = env.get("AZURE_DOCINTEL_ENDPOINT", "").strip(), env.get("AZURE_DOCINTEL_KEY", "").strip()
+    endpoint, key = (
+        env.get("AZURE_DOCINTEL_ENDPOINT", "").strip(),
+        env.get("AZURE_DOCINTEL_KEY", "").strip(),
+    )
     if not (endpoint and key):
         return None
     try:
@@ -654,7 +735,9 @@ def _docintel(env: Mapping[str, str]) -> Any:
         raise DependencyError("azure-ai-documentintelligence", "ocr-azure") from exc
     from ..extract.engines import AzureDocumentIntelligence
 
-    return AzureDocumentIntelligence(DocumentIntelligenceClient(endpoint, AzureKeyCredential(key)), model="prebuilt-read")
+    return AzureDocumentIntelligence(
+        DocumentIntelligenceClient(endpoint, AzureKeyCredential(key)), model="prebuilt-read"
+    )
 
 
 def _page_reader(docintel: Any) -> Callable[[bytes], List[str]]:
@@ -709,13 +792,31 @@ def _as_json(doc: Any) -> Dict[str, Any]:
 
 
 #: Keys whose values name the file or the machinery, not what the file says.
-_NOT_WORDS = frozenset({"kind", "source", "filename", "doc_id", "language", "engine", "format", "content_type", "src", "name", "described_by", "mime", "running_lines"})
+_NOT_WORDS = frozenset(
+    {
+        "kind",
+        "source",
+        "filename",
+        "doc_id",
+        "language",
+        "engine",
+        "format",
+        "content_type",
+        "src",
+        "name",
+        "described_by",
+        "mime",
+        "running_lines",
+    }
+)
 
 #: Between two texts sent to the masking engine at once: nothing any engine takes for a name, a number or an address.
 _BETWEEN = "\n␞\n"
 
 
-def _mask_everything_else(reply: Dict[str, Any], types: Optional[str], engine: Any, language: Optional[str]) -> None:
+def _mask_everything_else(
+    reply: Dict[str, Any], types: Optional[str], engine: Any, language: Optional[str]
+) -> None:
     """Mask every text in a JSON reply but its ``text``, which is masked already, in place.
 
     The texts go to the engine in one call, joined by a mark no engine
@@ -758,7 +859,13 @@ def _mask_everything_else(reply: Dict[str, Any], types: Optional[str], engine: A
 
 
 def _mask_wanted(request: Request) -> bool:
-    return str(request.query_params.get("mask", "")).strip().lower() not in ("", "0", "no", "false", "off")
+    return str(request.query_params.get("mask", "")).strip().lower() not in (
+        "",
+        "0",
+        "no",
+        "false",
+        "off",
+    )
 
 
 async def _answer(request: Request, doc: Any, markdown: Optional[str] = None) -> Response:
@@ -772,15 +879,27 @@ async def _answer(request: Request, doc: Any, markdown: Optional[str] = None) ->
     if not _mask_wanted(request):
         if _wants_json(request):
             return JSONResponse(_as_json(doc))
-        return PlainTextResponse(doc.text if markdown is None else markdown, media_type="text/markdown")
+        return PlainTextResponse(
+            doc.text if markdown is None else markdown, media_type="text/markdown"
+        )
     from ..masking import mask
 
     engine = getattr(request.app.state, "masking", None)
-    language = request.query_params.get("language") or (doc.metadata.get("language") if isinstance(doc.metadata, dict) else None)
+    language = request.query_params.get("language") or (
+        doc.metadata.get("language") if isinstance(doc.metadata, dict) else None
+    )
     types = request.query_params.get("types") or None
     try:
-        done = await run_in_threadpool(mask, doc.text, types=types, engine=engine, language=language)
-        shown = done if markdown is None else await run_in_threadpool(mask, markdown, types=types, engine=engine, language=language)
+        done = await run_in_threadpool(
+            mask, doc.text, types=types, engine=engine, language=language
+        )
+        shown = (
+            done
+            if markdown is None
+            else await run_in_threadpool(
+                mask, markdown, types=types, engine=engine, language=language
+            )
+        )
     except ConfigurationError as exc:
         raise _Refused(422, str(exc)) from exc
     about = {key: value for key, value in done.to_dict().items() if key != "text"}
@@ -793,7 +912,15 @@ async def _answer(request: Request, doc: Any, markdown: Optional[str] = None) ->
         await run_in_threadpool(_mask_everything_else, reply, types, engine, language)
         reply["masking"] = about
         return JSONResponse(reply)
-    return PlainTextResponse(shown.text, media_type="text/markdown", headers={"X-Masking": json.dumps({k: about[k] for k in ("engine", "score", "counts", "regex_only")})})
+    return PlainTextResponse(
+        shown.text,
+        media_type="text/markdown",
+        headers={
+            "X-Masking": json.dumps(
+                {k: about[k] for k in ("engine", "score", "counts", "regex_only")}
+            )
+        },
+    )
 
 
 async def _body(request: Request, service: ExtractionService) -> bytes:
@@ -810,7 +937,9 @@ async def _body(request: Request, service: ExtractionService) -> bytes:
 
 def _named(request: Request, suffix: Union[str, Tuple[str, ...]], default: str) -> str:
     """The file's name from X-Filename, or a default of the kind the route reads."""
-    given = unquote(request.headers.get("x-filename", "")).replace("\\", "/").rsplit("/", 1)[-1].strip()
+    given = (
+        unquote(request.headers.get("x-filename", "")).replace("\\", "/").rsplit("/", 1)[-1].strip()
+    )
     if given and given.lower().endswith(suffix):
         return given
     return default
@@ -823,7 +952,9 @@ def _refuse_open(allow_open: bool) -> None:
     if full_key_configured() or os.environ.get("VECTRIXDB_SIGNIN", "").strip():
         return
     if allow_open or os.environ.get("VECTRIXDB_ALLOW_OPEN", "").strip().lower() in _TRUE:
-        logger.warning("the extraction service is open: no API key and no sign-in, because it was told it may be")
+        logger.warning(
+            "the extraction service is open: no API key and no sign-in, because it was told it may be"
+        )
         return
     raise ConfigurationError(
         "refusing to build the extraction service with no API key and no sign-in: every call spends money, and "
@@ -857,7 +988,9 @@ def _route_key(path: str) -> str:
     return "/".join(part for part in path.strip("/").split("/") if not part.startswith("{"))
 
 
-def _publish_gateway_paths(app: FastAPI, router: Any, prefix: str, gateways: Mapping[str, str]) -> None:
+def _publish_gateway_paths(
+    app: FastAPI, router: Any, prefix: str, gateways: Mapping[str, str]
+) -> None:
     """Serve each listed route under its own gateway path too, so the gateway may pass it on or take it off.
 
     The copies are left out of the OpenAPI document, which lists each route
@@ -878,7 +1011,9 @@ def _publish_gateway_paths(app: FastAPI, router: Any, prefix: str, gateways: Map
         )
     for where in sorted(set(gateways.values())):
         published = APIRouter()
-        published.routes.extend(route for route in router.routes if gateways.get(_route_key(route.path)) == where)
+        published.routes.extend(
+            route for route in router.routes if gateways.get(_route_key(route.path)) == where
+        )
         app.include_router(published, prefix=f"{where}{prefix}", include_in_schema=False)
 
 
@@ -965,9 +1100,13 @@ def create_extraction_app(
     """
     global _current
     _refuse_open(allow_open)
-    prefix = route_prefix(os.environ.get("VECTRIXDB_EXTRACT_PREFIX", "") if prefix is None else prefix)
+    prefix = route_prefix(
+        os.environ.get("VECTRIXDB_EXTRACT_PREFIX", "") if prefix is None else prefix
+    )
     gateways = read_gateway_paths(
-        os.environ.get("VECTRIXDB_EXTRACT_GATEWAY_PATHS", "") if gateway_paths is None else gateway_paths
+        os.environ.get("VECTRIXDB_EXTRACT_GATEWAY_PATHS", "")
+        if gateway_paths is None
+        else gateway_paths
     )
     service = service or ExtractionService.from_environment(**given)
     _current = service
@@ -1012,7 +1151,9 @@ def create_extraction_app(
     # Keys issued by a VectrixDB server, and tokens from its identity
     # provider, are honoured here too when the two share a sign-in store.
     signin = SignInConfig.from_env(os.environ.get("VECTRIXDB_PATH") or tempfile.gettempdir())
-    app.state.signin = SignInRuntime(signin, product=app.state.brand.name) if signin.enabled else None
+    app.state.signin = (
+        SignInRuntime(signin, product=app.state.brand.name) if signin.enabled else None
+    )
     # The library's door, told that health and the documentation are public
     # under the prefix too, or /api/health would ask a load balancer for a
     # key; and health under its own gateway path, when it has one.
@@ -1022,9 +1163,9 @@ def create_extraction_app(
     app.add_middleware(_door(AccessMiddleware, public))
     from .security_headers import SecurityHeadersMiddleware, frame_ancestors_from_env
 
-    https = bool(app.state.signin is not None and app.state.signin.config.secure_cookies) or os.environ.get(
-        "VECTRIXDB_PUBLIC_URL", ""
-    ).strip().startswith("https://")
+    https = bool(
+        app.state.signin is not None and app.state.signin.config.secure_cookies
+    ) or os.environ.get("VECTRIXDB_PUBLIC_URL", "").strip().startswith("https://")
     app.add_middleware(SecurityHeadersMiddleware, ancestors=frame_ancestors_from_env(), https=https)
     if app.root_path:
         from .rootpath import RootPathMiddleware
@@ -1041,7 +1182,10 @@ def create_extraction_app(
 
     @app.exception_handler(RequestValidationError)
     async def _shape(request: Request, exc: RequestValidationError) -> Response:
-        detail = [{k: v for k, v in error.items() if k in ("type", "loc", "msg")} for error in exc.errors()]
+        detail = [
+            {k: v for k, v in error.items() if k in ("type", "loc", "msg")}
+            for error in exc.errors()
+        ]
         return refusal(422, message_of(detail), detail=detail)
 
     @app.exception_handler(DependencyError)
@@ -1069,7 +1213,11 @@ def create_extraction_app(
 
     @router.get("/health", tags=["about"])
     async def health() -> Dict[str, Any]:
-        return {"status": "healthy", "timestamp": _now(), "masking": describe_engine(app.state.masking, app.state.masking_languages)}
+        return {
+            "status": "healthy",
+            "timestamp": _now(),
+            "masking": describe_engine(app.state.masking, app.state.masking_languages),
+        }
 
     # -- masking
 
@@ -1085,7 +1233,9 @@ def create_extraction_app(
         from ..masking import mask
 
         try:
-            done = await run_in_threadpool(mask, body.text, types=body.types, engine=app.state.masking, language=body.language)
+            done = await run_in_threadpool(
+                mask, body.text, types=body.types, engine=app.state.masking, language=body.language
+            )
         except ConfigurationError as exc:
             raise _Refused(422, str(exc)) from exc
         return done.to_dict()
@@ -1144,19 +1294,26 @@ def create_extraction_app(
         from ..ingest import load_bytes
 
         data, _name, _type = await run_in_threadpool(service.fetch, body.url)
-        doc = await run_in_threadpool(lambda: load_bytes(data, "page.html", kind="html", source=body.url))
+        doc = await run_in_threadpool(
+            lambda: load_bytes(data, "page.html", kind="html", source=body.url)
+        )
         doc.metadata["embedded_media"] = "not read"
         return await _answer(request, doc)
 
     @router.post("/transcribe/image_url", tags=["transcribe"])
     async def transcribe_image_url(body: UrlBody, request: Request) -> Response:
         data, name, _type = await run_in_threadpool(service.fetch, body.url)
-        return await _answer(request, await run_in_threadpool(service.read_image, data, name or _MEDIA_NAMES["image"]))
+        return await _answer(
+            request,
+            await run_in_threadpool(service.read_image, data, name or _MEDIA_NAMES["image"]),
+        )
 
     @router.post("/transcribe/audio_url", tags=["transcribe"])
     async def transcribe_audio_url(body: UrlBody, request: Request) -> Response:
         data, name, _type = await run_in_threadpool(service.fetch, body.url)
-        doc = await run_in_threadpool(service.read_audio, data, name or _MEDIA_NAMES["audio"], body.language)
+        doc = await run_in_threadpool(
+            service.read_audio, data, name or _MEDIA_NAMES["audio"], body.language
+        )
         doc.metadata.update(source=body.url, language=body.language)
         doc.metadata.setdefault("filename", name)
         return await _answer(request, doc, transcript_markdown(doc))
@@ -1164,7 +1321,9 @@ def create_extraction_app(
     @router.post("/transcribe/video_url", tags=["transcribe"])
     async def transcribe_video_url(body: UrlBody, request: Request) -> Response:
         data, name, _type = await run_in_threadpool(service.fetch, body.url)
-        doc = await run_in_threadpool(service.read_video, data, name or _MEDIA_NAMES["video"], body.language)
+        doc = await run_in_threadpool(
+            service.read_video, data, name or _MEDIA_NAMES["video"], body.language
+        )
         doc.metadata.update(source=body.url, language=body.language)
         doc.metadata.setdefault("filename", name)
         return await _answer(request, doc, transcript_markdown(doc))
@@ -1176,7 +1335,9 @@ def create_extraction_app(
         from ..extract.youtube import load_youtube
 
         doc = await run_in_threadpool(
-            lambda: load_youtube(body.url, audio=service.audio, language=body.language, download=service.download)
+            lambda: load_youtube(
+                body.url, audio=service.audio, language=body.language, download=service.download
+            )
         )
         return await _answer(request, doc, transcript_markdown(doc))
 
@@ -1187,8 +1348,13 @@ def create_extraction_app(
         if video_id(body.url) is None:
             raise _Refused(422, f"{body.url!r} is not the address of one YouTube video")
         if not _FOLDER.match(body.output_dir) or ".." in body.output_dir:
-            raise _Refused(422, "output_dir is one folder name, letters, digits, spaces, dots, dashes and underscores")
-        record = await run_in_threadpool(service.jobs.submit, "youtube_save", body.model_dump(), service.run_job)
+            raise _Refused(
+                422,
+                "output_dir is one folder name, letters, digits, spaces, dots, dashes and underscores",
+            )
+        record = await run_in_threadpool(
+            service.jobs.submit, "youtube_save", body.model_dump(), service.run_job
+        )
         # The address the caller asks next, from the host on: a proxy's
         # path, the job route's own gateway path, then the prefix. The
         # caller puts the host it was given in front.
@@ -1214,7 +1380,9 @@ def create_extraction_app(
         data, name, content_type = await run_in_threadpool(service.fetch, body.url)
         suffix = PurePosixPath(name).suffix.lower().lstrip(".")
         if suffix in DOCUMENT_KINDS:
-            return await _answer(request, await run_in_threadpool(service.read_document, data, name, suffix))
+            return await _answer(
+                request, await run_in_threadpool(service.read_document, data, name, suffix)
+            )
         from ..ingest import media_kind_of
 
         # A server that labels everything application/octet-stream says
@@ -1225,30 +1393,47 @@ def create_extraction_app(
                 content_type = f"{proven}/{suffix or 'octet-stream'}"
             elif proven in ("pdf", "office", "rtf"):
                 kind = {"pdf": "pdf", "office": "docx", "rtf": "doc"}[proven]
-                return await _answer(request, await run_in_threadpool(service.read_document, data, name or f"file.{kind}", kind))
+                return await _answer(
+                    request,
+                    await run_in_threadpool(
+                        service.read_document, data, name or f"file.{kind}", kind
+                    ),
+                )
         if content_type.startswith("image/"):
-            return await _answer(request, await run_in_threadpool(service.read_image, data, name or _MEDIA_NAMES["image"]))
+            return await _answer(
+                request,
+                await run_in_threadpool(service.read_image, data, name or _MEDIA_NAMES["image"]),
+            )
         if content_type.startswith(("audio/", "video/")):
             reader = service.read_audio if content_type.startswith("audio/") else service.read_video
-            doc = await run_in_threadpool(reader, data, name or _MEDIA_NAMES["audio"], body.language)
+            doc = await run_in_threadpool(
+                reader, data, name or _MEDIA_NAMES["audio"], body.language
+            )
             doc.metadata.update(source=body.url, language=body.language)
             return await _answer(request, doc, transcript_markdown(doc))
         from ..ingest import load_bytes
 
-        doc = await run_in_threadpool(lambda: load_bytes(data, "page.html", kind="html", source=body.url))
+        doc = await run_in_threadpool(
+            lambda: load_bytes(data, "page.html", kind="html", source=body.url)
+        )
         return await _answer(request, doc)
 
     # -- languages
 
     def translator() -> Any:
         if service.translator is None:
-            raise _Refused(503, "translation is not set up: set AZURE_TRANSLATOR_KEY, and AZURE_TRANSLATOR_REGION for a regional resource")
+            raise _Refused(
+                503,
+                "translation is not set up: set AZURE_TRANSLATOR_KEY, and AZURE_TRANSLATOR_REGION for a regional resource",
+            )
         return service.translator
 
     @router.post("/translate/text", tags=["translate"])
     async def translate_text(body: TranslateBody) -> Dict[str, Any]:
         texts = [body.text] if isinstance(body.text, str) else list(body.text)
-        said = await run_in_threadpool(translator().translate, texts, body.to, source=body.from_lang)
+        said = await run_in_threadpool(
+            translator().translate, texts, body.to, source=body.from_lang
+        )
         translations = []
         for one in said:
             detected = one.get("detected") or {}
@@ -1260,7 +1445,11 @@ def create_extraction_app(
                     "detected_score": detected.get("score"),
                 }
             )
-        return {"translations": translations, "from_language": body.from_lang or "auto-detected", "to_language": body.to}
+        return {
+            "translations": translations,
+            "from_language": body.from_lang or "auto-detected",
+            "to_language": body.to,
+        }
 
     @router.post("/translate/detect", tags=["translate"])
     async def translate_detect(body: DetectBody) -> Dict[str, Any]:
@@ -1283,9 +1472,15 @@ def create_extraction_app(
         # The list needs no key, so it answers even when translation is not set up.
         from ..translate import AzureTranslator
 
-        found = await run_in_threadpool((service.translator or AzureTranslator(transport=None)).languages)
+        found = await run_in_threadpool(
+            (service.translator or AzureTranslator(transport=None)).languages
+        )
         languages = {
-            code: {"name": info.get("name"), "native_name": info.get("native"), "dir": info.get("direction", "ltr")}
+            code: {
+                "name": info.get("name"),
+                "native_name": info.get("native"),
+                "dir": info.get("direction", "ltr"),
+            }
             for code, info in found.items()
         }
         return {"languages": languages, "count": len(languages)}
@@ -1295,7 +1490,9 @@ def create_extraction_app(
     return app
 
 
-def run_extraction_job(body: Union[bytes, str], service: Optional[ExtractionService] = None) -> None:
+def run_extraction_job(
+    body: Union[bytes, str], service: Optional[ExtractionService] = None
+) -> None:
     """Run the job a queue message names, for the function app's queue trigger.
 
     The message is ``{"job": "j_..."}``, as ``AzureJobs.submit`` writes it.
@@ -1304,7 +1501,9 @@ def run_extraction_job(body: Union[bytes, str], service: Optional[ExtractionServ
     """
     service = service or _current or ExtractionService.from_environment()
     if not isinstance(service.jobs, AzureJobs):
-        raise ConfigurationError("run_extraction_job is for AzureJobs: set VECTRIXDB_EXTRACT_JOBS=azure")
+        raise ConfigurationError(
+            "run_extraction_job is for AzureJobs: set VECTRIXDB_EXTRACT_JOBS=azure"
+        )
     text = body.decode("utf-8") if isinstance(body, (bytes, bytearray)) else str(body)
     job = str(json.loads(text).get("job") or "")
     service.jobs.run(job, service.run_job)

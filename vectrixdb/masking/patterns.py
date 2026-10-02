@@ -16,10 +16,21 @@ so they are the other engines' work; this one never guesses at them.
 from __future__ import annotations
 
 import re
+import dataclasses
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-__all__ = ["DEFAULT_TYPES", "IN_PLACE", "MASK", "TYPES", "WEIGHTS", "Found", "RegexEngine", "apply", "score_of"]
+__all__ = [
+    "DEFAULT_TYPES",
+    "IN_PLACE",
+    "MASK",
+    "TYPES",
+    "WEIGHTS",
+    "Found",
+    "RegexEngine",
+    "apply",
+    "score_of",
+]
 
 
 # ============================================================================
@@ -35,16 +46,55 @@ MASK = "•"
 
 #: Every type an engine may report, in the words the record and the dashboard use.
 TYPES: Tuple[str, ...] = (
-    "name", "email", "phone", "credit_card", "ssn", "sin", "iban", "bank_account", "passport", "drivers_license",
-    "ip_address", "address", "date_of_birth", "date", "api_key", "connection_string", "internal_host",
+    "name",
+    "email",
+    "phone",
+    "credit_card",
+    "ssn",
+    "sin",
+    "iban",
+    "bank_account",
+    "passport",
+    "drivers_license",
+    "ip_address",
+    "address",
+    "date_of_birth",
+    "date",
+    "api_key",
+    "connection_string",
+    "internal_host",
 )
 #: What a collection masks when it says "masked" and names no types: identifiers, not people's names.
-DEFAULT_TYPES: Tuple[str, ...] = ("email", "phone", "credit_card", "ssn", "sin", "iban", "bank_account", "api_key", "connection_string")
+DEFAULT_TYPES: Tuple[str, ...] = (
+    "email",
+    "phone",
+    "credit_card",
+    "ssn",
+    "sin",
+    "iban",
+    "bank_account",
+    "api_key",
+    "connection_string",
+)
 #: The harm of one of each leaking, 0 to 1.
 WEIGHTS: Dict[str, float] = {
-    "name": 0.5, "email": 0.6, "phone": 0.5, "credit_card": 0.9, "ssn": 0.95, "sin": 0.95, "iban": 0.85, "bank_account": 0.85,
-    "passport": 0.8, "drivers_license": 0.7, "ip_address": 0.3, "address": 0.6, "date_of_birth": 0.5, "date": 0.1, "api_key": 0.95,
-    "connection_string": 0.95, "internal_host": 0.4,
+    "name": 0.5,
+    "email": 0.6,
+    "phone": 0.5,
+    "credit_card": 0.9,
+    "ssn": 0.95,
+    "sin": 0.95,
+    "iban": 0.85,
+    "bank_account": 0.85,
+    "passport": 0.8,
+    "drivers_license": 0.7,
+    "ip_address": 0.3,
+    "address": 0.6,
+    "date_of_birth": 0.5,
+    "date": 0.1,
+    "api_key": 0.95,
+    "connection_string": 0.95,
+    "internal_host": 0.4,
 }
 #: Masked where they stand, keeping enough to recognise; everything else is replaced by its type.
 IN_PLACE = frozenset({"email", "phone", "credit_card"})
@@ -71,7 +121,13 @@ class Found:
     score: float = 1.0
 
     def to_dict(self) -> Dict[str, object]:
-        return {"type": self.type, "start": self.start, "end": self.end, "engine": self.engine, "score": round(self.score, 3)}
+        return {
+            "type": self.type,
+            "start": self.start,
+            "end": self.end,
+            "engine": self.engine,
+            "score": round(self.score, 3),
+        }
 
 
 # ============================================================================
@@ -87,7 +143,9 @@ class Found:
 # An address: the first character of its local part is kept, and the domain,
 # which says whose address it is without saying whose mailbox.
 
-_EMAIL = re.compile(r"(?<![\w.+-])([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})\b")
+_EMAIL = re.compile(
+    r"(?<![\w.+-])([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})\b"
+)
 # Thirteen to nineteen digits, spaced or dashed, that pass the Luhn check.
 _CARD = re.compile(r"(?<![\w:])(?:\d[ -]?){12,18}\d(?![\w:])")
 # Nine to fifteen digits with the separators phone numbers are written with.
@@ -101,13 +159,21 @@ _SIN = re.compile(r"(?<![\w-])\d{3}[ -]\d{3}[ -]\d{3}(?![\w-])")
 _IBAN = re.compile(r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?\b")
 _IP = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])")
 # Keys by their prefixes, then any "key = value" that names itself a secret.
-_KEY_SHAPES = re.compile(r"(?<![A-Za-z0-9_-])(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|sk-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35})(?![A-Za-z0-9_-])")
-_KEY_NAMED = re.compile(r"(?i)\b(?:api[_ -]?key|secret(?:[_ -]?key)?|access[_ -]?token|auth[_ -]?token|token|password|passwd|pwd)\s*[:=]\s*['\"]?([^\s'\",;]{8,})")
+_KEY_SHAPES = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|sk-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35})(?![A-Za-z0-9_-])"
+)
+_KEY_NAMED = re.compile(
+    r"(?i)\b(?:api[_ -]?key|secret(?:[_ -]?key)?|access[_ -]?token|auth[_ -]?token|token|password|passwd|pwd)\s*[:=]\s*['\"]?([^\s'\",;]{8,})"
+)
 # A password inside a connection string or a database address.
-_CONNECTION = re.compile(r"(?i)\b(?:AccountKey|SharedAccessSignature|sig|Password|Pwd)=([^;\s]{8,})")
+_CONNECTION = re.compile(
+    r"(?i)\b(?:AccountKey|SharedAccessSignature|sig|Password|Pwd)=([^;\s]{8,})"
+)
 _URL_PASSWORD = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s:/@]+:([^\s@/]+)@")
 # Hosts nobody outside the company can reach, which a reader outside it should not be told of.
-_INTERNAL_HOST = re.compile(r"(?i)\b(?:[a-z0-9-]+\.)+(?:internal|corp|intranet|lan|local)\b|\bintranet(?:\.[a-z0-9-]+)+\b")
+_INTERNAL_HOST = re.compile(
+    r"(?i)\b(?:[a-z0-9-]+\.)+(?:internal|corp|intranet|lan|local)\b|\bintranet(?:\.[a-z0-9-]+)+\b"
+)
 
 
 def _luhn(digits: str) -> bool:
@@ -234,16 +300,21 @@ def _stand_in(kind: str, piece: str) -> str:
 
 
 def apply(text: str, found: Sequence[Found]) -> str:
-    """``text`` with each thing found masked, overlaps resolved in favour of the earliest and longest."""
+    """``text`` with each thing found masked. Spans that overlap are masked as
+    one, under the type of the earliest and longest: an engine's span that
+    ran past a pattern's used to be dropped whole, and its tail stayed in
+    the clear."""
     kept: List[Found] = []
     for item in sorted(found, key=lambda f: (f.start, -f.end)):
         if kept and item.start < kept[-1].end:
+            if item.end > kept[-1].end:
+                kept[-1] = dataclasses.replace(kept[-1], end=item.end)
             continue
         kept.append(item)
     out, at = [], 0
     for item in kept:
-        out.append(text[at:item.start])
-        out.append(_stand_in(item.type, text[item.start:item.end]))
+        out.append(text[at : item.start])
+        out.append(_stand_in(item.type, text[item.start : item.end]))
         at = item.end
     out.append(text[at:])
     return "".join(out)

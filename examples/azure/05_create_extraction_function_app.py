@@ -26,8 +26,14 @@ Four things happen here, in this order:
    written to a file on this machine.
 3. The wheel, looked inside before anything is sent. One built before the
    extraction service had what this app imports installs without complaint,
-   and then the app loads nothing and answers 404 to everything.
+   and then the app loads nothing and answers 404 to everything. The line
+   in ``requirements.txt`` that names it is pinned here to the wheel that
+   is actually in dist/, so a version bump cannot leave a stale name.
 4. The code, with ``func azure functionapp publish``.
+
+Once it is up, ``/health/wiring`` says what it was given, by service, with
+no key in it; and when it answers 404 to everything, its live log holds one
+message that lists every setting that is wrong.
 """
 
 from __future__ import annotations
@@ -69,7 +75,10 @@ from _common import (
 # passed on from settings.env, and the services from 03 the app uses when they
 # are there.
 #: What the app imports that only a new enough wheel has.
-NEEDS = {"vectrixdb/api/extraction.py": "class MaskRequest", "vectrixdb/masking/__init__.py": "def engine_from_env"}
+NEEDS = {
+    "vectrixdb/api/extraction.py": "class MaskRequest",
+    "vectrixdb/masking/__init__.py": "def engine_from_env",
+}
 
 #: The settings.env names that pass straight through to the library's own.
 PASSED_ON = {
@@ -83,10 +92,25 @@ PASSED_ON = {
 #: The services 03 makes that this app uses, what state.json calls each
 #: endpoint, and what the app does without it.
 SERVICES = (
-    ("VX_DOCINTEL", "docintel_endpoint", "AZURE_DOCINTEL", "pictures answer 503, and a scanned PDF page comes back without its text"),
+    (
+        "VX_DOCINTEL",
+        "docintel_endpoint",
+        "AZURE_DOCINTEL",
+        "pictures answer 503, and a scanned PDF page comes back without its text",
+    ),
     ("VX_SPEECH", "speech_endpoint", "AZURE_SPEECH", "recordings, videos and YouTube answer 503"),
-    ("VX_VISION_NAME", "vision_endpoint", "AZURE_VISION", "a picture is read for its words and not described"),
-    ("VX_LANGUAGE_NAME", "language_endpoint", "AZURE_LANGUAGE", "a document is masked by the patterns alone, which know no names or addresses"),
+    (
+        "VX_VISION_NAME",
+        "vision_endpoint",
+        "AZURE_VISION",
+        "a picture is read for its words and not described",
+    ),
+    (
+        "VX_LANGUAGE_NAME",
+        "language_endpoint",
+        "AZURE_LANGUAGE",
+        "a document is masked by the patterns alone, which know no names or addresses",
+    ),
 )
 
 
@@ -103,13 +127,17 @@ SERVICES = (
 
 
 def options(parser) -> None:
-    parser.add_argument("--settings-only", action="store_true", help="only push the settings, make nothing")
+    parser.add_argument(
+        "--settings-only", action="store_true", help="only push the settings, make nothing"
+    )
     parser.add_argument("--code-only", action="store_true", help="only publish the code")
 
 
 def route_prefix(config: Dict[str, str]) -> str:
     """The prefix as the app will use it, for the addresses printed at the end."""
-    parts = [part.strip() for part in config.get("VX_EXTRACT_PREFIX", "").split("/") if part.strip()]
+    parts = [
+        part.strip() for part in config.get("VX_EXTRACT_PREFIX", "").split("/") if part.strip()
+    ]
     return "/" + "/".join(parts) if parts else ""
 
 
@@ -129,7 +157,9 @@ def paths_hold(config: Dict[str, str]) -> None:
         note("the library is not installed here, so the app checks the paths itself when it starts")
         return
     try:
-        create_extraction_app(ExtractionService(), prefix=prefix, gateway_paths=listed, allow_open=True)
+        create_extraction_app(
+            ExtractionService(), prefix=prefix, gateway_paths=listed, allow_open=True
+        )
     except ConfigurationError as exc:
         stop(f"settings.env has paths the app would refuse, and it would load nothing:\n  {exc}")
     done("the prefix and the gateway paths are ones the app accepts")
@@ -151,8 +181,24 @@ def paths_hold(config: Dict[str, str]) -> None:
 
 def current_settings(az: Az, app: str, group: str) -> Dict[str, str]:
     """What the app runs with now, so a second run keeps its key rather than changing it under its callers."""
-    found = az("functionapp", "config", "appsettings", "list", "--name", app, "--resource-group", group, reads=True, quiet=True, allow_fail=True)
-    return {entry["name"]: entry.get("value") or "" for entry in (found or []) if isinstance(entry, dict) and "name" in entry}
+    found = az(
+        "functionapp",
+        "config",
+        "appsettings",
+        "list",
+        "--name",
+        app,
+        "--resource-group",
+        group,
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
+    return {
+        entry["name"]: entry.get("value") or ""
+        for entry in (found or [])
+        if isinstance(entry, dict) and "name" in entry
+    }
 
 
 def service_keys(az: Az, config: Dict[str, str]) -> Dict[str, str]:
@@ -160,32 +206,58 @@ def service_keys(az: Az, config: Dict[str, str]) -> Dict[str, str]:
     found_keys = {}
     for name, _kept, setting, _what in SERVICES:
         found = az(
-            "cognitiveservices", "account", "keys", "list",
-            "--name", config[name], "--resource-group", config["VX_RESOURCE_GROUP"],
-            reads=True, quiet=True, allow_fail=True,
+            "cognitiveservices",
+            "account",
+            "keys",
+            "list",
+            "--name",
+            config[name],
+            "--resource-group",
+            config["VX_RESOURCE_GROUP"],
+            reads=True,
+            quiet=True,
+            allow_fail=True,
         )
         if found:
             found_keys[f"{setting}_KEY"] = found["key1"]
     if wants(config, "VX_DETAILED_PICTURES"):
         found = az(
-            "cognitiveservices", "account", "keys", "list",
-            "--name", config["VX_OPENAI_NAME"], "--resource-group", config["VX_RESOURCE_GROUP"],
-            reads=True, quiet=True, allow_fail=True,
+            "cognitiveservices",
+            "account",
+            "keys",
+            "list",
+            "--name",
+            config["VX_OPENAI_NAME"],
+            "--resource-group",
+            config["VX_RESOURCE_GROUP"],
+            reads=True,
+            quiet=True,
+            allow_fail=True,
         )
         if found:
             found_keys["AZURE_OPENAI_KEY"] = found["key1"]
     if wants(config, "VX_TRANSLATOR"):
         found = az(
-            "cognitiveservices", "account", "keys", "list",
-            "--name", config["VX_TRANSLATOR_NAME"], "--resource-group", config["VX_RESOURCE_GROUP"],
-            reads=True, quiet=True, allow_fail=True,
+            "cognitiveservices",
+            "account",
+            "keys",
+            "list",
+            "--name",
+            config["VX_TRANSLATOR_NAME"],
+            "--resource-group",
+            config["VX_RESOURCE_GROUP"],
+            reads=True,
+            quiet=True,
+            allow_fail=True,
         )
         if found:
             found_keys["AZURE_TRANSLATOR_KEY"] = found["key1"]
     return found_keys
 
 
-def extraction_env(config: Dict[str, str], kept: Dict[str, Any], keys: Dict[str, str], key: str) -> Dict[str, str]:
+def extraction_env(
+    config: Dict[str, str], kept: Dict[str, Any], keys: Dict[str, str], key: str
+) -> Dict[str, str]:
     """Every setting the extraction app runs with. Nothing of the ingest app's: this one stands alone."""
     setting = {
         # The door. The app will not start without one, because every call
@@ -241,12 +313,24 @@ def main() -> int:
     config = settings()
     az = Az(args.dry_run)
     kept = state()
-    group, app, account = config["VX_RESOURCE_GROUP"], config["VX_EXTRACT_APP"], config["VX_STORAGE"]
+    group, app, account = (
+        config["VX_RESOURCE_GROUP"],
+        config["VX_EXTRACT_APP"],
+        config["VX_STORAGE"],
+    )
     host, prefix = f"https://{app}.azurewebsites.net", route_prefix(config)
-    begin("05", "The extraction service", "A utility API of its own: files, addresses and videos in, text out.")
+    begin(
+        "05",
+        "The extraction service",
+        "A utility API of its own: files, addresses and videos in, text out.",
+    )
 
-    if not args.dry_run and not az.exists("storage", "account", "show", "--name", account, "--resource-group", group):
-        stop(f"There is no storage account {account} in {group} yet. Run 01_create_resources.py first.")
+    if not args.dry_run and not az.exists(
+        "storage", "account", "show", "--name", account, "--resource-group", group
+    ):
+        stop(
+            f"There is no storage account {account} in {group} yet. Run 01_create_resources.py first."
+        )
 
     if not args.code_only:
         step("The paths it answers at")
@@ -261,18 +345,28 @@ def main() -> int:
         else:
             tries = regions(config["VX_LOCATION"], config["VX_ELSEWHERE"])
             went = somewhere(
-                az, tries,
+                az,
+                tries,
                 lambda where: az(
-                    "functionapp", "create",
-                    "--name", app,
-                    "--resource-group", group,
-                    "--storage-account", account,
-                    "--flexconsumption-location", where,
-                    "--runtime", "python",
-                    "--runtime-version", "3.11",
+                    "functionapp",
+                    "create",
+                    "--name",
+                    app,
+                    "--resource-group",
+                    group,
+                    "--storage-account",
+                    account,
+                    "--flexconsumption-location",
+                    where,
+                    "--runtime",
+                    "python",
+                    "--runtime-version",
+                    "3.11",
                     # 2 GB, the default: it holds no model, the services do the reading.
-                    "--instance-memory", "2048",
-                    "--output", "none",
+                    "--instance-memory",
+                    "2048",
+                    "--output",
+                    "none",
                     allow_fail=True,
                 ),
                 lambda: az.exists("functionapp", "show", "--name", app, "--resource-group", group),
@@ -290,31 +384,55 @@ def main() -> int:
         for name, value in sorted(every.items()):
             print(f"       {name:<34} {'...' if name.endswith('_KEY') else value}")
         az(
-            "functionapp", "config", "appsettings", "set",
-            "--name", app, "--resource-group", group,
-            "--settings", *[f"{k}={v}" for k, v in every.items()],
-            "--output", "none",
+            "functionapp",
+            "config",
+            "appsettings",
+            "set",
+            "--name",
+            app,
+            "--resource-group",
+            group,
+            "--settings",
+            *[f"{k}={v}" for k, v in every.items()],
+            "--output",
+            "none",
         )
-        kept_key = "the key it already had, so its callers are not cut off" if now.get("VECTRIXDB_API_KEY") else "a new key"
+        kept_key = (
+            "the key it already had, so its callers are not cut off"
+            if now.get("VECTRIXDB_API_KEY")
+            else "a new key"
+        )
         done(f"{len(every)} settings, sent straight to the app, with {kept_key}")
         # A path setting taken out of settings.env comes off the app too, or
         # the app would go on answering at the old paths.
         stale = [theirs for theirs in PASSED_ON.values() if theirs in now and theirs not in every]
         if stale:
             az(
-                "functionapp", "config", "appsettings", "delete",
-                "--name", app, "--resource-group", group,
-                "--setting-names", *stale,
-                "--output", "none",
+                "functionapp",
+                "config",
+                "appsettings",
+                "delete",
+                "--name",
+                app,
+                "--resource-group",
+                group,
+                "--setting-names",
+                *stale,
+                "--output",
+                "none",
             )
             done(f"took off {', '.join(stale)}, which settings.env no longer sets")
         for _name, _kept, setting, without in SERVICES:
             if not every.get(f"{setting}_ENDPOINT"):
                 note(f"no {setting}_ENDPOINT from 03, so {without}")
         if not every.get("AZURE_TRANSLATOR_KEY"):
-            note("no Translator from 03, so /translate/text and /translate/detect answer 503 and name the setting they need")
+            note(
+                "no Translator from 03, so /translate/text and /translate/detect answer 503 and name the setting they need"
+            )
         if not every.get("VECTRIXDB_EXTRACT_URL_HOSTS"):
-            note("no VX_EXTRACT_URL_HOSTS, so the routes that fetch an address refuse every one, which is the safe way round")
+            note(
+                "no VX_EXTRACT_URL_HOSTS, so the routes that fetch an address refuse every one, which is the safe way round"
+            )
 
     if not args.settings_only:
         step("The wheel it installs")
@@ -335,24 +453,36 @@ def main() -> int:
                 cwd=str(EXTRACTION_APP),
             )
             if finished.returncode != 0:
-                stop("func could not publish. Its output above says why; the usual cause is being signed in as somebody else.")
+                stop(
+                    "func could not publish. Its output above says why; the usual cause is being signed in as somebody else."
+                )
             done("published")
 
     remember(extract_app=app, extract_host=host)
     links(
         ("is it alive", f"{host}{prefix}/health"),
+        ("what it was given, with no secret in it", f"{host}{prefix}/health/wiring"),
         ("every route, to try", f"{host}{prefix}/docs"),
         ("the function app", portal("function", app, config)),
         ("its live log", portal("function", app, config, page="logStream")),
     )
-    note("health and the docs need no key; every other route needs it, in the api-key header")
+    note(
+        "health, health/wiring and the docs need no key; every other route needs it, in the api-key header"
+    )
+    note(
+        "a 404 on health means the app loaded nothing: its live log then has one message listing every setting that is wrong"
+    )
     note("the key is in the app's settings and nowhere else. Read it when you need it:")
     print(
         f"       az functionapp config appsettings list --name {app} --resource-group {group} "
         "--query \"[?name=='VECTRIXDB_API_KEY'].value\" --output tsv"
     )
-    note(f"then: curl -X POST {host}{prefix}/extract/pdf -H \"api-key: $KEY\" -H \"X-Filename: a.pdf\" --data-binary @a.pdf")
-    note("YouTube often refuses an address in a cloud; when it does, the route says so rather than failing quietly")
+    note(
+        f'then: curl -X POST {host}{prefix}/extract/pdf -H "api-key: $KEY" -H "X-Filename: a.pdf" --data-binary @a.pdf'
+    )
+    note(
+        "YouTube often refuses an address in a cloud; when it does, the route says so rather than failing quietly"
+    )
     note("99_delete_everything.py deletes this app with the rest of the group")
     finish(
         f"The extraction service is at {host}{prefix}",

@@ -393,7 +393,9 @@ class TestPromisesTheCodeNowKeeps:
         # The modules as they were, put back after. Left re-imported, every later
         # test held the old server while code importing it lazily got the new
         # one, whose database was never set up, and failed by the order it ran in.
-        saved = {name: module for name, module in sys.modules.items() if name.startswith("vectrixdb.api")}
+        saved = {
+            name: module for name, module in sys.modules.items() if name.startswith("vectrixdb.api")
+        }
         package = getattr(vectrixdb, "api", None)
         try:
             for value, expected in (("1", 200), ("0", 404)):

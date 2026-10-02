@@ -71,7 +71,10 @@ def should_go_round_again(outcome: Any) -> bool:
 
 def outcome_line(outcome: Any) -> str:
     """One line for the log: what happened to which file, and why when it failed."""
-    parts = [str(getattr(outcome, "action", "?")), str(getattr(outcome, "uri", "") or getattr(outcome, "doc_id", ""))]
+    parts = [
+        str(getattr(outcome, "action", "?")),
+        str(getattr(outcome, "uri", "") or getattr(outcome, "doc_id", "")),
+    ]
     chunks = getattr(outcome, "chunks", None)
     if chunks:
         parts.append(f"{chunks} chunks")

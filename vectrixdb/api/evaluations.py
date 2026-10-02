@@ -110,7 +110,9 @@ def _store(chunking: bool = False) -> Any:
 
 
 @router.get("/api/v1/evaluations", tags=["evaluations"])
-async def list_evaluations(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)) -> Dict[str, Any]:
+async def list_evaluations(
+    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)
+) -> Dict[str, Any]:
     """Every saved run, newest first: when, which golden file, which collections it searched, and each setup's top 10 count.
 
     ``offset`` skips that many of the newest, for the next page. The full
@@ -138,7 +140,9 @@ async def _report(store: Any, run: str, none: str = "No evaluation runs yet") ->
     try:
         report: Dict[str, Any] = await run_in_threadpool(store.get, run)
     except KeyError:
-        raise HTTPException(status_code=404, detail=none if run == "latest" else f"No run '{run}'") from None
+        raise HTTPException(
+            status_code=404, detail=none if run == "latest" else f"No run '{run}'"
+        ) from None
     return report
 
 
@@ -147,11 +151,16 @@ async def _golden_file(store: Any, report: Mapping[str, Any]) -> Response:
     try:
         data = await run_in_threadpool(store.golden, sha)
     except KeyError:
-        raise HTTPException(status_code=404, detail="This run's golden questions were not kept") from None
+        raise HTTPException(
+            status_code=404, detail="This run's golden questions were not kept"
+        ) from None
     return Response(
         content=data,
         media_type="application/x-ndjson",
-        headers={"Content-Disposition": f'attachment; filename="golden-{sha[:8]}.jsonl"', "Cache-Control": "no-store"},
+        headers={
+            "Content-Disposition": f'attachment; filename="golden-{sha[:8]}.jsonl"',
+            "Cache-Control": "no-store",
+        },
     )
 
 
@@ -169,8 +178,12 @@ async def get_evaluation(run: str, request: Request) -> Dict[str, Any]:
     store = _store()
     report = dict(await _report(store, run))
     sha = str((report.get("golden") or {}).get("sha256") or "")
-    report["golden_download"] = bool(_may_download(request) and await run_in_threadpool(store.has_golden, sha))
-    report["missing_notes"] = [_missing_message(str(name), gone) for name, gone in (report.get("missing") or {}).items()]
+    report["golden_download"] = bool(
+        _may_download(request) and await run_in_threadpool(store.has_golden, sha)
+    )
+    report["missing_notes"] = [
+        _missing_message(str(name), gone) for name, gone in (report.get("missing") or {}).items()
+    ]
     return {"ok": True, "data": report}
 
 
@@ -184,7 +197,10 @@ async def download_golden(run: str, request: Request) -> Response:
     questions in memory, has none.
     """
     if not _may_download(request):
-        raise HTTPException(status_code=403, detail="Only an admin signed in as a person can download the golden questions")
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin signed in as a person can download the golden questions",
+        )
     store = _store()
     return await _golden_file(store, await _report(store, run))
 
@@ -193,7 +209,9 @@ _NO_CHUNKING = "No chunking runs yet"
 
 
 @router.get("/api/v1/chunking", tags=["evaluations"])
-async def list_chunking(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)) -> Dict[str, Any]:
+async def list_chunking(
+    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)
+) -> Dict[str, Any]:
     """Every saved chunking run, newest first: when, which golden file, which collections it cut, and each technique's count.
 
     Kept beside the retrieval runs, as ``chunking/runs/<id>/report.json`` in
@@ -218,7 +236,9 @@ async def get_chunking(run: str, request: Request) -> Dict[str, Any]:
     store = _store(chunking=True)
     report = dict(await _report(store, run, _NO_CHUNKING))
     sha = str((report.get("golden") or {}).get("sha256") or "")
-    report["golden_download"] = bool(_may_download(request) and await run_in_threadpool(store.has_golden, sha))
+    report["golden_download"] = bool(
+        _may_download(request) and await run_in_threadpool(store.has_golden, sha)
+    )
     return {"ok": True, "data": report}
 
 
@@ -226,7 +246,10 @@ async def get_chunking(run: str, request: Request) -> Dict[str, Any]:
 async def download_chunking_golden(run: str, request: Request) -> Response:
     """The golden file a chunking run used, exactly as it was read. A signed-in admin only, as a person."""
     if not _may_download(request):
-        raise HTTPException(status_code=403, detail="Only an admin signed in as a person can download the golden questions")
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin signed in as a person can download the golden questions",
+        )
     store = _store(chunking=True)
     return await _golden_file(store, await _report(store, run, _NO_CHUNKING))
 

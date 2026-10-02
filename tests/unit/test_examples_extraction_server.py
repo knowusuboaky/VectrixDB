@@ -24,7 +24,10 @@ from vectrixdb.extract.engines import segments_to_document  # noqa: E402
 
 HERE = Path(__file__).resolve().parents[2] / "examples" / "extraction_server" / "server.py"
 if not HERE.exists():
-    pytest.skip("examples/ is kept on the machine that runs it, not in the repository", allow_module_level=True)
+    pytest.skip(
+        "examples/ is kept on the machine that runs it, not in the repository",
+        allow_module_level=True,
+    )
 
 KEY = "k" * 40
 
@@ -38,12 +41,18 @@ def load():
 
 server = load()
 PAGES = ["Terms of the facility.", "", "  Late fees accrue monthly.  ", "Signed in Accra."]
-SPEECH = [(2.0, 6.0, "Good morning."), (61.5, 70.0, "The  covenant\nwas breached."), (662.0, 668.5, "Thank you all.")]
+SPEECH = [
+    (2.0, 6.0, "Good morning."),
+    (61.5, 70.0, "The  covenant\nwas breached."),
+    (662.0, 668.5, "Thank you all."),
+]
 
 
 def app(**kwargs):
     kwargs.setdefault("key", KEY)
-    return server.create_app(lambda data, name: PAGES, lambda data, name: PAGES[:1], lambda data, name: SPEECH, **kwargs)
+    return server.create_app(
+        lambda data, name: PAGES, lambda data, name: PAGES[:1], lambda data, name: SPEECH, **kwargs
+    )
 
 
 class TestPageSpans:
@@ -64,10 +73,14 @@ class TestPageSpans:
 class TestMinuteOffsets:
     def test_a_minute_is_a_page_and_a_silent_minute_still_counts(self):
         reply = server.minutes_reply(SPEECH)
-        assert [number for _, number in reply["pages"]] == [1, 2, 12], "said at 11:02, so the twelfth minute"
+        assert [number for _, number in reply["pages"]] == [1, 2, 12], (
+            "said at 11:02, so the twelfth minute"
+        )
         for offset, _ in reply["pages"]:
             assert reply["text"][offset - 2 : offset] in ("", "\n\n")
-        assert "The covenant was breached." in reply["text"], "white space inside a segment is one space"
+        assert "The covenant was breached." in reply["text"], (
+            "white space inside a segment is one space"
+        )
         assert reply["metadata"]["duration_seconds"] == 668.5
 
     def test_it_is_the_librarys_own_arithmetic(self):
@@ -96,7 +109,15 @@ class TestTheKey:
         assert client.post("/ocr/pdf", content=b"%PDF").status_code == 401
         assert client.post("/ocr/pdf", content=b"%PDF", headers={"api-key": KEY}).status_code == 200
 
-    @pytest.mark.parametrize("headers", [{}, {"api-key": "wrong"}, {"Authorization": "Bearer wrong"}, {"Authorization": f"Basic {KEY}"}])
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            {},
+            {"api-key": "wrong"},
+            {"Authorization": "Bearer wrong"},
+            {"Authorization": f"Basic {KEY}"},
+        ],
+    )
     def test_no_key_and_a_wrong_key_read_nothing(self, headers):
         calls = []
         made = server.create_app(lambda d, n: calls.append(n) or PAGES, key=KEY)
@@ -104,9 +125,14 @@ class TestTheKey:
             assert TestClient(made).post(route, content=b"%PDF", headers=headers).status_code == 401
         assert calls == [], "the engine, which is what costs money, was never called"
 
-    @pytest.mark.parametrize("headers", [{"api-key": KEY}, {"x-api-key": KEY}, {"Authorization": f"Bearer {KEY}"}])
+    @pytest.mark.parametrize(
+        "headers", [{"api-key": KEY}, {"x-api-key": KEY}, {"Authorization": f"Bearer {KEY}"}]
+    )
     def test_the_key_is_taken_three_ways(self, headers):
-        assert TestClient(app()).post("/asr/audio", content=b"RIFF", headers=headers).status_code == 200
+        assert (
+            TestClient(app()).post("/asr/audio", content=b"RIFF", headers=headers).status_code
+            == 200
+        )
 
     def test_health_asks_for_nothing_and_says_nothing_about_files(self):
         reply = TestClient(app()).get("/health").json()
@@ -114,21 +140,31 @@ class TestTheKey:
 
     def test_a_route_exists_only_for_an_engine_that_was_given(self):
         client = TestClient(server.create_app(lambda d, n: PAGES, key=KEY))
-        assert client.post("/asr/audio", content=b"RIFF", headers={"api-key": KEY}).status_code == 404
+        assert (
+            client.post("/asr/audio", content=b"RIFF", headers={"api-key": KEY}).status_code == 404
+        )
 
 
 class TestWhatItIsSent:
     def test_an_empty_body_and_one_too_big_are_refused_before_the_engine(self):
         calls = []
-        client = TestClient(server.create_app(lambda d, n: calls.append(n) or PAGES, key=KEY, max_bytes=10))
+        client = TestClient(
+            server.create_app(lambda d, n: calls.append(n) or PAGES, key=KEY, max_bytes=10)
+        )
         assert client.post("/ocr/pdf", content=b"", headers={"api-key": KEY}).status_code == 400
-        assert client.post("/ocr/pdf", content=b"x" * 11, headers={"api-key": KEY}).status_code == 413
+        assert (
+            client.post("/ocr/pdf", content=b"x" * 11, headers={"api-key": KEY}).status_code == 413
+        )
         assert calls == []
 
     def test_a_path_in_the_name_is_cut_to_its_last_part(self):
         names = []
         client = TestClient(server.create_app(lambda d, n: names.append(n) or PAGES, key=KEY))
-        client.post("/ocr/pdf", content=b"%PDF", headers={"api-key": KEY, "X-Filename": "..\\..\\secrets/q3.pdf"})
+        client.post(
+            "/ocr/pdf",
+            content=b"%PDF",
+            headers={"api-key": KEY, "X-Filename": "..\\..\\secrets/q3.pdf"},
+        )
         assert names == ["q3.pdf"]
 
 
@@ -144,7 +180,9 @@ class TestTheLibraryReadsIt:
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
-        running = uvicorn.Server(uvicorn.Config(app(), host="127.0.0.1", port=port, log_level="error"))
+        running = uvicorn.Server(
+            uvicorn.Config(app(), host="127.0.0.1", port=port, log_level="error")
+        )
         thread = threading.Thread(target=running.run, daemon=True)
         thread.start()
         for _ in range(200):
@@ -157,12 +195,19 @@ class TestTheLibraryReadsIt:
         thread.join(timeout=10)
 
     def test_a_pdf_is_cited_by_page_and_a_recording_by_the_minute(self, address):
-        reader = HttpExtractor(address, {".pdf": "/ocr/pdf", ".wav": "/asr/audio"}, body="raw", headers={"api-key": KEY})
+        reader = HttpExtractor(
+            address,
+            {".pdf": "/ocr/pdf", ".wav": "/asr/audio"},
+            body="raw",
+            headers={"api-key": KEY},
+        )
         scan = reader(b"%PDF-1.7", "scan.pdf")
         assert [number for _, number in scan.pages] == [1, 3, 4] and scan.metadata["ocr"] is True
         assert scan.text[scan.pages[1][0] :].startswith("Late fees accrue monthly.")
         call = reader(b"RIFF", "call.wav")
-        assert [number for _, number in call.pages] == [1, 2, 12] and call.metadata["transcript"] is True
+        assert [number for _, number in call.pages] == [1, 2, 12] and call.metadata[
+            "transcript"
+        ] is True
 
     def test_without_the_key_the_library_says_which_route_refused(self, address):
         from vectrixdb.exceptions import ExtractionError

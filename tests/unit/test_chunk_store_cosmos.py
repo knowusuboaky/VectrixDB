@@ -123,14 +123,21 @@ class FakeContainer:
         bound = {p["name"]: p["value"] for p in parameters or []}
         assert set(PARAMETER.findall(query)) == set(bound), (query, bound)
         self.queries.append((query, dict(bound), partition_key))
-        rows = [item for (partition, _), item in sorted(self.items.items()) if partition == partition_key]
+        rows = [
+            item
+            for (partition, _), item in sorted(self.items.items())
+            if partition == partition_key
+        ]
         by_id = sorted(rows, key=lambda row: row["id"])
         if query == cs._COUNT:
             return [len(part) for part in self._pages(rows)] if rows else [0]
         if query == cs._CHANGED:
             return [max(row["_ts"] for row in part) for part in self._pages(rows)] if rows else []
         if query == cs._WRITTEN:
-            return [{"written": r["written"], "build": r["build"], "quality": r["quality"]} for r in rows]
+            return [
+                {"written": r["written"], "build": r["build"], "quality": r["quality"]}
+                for r in rows
+            ]
         if query == cs._SCORES:
             return [{"point": r["point"], "quality": r["quality"]} for r in rows]
         if query == cs._PAGE_OF_IDS:
@@ -142,7 +149,9 @@ class FakeContainer:
             return [r["point"] for r in rows if r["doc"] == bound["@doc"]]
         if query == cs._HELD:
             assert len(bound["@ids"]) <= 100
-            return [{"id": r["id"], "written": r["written"]} for r in rows if r["id"] in bound["@ids"]]
+            return [
+                {"id": r["id"], "written": r["written"]} for r in rows if r["id"] in bound["@ids"]
+            ]
         if query == cs._EVERY_ID:
             return [r["id"] for r in rows]
         raise AssertionError(f"a query the fake does not know: {query}")
@@ -175,12 +184,20 @@ def key(point_id):
 
 class TestItems:
     def test_one_item_a_chunk_in_its_collections_partition(self, container, docs):
-        docs.put(["financial/td/q3.pdf:0"], ["Net income rose."], [{"_vx_doc": "financial/td/q3.pdf", "_vx_build": "build_1", "_vx_quality": 0.9}], WHEN)
-        ((partition, item_id), item), = container.items.items()
+        docs.put(
+            ["financial/td/q3.pdf:0"],
+            ["Net income rose."],
+            [{"_vx_doc": "financial/td/q3.pdf", "_vx_build": "build_1", "_vx_quality": 0.9}],
+            WHEN,
+        )
+        (((partition, item_id), item),) = container.items.items()
         assert partition == "docs" and item_id == key("financial/td/q3.pdf:0")
         # An id Cosmos can hold: no slash, and 64 characters whatever the point id was.
         assert "/" not in item_id and len(item_id) == 64
-        assert {k: item[k] for k in ("collection", "point", "doc", "build", "quality", "written", "text")} == {
+        assert {
+            k: item[k]
+            for k in ("collection", "point", "doc", "build", "quality", "written", "text")
+        } == {
             "collection": "docs",
             "point": "financial/td/q3.pdf:0",
             "doc": "financial/td/q3.pdf",
@@ -192,10 +209,19 @@ class TestItems:
         assert "vector" not in item and "_embedding" not in item
 
     def test_metadata_goes_in_as_plain_json_whatever_made_it(self, container, docs):
-        docs.put(["a"], [None], [{"_vx_quality": np.float32(0.5), "pages": np.array([1, 2]), "n": np.int64(3)}], WHEN)
+        docs.put(
+            ["a"],
+            [None],
+            [{"_vx_quality": np.float32(0.5), "pages": np.array([1, 2]), "n": np.int64(3)}],
+            WHEN,
+        )
         (item,) = container.items.values()
         json.dumps(item)
-        assert item["quality"] == 0.5 and item["metadata"]["pages"] == [1, 2] and item["metadata"]["n"] == 3
+        assert (
+            item["quality"] == 0.5
+            and item["metadata"]["pages"] == [1, 2]
+            and item["metadata"]["n"] == 3
+        )
         assert item["text"] == ""
 
     def test_a_chunk_written_again_keeps_the_time_it_was_first_written(self, container, docs):
@@ -214,7 +240,9 @@ class TestItems:
         assert [len(kinds) for _, kinds in container.batches] == [100, 100, 50]
         assert {partition for partition, _ in container.batches} == {"docs"}
         # And the lookup of which were there already is in hundreds too.
-        assert [len(bound["@ids"]) for query, bound, _ in container.queries if query == cs._HELD] == [100, 100, 50]
+        assert [
+            len(bound["@ids"]) for query, bound, _ in container.queries if query == cs._HELD
+        ] == [100, 100, 50]
 
     def test_a_batch_stays_under_a_megabyte(self, container, docs):
         docs.put([f"c{n}" for n in range(40)], ["x" * 60_000] * 40, [{}] * 40, WHEN)
@@ -261,7 +289,12 @@ class TestUpdate:
         assert docs.update("a", {"_vx_quality": 0.8, "_vx_doc": "x.pdf"}) is True
         item = container.items[("docs", key("a"))]
         assert item["metadata"] == {"_vx_quality": 0.8, "k": 1, "_vx_doc": "x.pdf"}
-        assert (item["quality"], item["doc"], item["written"], item["text"]) == (0.8, "x.pdf", WHEN, "alpha")
+        assert (item["quality"], item["doc"], item["written"], item["text"]) == (
+            0.8,
+            "x.pdf",
+            WHEN,
+            "alpha",
+        )
         assert docs.update("a", {"k": 2}, merge=False) is True
         item = container.items[("docs", key("a"))]
         assert item["metadata"] == {"k": 2} and item["quality"] is None and item["doc"] is None
@@ -296,7 +329,9 @@ class TestReads:
             ],
             WHEN,
         )
-        CosmosChunks(container).collection("notes").put(["n"], ["note"], [{"_vx_doc": "r.pdf"}], WHEN)
+        CosmosChunks(container).collection("notes").put(
+            ["n"], ["note"], [{"_vx_doc": "r.pdf"}], WHEN
+        )
         return docs
 
     def test_count_adds_up_the_partial_answers(self, container, filled):
@@ -307,7 +342,10 @@ class TestReads:
     def test_changed_at_is_the_latest_of_the_partial_answers(self, container, filled):
         whole = filled.changed_at()
         container.split = True
-        assert filled.changed_at() == whole and datetime.fromisoformat(whole).utcoffset().total_seconds() == 0
+        assert (
+            filled.changed_at() == whole
+            and datetime.fromisoformat(whole).utcoffset().total_seconds() == 0
+        )
         assert CosmosChunks(container).collection("empty").changed_at() is None
 
     def test_written_and_scores_are_the_small_projection_the_pages_add_up(self, filled):
@@ -324,7 +362,12 @@ class TestReads:
 
     def test_one_chunk_by_id(self, filled):
         point = filled.get("r:1")
-        assert (point.id, point.text, point.metadata["_vx_quality"], point.vector) == ("r:1", "beta", 0.3, [])
+        assert (point.id, point.text, point.metadata["_vx_quality"], point.vector) == (
+            "r:1",
+            "beta",
+            0.3,
+            [],
+        )
         assert point.created_at == datetime.fromisoformat(WHEN) and point.updated_at is not None
         assert filled.get("missing") is None
 
@@ -341,8 +384,18 @@ class TestReads:
 
     def test_every_query_stays_inside_the_collections_partition(self, container, filled):
         container.queries.clear()
-        filled.count(), filled.changed_at(), list(filled.written()), list(filled.scores()), filled.ids(2, 0), list(filled.each()), filled.of_document("r.pdf")
-        assert len(container.queries) == 7 and {partition for _, _, partition in container.queries} == {"docs"}
+        (
+            filled.count(),
+            filled.changed_at(),
+            list(filled.written()),
+            list(filled.scores()),
+            filled.ids(2, 0),
+            list(filled.each()),
+            filled.of_document("r.pdf"),
+        )
+        assert len(container.queries) == 7 and {
+            partition for _, _, partition in container.queries
+        } == {"docs"}
 
 
 class TestOpen:
@@ -399,7 +452,12 @@ class TestOpen:
 
     def test_an_existing_container_with_the_key_or_the_managed_identity(self, sdk):
         store = CosmosChunks.open(self.URL, key="the-key")
-        assert (sdk["url"], sdk["credential"], sdk["database"], sdk["container_name"]) == ("https://acct.documents.azure.com:443/", "the-key", "vectrixdb", "chunks")
+        assert (sdk["url"], sdk["credential"], sdk["database"], sdk["container_name"]) == (
+            "https://acct.documents.azure.com:443/",
+            "the-key",
+            "vectrixdb",
+            "chunks",
+        )
         assert store.describe() == "Cosmos DB acct.documents.azure.com/vectrixdb/chunks"
         CosmosChunks.open(self.URL)
         assert sdk["credential"] == "the managed identity"
@@ -407,9 +465,15 @@ class TestOpen:
     def test_a_missing_container_is_made_partitioned_by_collection(self, sdk):
         sdk["container"] = None
         CosmosChunks.open(self.URL)
-        assert (sdk["created"], sdk["partition"], sdk["indexing"]) == ("chunks", "/collection", INDEXING)
+        assert (sdk["created"], sdk["partition"], sdk["indexing"]) == (
+            "chunks",
+            "/collection",
+            INDEXING,
+        )
         # Only what the queries filter and sort by is indexed: not the text, not the metadata.
-        assert {"path": "/text/?"} in INDEXING["excludedPaths"] and {"path": "/metadata/*"} in INDEXING["excludedPaths"]
+        assert {"path": "/text/?"} in INDEXING["excludedPaths"] and {
+            "path": "/metadata/*"
+        } in INDEXING["excludedPaths"]
 
     def test_one_it_may_not_make_says_how_to_make_it(self, sdk):
         sdk.update(container=None, refuse=True)
@@ -422,7 +486,11 @@ class TestOpen:
             CosmosChunks.open(self.URL)
 
     def test_an_address_without_a_database_and_a_container_is_refused(self, sdk):
-        for wrong in ("cosmos://acct.documents.azure.com/vectrixdb", "cosmos:///vectrixdb/chunks", "cosmos://acct.documents.azure.com/a/b/c"):
+        for wrong in (
+            "cosmos://acct.documents.azure.com/vectrixdb",
+            "cosmos:///vectrixdb/chunks",
+            "cosmos://acct.documents.azure.com/a/b/c",
+        ):
             with pytest.raises(ConfigurationError, match="<database>/<container>"):
                 CosmosChunks.open(wrong)
 

@@ -45,7 +45,9 @@ class Listener:
 
     def __call__(self, data, name):
         self.heard.append((data, name))
-        return LoadedDocument(text="Revenue grew in every region.", pages=[(0, 1)], metadata={"asr": "fake"})
+        return LoadedDocument(
+            text="Revenue grew in every region.", pages=[(0, 1)], metadata={"asr": "fake"}
+        )
 
 
 class Timed:
@@ -58,7 +60,11 @@ class Timed:
         from vectrixdb.extract.engines import segments_to_document
 
         return segments_to_document(
-            [(0.0, 4.2, "Welcome to the quarterly results."), (4.2, 9.0, "Revenue grew in every region.")], 60.0
+            [
+                (0.0, 4.2, "Welcome to the quarterly results."),
+                (4.2, 9.0, "Revenue grew in every region."),
+            ],
+            60.0,
         )
 
 
@@ -104,8 +110,14 @@ class TestOnlyOneYouTubeVideo:
 
     def test_a_video_inside_a_playlist_is_the_one_video(self):
         fetch = Downloader()
-        load_youtube(f"https://www.youtube.com/watch?v={VIDEO}&list=PL12345&index=3", audio=Listener(), download=fetch)
-        assert fetch.asked == f"https://www.youtube.com/watch?v={VIDEO}", "no playlist, no tracking, just the video"
+        load_youtube(
+            f"https://www.youtube.com/watch?v={VIDEO}&list=PL12345&index=3",
+            audio=Listener(),
+            download=fetch,
+        )
+        assert fetch.asked == f"https://www.youtube.com/watch?v={VIDEO}", (
+            "no playlist, no tracking, just the video"
+        )
 
     def test_a_malformed_id_is_no_video(self):
         assert video_id("https://youtu.be/short") is None
@@ -144,7 +156,9 @@ class TestItIsReadLikeAnyRecording:
         assert about["asr"] == "fake", "what the engine said about itself is kept"
 
     def test_a_video_with_no_title_is_named_by_its_id(self):
-        doc = load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener(), download=Downloader(info={"id": VIDEO}))
+        doc = load_youtube(
+            f"https://youtu.be/{VIDEO}", audio=Listener(), download=Downloader(info={"id": VIDEO})
+        )
         assert doc.metadata["filename"] == VIDEO and "title" not in doc.metadata
 
     def test_the_download_is_gone_afterwards(self):
@@ -156,7 +170,9 @@ class TestItIsReadLikeAnyRecording:
 class TestKeepingIt:
     def test_the_transcript_is_saved_the_way_a_person_reads_it(self, tmp_path):
         """What the reference's youtube_save writes: heading, details, full text, timed segments."""
-        doc = load_youtube(f"https://youtu.be/{VIDEO}", audio=Timed(), save_to=str(tmp_path), download=Downloader())
+        doc = load_youtube(
+            f"https://youtu.be/{VIDEO}", audio=Timed(), save_to=str(tmp_path), download=Downloader()
+        )
         written = tmp_path / f"{VIDEO}_transcript.md"
         assert doc.metadata["saved_to"] == str(written)
         saved = written.read_text(encoding="utf-8")
@@ -166,23 +182,39 @@ class TestKeepingIt:
 
     def test_it_is_named_by_the_video_and_not_its_title(self, tmp_path):
         """Two titles can share a first word; two requests must never swap files."""
-        load_youtube(f"https://youtu.be/{VIDEO}", audio=Timed(), save_to=str(tmp_path), download=Downloader())
+        load_youtube(
+            f"https://youtu.be/{VIDEO}", audio=Timed(), save_to=str(tmp_path), download=Downloader()
+        )
         assert [f.name for f in tmp_path.iterdir()] == [f"{VIDEO}_transcript.md"]
 
     def test_the_sound_is_deleted_unless_asked_for(self, tmp_path):
-        load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener(), save_to=str(tmp_path), download=Downloader())
+        load_youtube(
+            f"https://youtu.be/{VIDEO}",
+            audio=Listener(),
+            save_to=str(tmp_path),
+            download=Downloader(),
+        )
         assert not (tmp_path / f"{VIDEO}.m4a").exists()
 
     def test_keep_audio_keeps_it_beside_the_transcript(self, tmp_path):
         doc = load_youtube(
-            f"https://youtu.be/{VIDEO}", audio=Listener(), save_to=str(tmp_path), keep_audio=True, download=Downloader()
+            f"https://youtu.be/{VIDEO}",
+            audio=Listener(),
+            save_to=str(tmp_path),
+            keep_audio=True,
+            download=Downloader(),
         )
         assert (tmp_path / f"{VIDEO}.m4a").read_bytes() == b"sound"
         assert doc.metadata["audio_saved_to"] == str(tmp_path / f"{VIDEO}.m4a")
 
     def test_keep_audio_needs_somewhere_to_keep_it(self):
         with pytest.raises(ValueError, match="needs save_to"):
-            load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener(), keep_audio=True, download=Downloader())
+            load_youtube(
+                f"https://youtu.be/{VIDEO}",
+                audio=Listener(),
+                keep_audio=True,
+                download=Downloader(),
+            )
 
 
 class TestTheRealDownloader:
@@ -206,11 +238,17 @@ class TestTheRealDownloader:
                 seen["url"], seen["download"] = url, download
                 if seen.get("refuse"):
                     raise Exception(seen["refuse"])
-                Path(seen["options"]["outtmpl"].replace("%(id)s", VIDEO).replace("%(ext)s", "m4a")).write_bytes(b"sound")
+                Path(
+                    seen["options"]["outtmpl"].replace("%(id)s", VIDEO).replace("%(ext)s", "m4a")
+                ).write_bytes(b"sound")
                 return dict(INFO, ext="m4a")
 
             def prepare_filename(self, info):
-                return seen["options"]["outtmpl"].replace("%(id)s", info["id"]).replace("%(ext)s", info["ext"])
+                return (
+                    seen["options"]["outtmpl"]
+                    .replace("%(id)s", info["id"])
+                    .replace("%(ext)s", info["ext"])
+                )
 
         monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=YoutubeDL))
         return seen
@@ -218,7 +256,9 @@ class TestTheRealDownloader:
     def test_it_asks_for_the_sound_alone_and_one_video(self, ytdlp):
         load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener())
         options = ytdlp["options"]
-        assert options["format"].startswith("bestaudio[ext=m4a]"), "m4a first, which Speech reads as it comes"
+        assert options["format"].startswith("bestaudio[ext=m4a]"), (
+            "m4a first, which Speech reads as it comes"
+        )
         assert options["noplaylist"] is True and ytdlp["download"] is True
 
     def test_a_refusal_as_a_bot_says_why(self, ytdlp):
@@ -254,28 +294,40 @@ class TestTheLanguageIsPerCall:
 
         def transport(method, url, headers, body, timeout):
             sent.append(body)
-            return 200, {}, b'{"phrases": [{"offsetMilliseconds": 0, "durationMilliseconds": 4200, "text": "Bonjour."}]}'
+            return (
+                200,
+                {},
+                b'{"phrases": [{"offsetMilliseconds": 0, "durationMilliseconds": 4200, "text": "Bonjour."}]}',
+            )
 
-        return AzureSpeech("https://s.cognitiveservices.azure.com", "k", locales=("en-US",), transport=transport)
+        return AzureSpeech(
+            "https://s.cognitiveservices.azure.com", "k", locales=("en-US",), transport=transport
+        )
 
     def test_azure_speech_is_asked_for_the_locale_given(self):
         """Checked in the request Speech receives, not on an attribute."""
         sent = []
         speech = self.speech(sent)
-        doc = load_youtube(f"https://youtu.be/{VIDEO}", audio=speech, language="fr-FR", download=Downloader())
+        doc = load_youtube(
+            f"https://youtu.be/{VIDEO}", audio=speech, language="fr-FR", download=Downloader()
+        )
         assert b'{"locales": ["fr-FR"]}' in sent[0]
         assert doc.metadata["language"] == "fr-FR"
 
     def test_the_shared_engine_is_left_as_it_was(self):
         sent = []
         speech = self.speech(sent)
-        load_youtube(f"https://youtu.be/{VIDEO}", audio=speech, language="fr-FR", download=Downloader())
+        load_youtube(
+            f"https://youtu.be/{VIDEO}", audio=speech, language="fr-FR", download=Downloader()
+        )
         load_youtube(f"https://youtu.be/{VIDEO}", audio=speech, download=Downloader())
         assert speech.locales == ["en-US"], "the request running beside this one keeps its language"
         assert b'{"locales": ["en-US"]}' in sent[1]
 
     def test_left_out_it_is_the_engines_own(self):
-        doc = load_youtube(f"https://youtu.be/{VIDEO}", audio=self.speech([]), download=Downloader())
+        doc = load_youtube(
+            f"https://youtu.be/{VIDEO}", audio=self.speech([]), download=Downloader()
+        )
         assert doc.metadata["language"] == "en-US"
 
     def test_whisper_takes_the_language_part_of_a_locale(self):
@@ -290,14 +342,21 @@ class TestTheLanguageIsPerCall:
 
         whisper = Whisper(language="en")
         whisper._loaded = Model()
-        load_youtube(f"https://youtu.be/{VIDEO}", audio=whisper, language="fr-FR", download=Downloader())
+        load_youtube(
+            f"https://youtu.be/{VIDEO}", audio=whisper, language="fr-FR", download=Downloader()
+        )
         assert heard == ["fr"], "Whisper wants fr, and fr-FR is given the way Azure wants it"
         assert whisper.language == "en"
 
     def test_several_languages_are_all_given_to_speech(self):
         """Speech is told every language the recording may be in, and says which it heard."""
         sent = []
-        load_youtube(f"https://youtu.be/{VIDEO}", audio=self.speech(sent), language="en-US, fr-CA", download=Downloader())
+        load_youtube(
+            f"https://youtu.be/{VIDEO}",
+            audio=self.speech(sent),
+            language="en-US, fr-CA",
+            download=Downloader(),
+        )
         assert b'{"locales": ["en-US", "fr-CA"]}' in sent[0]
 
     def test_whisper_listens_for_the_first_of_several(self):
@@ -312,24 +371,39 @@ class TestTheLanguageIsPerCall:
 
         whisper = Whisper(language="en")
         whisper._loaded = Model()
-        load_youtube(f"https://youtu.be/{VIDEO}", audio=whisper, language="fr-CA,en-US", download=Downloader())
+        load_youtube(
+            f"https://youtu.be/{VIDEO}",
+            audio=whisper,
+            language="fr-CA,en-US",
+            download=Downloader(),
+        )
         assert heard == ["fr"]
 
     def test_an_engine_with_no_language_says_so_rather_than_ignoring_it(self):
         """Ignored, it would give a transcript in the wrong language and no error."""
         with pytest.raises(ValueError, match="has no language to set"):
-            load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener(), language="fr-FR", download=Downloader())
+            load_youtube(
+                f"https://youtu.be/{VIDEO}",
+                audio=Listener(),
+                language="fr-FR",
+                download=Downloader(),
+            )
 
 
 class TestEveryPhraseKeepsItsTime:
     def test_the_document_carries_its_segments(self):
         doc = load_youtube(f"https://youtu.be/{VIDEO}", audio=Timed(), download=Downloader())
-        assert doc.segments == [(0.0, 4.2, "Welcome to the quarterly results."), (4.2, 9.0, "Revenue grew in every region.")]
+        assert doc.segments == [
+            (0.0, 4.2, "Welcome to the quarterly results."),
+            (4.2, 9.0, "Revenue grew in every region."),
+        ]
 
     def test_the_transcript_is_the_references_layout(self):
         from vectrixdb.extract.engines import transcript_markdown
 
-        doc = load_youtube(f"https://youtu.be/{VIDEO}", audio=Timed(), language="en-US", download=Downloader())
+        doc = load_youtube(
+            f"https://youtu.be/{VIDEO}", audio=Timed(), language="en-US", download=Downloader()
+        )
         assert transcript_markdown(doc) == (
             "# YouTube: Quarterly results, explained\n"
             "\n"

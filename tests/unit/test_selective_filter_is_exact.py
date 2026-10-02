@@ -33,7 +33,10 @@ def collection(tmp_path):
     coll.add(
         ids=[f"d{i}" for i in range(N)],
         vectors=vectors,
-        metadata=[{"rare": i % 100 == 0, "client_id": "acme" if i % 100 == 0 else "zeta"} for i in range(N)],
+        metadata=[
+            {"rare": i % 100 == 0, "client_id": "acme" if i % 100 == 0 else "zeta"}
+            for i in range(N)
+        ],
         texts=[f"record {i}" for i in range(N)],
     )
     yield coll, vectors
@@ -43,15 +46,21 @@ def collection(tmp_path):
 def test_the_index_really_does_drop_nodes(collection):
     coll, vectors = collection
     found = coll._index.search(vectors[0], N)
-    assert len(set(found.keys.flatten().tolist())) < N, "if this ever returns all of them the tests below prove nothing"
+    assert len(set(found.keys.flatten().tolist())) < N, (
+        "if this ever returns all of them the tests below prove nothing"
+    )
 
 
 def test_every_matching_document_is_found(collection):
     coll, vectors = collection
     expected = {f"d{i}" for i in range(0, N, 100)}
     for seed in range(12):
-        hits = coll.search(vectors[(seed * 83) % N], limit=10, filter={"rare": True}, use_cache=False)
-        assert {r.id for r in hits.results} == expected, f"query {seed} found {len(hits.results)} of 10"
+        hits = coll.search(
+            vectors[(seed * 83) % N], limit=10, filter={"rare": True}, use_cache=False
+        )
+        assert {r.id for r in hits.results} == expected, (
+            f"query {seed} found {len(hits.results)} of 10"
+        )
         scores = [r.score for r in hits.results]
         assert scores == sorted(scores, reverse=True), "and they are still in order"
 
@@ -62,20 +71,31 @@ def test_a_policy_is_as_exact_and_its_counts_are_not_inflated_by_widening(tmp_pa
 
     rng = np.random.default_rng(11)
     base = rng.normal(size=64).astype(np.float32)
-    table = {f"record {i}": (base + 0.02 * rng.normal(size=64)).astype(np.float32) for i in range(N)}
+    table = {
+        f"record {i}": (base + 0.02 * rng.normal(size=64)).astype(np.float32) for i in range(N)
+    }
     sink = MemorySink(query_key=b"k", on_failure=DENY)
     db = Vectrix(
-        "walled", path=str(tmp_path), dimension=64, embedding_cache=False,
+        "walled",
+        path=str(tmp_path),
+        dimension=64,
+        embedding_cache=False,
         embed_fn=lambda texts: np.vstack([table[t] for t in texts]),
-        policy=Policy([Overlap("client_id", "clients")]), on_retrieval=sink,
+        policy=Policy([Overlap("client_id", "clients")]),
+        on_retrieval=sink,
     )
     try:
-        db.add(list(table), ids=[f"d{i}" for i in range(N)],
-               metadata=[{"client_id": "acme" if i % 100 == 0 else "zeta"} for i in range(N)])
+        db.add(
+            list(table),
+            ids=[f"d{i}" for i in range(N)],
+            metadata=[{"client_id": "acme" if i % 100 == 0 else "zeta"} for i in range(N)],
+        )
         hits = db.as_principal({"clients": ["acme"]}).search("record 3", limit=10, mode="dense")
         assert {h.id for h in hits} == {f"d{i}" for i in range(0, N, 100)}
         record = sink.records[-1]
-        assert record.candidates_examined <= N, "a widened search counted the same candidates more than once"
+        assert record.candidates_examined <= N, (
+            "a widened search counted the same candidates more than once"
+        )
         withheld = record.withheld_disclosable + record.withheld_undisclosable
         assert 0 < withheld <= N - 10, "more withheld than there are documents to withhold"
     finally:

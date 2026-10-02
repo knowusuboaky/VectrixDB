@@ -65,7 +65,9 @@ def server(data, monkeypatch):
         access_log=data / "auth" / "access.jsonl",
         sender=lambda to, subject, text: None,
     )
-    with TestClient(create_app(db_path=str(data), enable_dashboard=False, signin=config), base_url=PUBLIC) as client:
+    with TestClient(
+        create_app(db_path=str(data), enable_dashboard=False, signin=config), base_url=PUBLIC
+    ) as client:
         yield client
 
 
@@ -122,7 +124,9 @@ class TestAKeyMadeForOneCollection:
 
     def test_it_reaches_the_collection_it_was_made_for(self, server, scoped):
         assert server.get("/api/v1/collections/handbook", headers=scoped).status_code == 200
-        found = server.post("/api/v1/collections/handbook/search", json={"query": VECTORS["alpha"]}, headers=scoped)
+        found = server.post(
+            "/api/v1/collections/handbook/search", json={"query": VECTORS["alpha"]}, headers=scoped
+        )
         assert found.status_code == 200
 
     def test_another_collection_reads_as_one_that_is_not_there(self, server, scoped):
@@ -140,16 +144,33 @@ class TestAKeyMadeForOneCollection:
         assert server.get("/api/v1/collections/nowhere", headers=scoped).text == not_there.text
 
     def test_it_cannot_search_a_collection_it_was_not_made_for(self, server, scoped):
-        found = server.post("/api/v1/collections/payroll/search", json={"query": VECTORS["gamma"]}, headers=scoped)
+        found = server.post(
+            "/api/v1/collections/payroll/search", json={"query": VECTORS["gamma"]}, headers=scoped
+        )
         assert found.status_code == 404
 
     def test_the_listing_holds_only_its_own(self, server, scoped):
-        names = [c["name"] for c in server.get("/api/v1/collections", headers=scoped).json()["collections"]]
+        names = [
+            c["name"]
+            for c in server.get("/api/v1/collections", headers=scoped).json()["collections"]
+        ]
         assert names == ["handbook"]
-        everything = [c["name"] for c in server.get("/api/v1/collections", headers=ADMIN).json()["collections"]]
+        everything = [
+            c["name"]
+            for c in server.get("/api/v1/collections", headers=ADMIN).json()["collections"]
+        ]
         assert sorted(everything) == ["handbook", "payroll"]
 
-    @pytest.mark.parametrize("path", ["/api/v1/documents", "/api/v1/policies", "/api/v1/evaluations", "/api/v1/audit", "/api/v1/info/extended"])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/documents",
+            "/api/v1/policies",
+            "/api/v1/evaluations",
+            "/api/v1/audit",
+            "/api/v1/info/extended",
+        ],
+    )
     def test_a_route_that_cuts_across_collections_is_refused(self, server, scoped, path):
         """None of these names a collection in its path, and every one of them
         would hand back something about the collections this key is kept out of."""
@@ -157,10 +178,14 @@ class TestAKeyMadeForOneCollection:
         assert reply.status_code == 403 and "handbook" in reply.json()["message"]
 
     def test_it_cannot_make_a_collection(self, server, scoped):
-        made = server.post("/api/v1/collections", json={"name": "new", "dimension": 4}, headers=scoped)
+        made = server.post(
+            "/api/v1/collections", json={"name": "new", "dimension": 4}, headers=scoped
+        )
         assert made.status_code == 403
 
-    @pytest.mark.parametrize("path", ["/health", "/api/v1/info", "/api/v1/models", "/api/v1/extractors", "/openapi.json"])
+    @pytest.mark.parametrize(
+        "path", ["/health", "/api/v1/info", "/api/v1/models", "/api/v1/extractors", "/openapi.json"]
+    )
     def test_it_may_still_read_the_server_describing_itself(self, server, scoped, path):
         assert server.get(path, headers=scoped).status_code == 200
 
@@ -168,7 +193,9 @@ class TestAKeyMadeForOneCollection:
         wide = {"api-key": make(server, name="wide")["key"]}
         assert server.get("/api/v1/collections/payroll", headers=wide).status_code == 200
         assert server.get("/api/v1/documents", headers=wide).status_code == 200
-        names = [c["name"] for c in server.get("/api/v1/collections", headers=wide).json()["collections"]]
+        names = [
+            c["name"] for c in server.get("/api/v1/collections", headers=wide).json()["collections"]
+        ]
         assert sorted(names) == ["handbook", "payroll"]
 
 
@@ -183,22 +210,48 @@ class TestWhatTheScopeRuleDecides:
 
     @pytest.mark.parametrize(
         "path",
-        ["/api/v1/collections/handbook", "/api/v1/collections/handbook/search", "/api/v1/collections/handbook/points/one", "/api/collections/handbook", "/api/v2/collections/handbook/points"],
+        [
+            "/api/v1/collections/handbook",
+            "/api/v1/collections/handbook/search",
+            "/api/v1/collections/handbook/points/one",
+            "/api/collections/handbook",
+            "/api/v2/collections/handbook/points",
+        ],
     )
     def test_its_own_collection_in_any_shape(self, rule, path):
         assert rule(path, "POST") is None
 
-    def test_a_name_that_arrived_encoded_is_read_first(self, rule):
+    def test_the_path_is_read_as_the_server_decoded_it(self, rule):
+        """The server decodes a path once, before this rule sees it. Decoding
+        it again let a key for one collection reach another whose name was
+        that one's percent-escape."""
         from vectrixdb.api.signin import outside_the_scope
 
-        assert outside_the_scope("/api/v1/collections/two%20words", "GET", ("two words",)) is None
-        assert rule("/api/v1/collections/pay%2Froll").status_code == 404
+        assert outside_the_scope("/api/v1/collections/two words", "GET", ("two words",)) is None
+        assert (
+            outside_the_scope("/api/v1/collections/handbook%41", "GET", ("handbookA",)).status_code
+            == 404
+        )
+        assert outside_the_scope("/api/v1/collections/handbook%41", "GET", ("handbook%41",)) is None
+        assert rule("/api/v1/collections/pay/roll").status_code == 404
 
-    @pytest.mark.parametrize("path", ["/api/v1/collections/payroll", "/api/v1/collections/payroll/search"])
+    @pytest.mark.parametrize(
+        "path", ["/api/v1/collections/payroll", "/api/v1/collections/payroll/search"]
+    )
     def test_another_collection_is_a_404(self, rule, path):
         assert rule(path, "POST").status_code == 404
 
-    @pytest.mark.parametrize("path", ["/api/v1/documents", "/api/v1/keys", "/auth/me", "/dashboard/", "/api/v1/cache/stats", "/api/v1/ws/status"])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/documents",
+            "/api/v1/keys",
+            "/auth/me",
+            "/dashboard/",
+            "/api/v1/cache/stats",
+            "/api/v1/ws/status",
+        ],
+    )
     def test_everything_else_is_refused(self, rule, path):
         assert rule(path).status_code == 403
 
@@ -240,7 +293,9 @@ class TestAKeyThatExpires:
         make(server, name="ends", expires_in_days=30)
         make(server, name="stays")
         monkeypatch.setattr(store_module, "time", Later(31 * 86400))
-        keys = {k["name"]: k for k in server.get("/api/v1/keys", headers=ADMIN).json()["data"]["keys"]}
+        keys = {
+            k["name"]: k for k in server.get("/api/v1/keys", headers=ADMIN).json()["data"]["keys"]
+        }
         assert keys["ends"]["expired"] is True and keys["stays"]["expired"] is False
         assert keys["stays"]["expires_at"] is None
 
@@ -251,7 +306,11 @@ class TestAKeyThatExpires:
 
     @pytest.mark.parametrize("days", [0, -1, 3651])
     def test_a_length_that_is_no_length_is_refused(self, server, days):
-        reply = server.post("/api/v1/keys", json={"name": "x", "role": "reader", "expires_in_days": days}, headers=ADMIN)
+        reply = server.post(
+            "/api/v1/keys",
+            json={"name": "x", "role": "reader", "expires_in_days": days},
+            headers=ADMIN,
+        )
         assert reply.status_code == 422
 
     def test_what_was_asked_for_is_written_down(self, server):
@@ -272,7 +331,13 @@ class TestTheStoreKeepsTheScope:
         return SignInStore(tmp_path / "signin.db", (SECRET,))
 
     def test_a_key_remembers_what_it_was_made_for(self, store):
-        made, key = store.create_key("app", "reader", "ada@example.com", collections=["handbook"], expires_at=time.time() + 60)
+        made, key = store.create_key(
+            "app",
+            "reader",
+            "ada@example.com",
+            collections=["handbook"],
+            expires_at=time.time() + 60,
+        )
         assert made.collections == ("handbook",) and store.api_key(key).collections == ("handbook",)
         assert made.public()["collections"] == ["handbook"]
 
@@ -303,7 +368,13 @@ class TestTheStoreKeepsTheScope:
     def test_a_key_written_before_any_of_this_reads_as_what_it_was(self, store):
         from vectrixdb.signin.store import SignInStore
 
-        old = {"key_id": "abc", "name": "old", "role": "reader", "prefix": "vx_abc_", "created_at": 1.0}
+        old = {
+            "key_id": "abc",
+            "name": "old",
+            "role": "reader",
+            "prefix": "vx_abc_",
+            "created_at": 1.0,
+        }
         key = SignInStore._key(old, None)
         assert key.collections == () and key.expires_at is None and key.expired is False
         assert key.public()["collections"] == []

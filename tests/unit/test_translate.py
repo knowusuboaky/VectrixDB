@@ -47,7 +47,9 @@ class Service:
                     one["detectedLanguage"] = {"language": "fr", "score": 0.98}
                 reply.append(one)
         else:
-            reply = [{"language": "de", "score": 1.0, "isTranslationSupported": True} for _ in texts]
+            reply = [
+                {"language": "de", "score": 1.0, "isTranslationSupported": True} for _ in texts
+            ]
         return 200, {}, json.dumps(reply).encode()
 
 
@@ -58,7 +60,12 @@ def translator(service=None, **options):
 class TestTranslate:
     def test_one_text_into_one_language(self):
         said = translator().translate("Bonjour tout le monde", to="en")
-        assert said == [{"translations": {"en": "[en] Bonjour tout le monde"}, "detected": {"language": "fr", "score": 0.98}}]
+        assert said == [
+            {
+                "translations": {"en": "[en] Bonjour tout le monde"},
+                "detected": {"language": "fr", "score": 0.98},
+            }
+        ]
 
     def test_into_several_languages_at_once(self):
         said = translator().translate("Bonjour", to=["en", "es"])
@@ -81,7 +88,9 @@ class TestTranslate:
 
 class TestDetect:
     def test_the_language_and_how_sure(self):
-        assert translator().detect("Guten Tag") == [{"language": "de", "score": 1.0, "translatable": True}]
+        assert translator().detect("Guten Tag") == [
+            {"language": "de", "score": 1.0, "translatable": True}
+        ]
 
     def test_alternatives_are_kept_when_the_service_gives_them(self):
         service = Service(
@@ -100,16 +109,42 @@ class TestDetect:
             ]
         )
         said = translator(service).detect("Hei")
-        assert said[0]["alternatives"] == [{"language": "da", "score": 0.4}], "a short text is easy to mistake"
+        assert said[0]["alternatives"] == [{"language": "da", "score": 0.4}], (
+            "a short text is easy to mistake"
+        )
 
 
 class TestLanguages:
     def test_every_language_by_its_code(self):
-        service = Service([(200, {"translation": {"fr": {"name": "French", "nativeName": "Français", "dir": "ltr"}}})])
-        assert translator(service).languages() == {"fr": {"name": "French", "native": "Français", "direction": "ltr"}}
+        service = Service(
+            [
+                (
+                    200,
+                    {
+                        "translation": {
+                            "fr": {"name": "French", "nativeName": "Français", "dir": "ltr"}
+                        }
+                    },
+                )
+            ]
+        )
+        assert translator(service).languages() == {
+            "fr": {"name": "French", "native": "Français", "direction": "ltr"}
+        }
 
     def test_it_needs_no_key(self):
-        service = Service([(200, {"translation": {"ar": {"name": "Arabic", "nativeName": "العربية", "dir": "rtl"}}})])
+        service = Service(
+            [
+                (
+                    200,
+                    {
+                        "translation": {
+                            "ar": {"name": "Arabic", "nativeName": "العربية", "dir": "rtl"}
+                        }
+                    },
+                )
+            ]
+        )
         said = AzureTranslator(transport=service).languages()
         assert said["ar"]["direction"] == "rtl"
         assert "Ocp-Apim-Subscription-Key" not in service.asked[0]["headers"]
@@ -150,6 +185,19 @@ class TestTheServicesLimits:
         translator(service).translate(["a" * 30_000, "b" * 30_000], to="fr")
         assert len(service.asked) == 2, "together they are over the limit, so they go separately"
 
+    def test_the_characters_are_counted_once_per_target_language(self):
+        """The service counts the 50,000 against every target: two languages leave 25,000 a request."""
+        service = Service()
+        translator(service).translate(["a" * 20_000, "b" * 20_000], to=["fr", "de"])
+        assert len(service.asked) == 2, (
+            "40,000 characters twice over is 80,000, so they go separately"
+        )
+        service = Service()
+        translator(service).translate(["a" * 20_000, "b" * 20_000], to="fr")
+        assert len(service.asked) == 1, "one language: 40,000 fits"
+        with pytest.raises(ValueError, match="16,666 at most into 3 languages"):
+            translator().translate("x" * 16_667, to=["fr", "de", "it"])
+
     def test_one_text_over_the_limit_is_refused_by_name_and_not_cut(self):
         with pytest.raises(ValueError, match="50,000 at most"):
             translator().translate("x" * 50_001, to="fr")
@@ -165,7 +213,9 @@ class TestTheServicesLimits:
 
 class TestWhenTheServiceRefuses:
     def test_a_wrong_key_says_what_is_usually_wrong(self):
-        service = Service([(401, {"error": {"code": 401000, "message": "credentials are missing or invalid"}})])
+        service = Service(
+            [(401, {"error": {"code": 401000, "message": "credentials are missing or invalid"}})]
+        )
         with pytest.raises(TranslationError, match="no region was given") as caught:
             translator(service).detect("x")
         assert caught.value.status == 401 and caught.value.route == "detect"
@@ -173,7 +223,9 @@ class TestWhenTheServiceRefuses:
     def test_a_throttle_is_waited_out_once(self, monkeypatch):
         waited = []
         monkeypatch.setattr("vectrixdb.translate.time.sleep", waited.append)
-        service = Service([(429, {"error": {"message": "slow down"}}), (200, [{"language": "de", "score": 1.0}])])
+        service = Service(
+            [(429, {"error": {"message": "slow down"}}), (200, [{"language": "de", "score": 1.0}])]
+        )
         assert translator(service).detect("x")[0]["language"] == "de"
         assert len(service.asked) == 2 and waited, "it waited, then asked again"
 
@@ -188,7 +240,9 @@ class TestWhenTheServiceRefuses:
 
         with pytest.raises(TranslationError, match="429"):
             translator(Slow()).detect("x")
-        assert waited == [AzureTranslator.MOST_WAIT], "ten minutes asked for, ten seconds given, then told"
+        assert waited == [AzureTranslator.MOST_WAIT], (
+            "ten minutes asked for, ten seconds given, then told"
+        )
 
     def test_a_service_that_cannot_be_reached(self):
         def down(*args):
@@ -223,4 +277,7 @@ class TestFromTheEnvironment:
         assert made.endpoint == "https://my.cognitiveservices.azure.com/translator/text/v3.0"
 
     def test_the_global_endpoint_by_default(self):
-        assert AzureTranslator.from_environment({"AZURE_TRANSLATOR_KEY": "k"}).endpoint == AzureTranslator.ENDPOINT
+        assert (
+            AzureTranslator.from_environment({"AZURE_TRANSLATOR_KEY": "k"}).endpoint
+            == AzureTranslator.ENDPOINT
+        )

@@ -152,6 +152,22 @@ class TestServer:
         assert tool_forget(db, session="s", older_than_days=0) == "Forgot 1 memory in session 's'."
         assert db.count() == before
 
+    def test_forget_tool_leaves_documents_and_counts_what_went(self, db):
+        """An id is not a licence to delete a document the memory tools never
+        wrote, and a bare call does not wipe every session."""
+        from vectrixdb.mcp_server import tool_forget
+
+        db.add(["Quarterly revenue grew 12 percent"], ids=["report:0"])
+        db.remember("I like tea", session="alice")
+        db.remember("I like coffee", session="bob")
+        before = db.count()
+        assert tool_forget(db).startswith("Forgot nothing")
+        assert db.count() == before
+        assert tool_forget(db, ids=["report:0", "missing"]) == "Forgot 0 memories."
+        assert db.get(["report:0"])
+        assert tool_forget(db, all_sessions=True) == "Forgot 2 memories."
+        assert db.count() == before - 2
+
     @pytest.mark.skipif(not HAS_MCP, reason="the mcp extra is not installed")
     def test_every_tool_documents_a_budget_or_its_effect(self, db):
         server = build_server(db)

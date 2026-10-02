@@ -88,14 +88,32 @@ CELL_GAP = 1.3
 
 #: A figure: optional sign or currency, digits with separators, optional
 #: percent, or the dash a table prints for nothing.
-_NUMBER = re.compile(r"^[(\-−–+]?\s*[$€£¥]?\s*\(?\d[\d,.\s]*\)?\s*%?\)?\*?$|^[–—\-]$|^n/?a$", re.IGNORECASE)
+_NUMBER = re.compile(
+    r"^[(\-−–+]?\s*[$€£¥]?\s*\(?\d[\d,.\s]*\)?\s*%?\)?\*?$|^[–—\-]$|^n/?a$", re.IGNORECASE
+)
 #: What a cell holding a year or a date looks like; it can head a column.
-_DATEISH = re.compile(r"^(?:19|20)\d\d$|^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*\d{1,2},?(?:\s*(?:19|20)\d\d)?$", re.IGNORECASE)
+_DATEISH = re.compile(
+    r"^(?:19|20)\d\d$|^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*\d{1,2},?(?:\s*(?:19|20)\d\d)?$",
+    re.IGNORECASE,
+)
 #: Characters a PDF sets as one glyph for two or three letters.
 _LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st"}
 #: How PDFium writes a hyphen that is there only because the line broke.
 _SOFT = ("\x02", "\xad", "￾")
 _SENTENCE_END = re.compile(r"[.!?:;”\"')\]]$")
+#: What opens a list item: a bullet glyph, a dash, or a short number or letter
+#: with its dot or bracket, followed by the item's words.
+_LIST_MARK = re.compile(
+    r"^(?P<mark>[•◦▪▫‣⁃●○■□–—\-*·]|\(?\d{1,2}[.)]|\(?[a-zA-Z][.)]|\(?[ivxIVX]{1,4}[.)]|\d{1,2})\s+(?=\S)"
+)
+#: Bullet glyphs, written as Markdown's dash so every reader's lists look alike.
+_BULLETS = "•◦▪▫‣⁃●○■□·*–—-"
+#: Marks a line of prose can start with too: believed only inside a list.
+_WEAK_MARKS = re.compile(r"^(?:\d{1,2}|[–—\-])$")
+
+
+def _weak(mark: str) -> bool:
+    return _WEAK_MARKS.match(mark) is not None
 
 
 @dataclass
@@ -231,7 +249,9 @@ class _Styles:
             name = buffer.value.decode("latin-1", "replace").lower()
             bold = any(word in name for word in ("bold", "black", "heavy", "semibold", "demi"))
         r, g, b, a = self._rgba
-        if raw.FPDFText_GetFillColor(tp, index, ctypes.byref(r), ctypes.byref(g), ctypes.byref(b), ctypes.byref(a)):
+        if raw.FPDFText_GetFillColor(
+            tp, index, ctypes.byref(r), ctypes.byref(g), ctypes.byref(b), ctypes.byref(a)
+        ):
             rgba = (r.value, g.value, b.value, a.value)
         else:
             rgba = (0, 0, 0, 255)
@@ -241,7 +261,9 @@ class _Styles:
         return found
 
 
-def _backgrounds(page: Any, raw: Any, height: float) -> List[Tuple[float, float, float, float, bool]]:
+def _backgrounds(
+    page: Any, raw: Any, height: float
+) -> List[Tuple[float, float, float, float, bool]]:
     """What is drawn on a page that text can sit on: pictures, and shapes filled with a colour that is not white.
 
     ``(left, top, right, bottom, is_picture)``. Asked for only on a page with
@@ -258,24 +280,36 @@ def _backgrounds(page: Any, raw: Any, height: float) -> List[Tuple[float, float,
     for obj in objects:
         try:
             # get_bounds since pypdfium2 5, get_pos before it.
-            left, bottom, right, top = obj.get_bounds() if hasattr(obj, "get_bounds") else obj.get_pos()
+            left, bottom, right, top = (
+                obj.get_bounds() if hasattr(obj, "get_bounds") else obj.get_pos()
+            )
         except Exception:  # noqa: BLE001
             continue
         picture = obj.type == raw.FPDF_PAGEOBJ_IMAGE
         if obj.type == raw.FPDF_PAGEOBJ_PATH:
-            if not raw.FPDFPath_GetDrawMode(obj.raw, ctypes.byref(mode), ctypes.byref(stroke)) or mode.value == 0:
+            if (
+                not raw.FPDFPath_GetDrawMode(obj.raw, ctypes.byref(mode), ctypes.byref(stroke))
+                or mode.value == 0
+            ):
                 continue
             r, g, b, a = rgba
-            if raw.FPDFPageObj_GetFillColor(obj.raw, ctypes.byref(r), ctypes.byref(g), ctypes.byref(b), ctypes.byref(a)):
+            if raw.FPDFPageObj_GetFillColor(
+                obj.raw, ctypes.byref(r), ctypes.byref(g), ctypes.byref(b), ctypes.byref(a)
+            ):
                 if a.value == 0 or min(r.value, g.value, b.value) >= 245:
                     continue
         out.append((left, height - top, right, height - bottom, picture))
     return out
 
 
-def _over(run: Run, grounds: Sequence[Tuple[float, float, float, float, bool]], pictures_only: bool) -> bool:
+def _over(
+    run: Run, grounds: Sequence[Tuple[float, float, float, float, bool]], pictures_only: bool
+) -> bool:
     x, y = (run.left + run.right) / 2, run.middle
-    return any(l <= x <= r and t <= y <= b and (picture or not pictures_only) for l, t, r, b, picture in grounds)
+    return any(
+        l <= x <= r and t <= y <= b and (picture or not pictures_only)
+        for l, t, r, b, picture in grounds
+    )
 
 
 def _runs(page: Any, textpage: Any, raw: Any, height: float) -> Tuple[List[Run], int]:
@@ -295,7 +329,9 @@ def _runs(page: Any, textpage: Any, raw: Any, height: float) -> Tuple[List[Run],
     doubtful: List[Tuple[Run, bool]] = []
     hidden = 0
     for k in range(rects):
-        if not raw.FPDFText_GetRect(tp, k, ctypes.byref(l), ctypes.byref(t), ctypes.byref(r), ctypes.byref(b)):
+        if not raw.FPDFText_GetRect(
+            tp, k, ctypes.byref(l), ctypes.byref(t), ctypes.byref(r), ctypes.byref(b)
+        ):
             continue
         middle = (b.value + t.value) / 2
         first = raw.FPDFText_GetCharIndexAtPos(tp, l.value + 0.3, middle, 1.0, 1.0)
@@ -308,10 +344,14 @@ def _runs(page: Any, textpage: Any, raw: Any, height: float) -> Tuple[List[Run],
             continue
         at = first
         if at < 0:
-            at = raw.FPDFText_GetCharIndexAtPos(tp, l.value + min(1.0, (r.value - l.value) / 2), middle, 2.0, 2.0)
+            at = raw.FPDFText_GetCharIndexAtPos(
+                tp, l.value + min(1.0, (r.value - l.value) / 2), middle, 2.0, 2.0
+            )
         if at < 0:
             at = raw.FPDFText_GetCharIndexAtPos(tp, (l.value + r.value) / 2, middle, 4.0, 4.0)
-        size, bold, rgba, mode = styles.of(at) if at >= 0 else (t.value - b.value, False, (0, 0, 0, 255), 0)
+        size, bold, rgba, mode = (
+            styles.of(at) if at >= 0 else (t.value - b.value, False, (0, 0, 0, 255), 0)
+        )
         if size <= 0:
             size = t.value - b.value
         run = Run(l.value, height - t.value, r.value, height - b.value, words, size, bold)
@@ -319,7 +359,9 @@ def _runs(page: Any, textpage: Any, raw: Any, height: float) -> Tuple[List[Run],
             hidden += 1
             continue
         if mode == 3:
-            doubtful.append((run, True))  # invisible: kept only over a picture, the text layer of a scan
+            doubtful.append(
+                (run, True)
+            )  # invisible: kept only over a picture, the text layer of a scan
             continue
         if min(rgba[:3]) >= 245:
             doubtful.append((run, False))  # white: kept only over something drawn
@@ -347,7 +389,21 @@ def _runs(page: Any, textpage: Any, raw: Any, height: float) -> Tuple[List[Run],
 def _same_line(run: Run, line: List[Run]) -> bool:
     top, bottom = min(r.top for r in line), max(r.bottom for r in line)
     overlap = min(bottom, run.bottom) - max(top, run.top)
-    return overlap >= 0.45 * min(run.bottom - run.top, bottom - top)
+    if overlap >= 0.45 * min(run.bottom - run.top, bottom - top):
+        return True
+    # A footnote mark is set small and raised, so little of it overlaps the
+    # line it belongs to; it still ends inside that line's height, whichever
+    # of the two came first.
+    small, big = (run, line) if run.bottom - run.top < 0.8 * (bottom - top) else (line, run)
+    if small is run:
+        return overlap > 0 and top < run.bottom <= bottom
+    big_run = run
+    small_bottom = bottom
+    return (
+        overlap > 0
+        and (bottom - top) < 0.8 * (big_run.bottom - big_run.top)
+        and big_run.top < small_bottom <= big_run.bottom
+    )
 
 
 def _group(runs: Sequence[Run]) -> List[Line]:
@@ -378,7 +434,9 @@ def _stream_lines(runs: Sequence[Run]) -> List[Line]:
         if lines:
             current = lines[-1]
             last = current.runs[-1]
-            if _same_line(run, current.runs) and run.left >= last.right - 0.5 * min(run.size, last.size):
+            if _same_line(run, current.runs) and run.left >= last.right - 0.5 * min(
+                run.size, last.size
+            ):
                 current.runs.append(run)
                 continue
         lines.append(Line([run]))
@@ -410,7 +468,10 @@ def _coherent(lines: Sequence[Line]) -> bool:
             continue
         prose += 1
         size = max(line.size, 1.0)
-        if any(b.left - a.right > 2.0 * size and _prose_run(a) and _prose_run(b) for a, b in zip(line.runs, line.runs[1:])):
+        if any(
+            b.left - a.right > 2.0 * size and _prose_run(a) and _prose_run(b)
+            for a, b in zip(line.runs, line.runs[1:])
+        ):
             crossing += 1
     return not (crossing >= 3 and crossing >= 0.25 * prose)
 
@@ -427,7 +488,10 @@ def _split_rows(lines: Sequence[Line]) -> bool:
     shared = 0
     for line in alone:
         run = line.runs[0]
-        if any(other is not line and other.runs[0].right <= run.left and _same_line(run, other.runs) for other in lines):
+        if any(
+            other is not line and other.runs[0].right <= run.left and _same_line(run, other.runs)
+            for other in lines
+        ):
             shared += 1
     return shared >= 4 and shared >= 0.5 * len(alone)
 
@@ -493,20 +557,33 @@ def _order(runs: Sequence[Run], depth: int = 0) -> List[Line]:
 def _join_runs(runs: Sequence[Run], size: float) -> str:
     """A line's runs as words: close runs are one word, a raised small one is a footnote mark."""
     out = ""
-    base = max((r.bottom for r in runs if abs(r.size - size) <= 0.5), default=max(r.bottom for r in runs))
+    base = max(
+        (r.bottom for r in runs if abs(r.size - size) <= 0.5), default=max(r.bottom for r in runs)
+    )
     previous: Optional[Run] = None
     for run in runs:
         words = run.text.strip()
         if not words:
             continue
-        raised = size > 0 and run.size <= 0.8 * size and run.bottom < base - 0.2 * size and len(words) <= 4
-        if raised and out and re.fullmatch(r"[0-9a-z*†‡,]+", words):
+        raised = (
+            size > 0
+            and run.size < 0.9 * size
+            and run.bottom < base - 0.2 * size
+            and len(words) <= 4
+        )
+        if raised and re.fullmatch(r"[0-9a-z*†‡,]+", words):
+            # Raised after a word, the mark that points at a footnote; raised
+            # at the start of a line, the footnote's own number.
             out += "".join(f"[^{mark}]" for mark in words.split(",") if mark)
             previous = run
             continue
         if not out:
             out = words
-        elif previous is not None and run.left - previous.right < 0.12 * size and not out.endswith(" "):
+        elif (
+            previous is not None
+            and run.left - previous.right < 0.12 * size
+            and not out.endswith(" ")
+        ):
             out += words
         else:
             out += " " + words
@@ -567,12 +644,18 @@ def _drop_running(pages: List[List[Line]], heights: Sequence[float]) -> List[str
     written = [i for i, lines in enumerate(pages) if lines]
     if len(written) < 2:
         return []
-    needed = max(3, math.ceil(RUNNING_SHARE * len(written)))
+    # On a document of two pages a running line is in the margin of both; a
+    # line that repeats lower down is believed only on three pages or more.
+    needed = min(len(written), max(3, math.ceil(RUNNING_SHARE * len(written))))
+    needed_exact = max(3, math.ceil(RUNNING_SHARE * len(written)))
     seen: Dict[str, Set[int]] = {}
     exact: Dict[str, Set[int]] = {}
     first: Dict[str, str] = {}
     for index in written:
         height = heights[index]
+        if len(pages[index]) < 2:
+            # A page's only line runs over nothing.
+            continue
         for line in pages[index]:
             text = line.text.strip()
             if not text or len(text) > 120 or line.kind == "figure":
@@ -590,9 +673,16 @@ def _drop_running(pages: List[List[Line]], heights: Sequence[float]) -> List[str
     # A figure alone is a page number only when this document could have a page with that number.
     # A running line has words: "2025 2024" at the top of a table is its header, whatever it repeats.
     worded_line = lambda key: sum(c.isalpha() for c in key) >= 3  # noqa: E731
-    going = {shape for shape, on in seen.items() if len(on) >= needed and shape != "#" and worded_line(shape)}
+    going = {
+        shape
+        for shape, on in seen.items()
+        if len(on) >= needed and shape != "#" and worded_line(shape)
+    }
     most = 2 * len(pages) + 20
-    going_exact = {flat for flat, on in exact.items() if len(on) >= needed and worded_line(flat)}
+    going_exact = {
+        flat for flat, on in exact.items() if len(on) >= needed_exact and worded_line(flat)
+    }
+
     # A report prints each section's own foot, "Annual Report 2025 Financial
     # Results" on some pages and "Annual Report 2025 Management's Discussion"
     # on others. One that shares a long stretch of words with a running line
@@ -600,7 +690,11 @@ def _drop_running(pages: List[List[Line]], heights: Sequence[float]) -> List[str
     def kin(shape: str) -> bool:
         return any(_shared(shape, known) >= 16 for known in going)
 
-    going |= {shape for shape, on in seen.items() if len(on) >= 3 and shape not in going and worded_line(shape) and kin(shape)}
+    going |= {
+        shape
+        for shape, on in seen.items()
+        if len(on) >= 3 and shape not in going and worded_line(shape) and kin(shape)
+    }
     dropped: List[str] = []
     for index in written:
         height = heights[index]
@@ -644,8 +738,20 @@ def _row_like(line: Line) -> bool:
     line.cells = cells
     if cells and all(_DATEISH.match(text.strip()) for _l, _r, text in cells):
         return False  # "2025 2024": the years over a table's columns
-    figures = sum(1 for _l, _r, text in cells if _numeric(text))
-    return len(cells) >= 2 and figures >= 1 and (figures >= 2 or len(cells) >= 3 or _numeric(cells[-1][2]))
+    # "2025 2024 Change": a year is a figure only in a row that has other
+    # figures; among words alone it heads a column.
+    figures = sum(
+        1 for _l, _r, text in cells if _numeric(text) and not _DATEISH.match(text.strip())
+    )
+    if figures == 0:
+        figures = sum(1 for _l, _r, text in cells if _numeric(text))
+        if figures and any(not _numeric(text) for _l, _r, text in cells):
+            return False
+    return (
+        len(cells) >= 2
+        and figures >= 1
+        and (figures >= 2 or len(cells) >= 3 or _numeric(cells[-1][2]))
+    )
 
 
 def _anchors(rows: Sequence[Line], size: float) -> List[Tuple[float, float]]:
@@ -655,7 +761,9 @@ def _anchors(rows: Sequence[Line], size: float) -> List[Tuple[float, float]]:
     them flush right, flush left or centred; two columns do not, or a reader
     could not tell them apart either.
     """
-    spans = sorted((left, right) for line in rows for left, right, text in line.cells if _numeric(text))
+    spans = sorted(
+        (left, right) for line in rows for left, right, text in line.cells if _numeric(text)
+    )
     columns: List[List[float]] = []
     for left, right in spans:
         if columns and left <= columns[-1][1] + 0.5:
@@ -665,7 +773,9 @@ def _anchors(rows: Sequence[Line], size: float) -> List[Tuple[float, float]]:
     return [(left, right) for left, right in columns]
 
 
-def _column_of(left: float, right: float, anchors: Sequence[Tuple[float, float]], size: float) -> Optional[int]:
+def _column_of(
+    left: float, right: float, anchors: Sequence[Tuple[float, float]], size: float
+) -> Optional[int]:
     """The column a cell sits in: the one it overlaps most, else the nearest within a character or two."""
     best, most = None, 0.0
     for index, (a_left, a_right) in enumerate(anchors):
@@ -675,8 +785,16 @@ def _column_of(left: float, right: float, anchors: Sequence[Tuple[float, float]]
     if best is not None:
         return best
     middle = (left + right) / 2
-    nearest = min(range(len(anchors)), key=lambda i: abs((anchors[i][0] + anchors[i][1]) / 2 - middle), default=None)
-    if nearest is not None and abs((anchors[nearest][0] + anchors[nearest][1]) / 2 - middle) <= max(6.0, 2.0 * size) + (anchors[nearest][1] - anchors[nearest][0]) / 2:
+    nearest = min(
+        range(len(anchors)),
+        key=lambda i: abs((anchors[i][0] + anchors[i][1]) / 2 - middle),
+        default=None,
+    )
+    if (
+        nearest is not None
+        and abs((anchors[nearest][0] + anchors[nearest][1]) / 2 - middle)
+        <= max(6.0, 2.0 * size) + (anchors[nearest][1] - anchors[nearest][0]) / 2
+    ):
         return nearest
     return None
 
@@ -701,16 +819,24 @@ def _place_header(
     """
     over: List[List[int]] = []
     for left, right, _text in cells:
-        over.append([i for i, (a_left, a_right) in enumerate(spans) if left <= a_right and right >= a_left])
+        over.append(
+            [i for i, (a_left, a_right) in enumerate(spans) if left <= a_right and right >= a_left]
+        )
     if not groups or len(cells) >= len(spans):
         return [(i, text) for (left, right, text), columns in zip(cells, over) for i in columns]
     centres = [(a_left + a_right) / 2 for a_left, a_right in anchors]
     # A group's label centred between its columns may sit over none of them.
-    flush = [bool(columns) and abs(right - anchors[max(columns)][1]) <= max(3.0, 0.5 * size) for (left, right, _t), columns in zip(cells, over)]
+    flush = [
+        bool(columns) and abs(right - anchors[max(columns)][1]) <= max(3.0, 0.5 * size)
+        for (left, right, _t), columns in zip(cells, over)
+    ]
     if not all(flush):
         # Set over the middle of its columns: each column goes to the label nearest it.
         middles = [(left + right) / 2 for left, right, _t in cells]
-        return [(i, cells[min(range(len(cells)), key=lambda n: abs(middles[n] - c))][2]) for i, c in enumerate(centres)]
+        return [
+            (i, cells[min(range(len(cells)), key=lambda n: abs(middles[n] - c))][2])
+            for i, c in enumerate(centres)
+        ]
     out: List[Tuple[int, str]] = []
     start = 0
     for n, ((left, right, text), columns) in enumerate(zip(cells, over)):
@@ -729,7 +855,13 @@ def _place_header(
     return out
 
 
-def _headers(lines: List[Line], start: int, anchors: Sequence[Tuple[float, float]], label_right: float, size: float) -> Tuple[int, List[str]]:
+def _headers(
+    lines: List[Line],
+    start: int,
+    anchors: Sequence[Tuple[float, float]],
+    label_right: float,
+    size: float,
+) -> Tuple[int, List[str]]:
     """The lines just above a table that head its columns, as one header per column.
 
     A line counts when every one of its cells sits over the columns of
@@ -748,9 +880,17 @@ def _headers(lines: List[Line], start: int, anchors: Sequence[Tuple[float, float
         cells = line.cells or _cells(line)
         if not cells:
             break
-        if any(left < label_right - 0.5 * size or right <= label_right + 0.5 * size for left, right, _t in cells):
+        if any(
+            left < label_right - 0.5 * size or right <= label_right + 0.5 * size
+            for left, right, _t in cells
+        ):
             # "Assets" between the header and the rows is a label of the rows under it: look past one or two.
-            if len(cells) == 1 and labels < 2 and len(cells[0][2]) <= 40 and not _numeric(cells[0][2]):
+            if (
+                len(cells) == 1
+                and labels < 2
+                and len(cells[0][2]) <= 40
+                and not _numeric(cells[0][2])
+            ):
                 labels += 1
                 continue
             break
@@ -764,7 +904,9 @@ def _headers(lines: List[Line], start: int, anchors: Sequence[Tuple[float, float
         finest = max(finest, len(cells))
         line.kind = "header"
         first = back
-    return first, [" ".join(text for _top, text in sorted(parts, key=lambda part: part[0])) for parts in heads]
+    return first, [
+        " ".join(text for _top, text in sorted(parts, key=lambda part: part[0])) for parts in heads
+    ]
 
 
 def _tables(lines: List[Line]) -> int:
@@ -776,10 +918,19 @@ def _tables(lines: List[Line]) -> int:
             index += 1
             continue
         end = index
-        while end + 1 < len(lines) and lines[end + 1].kind == "text" and (
-            _row_like(lines[end + 1])
-            # A label alone between rows, "Average earning assets", belongs to the table.
-            or (end + 2 < len(lines) and len(_cells(lines[end + 1])) == 1 and len(lines[end + 1].text) <= 60 and _row_like(lines[end + 2]))
+        while (
+            end + 1 < len(lines)
+            and lines[end + 1].kind == "text"
+            and (
+                _row_like(lines[end + 1])
+                # A label alone between rows, "Average earning assets", belongs to the table.
+                or (
+                    end + 2 < len(lines)
+                    and len(_cells(lines[end + 1])) == 1
+                    and len(lines[end + 1].text) <= 60
+                    and _row_like(lines[end + 2])
+                )
+            )
         ):
             end += 1
         block = lines[index : end + 1]
@@ -793,17 +944,31 @@ def _tables(lines: List[Line]) -> int:
             index = end + 1
             continue
         first_column = min(a_left for a_left, _a in anchors)
-        label_right = max((right for line in rows for left, right, text in line.cells if right < first_column - 0.5 * size), default=first_column - size)
+        label_right = max(
+            (
+                right
+                for line in rows
+                for left, right, text in line.cells
+                if right < first_column - 0.5 * size
+            ),
+            default=first_column - size,
+        )
         top, heads = _headers(lines, index, anchors, label_right, size)
         for line in block:
             cells = line.cells or _cells(line)
             values: List[Optional[str]] = [None] * (len(anchors) + 1)
             for left, right, text in cells:
-                column = None if right < first_column - 0.5 * size else _column_of(left, right, anchors, size)
+                column = (
+                    None
+                    if right < first_column - 0.5 * size
+                    else _column_of(left, right, anchors, size)
+                )
                 if column is None:
                     values[0] = text if values[0] is None else f"{values[0]} {text}"
                 else:
-                    values[column + 1] = text if values[column + 1] is None else f"{values[column + 1]} {text}"
+                    values[column + 1] = (
+                        text if values[column + 1] is None else f"{values[column + 1]} {text}"
+                    )
             line.kind = "row"
             line.cells = [(0.0, 0.0, "" if v is None else v) for v in values]
         lines[index].level = 1  # the first row of a table carries its header
@@ -832,6 +997,23 @@ def _body_size(pages: Iterable[List[Line]]) -> float:
     return weights.most_common(1)[0][0] if weights else 10.0
 
 
+#: "1. ", "2.1 ", "III. ", "Chapter 4", "Part B", "Section 2": a line that opens a section of its own.
+_NUMBERED_HEADING = re.compile(
+    r"^(?:\d+(?:\.\d+)*\.?|[IVXLC]+\.|[A-Z]\.|(?:chapter|part|section|appendix|article)\s+\S+)\s+\S",
+    re.IGNORECASE,
+)
+
+
+def _aligned(one: Line, two: Line) -> bool:
+    """Whether two lines share a left edge, a right edge or a centre, within a character."""
+    within = max(one.size, two.size, 1.0)
+    return (
+        abs(one.left - two.left) <= within
+        or abs(one.right - two.right) <= within
+        or abs((one.left + one.right) - (two.left + two.right)) <= 2 * within
+    )
+
+
 def _heading_like(line: Line, body: float) -> bool:
     text = line.text.strip()
     if line.kind != "text" or not text or len(text) > 120 or not re.search(r"[A-Za-zÀ-ɏ]", text):
@@ -840,11 +1022,24 @@ def _heading_like(line: Line, body: float) -> bool:
         return False
     if line.size >= HEADING_SCALE * body:
         return True
-    return line.bold and line.size >= 0.95 * body and len(text.split()) <= 12 and text[:1].isupper() is not False
+    return (
+        line.bold
+        and line.size >= 0.95 * body
+        and len(text.split()) <= 12
+        and text[:1].isupper() is not False
+    )
 
 
 def _mark_headings(pages: List[List[Line]], body: float) -> None:
-    sizes = sorted({line.size for lines in pages for line in lines if _heading_like(line, body) and line.size >= HEADING_SCALE * body}, reverse=True)
+    sizes = sorted(
+        {
+            line.size
+            for lines in pages
+            for line in lines
+            if _heading_like(line, body) and line.size >= HEADING_SCALE * body
+        },
+        reverse=True,
+    )
     rank = {size: min(n + 1, 3) for n, size in enumerate(sizes)}
     for lines in pages:
         for n, line in enumerate(lines):
@@ -854,11 +1049,23 @@ def _mark_headings(pages: List[List[Line]], body: float) -> None:
                 # Bold at body size is a heading only when it stands alone.
                 before = lines[n - 1] if n else None
                 after = lines[n + 1] if n + 1 < len(lines) else None
-                gap_before = before is None or line.top - before.bottom > 0.5 * body or before.kind != "text"
+                gap_before = (
+                    before is None or line.top - before.bottom > 0.5 * body or before.kind != "text"
+                )
                 ends = after is None or after.top - line.bottom > 0.3 * body or not after.bold
-                if not (gap_before and ends) or (after is not None and after.bold and after.size == line.size and abs(after.top - line.bottom) < 0.5 * body):
+                if not (gap_before and ends) or (
+                    after is not None
+                    and after.bold
+                    and after.size == line.size
+                    and abs(after.top - line.bottom) < 0.5 * body
+                ):
                     continue
-                if before is not None and before.kind == "text" and not _SENTENCE_END.search(before.text.strip()) and line.top - before.bottom < 0.5 * body:
+                if (
+                    before is not None
+                    and before.kind == "text"
+                    and not _SENTENCE_END.search(before.text.strip())
+                    and line.top - before.bottom < 0.5 * body
+                ):
                     continue
                 if after is not None and after.kind == "text" and after.text.strip()[:1].islower():
                     continue
@@ -869,11 +1076,27 @@ def _mark_headings(pages: List[List[Line]], body: float) -> None:
 
 
 def _vocabulary(pages: Iterable[List[Line]]) -> Set[str]:
+    """The words the document uses, the two halves of a word a line broke left out.
+
+    "obliga-" at the end of a line and "tions" at the start of the next are
+    not words, and counting them made every broken word look like a compound
+    the document writes with its hyphen.
+    """
     words: Set[str] = set()
     for lines in pages:
+        after_break = False
         for line in lines:
-            if line.kind != "figure":
-                words.update(w.lower() for w in re.findall(r"[A-Za-zÀ-ɏ][A-Za-zÀ-ɏ'-]+", line.text))
+            if line.kind == "figure":
+                continue
+            text = line.text
+            found = re.findall(r"[A-Za-zÀ-ɏ][A-Za-zÀ-ɏ'-]+", text)
+            broken = text.rstrip().endswith(_SOFT + ("-",)) and len(text.rstrip()) > 1
+            if broken and found:
+                found = found[:-1]
+            if after_break and found:
+                found = found[1:]
+            words.update(w.lower() for w in found)
+            after_break = broken
     return words
 
 
@@ -900,20 +1123,45 @@ def _hyphen_join(head: str, tail: str, words: Set[str]) -> str:
     return stem + tail
 
 
+def _leading(lines: Sequence[Line]) -> float:
+    """How far one line of text sits below the one before, as the page sets most of them; 0 when it cannot tell."""
+    advances = [
+        b.top - a.top
+        for a, b in zip(lines, lines[1:])
+        if a.kind == "text"
+        and b.kind == "text"
+        and abs(a.size - b.size) <= 0.5
+        and 0.8 * a.size < b.top - a.top < 3.0 * a.size
+    ]
+    if len(advances) < 2:
+        return 0.0
+    return statistics.median(advances)
+
+
 def _page_text(lines: Sequence[Line], body: float, words: Set[str]) -> str:
     """A page's lines as text: headings on their own, paragraphs joined, a table a row a line."""
     blocks: List[str] = []
     paragraph = ""
     previous: Optional[Line] = None
     headers: List[str] = []
+    # The left edge of the list item the paragraph is, when it is one: its
+    # lines hang in from the marker, and a line back at the marker's edge,
+    # or a new marker, ends it.
+    item_left: Optional[float] = None
+    # Whether the block just closed was a list item: a bare number or a dash
+    # opens another only then.
+    in_list = False
 
     def close() -> None:
-        nonlocal paragraph
+        nonlocal paragraph, item_left, in_list
         if paragraph.strip():
             blocks.append(paragraph.strip())
+            in_list = item_left is not None
         paragraph = ""
+        item_left = None
 
     table: List[List[str]] = []
+    leading = _leading(lines)
 
     def flush_table() -> None:
         nonlocal table, headers
@@ -970,25 +1218,67 @@ def _page_text(lines: Sequence[Line], body: float, words: Set[str]) -> str:
                 and previous.level == line.level
                 and abs(previous.size - line.size) <= 0.5
                 and 0 <= line.top - previous.bottom < 0.8 * max(line.size, 1.0)
+                and _aligned(previous, line)
+                and not _NUMBERED_HEADING.match(text)
                 and blocks
             ):
-                # One heading set over several lines is one heading.
+                # One heading set over several lines is one heading: its lines
+                # share an edge or a centre, and the second does not open a
+                # numbered section of its own under a title.
                 blocks[-1] += " " + text
             else:
                 blocks.append("#" * max(1, line.level) + " " + text)
             previous = line
             continue
+        marked = _LIST_MARK.match(text)
+        if marked and _weak(marked.group("mark")) and not (item_left is not None or in_list):
+            # In prose a line can start with "12 markets" or "– which": a bare
+            # number or a dash opens an item only after another item.
+            marked = None
+        if marked and paragraph:
+            # A list item is a block of its own, whatever the spacing.
+            close()
         if previous is not None and previous.kind == "text" and paragraph:
-            gap = line.top - previous.bottom
+            if leading and abs(line.size - previous.size) <= 0.5:
+                # Measured from the tops of the lines, which a line's letters
+                # do not move: a line with no descender ends higher, and a
+                # gap measured from its bottom opened a paragraph mid-sentence.
+                advance = line.top - previous.top
+                gap = advance - leading if advance > leading * 1.3 + 1.0 else 0.0
+            else:
+                gap = line.top - previous.bottom
             moved_up = line.top < previous.top - 0.5 * body
             indented = line.left > previous.left + 1.2 * body and not moved_up
-            short_before = _SENTENCE_END.search(paragraph) is not None and previous.right < line.right - 0.15 * max(line.right - line.left, 1.0)
+            if item_left is not None:
+                # The lines of a list item hang in from its marker; one back
+                # at the marker's edge is the paragraph after the list.
+                indented = False
+                if line.left < item_left + 0.5 * body:
+                    close()
+            short_before = _SENTENCE_END.search(
+                paragraph
+            ) is not None and previous.right < line.right - 0.15 * max(line.right - line.left, 1.0)
             new_size = abs(line.size - previous.size) > 0.15 * max(previous.size, 1.0)
             runs_on = moved_up and not _SENTENCE_END.search(paragraph) and text[:1].islower()
-            if not runs_on and (gap > 0.6 * max(body, previous.size) or moved_up or indented or short_before or new_size):
+            if not runs_on and (
+                gap > (0.0 if leading else 0.6 * max(body, previous.size))
+                or moved_up
+                or indented
+                or short_before
+                or new_size
+            ):
                 close()
+        if marked and not paragraph:
+            item_left = line.left
+            if marked.group("mark") in _BULLETS:
+                text = "- " + text[marked.end() :]
         if paragraph:
-            ends_hyphen = paragraph.endswith(("-", "", "￾")) and len(paragraph) > 1 and paragraph[-2].isalpha() and text[:1].islower()
+            ends_hyphen = (
+                paragraph.endswith(("-", "", "￾"))
+                and len(paragraph) > 1
+                and paragraph[-2].isalpha()
+                and text[:1].islower()
+            )
             if paragraph.endswith("­") or ends_hyphen:
                 paragraph = _hyphen_join(paragraph, text, words)
             else:
@@ -1020,14 +1310,18 @@ def _page_text(lines: Sequence[Line], body: float, words: Set[str]) -> str:
 Box = Tuple[float, float, float, float]
 
 
-def _chart_regions(page: Any, raw: Any, width: float, height: float, runs: Sequence[Run]) -> List[Box]:
+def _chart_regions(
+    page: Any, raw: Any, width: float, height: float, runs: Sequence[Run]
+) -> List[Box]:
     """``(left, top, right, bottom)`` of each chart on a page, labels included."""
     shapes: List[Box] = []
     plotted: Set[int] = set()
     try:
         objects = page.get_objects(filter=(raw.FPDF_PAGEOBJ_PATH,), max_depth=4)
         for obj in objects:
-            left, bottom, right, top = obj.get_bounds() if hasattr(obj, "get_bounds") else obj.get_pos()
+            left, bottom, right, top = (
+                obj.get_bounds() if hasattr(obj, "get_bounds") else obj.get_pos()
+            )
             w, h = right - left, top - bottom
             if w < 3 or h < 3 or w * h > 0.6 * width * height:
                 continue  # a rule, a tick, or the page's background
@@ -1044,17 +1338,35 @@ def _chart_regions(page: Any, raw: Any, width: float, height: float, runs: Seque
     for members in _gather(shapes, runs):
         group = [shapes[i] for i in members]
         lines = [shapes[i] for i in members if i in plotted]
-        drawn = (min(b[0] for b in group), min(b[1] for b in group), max(b[2] for b in group), max(b[3] for b in group))
+        drawn = (
+            min(b[0] for b in group),
+            min(b[1] for b in group),
+            max(b[2] for b in group),
+            max(b[3] for b in group),
+        )
         # A chart in a panel of its own holds its scales in the panel.
         framed = _frame(group, drawn, lines) is not None
-        left, top, right, bottom = _scales(drawn, runs) if not framed and (len(group) >= 4 or lines) else drawn
+        left, top, right, bottom = (
+            _scales(drawn, runs) if not framed and (len(group) >= 4 or lines) else drawn
+        )
         area = (right - left) * (bottom - top)
-        if (len(group) < 4 and not lines) or area < 0.02 * width * height or area > 0.85 * width * height:
+        if (
+            (len(group) < 4 and not lines)
+            or area < 0.02 * width * height
+            or area > 0.85 * width * height
+        ):
             continue
         edges = Counter((round(b[0]), round(b[2])) for b in group)
         if not lines and edges.most_common(1)[0][1] >= 0.8 * len(group):
             continue  # shaded rows of a table, not bars
-        near = [r for r in runs if r.left >= left - 24 and r.right <= right + 24 and r.top >= top - 24 and r.bottom <= bottom + 24]
+        near = [
+            r
+            for r in runs
+            if r.left >= left - 24
+            and r.right <= right + 24
+            and r.top >= top - 24
+            and r.bottom <= bottom + 24
+        ]
         figures = sum(1 for r in near if _numeric(r.text))
         if figures < (2 if len(group) >= 4 else 3) and len(group) < 8:
             continue
@@ -1110,20 +1422,36 @@ def _scales(box: Box, runs: Sequence[Run]) -> Box:
             for column in _clusters(near, edge, 3.0):
                 column = sorted(column, key=lambda r: r.middle)
                 steps = [b.middle - a.middle for a, b in zip(column, column[1:])]
-                if len(column) >= 3 and min(steps) > 2 and max(steps) - min(steps) <= 0.25 * statistics.median(steps):
+                if (
+                    len(column) >= 3
+                    and min(steps) > 2
+                    and max(steps) - min(steps) <= 0.25 * statistics.median(steps)
+                ):
                     best = max(best, column, key=len)
         if best:
             ticks.update(id(r) for r in best)
             top, bottom = min(top, best[0].top), max(bottom, best[-1].bottom)
-            left, right = (min(left, *(r.left for r in best)), right) if side < 0 else (left, max(right, *(r.right for r in best)))
+            left, right = (
+                (min(left, *(r.left for r in best)), right)
+                if side < 0
+                else (left, max(right, *(r.right for r in best)))
+            )
     under = [
         r
         for r in runs
-        if id(r) not in ticks and bottom - 4 <= r.top <= bottom + 60 and r.right >= left and r.left <= right and len(r.text.strip()) <= 20
+        if id(r) not in ticks
+        and bottom - 4 <= r.top <= bottom + 60
+        and r.right >= left
+        and r.left <= right
+        and len(r.text.strip()) <= 20
     ]
-    rows = sorted(_clusters(under, lambda r: r.middle, 2.0), key=lambda row: min(r.top for r in row))
+    rows = sorted(
+        _clusters(under, lambda r: r.middle, 2.0), key=lambda row: min(r.top for r in row)
+    )
     if rows and len(rows[0]) >= 3:
-        bottom = max(bottom, *(r.bottom for r in rows[0]))  # the row nearest under it, and only that one
+        bottom = max(
+            bottom, *(r.bottom for r in rows[0])
+        )  # the row nearest under it, and only that one
     return (left, top, right, bottom)
 
 
@@ -1155,7 +1483,9 @@ def _plotted(raw: Any, handle: Any) -> bool:
     last: Optional[Tuple[float, float]] = None
     for index in range(count):
         segment = raw.FPDFPath_GetPathSegment(handle, index)
-        if not segment or not raw.FPDFPathSegment_GetPoint(segment, ctypes.byref(x), ctypes.byref(y)):
+        if not segment or not raw.FPDFPathSegment_GetPoint(
+            segment, ctypes.byref(x), ctypes.byref(y)
+        ):
             return False
         point = (x.value, y.value)
         if raw.FPDFPathSegment_GetType(segment) == raw.FPDF_SEGMENT_MOVETO:
@@ -1200,7 +1530,7 @@ def _gather(shapes: Sequence[Box], runs: Sequence[Run]) -> List[List[int]]:
     order = sorted(range(len(shapes)), key=lambda i: shapes[i][0])
     for at, i in enumerate(order):
         _, top, right, bottom = shapes[i]
-        for j in order[at + 1:]:
+        for j in order[at + 1 :]:
             if shapes[j][0] > right + 8:
                 break
             if shapes[j][1] <= bottom + 8 and shapes[j][3] >= top - 8:
@@ -1211,7 +1541,14 @@ def _gather(shapes: Sequence[Box], runs: Sequence[Run]) -> List[List[int]]:
     def bar(i: int) -> bool:
         if i not in bare:
             left, top, right, bottom = shapes[i]
-            inside = sum(1 for r in runs if r.left >= left - 1 and r.right <= right + 1 and r.top >= top - 1 and r.bottom <= bottom + 1)
+            inside = sum(
+                1
+                for r in runs
+                if r.left >= left - 1
+                and r.right <= right + 1
+                and r.top >= top - 1
+                and r.bottom <= bottom + 1
+            )
             bare[i] = inside <= 1  # a value printed on a bar, at most
         return bare[i]
 
@@ -1231,13 +1568,21 @@ def _gather(shapes: Sequence[Box], runs: Sequence[Run]) -> List[List[int]]:
                 continue
             ordered = sorted(members, key=lambda i: shapes[i][along])
             for i, j in zip(ordered, ordered[1:]):
-                size_i, size_j = shapes[i][end] - shapes[i][start], shapes[j][end] - shapes[j][start]
+                size_i, size_j = (
+                    shapes[i][end] - shapes[i][start],
+                    shapes[j][end] - shapes[j][start],
+                )
                 gap = shapes[j][start] - shapes[i][end]
                 # The room allowed between bars is measured by how thick they
                 # are, never how long: two charts one above the other have
                 # bars that share a left edge, a chart's height apart.
                 thick = max(min(b[2] - b[0], b[3] - b[1]) for b in (shapes[i], shapes[j]))
-                if abs(size_i - size_j) <= 0.25 * max(size_i, size_j) and -1 <= gap <= max(3 * thick, 40) and bar(i) and bar(j):
+                if (
+                    abs(size_i - size_j) <= 0.25 * max(size_i, size_j)
+                    and -1 <= gap <= max(3 * thick, 40)
+                    and bar(i)
+                    and bar(j)
+                ):
                     join(i, j)
 
     groups: Dict[int, List[int]] = {}
@@ -1257,7 +1602,14 @@ def _words_not_chart(region: Box, runs: Sequence[Run]) -> bool:
     charts side by side on one scale line up in rows too, and name nothing.
     """
     left, top, right, bottom = region
-    inside = [r for r in runs if r.left >= left - 1 and r.right <= right + 1 and r.top >= top - 1 and r.bottom <= bottom + 1]
+    inside = [
+        r
+        for r in runs
+        if r.left >= left - 1
+        and r.right <= right + 1
+        and r.top >= top - 1
+        and r.bottom <= bottom + 1
+    ]
     area = max(1.0, (right - left) * (bottom - top))
     if sum((r.right - r.left) * (r.bottom - r.top) for r in inside) >= 0.24 * area:
         return True
@@ -1274,7 +1626,10 @@ def _words_not_chart(region: Box, runs: Sequence[Run]) -> bool:
         figures = [r for r in row if _numeric(r.text)]
         if len(figures) >= 3:
             first = min(r.left for r in figures)
-            named += any(r.right <= first and not _numeric(r.text) and any(c.isalpha() for c in r.text) for r in row)
+            named += any(
+                r.right <= first and not _numeric(r.text) and any(c.isalpha() for c in r.text)
+                for r in row
+            )
     return named >= 6
 
 
@@ -1287,9 +1642,19 @@ def _frame(group: Sequence[Box], box: Box, lines: Sequence[Box] = ()) -> Optiona
     if not framing:
         return None
     frame = max(framing, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
-    held = sum(1 for b in group if b is not frame and b[0] >= frame[0] - 1 and b[2] <= frame[2] + 1 and b[1] >= frame[1] - 1 and b[3] <= frame[3] + 1)
+    held = sum(
+        1
+        for b in group
+        if b is not frame
+        and b[0] >= frame[0] - 1
+        and b[2] <= frame[2] + 1
+        and b[1] >= frame[1] - 1
+        and b[3] <= frame[3] + 1
+    )
     left, top, right, bottom = box
-    if held >= 2 and (frame[2] - frame[0]) * (frame[3] - frame[1]) >= 0.9 * (right - left) * (bottom - top):
+    if held >= 2 and (frame[2] - frame[0]) * (frame[3] - frame[1]) >= 0.9 * (right - left) * (
+        bottom - top
+    ):
         return frame
     return None
 
@@ -1308,13 +1673,25 @@ def _chart_bounds(
     # A panel or a border drawn round the chart already holds its title and
     # labels: the picture is the panel, and what lies outside it is the page.
     if _frame(group, box, lines) is not None:
-        return (max(0.0, left - 2), max(0.0, top - 2), min(width, right + 2), min(height, bottom + 2))
+        return (
+            max(0.0, left - 2),
+            max(0.0, top - 2),
+            min(width, right + 2),
+            min(height, bottom + 2),
+        )
     # The chart's own words around its shapes, each measured from the shapes
     # and never from words already taken, so a table or a paragraph under a
     # chart is not drawn into it one line at a time: axis values and end
     # labels beside it, a title and its subtitle above, year labels and a
     # legend below in the labels' own size.
-    inside = [r.size for r in runs if r.left >= left - 2 and r.right <= right + 2 and r.top >= top - 2 and r.bottom <= bottom + 2]
+    inside = [
+        r.size
+        for r in runs
+        if r.left >= left - 2
+        and r.right <= right + 2
+        and r.top >= top - 2
+        and r.bottom <= bottom + 2
+    ]
     label = sorted(inside)[len(inside) // 2] if inside else 0.0
     grown = [left, top, right, bottom]
     for r in runs:
@@ -1322,9 +1699,20 @@ def _chart_bounds(
             continue
         beside = r.bottom >= top and r.top <= bottom
         above = r.bottom < top and r.bottom >= top - 48 and r.right >= left and r.left <= right
-        below = r.top > bottom and r.top <= bottom + 30 and r.right >= left and r.left <= right and (not label or r.size <= label * 1.25)
+        below = (
+            r.top > bottom
+            and r.top <= bottom + 30
+            and r.right >= left
+            and r.left <= right
+            and (not label or r.size <= label * 1.25)
+        )
         if beside or above or below:
-            grown = [min(grown[0], r.left), min(grown[1], r.top), max(grown[2], r.right), max(grown[3], r.bottom)]
+            grown = [
+                min(grown[0], r.left),
+                min(grown[1], r.top),
+                max(grown[2], r.right),
+                max(grown[3], r.bottom),
+            ]
     # A title set over two or three lines climbs higher: each line sits just
     # above the last one taken, a line's own height or less, and is short
     # and no sentence.
@@ -1332,17 +1720,37 @@ def _chart_bounds(
         over = [
             r
             for r in runs
-            if grown[1] - max(8.0, 1.2 * r.size) <= r.bottom <= grown[1] + 1 and r.top < grown[1] - 1 and r.right >= left and r.left <= right
-            and len(r.text.strip()) <= 60 and len(r.text.split()) < 8
+            if grown[1] - max(8.0, 1.2 * r.size) <= r.bottom <= grown[1] + 1
+            and r.top < grown[1] - 1
+            and r.right >= left
+            and r.left <= right
+            and len(r.text.strip()) <= 60
+            and len(r.text.split()) < 8
         ]
         if not over:
             break
-        grown = [min(grown[0], *(r.left for r in over)), min(r.top for r in over), max(grown[2], *(r.right for r in over)), grown[3]]
+        grown = [
+            min(grown[0], *(r.left for r in over)),
+            min(r.top for r in over),
+            max(grown[2], *(r.right for r in over)),
+            grown[3],
+        ]
     left, top, right, bottom = grown
-    return (max(0.0, left - pad), max(0.0, top - pad), min(width, right + pad), min(height, bottom + pad))
+    return (
+        max(0.0, left - pad),
+        max(0.0, top - pad),
+        min(width, right + pad),
+        min(height, bottom + pad),
+    )
 
 
-def _draw_region(page: Any, width: float, height: float, region: Tuple[float, float, float, float], scale: float = 2.0) -> Optional[bytes]:
+def _draw_region(
+    page: Any,
+    width: float,
+    height: float,
+    region: Tuple[float, float, float, float],
+    scale: float = 2.0,
+) -> Optional[bytes]:
     """One region of a page as a PNG."""
     import io
 
@@ -1378,7 +1786,12 @@ def _figure_in_place(lines: Sequence[Line], region: Box, name: str, height: floa
     left, top, right, bottom = region
 
     def its_own(run: Run) -> bool:
-        inside = run.left >= left - 1 and run.right <= right + 1 and run.top >= top - 1 and run.bottom <= bottom + 1
+        inside = (
+            run.left >= left - 1
+            and run.right <= right + 1
+            and run.top >= top - 1
+            and run.bottom <= bottom + 1
+        )
         return inside and len(run.text.strip()) <= 60 and len(run.text.split()) < 8
 
     kept: List[Line] = []
@@ -1402,12 +1815,20 @@ def _figure_in_place(lines: Sequence[Line], region: Box, name: str, height: floa
             # A new line, not the old one cut down: what it says and how
             # large it is are worked out once and kept.
             kept.append(Line(rest, kind=line.kind, level=line.level))
+
     def across(line: Line) -> bool:
         body = MARGIN * height < line.bottom and line.top < (1 - MARGIN) * height
         return body and line.right >= left and line.left <= right
 
     above = [i for i, line in enumerate(kept) if across(line) and line.bottom <= top + 1]
-    under = next((i for i, line in enumerate(kept) if line.kind != "figure" and across(line) and line.top >= top - 1), None)
+    under = next(
+        (
+            i
+            for i, line in enumerate(kept)
+            if line.kind != "figure" and across(line) and line.top >= top - 1
+        ),
+        None,
+    )
     if above:
         at = max(above) + 1
     elif under is not None:
@@ -1444,11 +1865,15 @@ def _lone_figure(text: str) -> bool:
 
 def _rotated(runs: Sequence[Run]) -> bool:
     """Text set up the page rather than across it: its letters one over the other, in two places or more."""
-    singles = sorted((r for r in runs if len(r.text.strip()) == 1), key=lambda r: (round(r.left), r.top))
+    singles = sorted(
+        (r for r in runs if len(r.text.strip()) == 1), key=lambda r: (round(r.left), r.top)
+    )
     stacks = 0
     stacked = 1
     for a, b in zip(singles, singles[1:]):
-        if abs(a.left - b.left) <= 1 and -0.2 * max(a.size, 1.0) <= b.top - a.bottom <= 0.6 * max(a.size, 1.0):
+        if abs(a.left - b.left) <= 1 and -0.2 * max(a.size, 1.0) <= b.top - a.bottom <= 0.6 * max(
+            a.size, 1.0
+        ):
             stacked += 1
             if stacked == 4:
                 stacks += 1
@@ -1457,7 +1882,9 @@ def _rotated(runs: Sequence[Run]) -> bool:
     return stacks >= 2
 
 
-def _hard(lines: Sequence[Line], runs: Sequence[Run], height: float, charted: bool) -> Optional[str]:
+def _hard(
+    lines: Sequence[Line], runs: Sequence[Run], height: float, charted: bool
+) -> Optional[str]:
     """Why a page wants reading by something that sees it: "chart", "tiles", "order" or "rotated"; None when the rules read it well."""
     if charted:
         return "chart"
@@ -1471,7 +1898,9 @@ def _hard(lines: Sequence[Line], runs: Sequence[Run], height: float, charted: bo
         return "tiles"
     # A reading that starts at the foot of the page, or goes back up it twice
     # other than to a column beside: the file drew its parts out of order.
-    ups = sum(1 for a, b in zip(body, body[1:]) if b.top < a.top - 0.2 * height and b.left < a.right - 5)
+    ups = sum(
+        1 for a, b in zip(body, body[1:]) if b.top < a.top - 0.2 * height and b.left < a.right - 5
+    )
     foot = (1 - MARGIN) * height
     if (body[0].top >= foot and any(line.top < foot for line in body[1:])) or ups >= 2:
         return "order"
@@ -1511,7 +1940,11 @@ def _scale_ticks(runs: Sequence[Run]) -> Set[float]:
         return set()
     value_of = {id(r): v for r, v in labelled}
     marks = [r for r, _v in labelled]
-    ways = [(group, "down") for edge in (lambda r: r.right, lambda r: r.left, lambda r: (r.left + r.right) / 2) for group in _clusters(marks, edge, 3.0)]
+    ways = [
+        (group, "down")
+        for edge in (lambda r: r.right, lambda r: r.left, lambda r: (r.left + r.right) / 2)
+        for group in _clusters(marks, edge, 3.0)
+    ]
     ways += [(group, "across") for group in _clusters(marks, lambda r: r.middle, 2.0)]
     on_scale: Set[int] = set()
     for group, way in ways:
@@ -1524,7 +1957,10 @@ def _scale_ticks(runs: Sequence[Run]) -> Set[float]:
             continue
         values = [value_of[id(r)] for r in group]
         rises = [b - a for a, b in zip(values, values[1:])]
-        if any(abs(rise - rises[0]) > 1e-6 * max(1.0, abs(rises[0])) for rise in rises) or 0.0 not in values:
+        if (
+            any(abs(rise - rises[0]) > 1e-6 * max(1.0, abs(rises[0])) for rise in rises)
+            or 0.0 not in values
+        ):
             continue
         if round_step(abs(rises[0])):
             on_scale.update(id(r) for r in group)
@@ -1565,10 +2001,21 @@ def _pdfium_string(getter: Any, *args: Any) -> str:
 
 
 #: The annotation kinds a person writes a comment in.
-_COMMENTS = {"FPDF_ANNOT_TEXT", "FPDF_ANNOT_FREETEXT", "FPDF_ANNOT_HIGHLIGHT", "FPDF_ANNOT_UNDERLINE", "FPDF_ANNOT_STRIKEOUT", "FPDF_ANNOT_SQUIGGLY", "FPDF_ANNOT_STAMP", "FPDF_ANNOT_CARET"}
+_COMMENTS = {
+    "FPDF_ANNOT_TEXT",
+    "FPDF_ANNOT_FREETEXT",
+    "FPDF_ANNOT_HIGHLIGHT",
+    "FPDF_ANNOT_UNDERLINE",
+    "FPDF_ANNOT_STRIKEOUT",
+    "FPDF_ANNOT_SQUIGGLY",
+    "FPDF_ANNOT_STAMP",
+    "FPDF_ANNOT_CARET",
+}
 
 
-def _pdfium_annotations(page: Any, form: Any, raw: Any) -> Tuple[List[Tuple[Optional[Tuple[float, float, float, float]], str, str]], List[str]]:
+def _pdfium_annotations(
+    page: Any, form: Any, raw: Any
+) -> Tuple[List[Tuple[Optional[Tuple[float, float, float, float]], str, str]], List[str]]:
     """A page's filled fields as ``(rect, name, value)`` in PDF space, and its comments, read by PDFium."""
     fields: List[Tuple[Optional[Tuple[float, float, float, float]], str, str]] = []
     comments: List[str] = []
@@ -1586,16 +2033,26 @@ def _pdfium_annotations(page: Any, form: Any, raw: Any) -> Tuple[List[Tuple[Opti
         try:
             kind = raw.FPDFAnnot_GetSubtype(annot)
             if kind == widget and form is not None:
-                name = _pdfium_string(raw.FPDFAnnot_GetFormFieldAlternateName, form, annot) or _pdfium_string(raw.FPDFAnnot_GetFormFieldName, form, annot)
+                name = _pdfium_string(
+                    raw.FPDFAnnot_GetFormFieldAlternateName, form, annot
+                ) or _pdfium_string(raw.FPDFAnnot_GetFormFieldName, form, annot)
                 value = _pdfium_string(raw.FPDFAnnot_GetFormFieldValue, form, annot).strip()
                 kind_of_field = raw.FPDFAnnot_GetFormFieldType(form, annot)
-                if kind_of_field in (getattr(raw, "FPDF_FORMFIELD_CHECKBOX", 2), getattr(raw, "FPDF_FORMFIELD_RADIOBUTTON", 3)):
+                if kind_of_field in (
+                    getattr(raw, "FPDF_FORMFIELD_CHECKBOX", 2),
+                    getattr(raw, "FPDF_FORMFIELD_RADIOBUTTON", 3),
+                ):
                     value = "yes" if raw.FPDFAnnot_IsChecked(form, annot) else ""
                 if not value or value in ("Off",):
                     continue
                 place = None
                 if raw.FPDFAnnot_GetRect(annot, ctypes.byref(rect)):
-                    place = (min(rect.left, rect.right), min(rect.bottom, rect.top), max(rect.left, rect.right), max(rect.bottom, rect.top))
+                    place = (
+                        min(rect.left, rect.right),
+                        min(rect.bottom, rect.top),
+                        max(rect.left, rect.right),
+                        max(rect.bottom, rect.top),
+                    )
                 fields.append((place, name.strip(), value))
             elif kind in kinds:
                 said = _pdfium_string(raw.FPDFAnnot_GetStringValue, annot, b"Contents").strip()
@@ -1608,7 +2065,9 @@ def _pdfium_annotations(page: Any, form: Any, raw: Any) -> Tuple[List[Tuple[Opti
     return fields, comments
 
 
-def _annotations(page: Any) -> Tuple[List[Tuple[Optional[Tuple[float, float, float, float]], str, str]], List[str]]:
+def _annotations(
+    page: Any,
+) -> Tuple[List[Tuple[Optional[Tuple[float, float, float, float]], str, str]], List[str]]:
     """A page's filled fields as ``(rect, name, value)``, the rect in PDF space when it has one, and its comments."""
     fields: List[Tuple[Optional[Tuple[float, float, float, float]], str, str]] = []
     comments: List[str] = []
@@ -1639,11 +2098,25 @@ def _annotations(page: Any) -> Tuple[List[Tuple[Optional[Tuple[float, float, flo
                 rect = None
                 try:
                     corners = [float(v) for v in holder.get("/Rect")]
-                    rect = (min(corners[0], corners[2]), min(corners[1], corners[3]), max(corners[0], corners[2]), max(corners[1], corners[3]))
+                    rect = (
+                        min(corners[0], corners[2]),
+                        min(corners[1], corners[3]),
+                        max(corners[0], corners[2]),
+                        max(corners[1], corners[3]),
+                    )
                 except Exception:  # noqa: BLE001 - a field with no place is listed at the end of its page
                     rect = None
                 fields.append((rect, str(name).strip(), shown.strip()))
-            elif kind in ("/Text", "/FreeText", "/Highlight", "/Underline", "/StrikeOut", "/Squiggly", "/Stamp", "/Caret"):
+            elif kind in (
+                "/Text",
+                "/FreeText",
+                "/Highlight",
+                "/Underline",
+                "/StrikeOut",
+                "/Squiggly",
+                "/Stamp",
+                "/Caret",
+            ):
                 said = str(annot.get("/Contents") or "").strip()
                 if said:
                     comments.append(" ".join(said.split()))
@@ -1660,7 +2133,9 @@ def _annotations(page: Any) -> Tuple[List[Tuple[Optional[Tuple[float, float, flo
 # OUTPUT  a text a page, and what was left out
 
 
-def read_pdf(path: Path, password: Optional[str] = None, charts: bool = False, judge: bool = False) -> PdfRead:
+def read_pdf(
+    path: Path, password: Optional[str] = None, charts: bool = False, judge: bool = False
+) -> PdfRead:
     """Every page's text, rebuilt from where its runs sit. Raises ImportError without pypdfium2.
 
     A file PDFium cannot open raises :class:`vectrixdb.exceptions.ExtractionError`
@@ -1677,7 +2152,14 @@ def read_pdf(path: Path, password: Optional[str] = None, charts: bool = False, j
         return _read_pdf(pdfium, raw, path, password, charts, judge)
 
 
-def _read_pdf(pdfium: Any, raw: Any, path: Path, password: Optional[str], charts: bool = False, judge: bool = False) -> PdfRead:
+def _read_pdf(
+    pdfium: Any,
+    raw: Any,
+    path: Path,
+    password: Optional[str],
+    charts: bool = False,
+    judge: bool = False,
+) -> PdfRead:
     from ..exceptions import ExtractionError
 
     try:
@@ -1685,8 +2167,12 @@ def _read_pdf(pdfium: Any, raw: Any, path: Path, password: Optional[str], charts
     except pdfium.PdfiumError as exc:
         said = str(exc).lower()
         if "password" in said:
-            raise ExtractionError(f"{Path(path).name} is protected by a password, so its text cannot be read") from exc
-        raise ExtractionError(f"{Path(path).name} could not be opened as a PDF: it is damaged or not a PDF ({exc})") from exc
+            raise ExtractionError(
+                f"{Path(path).name} is protected by a password, so its text cannot be read"
+            ) from exc
+        raise ExtractionError(
+            f"{Path(path).name} could not be opened as a PDF: it is damaged or not a PDF ({exc})"
+        ) from exc
     try:
         form = None
         try:
@@ -1718,13 +2204,27 @@ def _read_pdf(pdfium: Any, raw: Any, path: Path, password: Optional[str], charts
                 forms.append(_pdfium_annotations(page, form, raw))
                 typed = forms[index][0] if index < len(forms) else []
                 values = [
-                    Run(l, height - tp_, r, height - b, value, max(4.0, min(12.0, 0.7 * (tp_ - b))), False)
-                    for (l, b, r, tp_), _name, value in ((rect, name, value) for rect, name, value in typed if rect is not None)
+                    Run(
+                        l,
+                        height - tp_,
+                        r,
+                        height - b,
+                        value,
+                        max(4.0, min(12.0, 0.7 * (tp_ - b))),
+                        False,
+                    )
+                    for (l, b, r, tp_), _name, value in (
+                        (rect, name, value) for rect, name, value in typed if rect is not None
+                    )
                 ]
                 hidden += left_out
                 if sum(len(r.text.strip()) for r in runs) < 200:
                     area = width * (height - float(box[1])) or 1.0
-                    covered = sum((r - l) * (b - t) for l, t, r, b, picture in _backgrounds(page, raw, height) if picture)
+                    covered = sum(
+                        (r - l) * (b - t)
+                        for l, t, r, b, picture in _backgrounds(page, raw, height)
+                        if picture
+                    )
                     if covered >= 0.5 * area:
                         pictured.append(index + 1)
                 lines = _page_lines(runs)
@@ -1771,11 +2271,30 @@ def _read_pdf(pdfium: Any, raw: Any, path: Path, password: Optional[str], charts
             fields += len(typed)
             unplaced = [f"{name}: {value}" for rect, name, value in typed if rect is None]
             if unplaced:
-                text += ("\n\n" if text else "") + "Form fields:\n" + "\n".join(f"- {item}" for item in unplaced)
+                text += (
+                    ("\n\n" if text else "")
+                    + "Form fields:\n"
+                    + "\n".join(f"- {item}" for item in unplaced)
+                )
             if remarks:
-                text += ("\n\n" if text else "") + "\n".join(f"[Comment: {item}]" for item in remarks)
+                text += ("\n\n" if text else "") + "\n".join(
+                    f"[Comment: {item}]" for item in remarks
+                )
                 comments += len(remarks)
         if not text.strip():
             textless.append(index + 1)
         texts.append(text)
-    return PdfRead(texts, running, hidden, textless, pictured, tables, fields, comments, drawn, layers, hard, ticks)
+    return PdfRead(
+        texts,
+        running,
+        hidden,
+        textless,
+        pictured,
+        tables,
+        fields,
+        comments,
+        drawn,
+        layers,
+        hard,
+        ticks,
+    )

@@ -52,11 +52,19 @@ class Mail:
 def build(tmp_path, monkeypatch, *, require: bool = True, mail: Mail | None = None):
     monkeypatch.delenv("VECTRIXDB_API_KEY", raising=False)
     config = SignInConfig(
-        methods=("email",), secrets=(SECRET,), public_url=PUBLIC, require_passkey=require,
-        users=(("ada@example.com", "admin"),), sender=mail or Mail(),
-        store_path=tmp_path / "auth" / "signin.db", access_log=tmp_path / "auth" / "access.jsonl",
+        methods=("email",),
+        secrets=(SECRET,),
+        public_url=PUBLIC,
+        require_passkey=require,
+        users=(("ada@example.com", "admin"),),
+        sender=mail or Mail(),
+        store_path=tmp_path / "auth" / "signin.db",
+        access_log=tmp_path / "auth" / "access.jsonl",
     )
-    return TestClient(create_app(db_path=str(tmp_path / "db"), enable_dashboard=False, signin=config), base_url=PUBLIC), config
+    return TestClient(
+        create_app(db_path=str(tmp_path / "db"), enable_dashboard=False, signin=config),
+        base_url=PUBLIC,
+    ), config
 
 
 def csrf(browser):
@@ -73,39 +81,76 @@ def set_up(browser, config, email="ada@example.com") -> dict:
 def enrol_with_passkey(browser, config, email="ada@example.com"):
     device = FakePasskey(PUBLIC)
     ticket = set_up(browser, config, email)["ticket"]
-    options = browser.post("/auth/passkey/enrol/begin", json={"token": ticket}).json()["data"]["options"]
-    done = browser.post("/auth/passkey/enrol/finish", json={"ticket": ticket, "credential": device.create(options)})
+    options = browser.post("/auth/passkey/enrol/begin", json={"token": ticket}).json()["data"][
+        "options"
+    ]
+    done = browser.post(
+        "/auth/passkey/enrol/finish", json={"ticket": ticket, "credential": device.create(options)}
+    )
     assert done.status_code == 200, done.text
     return device, done.json()["data"]
 
 
 def enrol_with_code(browser, config, email="ada@example.com") -> tuple[str, list]:
     begun = set_up(browser, config, email)
-    done = browser.post("/auth/email/enrol/confirm", json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())})
+    done = browser.post(
+        "/auth/email/enrol/confirm",
+        json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())},
+    )
     assert done.status_code == 200, done.text
     return begun["secret"], done.json()["data"]["recovery_codes"]
 
 
 def add_passkey(browser, device):
-    options = browser.post("/auth/me/passkeys/begin", headers=csrf(browser)).json()["data"]["options"]
-    return browser.post("/auth/me/passkeys/finish", json={"credential": device.create(options)}, headers=csrf(browser))
+    options = browser.post("/auth/me/passkeys/begin", headers=csrf(browser)).json()["data"][
+        "options"
+    ]
+    return browser.post(
+        "/auth/me/passkeys/finish",
+        json={"credential": device.create(options)},
+        headers=csrf(browser),
+    )
 
 
 def code_sign_in(browser, secret, step_offset=1):
-    return browser.post("/auth/email/verify", json={"email": "ada@example.com", "code": totp.code_at(secret, totp.step_now() + step_offset)})
+    return browser.post(
+        "/auth/email/verify",
+        json={
+            "email": "ada@example.com",
+            "code": totp.code_at(secret, totp.step_now() + step_offset),
+        },
+    )
 
 
 class TestSettingItUp:
     def test_it_needs_the_email_way_in_and_no_passwords(self, tmp_path):
-        base = {"VECTRIXDB_SIGNIN_SECRET": SECRET, "VECTRIXDB_PUBLIC_URL": PUBLIC, "VECTRIXDB_SIGNIN_REQUIRE": "passkey"}
-        assert SignInConfig.from_env(tmp_path, {**base, "VECTRIXDB_SIGNIN": "email"}).require_passkey
+        base = {
+            "VECTRIXDB_SIGNIN_SECRET": SECRET,
+            "VECTRIXDB_PUBLIC_URL": PUBLIC,
+            "VECTRIXDB_SIGNIN_REQUIRE": "passkey",
+        }
+        assert SignInConfig.from_env(
+            tmp_path, {**base, "VECTRIXDB_SIGNIN": "email"}
+        ).require_passkey
         with pytest.raises(ConfigurationError, match="own list"):
-            SignInConfig.from_env(tmp_path, {**base, "VECTRIXDB_SIGNIN": "oidc", "VECTRIXDB_OIDC_ISSUER": "https://idp.example.test",
-                                             "VECTRIXDB_OIDC_CLIENT_ID": "x", "VECTRIXDB_OIDC_DEFAULT_ROLE": "viewer"})
+            SignInConfig.from_env(
+                tmp_path,
+                {
+                    **base,
+                    "VECTRIXDB_SIGNIN": "oidc",
+                    "VECTRIXDB_OIDC_ISSUER": "https://idp.example.test",
+                    "VECTRIXDB_OIDC_CLIENT_ID": "x",
+                    "VECTRIXDB_OIDC_DEFAULT_ROLE": "viewer",
+                },
+            )
         with pytest.raises(ConfigurationError, match="Choose one"):
-            SignInConfig.from_env(tmp_path, {**base, "VECTRIXDB_SIGNIN": "email", "VECTRIXDB_SIGNIN_PASSWORDS": "on"})
+            SignInConfig.from_env(
+                tmp_path, {**base, "VECTRIXDB_SIGNIN": "email", "VECTRIXDB_SIGNIN_PASSWORDS": "on"}
+            )
         with pytest.raises(ConfigurationError, match="passkey, or left unset"):
-            SignInConfig.from_env(tmp_path, {**base, "VECTRIXDB_SIGNIN": "email", "VECTRIXDB_SIGNIN_REQUIRE": "fido"})
+            SignInConfig.from_env(
+                tmp_path, {**base, "VECTRIXDB_SIGNIN": "email", "VECTRIXDB_SIGNIN_REQUIRE": "fido"}
+            )
 
     def test_the_page_is_told(self, tmp_path, monkeypatch):
         client, _ = build(tmp_path, monkeypatch)
@@ -124,7 +169,9 @@ class TestANewPerson:
         client, config = build(tmp_path, monkeypatch)
         with client:
             ticket = set_up(client, config)["ticket"]
-            refused = client.post("/auth/email/enrol/confirm", json={"ticket": ticket, "code": "123456"})
+            refused = client.post(
+                "/auth/email/enrol/confirm", json={"ticket": ticket, "code": "123456"}
+            )
         assert refused.status_code == 403 and "passkeys" in refused.json()["message"]
 
     def test_a_passkey_sets_them_up_with_recovery_codes(self, tmp_path, monkeypatch):
@@ -138,7 +185,9 @@ class TestANewPerson:
 
 
 class TestSomebodyWithAPasskey:
-    def test_a_right_code_is_not_the_way_in_and_a_wrong_one_says_nothing_more(self, tmp_path, monkeypatch):
+    def test_a_right_code_is_not_the_way_in_and_a_wrong_one_says_nothing_more(
+        self, tmp_path, monkeypatch
+    ):
         mail = Mail()
         before, config = build(tmp_path, monkeypatch, require=False, mail=mail)
         with before:
@@ -146,7 +195,9 @@ class TestSomebodyWithAPasskey:
             assert add_passkey(before, FakePasskey(PUBLIC)).status_code == 200
         after, _ = build(tmp_path, monkeypatch, mail=mail)
         with after:
-            wrong = after.post("/auth/email/verify", json={"email": "ada@example.com", "code": "000000"})
+            wrong = after.post(
+                "/auth/email/verify", json={"email": "ada@example.com", "code": "000000"}
+            )
             assert wrong.status_code == 401 and "passkey" not in wrong.json()["message"].lower()
             right = code_sign_in(after, secret)
             assert right.status_code == 403 and right.json()["data"] == {"passkey_only": True}
@@ -157,7 +208,10 @@ class TestSomebodyWithAPasskey:
         with client:
             _, done = enrol_with_passkey(client, config)
             client.post("/auth/signout", headers=csrf(client))
-            back = client.post("/auth/email/verify", json={"email": "ada@example.com", "code": done["recovery_codes"][0]})
+            back = client.post(
+                "/auth/email/verify",
+                json={"email": "ada@example.com", "code": done["recovery_codes"][0]},
+            )
             assert back.status_code == 200 and client.get("/auth/me").status_code == 200
 
     def test_the_only_passkey_stays_even_beside_an_authenticator(self, tmp_path, monkeypatch):
@@ -171,9 +225,13 @@ class TestSomebodyWithAPasskey:
         after, _ = build(tmp_path, monkeypatch, mail=mail)
         with after:
             after.cookies.update(cookies)
-            refused = after.delete(f"/auth/me/passkeys/{b64u(device.credential_id)}", headers=csrf(after))
+            refused = after.delete(
+                f"/auth/me/passkeys/{b64u(device.credential_id)}", headers=csrf(after)
+            )
             assert refused.status_code == 409 and "only passkey" in refused.json()["message"]
-            assert after.post("/auth/me/authenticator/begin", headers=csrf(after)).status_code == 403
+            assert (
+                after.post("/auth/me/authenticator/begin", headers=csrf(after)).status_code == 403
+            )
 
     def test_a_fresh_check_is_a_passkey_only(self, tmp_path, monkeypatch):
         mail = Mail()
@@ -188,7 +246,9 @@ class TestSomebodyWithAPasskey:
 
         with after:
             after.cookies.update(cookies)
-            caller = Caller(who="ada@example.com", role="admin", method="email", email="ada@example.com")
+            caller = Caller(
+                who="ada@example.com", role="admin", method="email", email="ada@example.com"
+            )
             assert runtime.step_up_ways(caller) == ["passkey"]
 
 
@@ -204,8 +264,12 @@ class TestSwitchingAServerOver:
             me = after.get("/auth/me").json()["data"]
             assert me["must_add_passkey"] is True
             blocked = after.get("/api/v1/collections")
-            assert blocked.status_code == 403 and blocked.json()["data"] == {"must_add_passkey": True}
-            assert after.get("/auth/me/ways").status_code == 200, "their own page stays open, to add the passkey from"
+            assert blocked.status_code == 403 and blocked.json()["data"] == {
+                "must_add_passkey": True
+            }
+            assert after.get("/auth/me/ways").status_code == 200, (
+                "their own page stays open, to add the passkey from"
+            )
             assert add_passkey(after, FakePasskey(PUBLIC)).status_code == 200
             assert after.get("/auth/me").json()["data"]["must_add_passkey"] is False
             assert after.get("/api/v1/collections").status_code == 200

@@ -63,6 +63,25 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+#: Text files a checkout may carry with either line ending.
+_TEXT_SUFFIXES = {".json", ".txt"}
+
+
+def _line_ending_variants(path: Path) -> List[str]:
+    """The file's hash with LF and with CRLF endings, for a text file.
+
+    Part of the manifest was recorded from a Windows checkout, where git wrote
+    CRLF, while every other checkout and the release archives carry LF; the
+    bytes differ and the text does not. A binary file has no variants.
+    """
+    if path.suffix not in _TEXT_SUFFIXES:
+        return []
+    data = path.read_bytes()
+    lf = data.replace(b"\r\n", b"\n")
+    crlf = lf.replace(b"\n", b"\r\n")
+    return [hashlib.sha256(lf).hexdigest(), hashlib.sha256(crlf).hexdigest()]
+
+
 def compute(model_dir: Path) -> Dict[str, str]:
     """Relative path -> sha256 for every file under ``model_dir``."""
     out: Dict[str, str] = {}
@@ -116,7 +135,7 @@ def verify(
                 f"The {model_type!r} model is missing {relative!r} after download."
             )
         actual = sha256_of(path)
-        if actual != digest:
+        if actual != digest and digest not in _line_ending_variants(path):
             raise ModelDownloadError(
                 f"Checksum mismatch for {model_type!r} file {relative!r}: "
                 f"expected {digest[:12]}…, got {actual[:12]}…. The download is "

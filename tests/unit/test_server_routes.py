@@ -36,10 +36,10 @@ POINTS = [
 ]
 
 
-
 def own(metadata: dict) -> dict:
     """The caller's metadata without the build stamp every write adds."""
     return {k: v for k, v in metadata.items() if not k.startswith("_vx_")}
+
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
@@ -160,7 +160,9 @@ class TestInfoRoutes:
         lib.add(["A point with no document."], ids=["loose"])
         lib.close()
         with make_client(tmp_path) as c:
-            assert c.get("/api/v1/info").json()["documents_count"] == 2, "two documents; a loose chunk belongs to none"
+            assert c.get("/api/v1/info").json()["documents_count"] == 2, (
+                "two documents; a loose chunk belongs to none"
+            )
 
     def test_extended_info_and_resources(self, client):
         ext = client.get("/api/v1/info/extended")
@@ -255,6 +257,19 @@ class TestApiKeyMiddleware:
         assert r.status_code == 403
         assert "Read-only" in r.json()["message"]
 
+    def test_read_only_key_can_search(self, secured):
+        """A search is a read sent as a POST; the read-only key was refused it."""
+        made = secured.post("/api/v1/collections", json=self.BODY, headers={"api-key": "secret"})
+        assert made.status_code == 200
+        r = secured.post(
+            "/api/v1/collections/c/search", json={"query": [1.0] * DIM}, headers={"api-key": "ro"}
+        )
+        assert r.status_code == 200, r.text
+        anonymous = secured.post("/api/v1/collections/c/search", json={"query": [1.0] * DIM})
+        assert anonymous.status_code == 401
+        deleted = secured.delete("/api/v1/collections/c", headers={"api-key": "ro"})
+        assert deleted.status_code == 403
+
     def test_public_paths_skip_auth(self, secured):
         for path in ("/", "/health", "/auth/status", "/openapi.json"):
             assert secured.get(path).status_code == 200, path
@@ -268,6 +283,64 @@ class TestApiKeyMiddleware:
         with make_client(tmp_path) as c:
             r = c.post("/api/v1/collections", json=self.BODY, headers={"api-key": "ro"})
             assert r.status_code == 401
+
+    @pytest.mark.parametrize("value", ["0", "no", "false"])
+    def test_open_reads_off_makes_every_read_ask_for_a_key(self, tmp_path, monkeypatch, value):
+        """With only a key set, every GET was anonymous: the points with their text and vectors,
+        the documents, and the live feed. VECTRIXDB_OPEN_READS=0 closes them; the public pages stay public."""
+        monkeypatch.setenv("VECTRIXDB_API_KEY", "secret")
+        monkeypatch.setenv("VECTRIXDB_READ_ONLY_API_KEY", "ro")
+        monkeypatch.setenv("VECTRIXDB_OPEN_READS", value)
+        with make_client(tmp_path) as c:
+            assert (
+                c.post(
+                    "/api/v1/collections", json=self.BODY, headers={"api-key": "secret"}
+                ).status_code
+                == 200
+            )
+            for path in (
+                "/api/v1/collections",
+                "/api/v1/collections/c",
+                "/api/v1/collections/c/points",
+                "/api/v1/documents",
+            ):
+                r = c.get(path)
+                assert r.status_code == 401, path
+                assert r.json()["ok"] is False and "api-key" in r.json()["message"]
+                assert c.get(path, headers={"api-key": "ro"}).status_code == 200, path
+                assert c.get(path, headers={"api-key": "secret"}).status_code == 200, path
+            assert (
+                c.post("/api/v1/collections/c/search", json={"query": [1.0] * DIM}).status_code
+                == 401
+            )
+            assert (
+                c.post(
+                    "/api/v1/collections/c/search",
+                    json={"query": [1.0] * DIM},
+                    headers={"api-key": "ro"},
+                ).status_code
+                == 200
+            )
+            for path in ("/", "/health", "/auth/status", "/openapi.json"):
+                assert c.get(path).status_code == 200, path
+            # The dashboard's files are public; the app has none, so a plain 404 rather than a 401.
+            assert c.get("/dashboard/index.html").status_code == 404
+            from starlette.websockets import WebSocketDisconnect
+
+            with pytest.raises(WebSocketDisconnect) as refused:
+                with c.websocket_connect("/ws"):
+                    pass
+            assert refused.value.code == 4401
+            with c.websocket_connect("/ws", headers={"api-key": "ro"}) as ws:
+                assert json.loads(ws.receive_text())["event"] == "connected"
+
+    def test_open_reads_is_the_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("VECTRIXDB_API_KEY", "secret")
+        monkeypatch.setenv("VECTRIXDB_OPEN_READS", "1")
+        with make_client(tmp_path) as c:
+            assert c.get("/api/v1/collections").status_code == 200
+            with c.websocket_connect("/ws") as ws:
+                assert json.loads(ws.receive_text())["event"] == "connected"
 
 
 # =============================================================================
@@ -350,7 +423,12 @@ class TestCollections:
         assert client.get("/api/v1/collections/gone").status_code == 404
         again = client.delete("/api/v1/collections/gone")
         assert again.status_code == 404
-        assert again.json() == {"ok": False, "message": "Collection 'gone' not found", "data": None, "detail": "Collection 'gone' not found"}
+        assert again.json() == {
+            "ok": False,
+            "message": "Collection 'gone' not found",
+            "data": None,
+            "detail": "Collection 'gone' not found",
+        }
 
     def test_legacy_aliases(self, client):
         r = client.post("/api/collections", json={"name": "old", "dimension": DIM})
@@ -511,7 +589,9 @@ class TestPointsV2:
         assert r.json()["data"] == {"added": 2, "total": 2}
         got = client.get("/api/v1/collections/c/points/t1").json()["data"]
         assert got["text"] == "hello world"
-        assert own(client.get("/api/v1/collections/c/points/t2").json()["data"]["metadata"]) == {"k": 1}
+        assert own(client.get("/api/v1/collections/c/points/t2").json()["data"]["metadata"]) == {
+            "k": 1
+        }
 
     def test_missing_vector_key_is_400(self, client):
         create(client)
@@ -946,7 +1026,10 @@ class TestTextRoutes:
         from vectrixdb.exceptions import ModelMismatchWarning
 
         create(client, "t", dimension=TEXT_DIM)
-        assert client.post("/api/v1/collections/t/text-upsert", json={"points": SENTENCES}).status_code == 200
+        assert (
+            client.post("/api/v1/collections/t/text-upsert", json={"points": SENTENCES}).status_code
+            == 200
+        )
         client.close()
         with warnings.catch_warnings():
             warnings.simplefilter("error", ModelMismatchWarning)
@@ -1024,7 +1107,10 @@ class TestTextRoutes:
         from vectrixdb import Vectrix
         from vectrixdb.core.database import VectrixDB
 
-        texts = ["Basalt forms when lava cools quickly at the surface.", "Sourdough is leavened by wild yeast and a long ferment."]
+        texts = [
+            "Basalt forms when lava cools quickly at the surface.",
+            "Sourdough is leavened by wild yeast and a long ferment.",
+        ]
         lib = Vectrix("lib", path=str(tmp_path / "db"), mode="hybrid")
         lib.add(texts, ids=["basalt", "bread"])
         lib.close()
@@ -1032,13 +1118,18 @@ class TestTextRoutes:
             for path, body in (
                 ("/api/v1/collections/lib/keyword-search", {"query_text": "yeast"}),
                 ("/api/v1/collections/lib/text-hybrid-search", {"query_text": "wild yeast"}),
-                ("/api/v1/collections/lib/text-search", {"query_text": "wild yeast", "rerank": True}),
+                (
+                    "/api/v1/collections/lib/text-search",
+                    {"query_text": "wild yeast", "rerank": True},
+                ),
             ):
                 r = client.post(path, json=body)
                 assert r.status_code == 200, (path, r.text)
                 hits = r.json()["data"]["results"]
                 assert hits and all(h.get("text") in texts for h in hits), (path, hits)
-                assert "text" not in own(hits[0]["metadata"]), "the text is the result's, not copied into the metadata"
+                assert "text" not in own(hits[0]["metadata"]), (
+                    "the text is the result's, not copied into the metadata"
+                )
                 if body.get("rerank"):
                     # Handed empty strings, the cross-encoder gave every candidate one score.
                     assert hits[0]["id"] == "bread" and hits[0]["score"] > hits[1]["score"], hits
@@ -1191,7 +1282,9 @@ class TestGraphRoutes:
         assert r.status_code == 400
         said = r.json()["detail"]
         assert said.startswith("dense was not made for graph search, so it has no knowledge graph.")
-        assert 'mode="graph"' in said and "--mode graph" in said and "GraphRAG" not in said, "in words a person can act on"
+        assert 'mode="graph"' in said and "--mode graph" in said and "GraphRAG" not in said, (
+            "in words a person can act on"
+        )
         assert client.get("/api/v1/collections/none/graph").status_code == 404
 
     def test_health_says_whether_there_is_a_graph_so_the_page_need_not_ask(self, client):
@@ -1199,7 +1292,10 @@ class TestGraphRoutes:
         self.make_graph_collection(client)
         reply = client.get("/api/v1/collections/dense/health").json()
         assert reply["data"]["capabilities"]["graph"] is False, reply
-        assert client.get("/api/v1/collections/g/health").json()["data"]["capabilities"]["graph"] is True
+        assert (
+            client.get("/api/v1/collections/g/health").json()["data"]["capabilities"]["graph"]
+            is True
+        )
 
     def test_get_graph_on_an_empty_graph_collection(self, client):
         self.make_graph_collection(client)
@@ -1213,31 +1309,80 @@ class TestGraphRoutes:
     def test_extract_needs_the_graph_tag(self, client):
         create(client, "dense")
         r = client.post("/api/v1/collections/dense/graph/extract")
-        assert r.status_code == 400 and "was not made for graph search" in r.json()["detail"], "the same words as the read route"
+        assert r.status_code == 400 and "was not made for graph search" in r.json()["detail"], (
+            "the same words as the read route"
+        )
         assert client.post("/api/v1/collections/none/graph/extract").status_code == 404
 
-    def test_a_kept_graph_is_read_from_the_store_and_says_when_the_index_moved_on(self, client, tmp_path, monkeypatch):
+    def test_a_kept_graph_is_read_from_the_store_and_says_when_the_index_moved_on(
+        self, client, tmp_path, monkeypatch
+    ):
         from vectrixdb.api import server
         from vectrixdb.graph_store import graph_store
 
         monkeypatch.setenv("VECTRIXDB_GRAPH_STORE", str(tmp_path / "graphs"))
         server._GRAPH_STORES.clear()
         self.make_graph_collection(client)
-        graph_store(str(tmp_path / "graphs")).put("g", {
-            "collection": "g", "extracted_at": "2026-09-18T10:00:00+00:00", "build": "old-build", "model": "spaCy",
-            "entities": [{"id": "e1", "name": "Meridian", "type": "Organization", "description": "", "importance": 0.8}, {"id": "e2", "name": "Q3 test", "type": "event", "description": "", "importance": 0.5}],
-            "relationships": [{"id": "r1", "source_id": "e1", "target_id": "e2", "type": "underwent", "description": "", "strength": 0.7}],
-            "communities": {"e1": 0, "e2": 0},
-        })
+        graph_store(str(tmp_path / "graphs")).put(
+            "g",
+            {
+                "collection": "g",
+                "extracted_at": "2026-09-18T10:00:00+00:00",
+                "build": "old-build",
+                "model": "spaCy",
+                "entities": [
+                    {
+                        "id": "e1",
+                        "name": "Meridian",
+                        "type": "Organization",
+                        "description": "",
+                        "importance": 0.8,
+                    },
+                    {
+                        "id": "e2",
+                        "name": "Q3 test",
+                        "type": "event",
+                        "description": "",
+                        "importance": 0.5,
+                    },
+                ],
+                "relationships": [
+                    {
+                        "id": "r1",
+                        "source_id": "e1",
+                        "target_id": "e2",
+                        "type": "underwent",
+                        "description": "",
+                        "strength": 0.7,
+                    }
+                ],
+                "communities": {"e1": 0, "e2": 0},
+            },
+        )
         data = client.get("/api/v1/collections/g/graph").json()["data"]
-        assert [n["data"]["label"] for n in data["nodes"]] == ["Meridian", "Q3 test"] and data["nodes"][0]["data"]["type"] == "organization"
-        assert data["edges"][0]["data"]["label"] == "underwent" and data["nodes"][0]["data"]["community"] == 0
-        assert data["build"] == "old-build" and data["extracted_at"].startswith("2026-09-18") and data["kept_at"] == str(tmp_path / "graphs")
-        assert data["stale"] is False and data["since"] is None, "nothing has been written, so the index has not moved on"
+        assert [n["data"]["label"] for n in data["nodes"]] == ["Meridian", "Q3 test"] and data[
+            "nodes"
+        ][0]["data"]["type"] == "organization"
+        assert (
+            data["edges"][0]["data"]["label"] == "underwent"
+            and data["nodes"][0]["data"]["community"] == 0
+        )
+        assert (
+            data["build"] == "old-build"
+            and data["extracted_at"].startswith("2026-09-18")
+            and data["kept_at"] == str(tmp_path / "graphs")
+        )
+        assert data["stale"] is False and data["since"] is None, (
+            "nothing has been written, so the index has not moved on"
+        )
         client.post("/api/v1/collections/g/points", json={"points": POINTS})
         data = client.get("/api/v1/collections/g/graph").json()["data"]
-        assert data["stale"] is True and data["current_build"] and data["current_build"] != "old-build"
-        assert data["since"] == {"builds": 1, "chunks": len(POINTS)}, "one build wrote every point after the graph was read"
+        assert (
+            data["stale"] is True and data["current_build"] and data["current_build"] != "old-build"
+        )
+        assert data["since"] == {"builds": 1, "chunks": len(POINTS)}, (
+            "one build wrote every point after the graph was read"
+        )
         assert data["stats"]["total_entities"] == 2 and data["stats"]["total_communities"] == 1
 
     def test_deleting_a_collection_deletes_its_graph(self, client, tmp_path, monkeypatch):
@@ -1248,7 +1393,18 @@ class TestGraphRoutes:
         server._GRAPH_STORES.clear()
         self.make_graph_collection(client)
         store = graph_store(str(tmp_path / "graphs"))
-        store.put("g", {"collection": "g", "extracted_at": "2026-09-18T10:00:00+00:00", "build": None, "model": "spaCy", "entities": [], "relationships": [], "communities": {}})
+        store.put(
+            "g",
+            {
+                "collection": "g",
+                "extracted_at": "2026-09-18T10:00:00+00:00",
+                "build": None,
+                "model": "spaCy",
+                "entities": [],
+                "relationships": [],
+                "communities": {},
+            },
+        )
         assert client.delete("/api/v1/collections/g").status_code == 200
         assert store.get("g") is None and not (tmp_path / "graphs" / "g" / "graph.json").exists()
 
@@ -1436,7 +1592,10 @@ class TestHelpers:
             host="127.0.0.1", port=1234, db_path="/tmp/x", api_key="k", read_only_key="r"
         )
         assert calls == [
-            (("vectrixdb.api.server:app",), {"host": "127.0.0.1", "port": 1234, "reload": False, "server_header": False})
+            (
+                ("vectrixdb.api.server:app",),
+                {"host": "127.0.0.1", "port": 1234, "reload": False, "server_header": False},
+            )
         ]
         import os
 

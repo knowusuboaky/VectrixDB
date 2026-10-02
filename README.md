@@ -238,8 +238,8 @@ pip install vectrixdb[viz]         # UMAP visualisation
 pip install vectrixdb[mcp]         # MCP server for agent memory
 pip install vectrixdb[nlp]         # spaCy, for better GraphRAG extraction
 
-pip install vectrixdb[all]         # every backend and model extra above;
-                                   # not mcp or nlp, which are separate
+pip install vectrixdb[all]         # every backend and model extra above,
+                                   # mcp included; not nlp, which is separate
 ```
 
 From source, or a specific version:

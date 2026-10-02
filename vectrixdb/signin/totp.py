@@ -97,7 +97,9 @@ def step_now(now: Optional[float] = None) -> int:
     return int((time.time() if now is None else now) // PERIOD)
 
 
-def verify(secret: str, code: str, *, last_step: Optional[int] = None, now: Optional[float] = None) -> Optional[int]:
+def verify(
+    secret: str, code: str, *, last_step: Optional[int] = None, now: Optional[float] = None
+) -> Optional[int]:
     """The step this code belongs to, or None.
 
     ``last_step`` is the step of the last code this person used. A match at or

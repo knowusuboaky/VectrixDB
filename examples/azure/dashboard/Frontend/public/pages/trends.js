@@ -67,7 +67,9 @@ function trBars(width, days, series, stacked, label, overlay) {
   const most = Math.max(1, ...days.map((_, d) => stacked ? series.reduce((sum, s) => sum + (s.values[d] || 0), 0) : Math.max(...series.map((s) => s.values[d] || 0))), ...(overlay ? overlay.values : []));
   const { step, top } = trScale(most);
   // The left margin fits the widest tick label, so a count in the thousands is not cut off.
-  const R = overlay ? 30 : 4, L = trLeft(top), T = 10, B = 20, W = Math.max(220, Math.floor(width)), H = TR_H;
+  // T leaves room for the latest value written above the tallest bar: a bar that reaches the top of the scale
+  // put its label's baseline at 5, so the top half of the digits was outside the picture.
+  const R = overlay ? 30 : 4, L = trLeft(top), T = 18, B = 20, W = Math.max(220, Math.floor(width)), H = TR_H;
   const plotW = W - L - R, slot = plotW / days.length;
   let { g, y } = trFrame(W, H, L, R, T, B, top, step);
   const last = days.length - 1;

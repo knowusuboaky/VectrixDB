@@ -40,14 +40,20 @@ from vectrixdb.extract.layout import looks_blank, mend_sentence_breaks, reading_
 # third.
 
 W, H = 1700, 2200
-LEFT = ("Customers in a declared disaster area can defer loan payments for up to ninety days with no late fees. "
-        "Interest still accrues during the deferral, and an adviser calls within a day to confirm the new schedule. "
-        "Displaced customers get expedited access to their funds and waived withdrawal fees for thirty days.")
-RIGHT = ("Anyone who needs to sell investments before maturity is shown the penalty before they confirm the sale. "
-         "Statements are issued at the end of each quarter and kept for seven years. "
-         "Disputes are raised in writing and answered within ten working days of the letter arriving.")
-THIRD = ("Refunds go back to the account the payment came from. A reminder goes out on the fifth day, "
-         "and a second one a fortnight later. Nothing in these terms limits a right the law gives.")
+LEFT = (
+    "Customers in a declared disaster area can defer loan payments for up to ninety days with no late fees. "
+    "Interest still accrues during the deferral, and an adviser calls within a day to confirm the new schedule. "
+    "Displaced customers get expedited access to their funds and waived withdrawal fees for thirty days."
+)
+RIGHT = (
+    "Anyone who needs to sell investments before maturity is shown the penalty before they confirm the sale. "
+    "Statements are issued at the end of each quarter and kept for seven years. "
+    "Disputes are raised in writing and answered within ten working days of the letter arriving."
+)
+THIRD = (
+    "Refunds go back to the account the payment came from. A reminder goes out on the fifth day, "
+    "and a second one a fortnight later. Nothing in these terms limits a right the law gives."
+)
 
 
 # ============================================================================
@@ -66,7 +72,10 @@ THIRD = ("Refunds go back to the account the payment came from. A reminder goes 
 def _fonts():
     from PIL import ImageFont
 
-    for body, bold in ((r"C:\Windows\Fonts\georgia.ttf", r"C:\Windows\Fonts\georgiab.ttf"), ("DejaVuSerif.ttf", "DejaVuSerif-Bold.ttf")):
+    for body, bold in (
+        (r"C:\Windows\Fonts\georgia.ttf", r"C:\Windows\Fonts\georgiab.ttf"),
+        ("DejaVuSerif.ttf", "DejaVuSerif-Bold.ttf"),
+    ):
         try:
             return ImageFont.truetype(body, 26), ImageFont.truetype(bold, 36)
         except OSError:
@@ -113,15 +122,29 @@ def drawn_pages():
     image, d = fresh()
     title = "Terms for customers in a declared disaster area"
     d.text((120, 180), title, font=head, fill=20)
-    wanted = title + " " + _column(d, body, LEFT, 120, 300, 48) + " " + _column(d, body, RIGHT, 920, 300, 48)
+    wanted = (
+        title
+        + " "
+        + _column(d, body, LEFT, 120, 300, 48)
+        + " "
+        + _column(d, body, RIGHT, 920, 300, 48)
+    )
     yield "a heading across two columns", _png(image), wanted
 
     image, d = fresh()
-    wanted = " ".join(_column(d, body, t, x, 300, 30) for t, x in ((LEFT, 90), (RIGHT, 630), (THIRD, 1170)))
+    wanted = " ".join(
+        _column(d, body, t, x, 300, 30) for t, x in ((LEFT, 90), (RIGHT, 630), (THIRD, 1170))
+    )
     yield "three columns", _png(image), wanted
 
     image, d = fresh()
-    rows = [("Region", "Revenue", "Owner"), ("EMEA", "1200", "Ama"), ("APAC", "900", "Olu"), ("LATAM", "400", "Vi"), ("NORTH", "750", "Kofi")]
+    rows = [
+        ("Region", "Revenue", "Owner"),
+        ("EMEA", "1200", "Ama"),
+        ("APAC", "900", "Olu"),
+        ("LATAM", "400", "Vi"),
+        ("NORTH", "750", "Kofi"),
+    ]
     for n, row in enumerate(rows):
         for m, cell in enumerate(row):
             d.text((160 + 520 * m, 300 + 70 * n), cell, font=body, fill=20)
@@ -144,7 +167,9 @@ def drawn_pages():
 
 
 def _alike(got: str, wanted: str) -> float:
-    return difflib.SequenceMatcher(None, got.lower().split(), wanted.lower().split(), autojunk=False).ratio()
+    return difflib.SequenceMatcher(
+        None, got.lower().split(), wanted.lower().split(), autojunk=False
+    ).ratio()
 
 
 # ============================================================================
@@ -161,6 +186,15 @@ def _alike(got: str, wanted: str) -> float:
 
 
 def main(argv: list) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("pages", nargs="*", help="page images to read; none draws the pages here")
+    args = parser.parse_args(argv)
+
+    # After parsing, so --help answers on a machine without the extra.
     try:
         from rapidocr_onnxruntime import RapidOCR
     except ImportError:
@@ -168,10 +202,13 @@ def main(argv: list) -> int:
         return 2
     model = RapidOCR()
 
-    if argv:
-        for name in argv:
+    if args.pages:
+        for name in args.pages:
             data = Path(name).read_bytes()
-            print(f"== {name}" + ("  (judged blank: not sent to the engine)" if looks_blank(data) else ""))
+            print(
+                f"== {name}"
+                + ("  (judged blank: not sent to the engine)" if looks_blank(data) else "")
+            )
             found, _ = model(data)
             for line in reading_order([(r[0], str(r[1])) for r in found or []]):
                 print("  ", mend_sentence_breaks(line))
@@ -181,9 +218,16 @@ def main(argv: list) -> int:
     for name, image, wanted in drawn_pages():
         found, _ = model(image)
         found = found or []
-        by_tops = " ".join(str(r[1]) for r in sorted(found, key=lambda r: (min(p[1] for p in r[0]), min(p[0] for p in r[0]))))
-        in_order = " ".join(mend_sentence_breaks(line) for line in reading_order([(r[0], str(r[1])) for r in found]))
-        print(f"{name:44} {len(found):5d} {_alike(by_tops, wanted):14.3f} {_alike(in_order, wanted):14.3f}")
+        by_tops = " ".join(
+            str(r[1])
+            for r in sorted(found, key=lambda r: (min(p[1] for p in r[0]), min(p[0] for p in r[0])))
+        )
+        in_order = " ".join(
+            mend_sentence_breaks(line) for line in reading_order([(r[0], str(r[1])) for r in found])
+        )
+        print(
+            f"{name:44} {len(found):5d} {_alike(by_tops, wanted):14.3f} {_alike(in_order, wanted):14.3f}"
+        )
     from PIL import Image
 
     blank = _png(Image.new("L", (W, H), 250), speckle=900)

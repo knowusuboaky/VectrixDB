@@ -171,13 +171,26 @@ def retention_of(az: Az, account: str, group: str) -> dict:
     the period is what says whether there is one.
     """
     found = az(
-        "storage", "container", "immutability-policy", "show",
-        "--account-name", account, "--resource-group", group, "--container-name", AUDIT,
-        reads=True, quiet=True, allow_fail=True,
+        "storage",
+        "container",
+        "immutability-policy",
+        "show",
+        "--account-name",
+        account,
+        "--resource-group",
+        group,
+        "--container-name",
+        AUDIT,
+        reads=True,
+        quiet=True,
+        allow_fail=True,
     )
     if not isinstance(found, dict):
         return {}
-    policy = {**(found.get("properties") or {}), **{k: v for k, v in found.items() if k != "properties"}}
+    policy = {
+        **(found.get("properties") or {}),
+        **{k: v for k, v in found.items() if k != "properties"},
+    }
     return policy if int(policy.get("immutabilityPeriodSinceCreationInDays") or 0) > 0 else {}
 
 
@@ -198,8 +211,16 @@ def main() -> int:
     args = arguments(__doc__)
     config = settings()
     az = Az(args.dry_run)
-    group, account, region = config["VX_RESOURCE_GROUP"], config["VX_STORAGE"], config["VX_LOCATION"]
-    begin("01", "Storage and the queue", "The resource providers, the resource group, one storage account, three containers, one queue.")
+    group, account, region = (
+        config["VX_RESOURCE_GROUP"],
+        config["VX_STORAGE"],
+        config["VX_LOCATION"],
+    )
+    begin(
+        "01",
+        "Storage and the queue",
+        "The resource providers, the resource group, one storage account, three containers, one queue.",
+    )
 
     # Before anything else: a subscription that has never made one of these
     # refuses every create with a message about the subscription not existing.
@@ -214,8 +235,19 @@ def main() -> int:
         skipped(f"{group}")
     else:
         went = somewhere(
-            az, tries,
-            lambda where: az("group", "create", "--name", group, "--location", where, "--output", "none", allow_fail=True),
+            az,
+            tries,
+            lambda where: az(
+                "group",
+                "create",
+                "--name",
+                group,
+                "--location",
+                where,
+                "--output",
+                "none",
+                allow_fail=True,
+            ),
             lambda: az.exists("group", "show", "--name", group),
             f"the resource group {group}",
         )
@@ -231,25 +263,52 @@ def main() -> int:
 
         def create(where: str) -> None:
             az(
-                "storage", "account", "create",
-                "--name", account,
-                "--resource-group", group,
-                "--location", where,
+                "storage",
+                "account",
+                "create",
+                "--name",
+                account,
+                "--resource-group",
+                group,
+                "--location",
+                where,
                 # Locally redundant is the cheapest and enough for a test. Hot,
                 # because everything here is read within the hour.
-                "--sku", "Standard_LRS",
-                "--access-tier", "Hot",
-                "--allow-blob-public-access", "false",
-                "--min-tls-version", "TLS1_2",
-                "--output", "none",
+                "--sku",
+                "Standard_LRS",
+                "--access-tier",
+                "Hot",
+                "--allow-blob-public-access",
+                "false",
+                "--min-tls-version",
+                "TLS1_2",
+                "--output",
+                "none",
                 allow_fail=True,
             )
 
         def clear() -> None:
             if az.state_of(*shown):
-                az("storage", "account", "delete", "--name", account, "--resource-group", group, "--yes", allow_fail=True)
+                az(
+                    "storage",
+                    "account",
+                    "delete",
+                    "--name",
+                    account,
+                    "--resource-group",
+                    group,
+                    "--yes",
+                    allow_fail=True,
+                )
 
-        went = somewhere(az, tries, create, lambda: az.state_of(*shown) == "Succeeded", f"the storage account {account}", clear)
+        went = somewhere(
+            az,
+            tries,
+            create,
+            lambda: az.state_of(*shown) == "Succeeded",
+            f"the storage account {account}",
+            clear,
+        )
         if not went:
             stop(_no_region(account, tries))
         region = went
@@ -259,7 +318,18 @@ def main() -> int:
     # written to disk: the other scripts ask for it again when they need it.
     key = None
     if not args.dry_run:
-        keys = az("storage", "account", "keys", "list", "--account-name", account, "--resource-group", group, reads=True, quiet=True)
+        keys = az(
+            "storage",
+            "account",
+            "keys",
+            "list",
+            "--account-name",
+            account,
+            "--resource-group",
+            group,
+            reads=True,
+            quiet=True,
+        )
         key = keys[0]["value"] if keys else None
 
     def with_key(*args_: str) -> tuple:
@@ -282,16 +352,27 @@ def main() -> int:
     days = config["VX_AUDIT_DAYS"]
     held = retention_of(az, account, group)
     if held:
-        skipped(f"{held.get('immutabilityPeriodSinceCreationInDays')} days, {str(held.get('state', '')).lower()}, appends allowed")
+        skipped(
+            f"{held.get('immutabilityPeriodSinceCreationInDays')} days, {str(held.get('state', '')).lower()}, appends allowed"
+        )
     else:
         az(
-            "storage", "container", "immutability-policy", "create",
-            "--account-name", account,
-            "--resource-group", group,
-            "--container-name", AUDIT,
-            "--period", days,
-            "--allow-protected-append-writes", "true",
-            "--output", "none",
+            "storage",
+            "container",
+            "immutability-policy",
+            "create",
+            "--account-name",
+            account,
+            "--resource-group",
+            group,
+            "--container-name",
+            AUDIT,
+            "--period",
+            days,
+            "--allow-protected-append-writes",
+            "true",
+            "--output",
+            "none",
         )
         done(f"{days} days, unlocked, appends allowed")
     note("left unlocked, so 99 can take it off; locking it cannot be undone, see section 4")
@@ -309,7 +390,13 @@ def main() -> int:
     note("Azure makes ingest-poison beside it the first time a message fails five times")
 
     blob = f"https://{account}.blob.core.windows.net"
-    remember(resource_group=group, location=region, storage=account, blob_account=blob, audit_container=AUDIT)
+    remember(
+        resource_group=group,
+        location=region,
+        storage=account,
+        blob_account=blob,
+        audit_container=AUDIT,
+    )
     links(
         ("the resource group", portal("group", group, config)),
         ("the storage account", portal("storage", account, config)),

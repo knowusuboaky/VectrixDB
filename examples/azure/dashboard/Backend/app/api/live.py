@@ -22,12 +22,15 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, WebSocket
 from starlette.websockets import WebSocketState
 
+from app.core.headers import from_another_site
+
 router = APIRouter()
 
 #: Close codes. The page retries on any close, with a backoff of its own, so a
 #: service that is not there is not an error to shout about.
 GOING_AWAY = 1001
 CANNOT_REACH = 1011
+POLICY_VIOLATION = 1008
 
 #: What travels up with the socket handshake. The service decides who this is
 #: from the same cookie and the same key it would read on a call.
@@ -70,7 +73,10 @@ async def _to_browser(browser: WebSocket, service: Any) -> None:
 
 async def pump(browser: WebSocket, service: Any) -> None:
     """Both directions at once, until whichever end goes first takes the other with it."""
-    both = [asyncio.create_task(_to_service(browser, service)), asyncio.create_task(_to_browser(browser, service))]
+    both = [
+        asyncio.create_task(_to_service(browser, service)),
+        asyncio.create_task(_to_browser(browser, service)),
+    ]
     done, pending = await asyncio.wait(both, return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
         task.cancel()
@@ -83,6 +89,11 @@ async def pump(browser: WebSocket, service: Any) -> None:
 async def live(browser: WebSocket) -> None:
     """The dashboard's live socket, held open against the retrieval service's."""
     settings = browser.app.state.settings
+    if from_another_site(browser.headers):
+        # A socket is not covered by CORS: any page may open one, and this
+        # one would carry UPSTREAM_KEY.
+        await browser.close(code=POLICY_VIOLATION)
+        return
     if not settings.ready:
         await browser.close(code=CANNOT_REACH)
         return
@@ -95,7 +106,11 @@ async def live(browser: WebSocket) -> None:
     headers = handshake(browser.headers, key=settings.key, key_header=settings.key_header)
     await browser.accept()
     try:
-        async with connect(ws_url(settings.upstream, settings.upstream_path("/ws")), additional_headers=headers, open_timeout=10) as service:
+        async with connect(
+            ws_url(settings.upstream, settings.upstream_path("/ws")),
+            additional_headers=headers,
+            open_timeout=10,
+        ) as service:
             await pump(browser, service)
     except Exception:
         # The service is asleep, or it refused the socket. The page reads a

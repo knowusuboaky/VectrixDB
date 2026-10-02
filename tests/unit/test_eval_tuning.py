@@ -11,7 +11,10 @@ from vectrixdb.evaluation import Question, answer_cutoff, sweep, sweep_markdown
 class Hit:
     def __init__(self, doc, similarity, relevance=None):
         self.id, self.metadata = f"{doc}:0", {"_vx_doc": doc}
-        self.similarity, self.relevance = similarity, relevance if relevance is not None else similarity
+        self.similarity, self.relevance = (
+            similarity,
+            relevance if relevance is not None else similarity,
+        )
 
 
 class Canned:
@@ -42,7 +45,12 @@ class TestAnswerCutoff:
         questions, answers = golden(6, 6)
         found = answer_cutoff(Canned(answers), questions)
         assert 0.6 < found["cutoff"] < 0.8
-        assert found["at_cutoff"] == {"cutoff": found["cutoff"], "precision": 1.0, "answered": 1.0, "declined": 1.0}
+        assert found["at_cutoff"] == {
+            "cutoff": found["cutoff"],
+            "precision": 1.0,
+            "answered": 1.0,
+            "declined": 1.0,
+        }
         assert found["separation"] == 1.0 and found["answers"] == 6 and found["near_misses"] == 6
         assert found["model"] == "a-model" and found["measure"] == "similarity"
 
@@ -51,7 +59,9 @@ class TestAnswerCutoff:
         found = answer_cutoff(Canned(answers), questions)
         assert 0.5 < found["separation"] < 1.0
         at = found["at_cutoff"]
-        assert at["answered"] < 1.0 or at["declined"] < 1.0, "no cut-off keeps every answer and declines every miss"
+        assert at["answered"] < 1.0 or at["declined"] < 1.0, (
+            "no cut-off keeps every answer and declines every miss"
+        )
         cuts = [row["cutoff"] for row in found["table"]]
         assert cuts == sorted(cuts) and found["cutoff"] in cuts and len(cuts) <= 15
         strict = found["table"][-1]
@@ -62,12 +72,20 @@ class TestAnswerCutoff:
         outside = [f"zebras {i}" for i in range(5)]
         answers.update({text: Hit("a", 0.55) for text in outside})
         found = answer_cutoff(Canned(answers), questions, unanswerable=outside)
-        assert found["near_misses"] == 5 and found["unanswerable"] == 5 and 0.55 < found["cutoff"] <= 0.8
+        assert (
+            found["near_misses"] == 5
+            and found["unanswerable"] == 5
+            and 0.55 < found["cutoff"] <= 0.8
+        )
 
     def test_too_few_of_either_is_no_cutoff_and_says_which(self):
         questions, answers = golden(6, 2)
         found = answer_cutoff(Canned(answers), questions)
-        assert found["cutoff"] is None and "too few near misses" in found["reason"] and "unanswerable=" in found["reason"]
+        assert (
+            found["cutoff"] is None
+            and "too few near misses" in found["reason"]
+            and "unanswerable=" in found["reason"]
+        )
         questions, answers = golden(2, 6)
         found = answer_cutoff(Canned(answers), questions)
         assert found["cutoff"] is None and "too few answers" in found["reason"]
@@ -77,7 +95,11 @@ class TestAnswerCutoff:
         for hit in answers.values():
             hit.similarity = None
         found = answer_cutoff(Canned(answers), questions)
-        assert found["cutoff"] is None and found["unmeasured"] == 12 and "keyword search has none" in found["reason"]
+        assert (
+            found["cutoff"] is None
+            and found["unmeasured"] == 12
+            and "keyword search has none" in found["reason"]
+        )
 
     def test_the_search_is_the_callers_and_the_measure_can_be_the_rerankers(self):
         questions, answers = golden(6, 6)
@@ -85,7 +107,10 @@ class TestAnswerCutoff:
             hit.relevance = 0.9 if text.startswith("right") else 0.1
         db = Canned(answers)
         found = answer_cutoff(db, questions, measure="relevance", mode="hybrid", rerank=True)
-        assert 0.1 < found["cutoff"] <= 0.9 and found["search"] == {"mode": "hybrid", "rerank": True}
+        assert 0.1 < found["cutoff"] <= 0.9 and found["search"] == {
+            "mode": "hybrid",
+            "rerank": True,
+        }
         assert all(how == {"mode": "hybrid", "rerank": True} for _, how in db.asked)
 
     def test_unlabelled_questions_are_left_out_and_wrong_arguments_refused(self):
@@ -103,7 +128,19 @@ DOCS = {
     "deferment": "# Deferment\n\nPayment deferment: customers in disaster areas can defer loan payments with no late fees.\n\n## Term\n\nThe deferred payment goes to the end of the loan.",
     "divestment": "# Divestment\n\nEarly divestment guidance for customers who need to sell investments before maturity.",
 }
-WORDS = {"cash": 0, "fund": 0, "emergency": 0, "fee": 0, "fees": 0, "payment": 1, "deferment": 1, "loan": 1, "late": 1, "divestment": 2, "investments": 2}
+WORDS = {
+    "cash": 0,
+    "fund": 0,
+    "emergency": 0,
+    "fee": 0,
+    "fees": 0,
+    "payment": 1,
+    "deferment": 1,
+    "loan": 1,
+    "late": 1,
+    "divestment": 2,
+    "investments": 2,
+}
 QUESTIONS = [
     Question("Which fee is waived when cash is needed?", expected=["emergency-fund"], id="g1"),
     Question("Can a loan payment be late under deferment?", expected=["deferment"], id="g2"),
@@ -130,20 +167,39 @@ class TestSweep:
     def test_every_combination_is_built_asked_and_ranked(self, tmp_path):
         seen = []
         report = sweep(
-            DOCS, QUESTIONS, chunk=["recursive", "markdown"], chunk_size=[80, 400], overlap=[20], embed_heading=[False, True],
-            k=(1, 3), open_with=OURS, workdir=tmp_path, progress=lambda row, n, total: seen.append((n, total)),
+            DOCS,
+            QUESTIONS,
+            chunk=["recursive", "markdown"],
+            chunk_size=[80, 400],
+            overlap=[20],
+            embed_heading=[False, True],
+            k=(1, 3),
+            open_with=OURS,
+            workdir=tmp_path,
+            progress=lambda row, n, total: seen.append((n, total)),
         )
         assert report["builds"] == 8 and len(report["rows"]) == 8 and seen[-1] == (8, 8)
         assert report["questions"] == 3 and report["documents"] == 3 and report["k"] == [1, 3]
-        assert [row["rank"] for row in report["rows"]] == list(range(1, 9)) and report["best"] is report["rows"][0]
+        assert [row["rank"] for row in report["rows"]] == list(range(1, 9)) and report[
+            "best"
+        ] is report["rows"][0]
         scores = [row["ndcg"] for row in report["rows"]]
         assert scores == sorted(scores, reverse=True)
         combos = {(r["chunk"], r["chunk_size"], r["embed_heading"]) for r in report["rows"]}
         assert len(combos) == 8
         for row in report["rows"]:
-            assert row["recall"]["@3"] == 1.0 and row["chunks"] >= 3 and row["median_ms"] is not None and row["build_s"] >= 0
-        small = next(r for r in report["rows"] if r["chunk_size"] == 80 and r["chunk"] == "recursive")
-        large = next(r for r in report["rows"] if r["chunk_size"] == 400 and r["chunk"] == "recursive")
+            assert (
+                row["recall"]["@3"] == 1.0
+                and row["chunks"] >= 3
+                and row["median_ms"] is not None
+                and row["build_s"] >= 0
+            )
+        small = next(
+            r for r in report["rows"] if r["chunk_size"] == 80 and r["chunk"] == "recursive"
+        )
+        large = next(
+            r for r in report["rows"] if r["chunk_size"] == 400 and r["chunk"] == "recursive"
+        )
         assert small["chunks"] > large["chunks"], "a smaller size really cut the documents smaller"
 
     def test_the_scratch_builds_are_removed_and_the_originals_untouched(self, tmp_path):
@@ -151,8 +207,16 @@ class TestSweep:
         assert list(tmp_path.iterdir()) == []
 
     def test_each_way_of_searching_is_a_row_of_the_same_build(self, tmp_path):
-        report = sweep(DOCS, QUESTIONS, search=[{"mode": "dense"}, {"mode": "hybrid", "rerank": False}], open_with=OURS, workdir=tmp_path)
-        assert report["builds"] == 1 and [r["search"] for r in sorted(report["rows"], key=lambda r: r["search"]["mode"])] == [{"mode": "dense"}, {"mode": "hybrid", "rerank": False}]
+        report = sweep(
+            DOCS,
+            QUESTIONS,
+            search=[{"mode": "dense"}, {"mode": "hybrid", "rerank": False}],
+            open_with=OURS,
+            workdir=tmp_path,
+        )
+        assert report["builds"] == 1 and [
+            r["search"] for r in sorted(report["rows"], key=lambda r: r["search"]["mode"])
+        ] == [{"mode": "dense"}, {"mode": "hybrid", "rerank": False}]
         assert len({r["chunks"] for r in report["rows"]}) == 1
 
     def test_files_are_read_from_where_they_are_under_the_ids_given(self, tmp_path):
@@ -166,15 +230,22 @@ class TestSweep:
         assert report["best"]["recall"]["@10"] == 1.0 and report["best"]["misses"] == []
 
     def test_a_miss_is_named(self, tmp_path):
-        questions = [*QUESTIONS, Question("cash emergency fund fee", expected=["a-document-that-is-not-there"], id="g9")]
+        questions = [
+            *QUESTIONS,
+            Question("cash emergency fund fee", expected=["a-document-that-is-not-there"], id="g9"),
+        ]
         report = sweep(DOCS, questions, open_with=OURS, workdir=tmp_path)
         assert report["best"]["misses"] == ["g9"] and report["best"]["recall"]["@10"] == 0.75
 
     def test_an_overlap_as_long_as_the_chunk_is_left_out(self, tmp_path):
-        report = sweep(DOCS, QUESTIONS, chunk_size=[100, 400], overlap=[100], open_with=OURS, workdir=tmp_path)
+        report = sweep(
+            DOCS, QUESTIONS, chunk_size=[100, 400], overlap=[100], open_with=OURS, workdir=tmp_path
+        )
         assert [r["chunk_size"] for r in report["rows"]] == [400]
         with pytest.raises(ValueError, match="at least as long"):
-            sweep(DOCS, QUESTIONS, chunk_size=[100], overlap=[100], open_with=OURS, workdir=tmp_path)
+            sweep(
+                DOCS, QUESTIONS, chunk_size=[100], overlap=[100], open_with=OURS, workdir=tmp_path
+            )
 
     def test_what_cannot_be_swept_is_refused_before_anything_is_built(self, tmp_path):
         with pytest.raises(ValueError, match="nothing to score against"):
@@ -188,7 +259,21 @@ class TestSweep:
         assert list(tmp_path.iterdir()) == []
 
     def test_the_table_is_best_first_and_says_how_each_was_searched(self, tmp_path):
-        report = sweep(DOCS, QUESTIONS, chunk=["recursive", "markdown"], search=[{"mode": "hybrid", "rerank": False}], k=(1, 3), open_with=OURS, workdir=tmp_path)
+        report = sweep(
+            DOCS,
+            QUESTIONS,
+            chunk=["recursive", "markdown"],
+            search=[{"mode": "hybrid", "rerank": False}],
+            k=(1, 3),
+            open_with=OURS,
+            workdir=tmp_path,
+        )
         lines = sweep_markdown(report).splitlines()
-        assert lines[0].startswith("| # | chunker | size | overlap | headings | search | recall @1 | recall @3 | MRR | nDCG |")
-        assert len(lines) == 4 and lines[2].startswith("| 1 | ") and "hybrid (rerank=False)" in lines[2]
+        assert lines[0].startswith(
+            "| # | chunker | size | overlap | headings | search | recall @1 | recall @3 | MRR | nDCG |"
+        )
+        assert (
+            len(lines) == 4
+            and lines[2].startswith("| 1 | ")
+            and "hybrid (rerank=False)" in lines[2]
+        )

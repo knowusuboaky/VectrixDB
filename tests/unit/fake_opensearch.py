@@ -198,24 +198,34 @@ class FakeOpenSearch:
         if "exists" in query:
             field = query["exists"]["field"]
             # A null is not indexed, so to OpenSearch it does not exist.
-            return [(doc_id, 1.0) for doc_id, d in docs.items() if d.get(field) not in (None, [], "")]
+            return [
+                (doc_id, 1.0) for doc_id, d in docs.items() if d.get(field) not in (None, [], "")
+            ]
         if "terms" in query:
             ((field, values),) = query["terms"].items()
             wanted = set(values)
             out = []
             for doc_id, d in docs.items():
                 have = d.get(field)
-                held = set(have) if isinstance(have, list) else ({have} if have is not None else set())
+                held = (
+                    set(have) if isinstance(have, list) else ({have} if have is not None else set())
+                )
                 if held & wanted:
                     out.append((doc_id, 1.0))
             return out
         if "range" in query:
             ((field, bounds),) = query["range"].items()
-            tests = {"gt": lambda v, b: v > b, "gte": lambda v, b: v >= b, "lt": lambda v, b: v < b, "lte": lambda v, b: v <= b}
+            tests = {
+                "gt": lambda v, b: v > b,
+                "gte": lambda v, b: v >= b,
+                "lt": lambda v, b: v < b,
+                "lte": lambda v, b: v <= b,
+            }
             return [
                 (doc_id, 1.0)
                 for doc_id, d in docs.items()
-                if d.get(field) is not None and all(tests[op](d[field], bound) for op, bound in bounds.items())
+                if d.get(field) is not None
+                and all(tests[op](d[field], bound) for op, bound in bounds.items())
             ]
         if "match" in query:
             ((field, spec),) = query["match"].items()
@@ -246,7 +256,12 @@ class FakeOpenSearch:
                 cos = sum(a * float(b) for a, b in zip(qv, v)) / (qn * dn)
                 distance = 1.0 - cos
                 formula = getattr(self, "cosine_score", "reciprocal")
-                out.append((doc_id, (2.0 - distance) / 2.0 if formula == "half" else 1.0 / (1.0 + distance)))
+                out.append(
+                    (
+                        doc_id,
+                        (2.0 - distance) / 2.0 if formula == "half" else 1.0 / (1.0 + distance),
+                    )
+                )
             return sorted(out, key=lambda x: (-x[1], x[0]))[:k]
         if "bool" in query:
             clauses = query["bool"]

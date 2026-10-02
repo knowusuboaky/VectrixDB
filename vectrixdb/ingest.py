@@ -37,7 +37,19 @@ import threading
 import unicodedata
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import numpy as np
 
@@ -152,13 +164,17 @@ class LoadedDocument:
         if self.page_labels:
             # Only a PDF that numbers its own pages has them, and every other
             # file's front matter stays exactly as it was.
-            front["page_labels"] = {str(int(n)): str(label) for n, label in sorted(self.page_labels.items())}
+            front["page_labels"] = {
+                str(int(n)): str(label) for n, label in sorted(self.page_labels.items())
+            }
         front["headings"] = [[int(o), str(h), int(level)] for o, h, level in self.headings]
         front["figures"] = [[int(o), _jsonable(info)] for o, info in self.figures]
         if self.segments:
             # Only a recording has them, and every other file's front matter
             # stays exactly as it was.
-            front["segments"] = [[round(float(a), 3), round(float(b), 3), str(t)] for a, b, t in self.segments]
+            front["segments"] = [
+                [round(float(a), 3), round(float(b), 3), str(t)] for a, b, t in self.segments
+            ]
         return _front_matter_text(front) + self.text
 
     @classmethod
@@ -177,9 +193,19 @@ class LoadedDocument:
             return cls(
                 text=body,
                 metadata=dict(front.get("metadata") or {}),
-                pages=[(int(o), int(n)) for o, n in front.get("pages") or [] if 0 <= int(o) <= length],
-                headings=[(int(o), str(h), int(level)) for o, h, level in front.get("headings") or [] if 0 <= int(o) <= length],
-                figures=[(int(o), dict(info or {})) for o, info in front.get("figures") or [] if 0 <= int(o) <= length],
+                pages=[
+                    (int(o), int(n)) for o, n in front.get("pages") or [] if 0 <= int(o) <= length
+                ],
+                headings=[
+                    (int(o), str(h), int(level))
+                    for o, h, level in front.get("headings") or []
+                    if 0 <= int(o) <= length
+                ],
+                figures=[
+                    (int(o), dict(info or {}))
+                    for o, info in front.get("figures") or []
+                    if 0 <= int(o) <= length
+                ],
                 segments=[(float(a), float(b), str(t)) for a, b, t in front.get("segments") or []],
                 page_labels=_labels_from(front.get("page_labels")),
             )
@@ -230,7 +256,9 @@ def _labels_from(value: Any) -> Dict[int, str]:
     """Printed page numbers as front matter or a reply holds them, ``{"41": "39"}``, by page."""
     if not isinstance(value, Mapping):
         return {}
-    return {int(n): str(label) for n, label in value.items() if str(n).isdigit() and str(label).strip()}
+    return {
+        int(n): str(label) for n, label in value.items() if str(n).isdigit() and str(label).strip()
+    }
 
 
 # ============================================================================
@@ -303,7 +331,9 @@ def split_front_matter(text: str) -> Tuple[Dict[str, Any], str]:
     for line in match.group(1).splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        item = re.match(r"^[ \t]+-[ \t]+(.*)$", line) or (re.match(r"^-[ \t]+(.*)$", line) if current else None)
+        item = re.match(r"^[ \t]+-[ \t]+(.*)$", line) or (
+            re.match(r"^-[ \t]+(.*)$", line) if current else None
+        )
         if item and current is not None:
             if not isinstance(front.get(current), list):
                 front[current] = []
@@ -376,7 +406,9 @@ def _figure_text(caption: str, src: Optional[str], quote: Optional[str]) -> str:
 def normalise_figures(text: str) -> str:
     """Markdown images as figure lines on their own paragraph, each with
     the description from the blockquote under it, when there is one."""
-    return _FIGURE_BLOCK.sub(lambda m: "\n\n" + _figure_text(m.group(1), m.group(2), m.group(3)) + "\n\n", text)
+    return _FIGURE_BLOCK.sub(
+        lambda m: "\n\n" + _figure_text(m.group(1), m.group(2), m.group(3)) + "\n\n", text
+    )
 
 
 _TABLE_RULE = re.compile(r"^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$")
@@ -415,7 +447,9 @@ def _table_edits(text: str) -> List[Tuple[int, int, str]]:
             i += 1
             continue
         j = i + 2
-        while j < len(lines) and "|" in lines[j] and lines[j].strip() and not _FENCE.match(lines[j]):
+        while (
+            j < len(lines) and "|" in lines[j] and lines[j].strip() and not _FENCE.match(lines[j])
+        ):
             j += 1
         rows = [_table_cells(bare)] + [_table_cells(lines[k]) for k in range(i + 2, j)]
         # A header with fewer cells than its rows has left out the one over
@@ -518,7 +552,11 @@ class _TableRows(html.parser.HTMLParser):
                 self.rows.append([])
             given = dict(attrs)
             self._cell = []
-            self._span = (max(_int(given.get("colspan"), 1), 1), max(_int(given.get("rowspan"), 1), 1), tag == "th")
+            self._span = (
+                max(_int(given.get("colspan"), 1), 1),
+                max(_int(given.get("rowspan"), 1), 1),
+                tag == "th",
+            )
         elif tag == "br" and self._cell is not None:
             self._cell.append(" ")
 
@@ -538,7 +576,9 @@ class _TableRows(html.parser.HTMLParser):
             self._cell.append(data)
 
 
-def _html_rows(parsed: Sequence[Sequence[Tuple[Optional[str], int, int, bool]]]) -> List[List[Optional[str]]]:
+def _html_rows(
+    parsed: Sequence[Sequence[Tuple[Optional[str], int, int, bool]]],
+) -> List[List[Optional[str]]]:
     """An HTML table's cells laid on its grid, as rows for ``rows_to_lines``.
 
     A heading that spans columns names each of them, and a value that spans
@@ -576,7 +616,9 @@ def _html_rows(parsed: Sequence[Sequence[Tuple[Optional[str], int, int, bool]]])
         carry_on(row, column)
         grid.append(row)
     top = 0
-    while top < len(grid) and any(h for _t, h in grid[top]) and all(h or not t for t, h in grid[top]):
+    while (
+        top < len(grid) and any(h for _t, h in grid[top]) and all(h or not t for t, h in grid[top])
+    ):
         top += 1
     if top == 0:
         return [[text for text, _header in row] for row in grid]
@@ -653,9 +695,20 @@ def markdown_document(
     figure_edits: List[Tuple[int, int, str]] = []
     marks: List[tuple] = []
     for m in _FIGURE_BLOCK.finditer(text):
-        figure_edits.append((m.start(), m.end(), "\n\n" + _figure_text(m.group(1), m.group(2), m.group(3)) + "\n\n"))
+        figure_edits.append(
+            (m.start(), m.end(), "\n\n" + _figure_text(m.group(1), m.group(2), m.group(3)) + "\n\n")
+        )
         line = figure_line(m.group(1), m.group(2))
-        marks.append((m.start(), {"caption": line[9:-1], "src": m.group(2), "described": bool(figure_description(m.group(3)))}))
+        marks.append(
+            (
+                m.start(),
+                {
+                    "caption": line[9:-1],
+                    "src": m.group(2),
+                    "described": bool(figure_description(m.group(3))),
+                },
+            )
+        )
     text, (pages, given, marks, kept) = _apply_edits(text, figure_edits, pages, given, marks, kept)
     # A mark sits where its edit starts, which is the blank line put in
     # front of the figure; the figure's own line is two characters on.
@@ -669,13 +722,19 @@ def markdown_document(
         metadata=dict(metadata or {}),
         pages=[(int(o), int(n)) for o, n in pages],
         headings=[(int(o), str(h), int(level)) for o, h, level in found],
-        figures=sorted(((int(o), dict(info)) for o, info in marks + kept), key=lambda figure: figure[0]),
+        figures=sorted(
+            ((int(o), dict(info)) for o, info in marks + kept), key=lambda figure: figure[0]
+        ),
     )
 
 
 def _markdown_headings(text: str) -> List[Tuple[int, str, int]]:
     """The ATX headings of Markdown, outside its fenced code: ``# install dependencies`` in a bash block is a comment."""
-    fenced = [(m.start(), m.end()) for m in _FENCED_BLOCK.finditer(text)] if "```" in text or "~~~" in text else []
+    fenced = (
+        [(m.start(), m.end()) for m in _FENCED_BLOCK.finditer(text)]
+        if "```" in text or "~~~" in text
+        else []
+    )
     return [
         (m.start(), m.group(2).strip(), len(m.group(1)))
         for m in _HEADING.finditer(text)
@@ -742,7 +801,9 @@ SUFFIX_KINDS: Dict[str, str] = {
 }
 
 #: The kinds a file's bytes can prove, and a wrong suffix can be corrected to.
-_PROVABLE = frozenset({"pdf", "docx", "doc", "xlsx", "xls", "pptx", "rtf", "odf", "image", "audio", "video"})
+_PROVABLE = frozenset(
+    {"pdf", "docx", "doc", "xlsx", "xls", "pptx", "rtf", "odf", "image", "audio", "video"}
+)
 
 
 def _refuse(message: str) -> None:
@@ -787,7 +848,9 @@ def _ole_kind(path: Path, name: str) -> Optional[str]:
         return None
     try:
         if ole.exists("EncryptionInfo") or ole.exists("EncryptedPackage"):
-            _refuse(f"{name} is protected by a password, so its text cannot be read: open it, remove the password and save it again")
+            _refuse(
+                f"{name} is protected by a password, so its text cannot be read: open it, remove the password and save it again"
+            )
         if ole.exists("WordDocument"):
             return "doc"
         if ole.exists("Workbook") or ole.exists("Book"):
@@ -795,7 +858,9 @@ def _ole_kind(path: Path, name: str) -> Optional[str]:
         if ole.exists("PowerPoint Document"):
             _refuse(f"{name} is a PowerPoint 97-2003 deck, which is not read: save it as .pptx")
         if any(entry and entry[0].startswith("__substg1.0_") for entry in ole.listdir()):
-            _refuse(f"{name} is an Outlook message, which is not read: save it as a PDF or copy its text")
+            _refuse(
+                f"{name} is an Outlook message, which is not read: save it as a PDF or copy its text"
+            )
     finally:
         ole.close()
     _refuse(f"{name} is an OLE compound file that holds no document this reads")
@@ -820,9 +885,15 @@ def _sniff(path: Path, name: str) -> Optional[str]:
         return _ole_kind(path, name)
     if stripped.startswith(b"{\\rtf"):
         return "rtf"
-    if head.startswith((b"\x89PNG", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"II*\x00", b"MM\x00*", b"BM")) or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"):
+    if head.startswith(
+        (b"\x89PNG", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"II*\x00", b"MM\x00*", b"BM")
+    ) or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"):
         return "image"
-    if (head[:4] == b"RIFF" and head[8:12] == b"WAVE") or head.startswith((b"ID3", b"fLaC", b"OggS")) or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+    if (
+        (head[:4] == b"RIFF" and head[8:12] == b"WAVE")
+        or head.startswith((b"ID3", b"fLaC", b"OggS"))
+        or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")
+    ):
         return "audio"
     if head[4:8] == b"ftyp":
         brand = head[8:12]
@@ -833,7 +904,9 @@ def _sniff(path: Path, name: str) -> Optional[str]:
     if lowered.startswith((b"<!doctype html", b"<html")):
         return "html"
     if not head.startswith((b"\xff\xfe", b"\xfe\xff")) and b"\x00" in head:
-        _refuse(f"{name} is not a format this reads: its bytes are not text and not a document it knows")
+        _refuse(
+            f"{name} is not a format this reads: its bytes are not text and not a document it knows"
+        )
     return None
 
 
@@ -853,9 +926,15 @@ def media_kind_of(head: bytes) -> Optional[str]:
         return "office"
     if stripped.startswith(b"{\\rtf"):
         return "rtf"
-    if head.startswith((b"\x89PNG", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"II*\x00", b"MM\x00*", b"BM")) or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"):
+    if head.startswith(
+        (b"\x89PNG", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"II*\x00", b"MM\x00*", b"BM")
+    ) or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"):
         return "image"
-    if (head[:4] == b"RIFF" and head[8:12] == b"WAVE") or head.startswith((b"ID3", b"fLaC", b"OggS")) or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+    if (
+        (head[:4] == b"RIFF" and head[8:12] == b"WAVE")
+        or head.startswith((b"ID3", b"fLaC", b"OggS"))
+        or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")
+    ):
         return "audio"
     if head[4:8] == b"ftyp":
         return "audio" if head[8:12] in (b"M4A ", b"M4B ") else "video"
@@ -878,7 +957,9 @@ def _kind_of(path: Path) -> str:
         # Named as a document and holding text, or nothing: the name is wrong.
         if not path.stat().st_size:
             _refuse(f"{path.name} is empty")
-        _refuse(f"{path.name} is not the {path.suffix.lower()} file its name says: its bytes do not start the way one does")
+        _refuse(
+            f"{path.name} is not the {path.suffix.lower()} file its name says: its bytes do not start the way one does"
+        )
     if by_bytes == "html" and by_name in (None, "text"):
         return "html"
     return by_name or "text"
@@ -911,15 +992,21 @@ def _decode_text(data: bytes) -> str:
 
 
 #: A whole fenced code block; ``_FENCE`` above is one fence line.
-_FENCED_BLOCK = re.compile(r"^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[ \t]*$", re.MULTILINE | re.DOTALL)
+_FENCED_BLOCK = re.compile(
+    r"^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[ \t]*$", re.MULTILINE | re.DOTALL
+)
 _HTML_COMMENT = re.compile(r"<!--.*?-->\n?", re.DOTALL)
 
 
-_SETEXT = re.compile(r"(?:(?<=\n\n)|\A)(?P<title>[^\n#>|`~ \t\-*+][^\n]*)\n(?P<rule>={2,}|-{2,})[ \t]*(?=\n|\Z)")
+_SETEXT = re.compile(
+    r"(?:(?<=\n\n)|\A)(?P<title>[^\n#>|`~ \t\-*+][^\n]*)\n(?P<rule>={2,}|-{2,})[ \t]*(?=\n|\Z)"
+)
 _HTML_HEADING = re.compile(r"<h([1-6])\b[^>]*>(.*?)</h\1\s*>", re.IGNORECASE | re.DOTALL)
 _LINKED_IMAGE = re.compile(r"\[(!\[[^\]]*\]\((?:[^()\s]|\([^()\s]*\))+[^)]*\))\]\([^)]*\)")
 _REF_IMAGE = re.compile(r"!\[([^\]]*)\]\[([^\]]*)\]")
-_REF_DEFINITION = re.compile(r"^[ \t]{0,3}\[([^\]]+)\]:[ \t]*<?(\S+?)>?(?:[ \t]+[\"'(][^\n]*)?[ \t]*$", re.MULTILINE)
+_REF_DEFINITION = re.compile(
+    r"^[ \t]{0,3}\[([^\]]+)\]:[ \t]*<?(\S+?)>?(?:[ \t]+[\"'(][^\n]*)?[ \t]*$", re.MULTILINE
+)
 _TOML_FRONT = re.compile(r"\A\+\+\+[ \t]*\n(.*?)\n\+\+\+[ \t]*(?:\n|\Z)", re.DOTALL)
 
 
@@ -938,15 +1025,34 @@ def _markdown_normalised(text: str) -> str:
             key = re.match(r"^\s*([A-Za-z_][\w.-]*)\s*=\s*(.*?)\s*$", line)
             if key:
                 lines.append(f"{key.group(1)}: {key.group(2)}")
-        text = "---\n" + "\n".join(lines) + "\n---\n" + text[toml.end():]
+        text = "---\n" + "\n".join(lines) + "\n---\n" + text[toml.end() :]
     refs = {m.group(1).strip().lower(): m.group(2) for m in _REF_DEFINITION.finditer(text)}
 
     def plain(part: str) -> str:
-        part = _SETEXT.sub(lambda m: ("# " if m.group("rule")[0] == "=" else "## ") + m.group("title").strip(), part)
-        part = _HTML_HEADING.sub(lambda m: "\n" + "#" * int(m.group(1)) + " " + " ".join(re.sub(r"<[^>]+>", "", m.group(2)).split()) + "\n", part)
+        part = _SETEXT.sub(
+            lambda m: ("# " if m.group("rule")[0] == "=" else "## ") + m.group("title").strip(),
+            part,
+        )
+        part = _HTML_HEADING.sub(
+            lambda m: (
+                "\n"
+                + "#" * int(m.group(1))
+                + " "
+                + " ".join(re.sub(r"<[^>]+>", "", m.group(2)).split())
+                + "\n"
+            ),
+            part,
+        )
         part = _LINKED_IMAGE.sub(lambda m: m.group(1), part)
         if refs:
-            part = _REF_IMAGE.sub(lambda m: f"![{m.group(1)}]({refs[(m.group(2) or m.group(1)).strip().lower()]})" if (m.group(2) or m.group(1)).strip().lower() in refs else m.group(0), part)
+            part = _REF_IMAGE.sub(
+                lambda m: (
+                    f"![{m.group(1)}]({refs[(m.group(2) or m.group(1)).strip().lower()]})"
+                    if (m.group(2) or m.group(1)).strip().lower() in refs
+                    else m.group(0)
+                ),
+                part,
+            )
         return part
 
     out: List[str] = []
@@ -959,7 +1065,10 @@ def _markdown_normalised(text: str) -> str:
     return "".join(out)
 
 
-_INLINE_TAGS = re.compile(r"</?(?:b|i|em|strong|u|span|sup|sub|small|mark|font|details|summary|abbr|cite|kbd|q|s|del|ins)\b[^>]*>", re.IGNORECASE)
+_INLINE_TAGS = re.compile(
+    r"</?(?:b|i|em|strong|u|span|sup|sub|small|mark|font|details|summary|abbr|cite|kbd|q|s|del|ins)\b[^>]*>",
+    re.IGNORECASE,
+)
 
 
 def _inline_html(text: str) -> str:
@@ -1006,18 +1115,75 @@ def _load_text(path: Path) -> LoadedDocument:
 # run, \deleted marks one struck out; \'e9 is a byte in the document's code
 # page and \u233 a character with a fallback after it.
 
-_RTF_TOKEN = re.compile(r"\\([a-zA-Z]+)(-?\d+)? ?|\\'([0-9a-fA-F]{2})|\\([^a-zA-Z])|([{}])|[\r\n]+|([^\\{}\r\n]+)")
-_RTF_SKIP = frozenset({
-    "fonttbl", "colortbl", "stylesheet", "info", "pict", "object", "header", "footer", "headerl", "headerr", "headerf",
-    "footerl", "footerr", "footerf", "listtable", "listoverridetable", "rsidtbl", "generator", "themedata",
-    "colorschememapping", "datastore", "latentstyles", "xmlnstbl", "fldinst", "filetbl", "revtbl", "pgdsctbl",
-    "mmathPr", "wgrffmtfilter", "comment", "annotation", "atnid", "atnauthor", "bkmkstart", "bkmkend", "shppict",
-    "nonshppict", "blipuid", "operator", "author", "title", "subject", "keywords", "doccomm", "company",
-})
+_RTF_TOKEN = re.compile(
+    r"\\([a-zA-Z]+)(-?\d+)? ?|\\'([0-9a-fA-F]{2})|\\([^a-zA-Z])|([{}])|[\r\n]+|([^\\{}\r\n]+)"
+)
+_RTF_SKIP = frozenset(
+    {
+        "fonttbl",
+        "colortbl",
+        "stylesheet",
+        "info",
+        "pict",
+        "object",
+        "header",
+        "footer",
+        "headerl",
+        "headerr",
+        "headerf",
+        "footerl",
+        "footerr",
+        "footerf",
+        "listtable",
+        "listoverridetable",
+        "rsidtbl",
+        "generator",
+        "themedata",
+        "colorschememapping",
+        "datastore",
+        "latentstyles",
+        "xmlnstbl",
+        "fldinst",
+        "filetbl",
+        "revtbl",
+        "pgdsctbl",
+        "mmathPr",
+        "wgrffmtfilter",
+        "comment",
+        "annotation",
+        "atnid",
+        "atnauthor",
+        "bkmkstart",
+        "bkmkend",
+        "shppict",
+        "nonshppict",
+        "blipuid",
+        "operator",
+        "author",
+        "title",
+        "subject",
+        "keywords",
+        "doccomm",
+        "company",
+    }
+)
 _RTF_CHARS = {
-    "par": "\n", "line": "\n", "sect": "\n\n", "page": "\n\n", "tab": "\t", "cell": "\x1f", "row": "\n",
-    "emdash": "\u2014", "endash": "\u2013", "bullet": "\u2022", "lquote": "\u2018", "rquote": "\u2019",
-    "ldblquote": "\u201c", "rdblquote": "\u201d", "emspace": " ", "enspace": " ",
+    "par": "\n",
+    "line": "\n",
+    "sect": "\n\n",
+    "page": "\n\n",
+    "tab": "\t",
+    "cell": "\x1f",
+    "row": "\n",
+    "emdash": "\u2014",
+    "endash": "\u2013",
+    "bullet": "\u2022",
+    "lquote": "\u2018",
+    "rquote": "\u2019",
+    "ldblquote": "\u201c",
+    "rdblquote": "\u201d",
+    "emspace": " ",
+    "enspace": " ",
 }
 
 
@@ -1081,7 +1247,9 @@ def _rtf_text(raw: str) -> Tuple[str, Optional[str]]:
             if symbol == "*":
                 star = True
             elif not skip and not hidden:
-                out.append({"~": " ", "-": "", "_": "-", "\\": "\\", "{": "{", "}": "}"}.get(symbol, ""))
+                out.append(
+                    {"~": " ", "-": "", "_": "-", "\\": "\\", "{": "{", "}": "}"}.get(symbol, "")
+                )
             continue
         if text is not None:
             if pending:
@@ -1114,7 +1282,11 @@ def _rtf_text(raw: str) -> Tuple[str, Optional[str]]:
 def _load_rtf(path: Path) -> LoadedDocument:
     raw = path.read_bytes().decode("latin-1")
     text, title = _rtf_text(raw)
-    doc = LoadedDocument.from_markdown(text) if re.search(r"^#{1,6} ", text, re.M) else LoadedDocument(text=text)
+    doc = (
+        LoadedDocument.from_markdown(text)
+        if re.search(r"^#{1,6} ", text, re.M)
+        else LoadedDocument(text=text)
+    )
     if title:
         doc.metadata["title"] = title
     return doc
@@ -1144,7 +1316,11 @@ def _load_odf(path: Path) -> LoadedDocument:
     try:
         with zipfile.ZipFile(str(path)) as archive:
             root = ET.fromstring(archive.read("content.xml"))
-            meta = ET.fromstring(archive.read("meta.xml")) if "meta.xml" in archive.namelist() else None
+            meta = (
+                ET.fromstring(archive.read("meta.xml"))
+                if "meta.xml" in archive.namelist()
+                else None
+            )
     except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError) as exc:
         _refuse(f"{path.name} is a damaged OpenDocument file: {exc}")
         raise  # unreachable
@@ -1211,7 +1387,10 @@ def _load_odf(path: Path) -> LoadedDocument:
                     rows += [cells] * repeat_rows
             lines = rows_to_lines(rows)
             if lines:
-                blocks.append(("## " + name + "\n\n" if name and path.suffix.lower() == ".ods" else "") + "\n".join(lines))
+                blocks.append(
+                    ("## " + name + "\n\n" if name and path.suffix.lower() == ".ods" else "")
+                    + "\n".join(lines)
+                )
         else:
             for child in node:
                 block(child, depth)
@@ -1347,7 +1526,9 @@ def load(
     meta = {"source": str(path), "filename": path.name, "kind": kind}
 
     if kind == "pdf":
-        doc = _load_pdf(path, images=images, ocr=ocr, page_reader=page_reader, every_page=every_page)
+        doc = _load_pdf(
+            path, images=images, ocr=ocr, page_reader=page_reader, every_page=every_page
+        )
     elif kind == "docx":
         doc = _load_docx(path, images=images)
     elif kind == "doc":
@@ -1425,7 +1606,9 @@ def image_size(data: bytes) -> Optional[Tuple[int, int]]:
             return width, abs(height)
         if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
             if data[12:16] == b"VP8X":
-                return 1 + int.from_bytes(data[24:27], "little"), 1 + int.from_bytes(data[27:30], "little")
+                return 1 + int.from_bytes(data[24:27], "little"), 1 + int.from_bytes(
+                    data[27:30], "little"
+                )
             if data[12:16] == b"VP8 ":
                 width, height = struct.unpack("<HH", data[26:30])
                 return width & 0x3FFF, height & 0x3FFF
@@ -1439,7 +1622,21 @@ def image_size(data: bytes) -> Optional[Tuple[int, int]]:
                     i += 1
                     continue
                 marker = data[i + 1]
-                if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                if marker in (
+                    0xC0,
+                    0xC1,
+                    0xC2,
+                    0xC3,
+                    0xC5,
+                    0xC6,
+                    0xC7,
+                    0xC9,
+                    0xCA,
+                    0xCB,
+                    0xCD,
+                    0xCE,
+                    0xCF,
+                ):
                     height, width = struct.unpack(">HH", data[i + 5 : i + 9])
                     return width, height
                 if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
@@ -1451,7 +1648,9 @@ def image_size(data: bytes) -> Optional[Tuple[int, int]]:
     return None
 
 
-def is_decorative(data: bytes, min_bytes: int = 1500, min_side: int = 48, max_aspect: float = 8.0) -> bool:
+def is_decorative(
+    data: bytes, min_bytes: int = 1500, min_side: int = 48, max_aspect: float = 8.0
+) -> bool:
     """A logo, an icon, a rule, a signature: too small to be a figure, or
     far too long and thin. Costs nothing to tell, which matters because the
     alternative is paying a vision model to describe a letterhead."""
@@ -1474,7 +1673,9 @@ def _blank_image(data: bytes) -> bool:
 
 def _printed_words(block: str) -> str:
     """What a figure left out as decoration keeps: the words a chart printed, which were the page's own."""
-    return "\n".join(line for line in block.split("\n")[1:] if line.startswith("Words in the picture:"))
+    return "\n".join(
+        line for line in block.split("\n")[1:] if line.startswith("Words in the picture:")
+    )
 
 
 def _printed_rows(rows: Any, block: str) -> Any:
@@ -1487,7 +1688,14 @@ def _printed_rows(rows: Any, block: str) -> Any:
     A picture with no such line, a photograph or a picture pasted in, keeps
     its rows as the describer gave them.
     """
-    words = next((line[len("Words in the picture: "):] for line in block.split("\n")[1:] if line.startswith("Words in the picture: ")), None)
+    words = next(
+        (
+            line[len("Words in the picture: ") :]
+            for line in block.split("\n")[1:]
+            if line.startswith("Words in the picture: ")
+        ),
+        None,
+    )
     if words is None or not isinstance(rows, list) or len(rows) < 2:
         return rows
     from .extract.page_reader import numbers_in, scale_in
@@ -1496,7 +1704,9 @@ def _printed_rows(rows: Any, block: str) -> Any:
 
     def shown(cell: Any) -> bool:
         found = numbers_in(str(cell or ""))
-        return not found or (all(n in printed for n in found) and not (ticks and all(n in ticks for n in found)))
+        return not found or (
+            all(n in printed for n in found) and not (ticks and all(n in ticks for n in found))
+        )
 
     kept = [list(rows[0])]
     for row in rows[1:]:
@@ -1557,7 +1767,9 @@ def describe_figures(
             continue
         # An image with nothing in it is asked about least of all: a vision model
         # shown an empty picture describes one it made up.
-        if skip_decorative and (is_decorative(data) or counts.get(digests[src], 0) >= repeated_on or _blank_image(data)):
+        if skip_decorative and (
+            is_decorative(data) or counts.get(digests[src], 0) >= repeated_on or _blank_image(data)
+        ):
             edits.append((block.start(), block.end(), _printed_words(block.group(0))))
             dropped.append(src)
             continue
@@ -1586,7 +1798,9 @@ def describe_figures(
 
             if isinstance(exc, ExtractionError):
                 raise
-            raise ExtractionError(f"describing the figure {src} in {name or 'a document'} failed: {exc}") from exc
+            raise ExtractionError(
+                f"describing the figure {src} in {name or 'a document'} failed: {exc}"
+            ) from exc
         if answer is None:
             said["undescribed"] = said.get("undescribed", 0) + 1
             marks.append((offset, info))
@@ -1611,7 +1825,13 @@ def describe_figures(
             by = str(answer.get("by") or getattr(describer, "label", "") or "describer")
             info["described_by"] = by
             said[by] = said.get(by, 0) + 1
-        edits.append((block.start(), block.end(), figure_line(caption, src) + ("\n" + description if description else "")))
+        edits.append(
+            (
+                block.start(),
+                block.end(),
+                figure_line(caption, src) + ("\n" + description if description else ""),
+            )
+        )
         marks.append((offset, info))
     metadata = dict(doc.metadata)
     if said:
@@ -1649,7 +1869,11 @@ def _local_engine(kind: str) -> Any:
     if kind not in _LOCAL_ENGINES:
         from .extract import engines
 
-        _LOCAL_ENGINES[kind] = {"image": engines.RapidOcr, "audio": engines.Whisper, "video": engines.Video}[kind]()
+        _LOCAL_ENGINES[kind] = {
+            "image": engines.RapidOcr,
+            "audio": engines.Whisper,
+            "video": engines.Video,
+        }[kind]()
     return _LOCAL_ENGINES[kind]
 
 
@@ -1665,7 +1889,12 @@ def _as_read(doc: LoadedDocument, data: bytes, name: str, source: str) -> Loaded
     cut from it has none of the three of its own.
     """
     given = {k: v for k, v in doc.metadata.items() if k not in ("source", "filename")}
-    doc.metadata = {"source": source, "filename": name, "kind": Path(name).suffix.lower().lstrip(".") or "text", **given}
+    doc.metadata = {
+        "source": source,
+        "filename": name,
+        "kind": Path(name).suffix.lower().lstrip(".") or "text",
+        **given,
+    }
     if Path(name).suffix.lower() == ".pdf":
         _pdf_extras(data, doc)
     return doc
@@ -1713,7 +1942,15 @@ def load_bytes(
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
-        doc = load(tmp, kind=kind, extractors={}, images=images, ocr=ocr, page_reader=page_reader, every_page=every_page)
+        doc = load(
+            tmp,
+            kind=kind,
+            extractors={},
+            images=images,
+            ocr=ocr,
+            page_reader=page_reader,
+            every_page=every_page,
+        )
     finally:
         try:
             os.unlink(tmp)
@@ -1844,7 +2081,9 @@ def _ooxml_rels(archive: Any, part: str) -> Dict[str, str]:
 
     folder, _, name = part.rpartition("/")
     try:
-        root = ET.fromstring(archive.read(f"{folder}/_rels/{name}.rels" if folder else f"_rels/{name}.rels"))
+        root = ET.fromstring(
+            archive.read(f"{folder}/_rels/{name}.rels" if folder else f"_rels/{name}.rels")
+        )
     except (KeyError, ET.ParseError):
         return {}
     found: Dict[str, str] = {}
@@ -1853,7 +2092,9 @@ def _ooxml_rels(archive: Any, part: str) -> Dict[str, str]:
         if not target or rel.get("TargetMode") == "External":
             continue
         found[str(rel.get("Id"))] = (
-            target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join(folder, target))
+            target.lstrip("/")
+            if target.startswith("/")
+            else posixpath.normpath(posixpath.join(folder, target))
         )
     return found
 
@@ -1914,7 +2155,11 @@ def _format_number(value: str, code: str) -> str:
     except (TypeError, ValueError):
         return str(value)
     code = (code or "").split(";")[0]
-    decimals = len(code.split(".")[1].rstrip("%)]\\\"_ ")) if "." in code else (0 if code and code != "General" else None)
+    decimals = (
+        len(code.split(".")[1].rstrip('%)]\\"_ '))
+        if "." in code
+        else (0 if code and code != "General" else None)
+    )
     if "%" in code:
         return f"{number * 100:.{decimals or 0}f}%"
     if decimals is None:
@@ -1929,7 +2174,11 @@ def _chart_points(element: Any) -> Dict[int, str]:
         return {}
     c = "{%s}" % _CHART_NS
     found: Dict[int, str] = {}
-    for cache in list(element.iter(c + "numCache")) + list(element.iter(c + "strCache")) + list(element.iter(c + "multiLvlStrCache")):
+    for cache in (
+        list(element.iter(c + "numCache"))
+        + list(element.iter(c + "strCache"))
+        + list(element.iter(c + "multiLvlStrCache"))
+    ):
         code_el = cache.find(c + "formatCode")
         code = code_el.text if code_el is not None else ""
         for pt in cache.iter(c + "pt"):
@@ -1937,7 +2186,12 @@ def _chart_points(element: Any) -> Dict[int, str]:
             if v is None or v.text is None:
                 continue
             index = _int(pt.get("idx"), len(found))
-            found.setdefault(index, _format_number(v.text, code) if cache.tag.endswith("numCache") else " ".join(v.text.split()))
+            found.setdefault(
+                index,
+                _format_number(v.text, code)
+                if cache.tag.endswith("numCache")
+                else " ".join(v.text.split()),
+            )
     if not found:
         for index, v in enumerate(element.iter(c + "v")):
             if v.text:
@@ -1970,7 +2224,14 @@ def _chart_lines(data: bytes) -> List[str]:
     plot = chart.find(c + "plotArea")
     if plot is None:
         return [f"Chart: {title}"] if title else []
-    axis = next((_chart_title(ax.find(c + "title")) for ax in plot if ax.tag in (c + "catAx", c + "dateAx") and ax.find(c + "title") is not None), "")
+    axis = next(
+        (
+            _chart_title(ax.find(c + "title"))
+            for ax in plot
+            if ax.tag in (c + "catAx", c + "dateAx") and ax.find(c + "title") is not None
+        ),
+        "",
+    )
     kinds: List[str] = []
     categories: Dict[int, str] = {}
     series: List[Tuple[str, Dict[int, str]]] = []
@@ -1987,7 +2248,11 @@ def _chart_lines(data: bytes) -> List[str]:
                 categories.setdefault(index, value)
             series.append((label, vals))
     kind = "/".join(dict.fromkeys(kinds))
-    lines = [f"Chart: {title}" + (f" ({kind} chart)" if kind else "") if title else f"Chart ({kind or 'untitled'})"]
+    lines = [
+        f"Chart: {title}" + (f" ({kind} chart)" if kind else "")
+        if title
+        else f"Chart ({kind or 'untitled'})"
+    ]
     if not series:
         return lines
     indexes = sorted(set(categories) | {i for _l, vals in series for i in vals})
@@ -2012,7 +2277,9 @@ def _smartart_lines(data: bytes) -> List[str]:
     for point in root.iter(d + "pt"):
         if point.get("type") in ("parTrans", "sibTrans", "pres", "doc"):
             continue
-        words = " ".join("".join(t.text or "" for t in point.iter("{%s}t" % _OOXML_NS["a"])).split())
+        words = " ".join(
+            "".join(t.text or "" for t in point.iter("{%s}t" % _OOXML_NS["a"])).split()
+        )
         if words:
             lines.append("- " + words)
     return lines
@@ -2073,7 +2340,9 @@ def _xlsx_pictures(path: Path) -> Dict[str, List[Tuple[str, bytes]]]:
                 except (KeyError, ET.ParseError):
                     shapes = None
                 if shapes is not None:
-                    shown.extend(_ooxml_pictures(archive, _ooxml_rels(archive, drawn or ""), shapes))
+                    shown.extend(
+                        _ooxml_pictures(archive, _ooxml_rels(archive, drawn or ""), shapes)
+                    )
             if shown:
                 found[str(sheet.get("name") or "")] = shown
     return found
@@ -2118,7 +2387,9 @@ def pdf_page_labels(data: Union[bytes, str, Path]) -> Dict[int, str]:
     try:
         import pypdf
 
-        reader = pypdf.PdfReader(io.BytesIO(bytes(data)) if isinstance(data, (bytes, bytearray)) else str(data))
+        reader = pypdf.PdfReader(
+            io.BytesIO(bytes(data)) if isinstance(data, (bytes, bytearray)) else str(data)
+        )
     except Exception:  # noqa: BLE001 - no pypdf, or not a PDF it can open
         return {}
     return _page_labels_of(reader)
@@ -2126,8 +2397,16 @@ def pdf_page_labels(data: Union[bytes, str, Path]) -> Dict[int, str]:
 
 #: What a template or a printer driver calls a document when nobody named it.
 _PLACEHOLDER_TITLES = {
-    "untitled", "title", "document", "word document", "presentation", "powerpoint presentation",
-    "slide 1", "book1", "sheet1", "workbook",
+    "untitled",
+    "title",
+    "document",
+    "word document",
+    "presentation",
+    "powerpoint presentation",
+    "slide 1",
+    "book1",
+    "sheet1",
+    "workbook",
 }
 
 
@@ -2139,8 +2418,15 @@ def _useful_title(value: Any) -> Optional[str]:
     ``PowerPoint Presentation``.
     """
     text = " ".join(str(value or "").split())
-    text = re.sub(r"^microsoft\s+(?:office\s+)?(?:word|powerpoint|excel)\s*-\s*", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\.(?:docx?|pptx?|xlsx?|pdf|indd|rtf|odt|txt)$", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(
+        r"^microsoft\s+(?:office\s+)?(?:word|powerpoint|excel)\s*-\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\.(?:docx?|pptx?|xlsx?|pdf|indd|rtf|odt|txt)$", "", text, flags=re.IGNORECASE
+    ).strip()
     if not text or len(text) > 300 or text.lower() in _PLACEHOLDER_TITLES:
         return None
     return text
@@ -2162,14 +2448,19 @@ def _find_heading(text: str, start: int, end: int, title: str) -> Optional[int]:
         return None
     pattern = r"\W+".join(re.escape(word) for word in words)
     page = text[start:end]
-    for rx in (re.compile(r"(?:^|\n)[ \t]*(" + pattern + r")", re.IGNORECASE), re.compile(r"\b(" + pattern + r")\b", re.IGNORECASE)):
+    for rx in (
+        re.compile(r"(?:^|\n)[ \t]*(" + pattern + r")", re.IGNORECASE),
+        re.compile(r"\b(" + pattern + r")\b", re.IGNORECASE),
+    ):
         found = rx.search(page)
         if found:
             return start + found.start(1)
     return None
 
 
-def _pdf_bookmark_headings(reader: Any, text: str, pages: Sequence[Tuple[int, int]]) -> List[Tuple[int, str, int]]:
+def _pdf_bookmark_headings(
+    reader: Any, text: str, pages: Sequence[Tuple[int, int]]
+) -> List[Tuple[int, str, int]]:
     """A PDF's own bookmarks as its headings: each where its title is written on its page, else where the page starts.
 
     The bookmarks are the section list the author made, so they are what a
@@ -2247,7 +2538,9 @@ def _pdf_extras(data: bytes, doc: "LoadedDocument") -> None:
             doc.metadata["title"] = title
 
 
-def _pdf_headings(reader: Any, text: str, pages: Sequence[Tuple[int, int]]) -> List[Tuple[int, str, int]]:
+def _pdf_headings(
+    reader: Any, text: str, pages: Sequence[Tuple[int, int]]
+) -> List[Tuple[int, str, int]]:
     """A PDF's headings: its bookmarks, and under them the headings its type sets apart.
 
     The engine writes a line set larger, or bold and alone, as a Markdown
@@ -2307,16 +2600,24 @@ def _pages_by_sight(
 
     from .extract.page_reader import held_to_the_page
 
-    wanted = [i for i, layer in enumerate(engine.layers) if layer.strip() and (every_page or (i + 1) in engine.hard)]
+    wanted = [
+        i
+        for i, layer in enumerate(engine.layers)
+        if layer.strip() and (every_page or (i + 1) in engine.hard)
+    ]
     if not wanted:
         return {}, {}, {}
     drawn = dict(_pdf_page_images(path, wanted))
 
     def read(index: int) -> Tuple[int, Optional[str]]:
         try:
-            return index, page_reader(drawn[index], engine.layers[index], {"name": path.name, "page": index + 1})
+            return index, page_reader(
+                drawn[index], engine.layers[index], {"name": path.name, "page": index + 1}
+            )
         except Exception as exc:  # noqa: BLE001 - a page the reader fails on keeps its reading by the rules
-            logging.getLogger("vectrixdb.ingest").warning("page %d of %s was not read by sight: %s", index + 1, path.name, exc)
+            logging.getLogger("vectrixdb.ingest").warning(
+                "page %d of %s was not read by sight: %s", index + 1, path.name, exc
+            )
             return index, None
 
     seen: Dict[int, str] = {}
@@ -2401,7 +2702,9 @@ def _load_pdf(
         if engine is None:
             if refused is not None:
                 raise refused from exc
-            raise ExtractionError(f"{path.name} could not be read as a PDF: it is damaged, protected by a password, or not a PDF ({exc})") from exc
+            raise ExtractionError(
+                f"{path.name} could not be read as a PDF: it is damaged, protected by a password, or not a PDF ({exc})"
+            ) from exc
         reader = None
 
     if engine is not None:
@@ -2413,7 +2716,9 @@ def _load_pdf(
             except Exception:  # noqa: BLE001
                 opened = 0
             if not opened:
-                raise ExtractionError(f"{path.name} is protected by a password, so its text cannot be read")
+                raise ExtractionError(
+                    f"{path.name} is protected by a password, so its text cannot be read"
+                )
         try:
             bodies = [page.extract_text() or "" for page in reader.pages]
         except Exception as exc:  # noqa: BLE001
@@ -2464,14 +2769,21 @@ def _load_pdf(
         pictured = set(engine.pictured) if engine is not None else set()
         # A page that draws a chart was made by a program, not a scanner,
         # however little of its text is left once the chart's words are its.
-        thin = [i for i, body in enumerate(bodies) if (len(body.strip()) < min_chars and (i + 1) not in charted) or (i + 1) in pictured]
+        thin = [
+            i
+            for i, body in enumerate(bodies)
+            if (len(body.strip()) < min_chars and (i + 1) not in charted) or (i + 1) in pictured
+        ]
         for index, drawn in _pdf_page_images(path, thin) if thin else ():
             if looks_blank(drawn):
                 blank += 1
                 continue
             lines = list(ocr(drawn) or [])
             if lines:
-                read = "\n".join(lines)
+                from .extract.layout import paragraphs_of
+
+                # A line of text a line of print, joined back into paragraphs.
+                read = paragraphs_of(lines)
                 kept = bodies[index].strip()
                 bodies[index] = read if not kept or kept in read else f"{kept}\n\n{read}"
                 by_ocr.append(index + 1)
@@ -2511,17 +2823,27 @@ def _load_pdf(
             metadata["hidden_text_left_out"] = engine.hidden
     if page_reader is not None:
         # Which pages were read by sight, and which stayed with the rules and why.
-        metadata["page_reader"] = str(getattr(page_reader, "label", "") or type(page_reader).__name__)
+        metadata["page_reader"] = str(
+            getattr(page_reader, "label", "") or type(page_reader).__name__
+        )
         metadata["pages_read_by_sight"] = sorted(index + 1 for index in sight)
         if left_to_rules:
-            metadata["pages_kept_by_rules"] = {str(number): why for number, why in sorted(left_to_rules.items())}
+            metadata["pages_kept_by_rules"] = {
+                str(number): why for number, why in sorted(left_to_rules.items())
+            }
         if unprinted.get("numbers_dropped"):
             metadata["numbers_not_on_page"] = unprinted["numbers_dropped"]
         if unprinted.get("guesses_dropped"):
             # Values read off a chart's bars, or said to be guessed: taken out, not held against the reading.
             metadata["guesses_left_out"] = unprinted["guesses_dropped"]
     return LoadedDocument(
-        text=text, pages=pages, headings=headings, metadata=metadata, figures=figures, images=found, page_labels=labels
+        text=text,
+        pages=pages,
+        headings=headings,
+        metadata=metadata,
+        figures=figures,
+        images=found,
+        page_labels=labels,
     )
 
 
@@ -2544,13 +2866,13 @@ _FIELD_OPEN, _FIELD_SEPARATE, _FIELD_CLOSE = "\x13", "\x14", "\x15"
 #: end in 0x07, and without the table's properties the two cannot be told
 #: apart, so cells come out tab separated rather than guessed into rows.
 _DOC_MARKS = {
-    "\r": "\n",      # paragraph
-    "\x0b": "\n",    # line break inside a paragraph
-    "\x0c": "\n",    # page or section break
-    "\x07": "\t",    # end of a table cell
-    "\x1e": "-",      # non-breaking hyphen
-    "\x1f": "",       # optional hyphen, shown only where a line breaks
-    "\xa0": " ",      # non-breaking space
+    "\r": "\n",  # paragraph
+    "\x0b": "\n",  # line break inside a paragraph
+    "\x0c": "\n",  # page or section break
+    "\x07": "\t",  # end of a table cell
+    "\x1e": "-",  # non-breaking hyphen
+    "\x1f": "",  # optional hyphen, shown only where a line breaks
+    "\xa0": " ",  # non-breaking space
 }
 
 
@@ -2580,7 +2902,9 @@ def _doc_text(word: bytes, table: bytes) -> str:
     at_count = rg_lw + cslw * 4
     pairs = struct.unpack_from("<H", word, at_count)[0]
     if pairs < 34:
-        raise ExtractionError("the document's file information block is too short to hold a piece table")
+        raise ExtractionError(
+            "the document's file information block is too short to hold a piece table"
+        )
     fc_clx, lcb_clx = struct.unpack_from("<II", word, at_count + 2 + 33 * 8)
     clx = table[fc_clx : fc_clx + lcb_clx]
 
@@ -2663,9 +2987,15 @@ def _doc_streams(path: Path) -> Tuple[bytes, bytes]:
     ole = olefile.OleFileIO(str(path))
     try:
         if not ole.exists("WordDocument"):
-            raise ExtractionError(f"{path.name} is an OLE file but not a Word document: it has no WordDocument stream")
+            raise ExtractionError(
+                f"{path.name} is an OLE file but not a Word document: it has no WordDocument stream"
+            )
         word = ole.openstream("WordDocument").read()
-        which = "1Table" if len(word) > 0x0B and struct.unpack_from("<H", word, 0x0A)[0] & 0x0200 else "0Table"
+        which = (
+            "1Table"
+            if len(word) > 0x0B and struct.unpack_from("<H", word, 0x0A)[0] & 0x0200
+            else "0Table"
+        )
         if not ole.exists(which):
             raise ExtractionError(f"{path.name} names a {which} stream it does not have")
         table = ole.openstream(which).read()
@@ -2705,7 +3035,19 @@ _MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 _M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 #: What holds words inside a paragraph, and so is walked into. A deletion, a
 #: move away and a field's instructions are not: none of them is shown.
-_W_INSIDE = {"r", "hyperlink", "ins", "moveTo", "smartTag", "sdt", "sdtContent", "fldSimple", "customXml", "dir", "bdo"}
+_W_INSIDE = {
+    "r",
+    "hyperlink",
+    "ins",
+    "moveTo",
+    "smartTag",
+    "sdt",
+    "sdtContent",
+    "fldSimple",
+    "customXml",
+    "dir",
+    "bdo",
+}
 
 
 def _w(tag: str) -> str:
@@ -2717,7 +3059,11 @@ def _w_on(properties: Any, tag: str) -> bool:
     if properties is None:
         return False
     found = properties.find(_w(tag))
-    return found is not None and str(found.get(_w("val"), "true")).lower() not in ("false", "0", "off")
+    return found is not None and str(found.get(_w("val"), "true")).lower() not in (
+        "false",
+        "0",
+        "off",
+    )
 
 
 def _w_unseen(element: Any) -> bool:
@@ -2758,8 +3104,19 @@ def _int(value: Any, default: int) -> int:
 def _roman(n: int) -> str:
     out: List[str] = []
     for value, letters in (
-        (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"),
-        (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
     ):
         while n >= value:
             out.append(letters)
@@ -2811,7 +3168,13 @@ class _WordNotes:
         self.written: set = set()
         for relationship in document.part.rels.values():
             reltype = str(relationship.reltype)
-            kind = "f" if reltype.endswith("/footnotes") else "e" if reltype.endswith("/endnotes") else ""
+            kind = (
+                "f"
+                if reltype.endswith("/footnotes")
+                else "e"
+                if reltype.endswith("/endnotes")
+                else ""
+            )
             if not kind or relationship.is_external:
                 continue
             try:
@@ -2821,9 +3184,16 @@ class _WordNotes:
             for note in root:
                 space, name = _local(note)
                 # The separator lines Word keeps among the notes are not notes.
-                if space != _W or name not in ("footnote", "endnote") or note.get(_w("type")) not in (None, "normal"):
+                if (
+                    space != _W
+                    or name not in ("footnote", "endnote")
+                    or note.get(_w("type")) not in (None, "normal")
+                ):
                     continue
-                paragraphs = [" ".join("".join(t.text or "" for t in p.iter(_w("t"))).split()) for p in note.iter(_w("p"))]
+                paragraphs = [
+                    " ".join("".join(t.text or "" for t in p.iter(_w("t"))).split())
+                    for p in note.iter(_w("p"))
+                ]
                 words = " ".join(p for p in paragraphs if p)
                 if words:
                     self._words[(kind, str(note.get(_w("id"))))] = words
@@ -2945,7 +3315,9 @@ class _WordRun:
             elif name == "commentReference":
                 self.comments.append(str(child.get(_w("id"))))
             elif name in ("footnoteReference", "endnoteReference"):
-                marker = self._notes.call("f" if name == "footnoteReference" else "e", child.get(_w("id")))
+                marker = self._notes.call(
+                    "f" if name == "footnoteReference" else "e", child.get(_w("id"))
+                )
                 if marker:
                     self.called.append(marker)
                     self.add(f"[^{marker}]")
@@ -2971,7 +3343,10 @@ def _docx_comments(document: Any) -> Dict[str, str]:
     except Exception:  # noqa: BLE001
         return found
     for relationship in relationships:
-        if not str(getattr(relationship, "reltype", "")).endswith("/comments") or relationship.is_external:
+        if (
+            not str(getattr(relationship, "reltype", "")).endswith("/comments")
+            or relationship.is_external
+        ):
             continue
         try:
             root = parse_xml(relationship.target_part.blob)
@@ -3009,7 +3384,11 @@ def _docx_running(document: Any, notes: Any) -> Dict[str, List[str]]:
                     run = _WordRun(notes)
                     run.walk(paragraph)
                     words = " ".join(run.text.split())
-                    if words and not re.fullmatch(r"(?:page\s*)?[\d\s/of-]+", words, re.IGNORECASE) and words not in out[key]:
+                    if (
+                        words
+                        and not re.fullmatch(r"(?:page\s*)?[\d\s/of-]+", words, re.IGNORECASE)
+                        and words not in out[key]
+                    ):
                         out[key].append(words)
     return out
 
@@ -3046,7 +3425,10 @@ def _docx_numbering(document: Any) -> Dict[str, Dict[int, Tuple[Any, ...]]]:
             level_index = _int(override.get(_w("ilvl")), 0)
             start = override.find(_w("startOverride"))
             if start is not None and level_index in levels:
-                levels[level_index] = (levels[level_index][0], _int(start.get(_w("val")), 1)) + tuple(levels[level_index][2:])
+                levels[level_index] = (
+                    levels[level_index][0],
+                    _int(start.get(_w("val")), 1),
+                ) + tuple(levels[level_index][2:])
         lists[str(num.get(_w("numId")))] = levels
     return lists
 
@@ -3095,7 +3477,9 @@ _HEADING_STYLE = re.compile(r"^heading\s*([1-9])$", re.IGNORECASE)
 _HEADING_ID = re.compile(r"^Heading([1-9])$")
 
 
-def _docx_kind(paragraph: Any, p: Any, styles: Optional[Tuple[Dict[str, Any], Any]] = None) -> Tuple[str, int, Optional[Tuple[str, int]]]:
+def _docx_kind(
+    paragraph: Any, p: Any, styles: Optional[Tuple[Dict[str, Any], Any]] = None
+) -> Tuple[str, int, Optional[Tuple[str, int]]]:
     """A paragraph's style name, its heading level, 0 for none, and its list, ``(numId, level)``, or None.
 
     A heading is a style named "Heading 1" to "Heading 9", or with that id
@@ -3128,7 +3512,11 @@ def _docx_kind(paragraph: Any, p: Any, styles: Optional[Tuple[Dict[str, Any], An
     return name, min(level, 6), listed
 
 
-def _list_marker(listed: Tuple[str, int], lists: Mapping[str, Dict[int, Tuple[Any, ...]]], counters: Dict[Tuple[str, int], int]) -> str:
+def _list_marker(
+    listed: Tuple[str, int],
+    lists: Mapping[str, Dict[int, Tuple[Any, ...]]],
+    counters: Dict[Tuple[str, int], int],
+) -> str:
     """A list item's marker as Word shows it, ``- `` for a bullet, ``3. `` or ``iii. `` for a number, indented by its level."""
     num_id, level = listed
     spec: Tuple[Any, ...] = tuple(lists.get(num_id, {}).get(level, ("bullet", 1))) + (None, False)
@@ -3146,7 +3534,10 @@ def _list_marker(listed: Tuple[str, int], lists: Mapping[str, Dict[int, Tuple[An
         # Word's own pattern: every level's number where it says %1, %2.
         def number(match: Any) -> str:
             at = int(match.group(1)) - 1
-            other: Tuple[Any, ...] = tuple(lists.get(num_id, {}).get(at, ("decimal", 1))) + (None, False)
+            other: Tuple[Any, ...] = tuple(lists.get(num_id, {}).get(at, ("decimal", 1))) + (
+                None,
+                False,
+            )
             value = counters.get((num_id, at), other[1])
             return _word_number(value, "decimal" if legal and at < level else other[0])
 
@@ -3156,7 +3547,9 @@ def _list_marker(listed: Tuple[str, int], lists: Mapping[str, Dict[int, Tuple[An
     return indent + _word_number(counters[(num_id, level)], fmt) + ". "
 
 
-def _docx_page_labels(pages: Sequence[Tuple[int, int]], sections: Sequence[Tuple[Optional[int], Any]]) -> Dict[int, str]:
+def _docx_page_labels(
+    pages: Sequence[Tuple[int, int]], sections: Sequence[Tuple[Optional[int], Any]]
+) -> Dict[int, str]:
     """The number printed on each page, where a section numbers its own pages: from 1 again, or as i, ii, iii.
 
     Each section's ``pgNumType`` says how, and a section that says nothing
@@ -3216,7 +3609,9 @@ def _load_docx(path: Path, images: bool = False) -> LoadedDocument:
     try:
         document = docx.Document(str(path))
     except Exception as exc:  # noqa: BLE001 - python-docx says "Package not found" for a file it cannot parse
-        _refuse(f"{path.name} could not be read as a Word document: it is damaged or not a .docx ({exc})")
+        _refuse(
+            f"{path.name} could not be read as a Word document: it is damaged or not a .docx ({exc})"
+        )
         raise
     lists = _docx_numbering(document)
     notes = _WordNotes(document)
@@ -3235,7 +3630,13 @@ def _load_docx(path: Path, images: bool = False) -> LoadedDocument:
     found: Dict[str, bytes] = {}
     starts: List[int] = []
     sections: List[Tuple[Optional[int], Any]] = []
-    state: Dict[str, Any] = {"offset": 0, "pending": False, "rendered": False, "title": None, "first_heading": None}
+    state: Dict[str, Any] = {
+        "offset": 0,
+        "pending": False,
+        "rendered": False,
+        "title": None,
+        "first_heading": None,
+    }
 
     def emit(line: str, breaks: Sequence[int] = ()) -> int:
         # One line of the text; ``breaks`` are where in it a new page begins.
@@ -3328,14 +3729,24 @@ def _load_docx(path: Path, images: bool = False) -> LoadedDocument:
         elif breaks:
             state["pending"] = True
         drawn: List[str] = []
-        for drawing in p.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}drawing"):
+        for drawing in p.iter(
+            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}drawing"
+        ):
             if archive is not None:
                 drawn += _drawing_extras(archive, drawing_rels, drawing)
             if not images:
                 # A picture's alt text is what it shows, in the author's words, and costs nothing to keep.
-                for described in drawing.iter("{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}docPr"):
-                    alt = " ".join(str(described.get("descr") or described.get("title") or "").split())
-                    if alt and not _DEFAULT_ALT.match(alt) and not any(True for _ in drawing.iter("{%s}chart" % _CHART_NS)):
+                for described in drawing.iter(
+                    "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}docPr"
+                ):
+                    alt = " ".join(
+                        str(described.get("descr") or described.get("title") or "").split()
+                    )
+                    if (
+                        alt
+                        and not _DEFAULT_ALT.match(alt)
+                        and not any(True for _ in drawing.iter("{%s}chart" % _CHART_NS))
+                    ):
                         drawn.append(figure_line(alt))
         after(run.called, run.boxes, pictures, run.comments, drawn)
         if properties is not None and properties.find(_w("sectPr")) is not None:
@@ -3442,7 +3853,9 @@ def _load_docx(path: Path, images: bool = False) -> LoadedDocument:
                 table(child)
             elif name == "sdt":
                 content = child.find(_w("sdtContent"))
-                gallery = child.find(_w("sdtPr") + "/" + _w("docPartObj") + "/" + _w("docPartGallery"))
+                gallery = child.find(
+                    _w("sdtPr") + "/" + _w("docPartObj") + "/" + _w("docPartGallery")
+                )
                 if gallery is not None and "contents" in str(gallery.get(_w("val")) or "").lower():
                     continue  # a table of contents: the headings again, with page numbers
                 if content is not None and not _w_unseen(child):
@@ -3534,7 +3947,11 @@ def rows_to_lines(rows: Sequence[Sequence[Any]]) -> List[str]:
 
 def _row_lines(rows: Sequence[Sequence[Any]]) -> List[Tuple[int, str]]:
     """``rows_to_lines`` with the row each line came from, for a reader that has to say where a row sits."""
-    kept = [(index, list(r)) for index, r in enumerate(rows) if any(c is not None and str(c).strip() for c in r)]
+    kept = [
+        (index, list(r))
+        for index, r in enumerate(rows)
+        if any(c is not None and str(c).strip() for c in r)
+    ]
     if not kept:
         return []
     first = kept[0][1]
@@ -3572,7 +3989,9 @@ def _row_lines(rows: Sequence[Sequence[Any]]) -> List[Tuple[int, str]]:
 # whose cells are all strings, took its first row of data for a header.
 
 _YEARISH = re.compile(r"^(?:19|20)\d{2}$")
-_NUMBERISH = re.compile(r"^[(\-\u2212+]?\s*[$\u20ac\u00a3\u00a5]?\s*\(?\d[\d,.\s']*\)?\s*%?\)?\s*[kKmMbB]?$")
+_NUMBERISH = re.compile(
+    r"^[(\-\u2212+]?\s*[$\u20ac\u00a3\u00a5]?\s*\(?\d[\d,.\s']*\)?\s*%?\)?\s*[kKmMbB]?$"
+)
 _DATEISH_TEXT = re.compile(
     r"^(?:\d{4}-\d{2}-\d{2}(?:[T ][\d:]+)?|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,4}(?:,?\s*\d{4})?)$",
     re.IGNORECASE,
@@ -3580,7 +3999,7 @@ _DATEISH_TEXT = re.compile(
 
 
 def _cell_kind(value: Any) -> str:
-    """"empty", "text", "number", "year" or "date": what a cell holds, whatever type it came as."""
+    """ "empty", "text", "number", "year" or "date": what a cell holds, whatever type it came as."""
     if value is None:
         return "empty"
     if isinstance(value, bool):
@@ -3611,12 +4030,16 @@ def _plain_rows(rows: Sequence[Sequence[Any]]) -> List[str]:
     return lines
 
 
-def _header_rows_lines(rows: Sequence[Sequence[Any]], header_rows: Optional[int] = None) -> List[str]:
+def _header_rows_lines(
+    rows: Sequence[Sequence[Any]], header_rows: Optional[int] = None
+) -> List[str]:
     """One table's rows as lines; see :func:`_table_row_lines`."""
     return [line for _index, line in _table_row_lines(rows, header_rows)]
 
 
-def _table_row_lines(given: Sequence[Sequence[Any]], forced: Optional[int] = None) -> List[Tuple[int, str]]:
+def _table_row_lines(
+    given: Sequence[Sequence[Any]], forced: Optional[int] = None
+) -> List[Tuple[int, str]]:
     """One table's rows as lines, each with the row it came from, its header found by what its cells hold.
 
     A header is a row of words, years or dates over rows that hold numbers,
@@ -3628,7 +4051,11 @@ def _table_row_lines(given: Sequence[Sequence[Any]], forced: Optional[int] = Non
     header are their cells, in order. ``forced`` is how many rows the file
     itself marks as the header, a Word table's repeated header rows.
     """
-    kept = [(i, list(r)) for i, r in enumerate(given) if any(c is not None and str(c).strip() for c in r)]
+    kept = [
+        (i, list(r))
+        for i, r in enumerate(given)
+        if any(c is not None and str(c).strip() for c in r)
+    ]
     if not kept:
         return []
     origin = [i for i, _r in kept]
@@ -3652,15 +4079,27 @@ def _table_row_lines(given: Sequence[Sequence[Any]], forced: Optional[int] = Non
         first, second = columns
         keys = [kinds[i][first] for i in range(len(rows))]
         values = {kinds[i][second] for i in range(len(rows)) if kinds[i][second] != "empty"}
-        labelled = all(k == "text" for k in keys) and len({str(rows[i][first]).strip().lower() for i in range(len(rows))}) == len(rows)
+        labelled = all(k == "text" for k in keys) and len(
+            {str(rows[i][first]).strip().lower() for i in range(len(rows))}
+        ) == len(rows)
         colons = all(str(rows[i][first]).strip().endswith(":") for i in range(len(rows)))
         body_values = {kinds[i][second] for i in range(1, len(rows)) if kinds[i][second] != "empty"}
-        if labelled and (colons or (len(values) >= 2 and not (kinds[0][second] == "text" and len(body_values) == 1))):
+        if labelled and (
+            colons
+            or (len(values) >= 2 and not (kinds[0][second] == "text" and len(body_values) == 1))
+        ):
             pairs: List[Tuple[int, str]] = []
             for i in range(len(rows)):
                 key = str(rows[i][first]).strip().rstrip(":").strip()
                 value = rows[i][second]
-                pairs.append((origin[i], f"{key}: {_cell_text(value)}" if value is not None and str(value).strip() else key))
+                pairs.append(
+                    (
+                        origin[i],
+                        f"{key}: {_cell_text(value)}"
+                        if value is not None and str(value).strip()
+                        else key,
+                    )
+                )
             return pairs
 
     any_figures = any(figures(i) for i in range(len(rows)))
@@ -3669,9 +4108,22 @@ def _table_row_lines(given: Sequence[Sequence[Any]], forced: Optional[int] = Non
         header_rows = max(0, min(int(forced), len(rows) - 1))
     elif len(rows) > 1 and worded(0) and (figures(1) or not any_figures or worded(1)):
         header_rows = 1
-        if len(rows) > 2 and worded(1) and not figures(1) and any(figures(i) for i in range(2, len(rows))) and not figures(0):
+        if (
+            len(rows) > 2
+            and worded(1)
+            and not figures(1)
+            and any(figures(i) for i in range(2, len(rows)))
+            and not figures(0)
+        ):
             header_rows = 2
-    if forced is None and len(rows) > 1 and not header_rows and all(k in ("year", "text", "empty") for k in kinds[0]) and kinds[0].count("year") >= 2 and figures(1):
+    if (
+        forced is None
+        and len(rows) > 1
+        and not header_rows
+        and all(k in ("year", "text", "empty") for k in kinds[0])
+        and kinds[0].count("year") >= 2
+        and figures(1)
+    ):
         header_rows = 1  # years as numbers over the columns: 2023, 2024
     if not header_rows:
         return [(origin[i], line) for i, row in enumerate(rows) for line in _plain_rows([row])]
@@ -3683,9 +4135,17 @@ def _table_row_lines(given: Sequence[Sequence[Any]], forced: Optional[int] = Non
             if (value is None or not str(value).strip()) and i < header_rows - 1:
                 # A label printed once over the columns after it: carried along, under the row below it.
                 back = j - 1
-                while back >= 0 and (rows[i][back] is None or not str(rows[i][back]).strip()) and rows[header_rows - 1][back] is not None:
+                while (
+                    back >= 0
+                    and (rows[i][back] is None or not str(rows[i][back]).strip())
+                    and rows[header_rows - 1][back] is not None
+                ):
                     back -= 1
-                if back >= 0 and rows[header_rows - 1][j] is not None and str(rows[header_rows - 1][j]).strip():
+                if (
+                    back >= 0
+                    and rows[header_rows - 1][j] is not None
+                    and str(rows[header_rows - 1][j]).strip()
+                ):
                     value = rows[i][back]
             if value is not None and str(value).strip():
                 said = _cell_text(value)
@@ -3735,7 +4195,9 @@ def _sheet_lines(rows: Sequence[Sequence[Any]]) -> List[str]:
         widest = max(filled(r) for r in grid)
         if widest <= 1:
             # Lines of one cell each, a title and a note: text, not a table.
-            lines.extend(next(_cell_text(c) for c in r if c is not None and str(c).strip()) for r in grid)
+            lines.extend(
+                next(_cell_text(c) for c in r if c is not None and str(c).strip()) for r in grid
+            )
             block.clear()
             return
         if last["head"] is not None and not worded(grid[0]) and filled(grid[0]) == last["width"]:
@@ -3750,10 +4212,14 @@ def _sheet_lines(rows: Sequence[Sequence[Any]]) -> List[str]:
         bottom = len(grid)
         tail: List[str] = []
         while bottom - 1 > top and widest >= 2 and filled(grid[bottom - 1]) == 1:
-            tail.insert(0, next(_cell_text(c) for c in grid[bottom - 1] if c is not None and str(c).strip()))
+            tail.insert(
+                0, next(_cell_text(c) for c in grid[bottom - 1] if c is not None and str(c).strip())
+            )
             bottom -= 1
         body = grid[top:bottom]
-        empty = [j for j in range(width) if all(r[j] is None or not str(r[j]).strip() for r in body)]
+        empty = [
+            j for j in range(width) if all(r[j] is None or not str(r[j]).strip() for r in body)
+        ]
         spans: List[Tuple[int, int]] = []
         start = None
         for j in range(width + 1):
@@ -3817,7 +4283,9 @@ def _format_cell(value: Any, code: Optional[str]) -> Any:
         return value
     sections = code.split(";")
     section = sections[1] if value < 0 and len(sections) > 1 else sections[0]
-    body = re.sub(r"\[[^\]]*\]", lambda m: m.group(0) if m.group(0).startswith("[$") else "", section)
+    body = re.sub(
+        r"\[[^\]]*\]", lambda m: m.group(0) if m.group(0).startswith("[$") else "", section
+    )
     if not re.search(r"[0#]", body):
         return value
     decimals = 0
@@ -3838,14 +4306,21 @@ def _format_cell(value: Any, code: Optional[str]) -> Any:
         shown += "%"
     if symbol:
         digit = re.search(r"[0#]", body)
-        shown = (symbol + shown) if body.find(symbol) <= (digit.start() if digit else 0) else (shown + " " + symbol)
+        shown = (
+            (symbol + shown)
+            if body.find(symbol) <= (digit.start() if digit else 0)
+            else (shown + " " + symbol)
+        )
     if value < 0:
         shown = f"({shown})" if "(" in section and len(sections) > 1 else "-" + shown
     return shown
 
 
 #: What a program calls a picture when nobody described it: "Picture 3", "Image", "Chart 1". Not alt text.
-_DEFAULT_ALT = re.compile(r"^(?:picture|image|graphic|chart|shape|object|diagram|photo|figure|grafik|bild|imagen)\s*\d*$", re.IGNORECASE)
+_DEFAULT_ALT = re.compile(
+    r"^(?:picture|image|graphic|chart|shape|object|diagram|photo|figure|grafik|bild|imagen)\s*\d*$",
+    re.IGNORECASE,
+)
 
 
 def _xlsx_sheet_extras(path: Path) -> Dict[str, Dict[str, Any]]:
@@ -3876,17 +4351,35 @@ def _xlsx_sheet_extras(path: Path) -> Dict[str, Dict[str, Any]]:
                 data = archive.read(part)
             except KeyError:
                 continue
-            merged = [m.decode() for m in re.findall(rb'<mergeCell\s+ref="([A-Z]+\d+:[A-Z]+\d+)"', data)]
-            hidden_rows = {int(r) for r in re.findall(rb'<row\s[^>]*?r="(\d+)"[^>]*?\bhidden="(?:1|true)"', data)}
-            hidden_rows |= {int(r) for r in re.findall(rb'<row\s[^>]*?\bhidden="(?:1|true)"[^>]*?r="(\d+)"', data)}
+            merged = [
+                m.decode() for m in re.findall(rb'<mergeCell\s+ref="([A-Z]+\d+:[A-Z]+\d+)"', data)
+            ]
+            hidden_rows = {
+                int(r)
+                for r in re.findall(rb'<row\s[^>]*?r="(\d+)"[^>]*?\bhidden="(?:1|true)"', data)
+            }
+            hidden_rows |= {
+                int(r)
+                for r in re.findall(rb'<row\s[^>]*?\bhidden="(?:1|true)"[^>]*?r="(\d+)"', data)
+            }
             hidden_cols: Set[int] = set()
             for tag in re.findall(rb"<col\s[^>]*>", data):
                 # Attributes in any order: openpyxl writes hidden before min and max.
                 attributes = dict(re.findall(rb'(\w+)="([^"]*)"', tag))
                 if attributes.get(b"hidden") in (b"1", b"true"):
-                    hidden_cols.update(range(int(attributes.get(b"min", b"0")), int(attributes.get(b"max", b"0")) + 1))
+                    hidden_cols.update(
+                        range(
+                            int(attributes.get(b"min", b"0")), int(attributes.get(b"max", b"0")) + 1
+                        )
+                    )
             # A formula nobody recalculated is saved with no value, or an empty one.
-            uncached = re.search(rb"<f[^>]*>[^<]*</f>\s*(?:<v\s*/>|<v>\s*</v>)?\s*</c>|<f[^>]*/>\s*(?:<v\s*/>|<v>\s*</v>)?\s*</c>", data) is not None
+            uncached = (
+                re.search(
+                    rb"<f[^>]*>[^<]*</f>\s*(?:<v\s*/>|<v>\s*</v>)?\s*</c>|<f[^>]*/>\s*(?:<v\s*/>|<v>\s*</v>)?\s*</c>",
+                    data,
+                )
+                is not None
+            )
             charts: List[str] = []
             rels = _ooxml_rels(archive, part or "")
             for drawing in re.findall(rb'<drawing\s[^>]*?r:id="([^"]+)"', data):
@@ -3898,12 +4391,18 @@ def _xlsx_sheet_extras(path: Path) -> Dict[str, Dict[str, Any]]:
                 except (KeyError, ET.ParseError):
                     continue
                 charts += _drawing_extras(archive, _ooxml_rels(archive, drawn), shapes)
-                for described in shapes.iter("{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}cNvPr"):
+                for described in shapes.iter(
+                    "{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}cNvPr"
+                ):
                     alt = " ".join(str(described.get("descr") or "").split())
                     if alt and not _DEFAULT_ALT.match(alt):
                         charts.append(figure_line(alt))
             found[str(sheet.get("name") or "")] = {
-                "merged": merged, "hidden_rows": hidden_rows, "hidden_cols": hidden_cols, "uncached": uncached, "charts": charts,
+                "merged": merged,
+                "hidden_rows": hidden_rows,
+                "hidden_cols": hidden_cols,
+                "uncached": uncached,
+                "charts": charts,
             }
     return found
 
@@ -3981,7 +4480,9 @@ def _load_xlsx(path: Path, images: bool = False) -> LoadedDocument:
     try:
         workbook = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
     except Exception as exc:  # noqa: BLE001 - openpyxl raises zip, key, value and XML errors for a damaged file
-        _refuse(f"{path.name} could not be read as an Excel workbook: it is damaged or protected by a password ({exc})")
+        _refuse(
+            f"{path.name} could not be read as an Excel workbook: it is damaged or protected by a password ({exc})"
+        )
         raise
     parts: List[str] = []
     headings: List[Tuple[int, str, int]] = []
@@ -4004,7 +4505,9 @@ def _load_xlsx(path: Path, images: bool = False) -> LoadedDocument:
             if about.get("uncached"):
                 # A formula nobody recalculated has no value saved; its formula is read instead.
                 if formulas_book is None:
-                    formulas_book = openpyxl.load_workbook(str(path), read_only=True, data_only=False)
+                    formulas_book = openpyxl.load_workbook(
+                        str(path), read_only=True, data_only=False
+                    )
                 formulas = formulas_book[sheet.title]
                 if hasattr(formulas, "reset_dimensions"):
                     formulas.reset_dimensions()
@@ -4056,7 +4559,11 @@ def _load_xlsx(path: Path, images: bool = False) -> LoadedDocument:
     if title:
         metadata["title"] = title
     return LoadedDocument(
-        text=text, headings=headings, metadata=metadata, figures=_marked_figures(text, found), images=found
+        text=text,
+        headings=headings,
+        metadata=metadata,
+        figures=_marked_figures(text, found),
+        images=found,
     )
 
 
@@ -4159,14 +4666,19 @@ def _pptx_paragraphs(body: Any, bulleted: bool) -> List[str]:
         pieces: List[str] = []
         for child in para:
             if child.tag == a + "r" or child.tag == a + "fld":
-                if child.tag == a + "fld" and str(child.get("type") or "").startswith(("slidenum", "datetime")):
+                if child.tag == a + "fld" and str(child.get("type") or "").startswith(
+                    ("slidenum", "datetime")
+                ):
                     continue
                 pieces.append("".join(t.text or "" for t in child.findall("a:t", _PPTX_NS)))
             elif child.tag == a + "br":
                 pieces.append("\n")
         props = para.find("a:pPr", _PPTX_NS)
         level = _int(props.get("lvl") if props is not None else None, 0)
-        marked = props is not None and (props.find("a:buChar", _PPTX_NS) is not None or props.find("a:buAutoNum", _PPTX_NS) is not None)
+        marked = props is not None and (
+            props.find("a:buChar", _PPTX_NS) is not None
+            or props.find("a:buAutoNum", _PPTX_NS) is not None
+        )
         unmarked = props is not None and props.find("a:buNone", _PPTX_NS) is not None
         for n, line in enumerate("".join(pieces).split("\n")):
             words = " ".join(line.split())
@@ -4179,7 +4691,9 @@ def _pptx_paragraphs(body: Any, bulleted: bool) -> List[str]:
     return lines
 
 
-def _pptx_items(tree: Any, archive: Any, rels: Mapping[str, str], shift: Tuple[float, float, float, float]) -> List[Tuple[float, float, str, List[str]]]:
+def _pptx_items(
+    tree: Any, archive: Any, rels: Mapping[str, str], shift: Tuple[float, float, float, float]
+) -> List[Tuple[float, float, str, List[str]]]:
     """A shape tree's items as ``(top, left, role, lines)``: role is "title" or "body", placed on the slide."""
     ox, oy, sx, sy = shift
     items: List[Tuple[float, float, str, List[str]]] = []
@@ -4199,7 +4713,12 @@ def _pptx_items(tree: Any, archive: Any, rels: Mapping[str, str], shift: Tuple[f
                 if off is not None and choff is not None and ext is not None and chext is not None:
                     scale_x = float(ext.get("cx", 1)) / max(float(chext.get("cx", 1)), 1.0)
                     scale_y = float(ext.get("cy", 1)) / max(float(chext.get("cy", 1)), 1.0)
-                    inner = (float(off.get("x", 0)) - float(choff.get("x", 0)) * scale_x, float(off.get("y", 0)) - float(choff.get("y", 0)) * scale_y, scale_x, scale_y)
+                    inner = (
+                        float(off.get("x", 0)) - float(choff.get("x", 0)) * scale_x,
+                        float(off.get("y", 0)) - float(choff.get("y", 0)) * scale_y,
+                        scale_x,
+                        scale_y,
+                    )
                     inner = (ox + inner[0] * sx, oy + inner[1] * sy, sx * inner[2], sy * inner[3])
                     items += _pptx_items(shape, archive, rels, inner)
                     continue
@@ -4231,7 +4750,13 @@ def _pptx_items(tree: Any, archive: Any, rels: Mapping[str, str], shift: Tuple[f
                 items.append((oy + y * sy, ox + x * sx, "body", lines))
         elif tag == "pic":
             described = shape.find("p:nvPicPr/p:cNvPr", _PPTX_NS)
-            alt = " ".join(str((described.get("descr") or described.get("title") or "") if described is not None else "").split())
+            alt = " ".join(
+                str(
+                    (described.get("descr") or described.get("title") or "")
+                    if described is not None
+                    else ""
+                ).split()
+            )
             if alt and not _DEFAULT_ALT.match(alt):
                 x, y = _pptx_offset(shape.find("p:spPr/a:xfrm", _PPTX_NS))
                 items.append((oy + y * sy, ox + x * sx, "picture", [figure_line(alt)]))
@@ -4246,20 +4771,29 @@ def _pptx_table(table: Any) -> List[str]:
         cells: List[Optional[str]] = []
         carried: Optional[str] = None
         for index, cell in enumerate(row.findall("a:tc", _PPTX_NS)):
-            text = " ".join("".join(t.text or "" for t in cell.findall(".//a:t", _PPTX_NS)).split()) or None
+            text = (
+                " ".join("".join(t.text or "" for t in cell.findall(".//a:t", _PPTX_NS)).split())
+                or None
+            )
             if cell.get("vMerge") in ("1", "true"):
                 text = below.get(index)
             elif cell.get("hMerge") in ("1", "true"):
                 text = carried
             if _int(cell.get("rowSpan"), 1) > 1 and text:
                 below[index] = text
-            carried = text if _int(cell.get("gridSpan"), 1) > 1 or cell.get("hMerge") in ("1", "true") else None
+            carried = (
+                text
+                if _int(cell.get("gridSpan"), 1) > 1 or cell.get("hMerge") in ("1", "true")
+                else None
+            )
             cells.append(text)
         rows.append(cells)
     return _header_rows_lines(rows)
 
 
-def _pptx_slide_text(root: Any, archive: Any = None, part: Optional[str] = None) -> Tuple[str, List[str]]:
+def _pptx_slide_text(
+    root: Any, archive: Any = None, part: Optional[str] = None
+) -> Tuple[str, List[str]]:
     """The slide's title and its text, read top to bottom and left to right, one line per paragraph or table row.
 
     A shape's place on the slide is its reading order, not where the file
@@ -4283,7 +4817,12 @@ def _pptx_slide_text(root: Any, archive: Any = None, part: Optional[str] = None)
             title = " ".join(" ".join(found).replace("- ", "").split())
         else:
             lines.extend(found)
-    if not title and lines and len(lines[0]) <= 100 and not lines[0].startswith(("- ", "[Figure:", "Chart")):
+    if (
+        not title
+        and lines
+        and len(lines[0]) <= 100
+        and not lines[0].startswith(("- ", "[Figure:", "Chart"))
+    ):
         title = lines.pop(0)
     return title, lines
 
@@ -4312,7 +4851,10 @@ def _pptx_notes(archive: Any, slide_part: str) -> List[str]:
         return []
     target = None
     for rel in rels.findall("rel:Relationship", _PPTX_NS):
-        if str(rel.get("Type") or "").endswith("/notesSlide") and rel.get("TargetMode") != "External":
+        if (
+            str(rel.get("Type") or "").endswith("/notesSlide")
+            and rel.get("TargetMode") != "External"
+        ):
             target = posixpath.normpath(posixpath.join(folder, rel.get("Target") or ""))
             break
     if not target:
@@ -4327,7 +4869,9 @@ def _pptx_notes(archive: Any, slide_part: str) -> List[str]:
         if placeholder is None or placeholder.get("type") != "body":
             continue
         for para in shape.findall("p:txBody/a:p", _PPTX_NS):
-            words = " ".join("".join(t.text or "" for t in para.findall(".//a:t", _PPTX_NS)).split())
+            words = " ".join(
+                "".join(t.text or "" for t in para.findall(".//a:t", _PPTX_NS)).split()
+            )
             if words:
                 lines.append(words)
     return lines
@@ -4368,7 +4912,9 @@ def _load_pptx(path: Path, images: bool = False) -> LoadedDocument:
                 # What the speaker says over the slide, which is often what it means.
                 block += "\n\nSpeaker notes: " + "\n".join(notes)
             if images:
-                for index, (suffix, data) in enumerate(_ooxml_pictures(archive, _ooxml_rels(archive, part), root), start=1):
+                for index, (suffix, data) in enumerate(
+                    _ooxml_pictures(archive, _ooxml_rels(archive, part), root), start=1
+                ):
                     name = f"s{number}-fig{index}{suffix}"
                     found[name] = data
                     block += f"\n\n[Figure: {name}]"
@@ -4412,7 +4958,9 @@ def _load_pptx(path: Path, images: bool = False) -> LoadedDocument:
 
 
 #: A page's own <meta charset>, looked for before anything is decoded.
-_META_CHARSET = re.compile(rb"""<meta[^>]{0,200}?charset\s*=\s*["']?\s*([A-Za-z0-9_.:-]+)""", re.IGNORECASE)
+_META_CHARSET = re.compile(
+    rb"""<meta[^>]{0,200}?charset\s*=\s*["']?\s*([A-Za-z0-9_.:-]+)""", re.IGNORECASE
+)
 
 
 def _decode_html(data: bytes) -> str:
@@ -4425,7 +4973,7 @@ def _decode_html(data: bytes) -> str:
     UTF-16 in a <meta> is not UTF-16, or the <meta> could not have been read.
     """
     if data.startswith(codecs.BOM_UTF8):
-        return data[len(codecs.BOM_UTF8):].decode("utf-8", errors="replace")
+        return data[len(codecs.BOM_UTF8) :].decode("utf-8", errors="replace")
     if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
         return data.decode("utf-16", errors="replace")
     said = _META_CHARSET.search(data[:8192])
@@ -4445,31 +4993,91 @@ def _decode_html(data: bytes) -> str:
 
 
 #: Elements with no end tag: never on the stack of open elements.
-_VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"})
+_VOID = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
 
 #: Elements that hold no text a reader wants: nothing inside them is read.
-_NOT_TEXT = frozenset({
-    "script", "style", "noscript", "template", "head", "title", "svg", "math", "canvas",
-    "iframe", "object", "embed", "audio", "video", "map",
-})
+_NOT_TEXT = frozenset(
+    {
+        "script",
+        "style",
+        "noscript",
+        "template",
+        "head",
+        "title",
+        "svg",
+        "math",
+        "canvas",
+        "iframe",
+        "object",
+        "embed",
+        "audio",
+        "video",
+        "map",
+    }
+)
 
 #: Elements that are around a page's content and not in it.
 _AROUND = frozenset({"nav", "dialog", "menu", "button", "select", "textarea", "datalist", "option"})
 
 #: Roles that say the same of any element.
-_AROUND_ROLES = frozenset({
-    "navigation", "banner", "contentinfo", "search", "dialog", "alertdialog", "menu", "menubar", "toolbar", "tooltip",
-})
+_AROUND_ROLES = frozenset(
+    {
+        "navigation",
+        "banner",
+        "contentinfo",
+        "search",
+        "dialog",
+        "alertdialog",
+        "menu",
+        "menubar",
+        "toolbar",
+        "tooltip",
+    }
+)
 
 #: Words in a class or an id that name something around the content, matched whole.
-_AROUND_WORDS = frozenset({"cookie", "cookies", "consent", "gdpr", "breadcrumb", "breadcrumbs", "skip", "skiplink", "modal", "popup"})
+_AROUND_WORDS = frozenset(
+    {
+        "cookie",
+        "cookies",
+        "consent",
+        "gdpr",
+        "breadcrumb",
+        "breadcrumbs",
+        "skip",
+        "skiplink",
+        "modal",
+        "popup",
+    }
+)
 
 #: Class names that hide an element, unless another class shows it again at some width.
 _HIDING_CLASSES = frozenset({"hidden", "is-hidden", "u-hidden"})
-_SHOWING_CLASS = re.compile(r"(?:^|[:-])(?:block|flex|grid|inline|inline-block|inline-flex|table|contents)$")
+_SHOWING_CLASS = re.compile(
+    r"(?:^|[:-])(?:block|flex|grid|inline|inline-block|inline-flex|table|contents)$"
+)
 
 #: Class names for text only a screen reader is given: "opens in a new window".
-_READER_ONLY = frozenset({"sr-only", "visually-hidden", "visuallyhidden", "screen-reader-text", "screenreader-only"})
+_READER_ONLY = frozenset(
+    {"sr-only", "visually-hidden", "visuallyhidden", "screen-reader-text", "screenreader-only"}
+)
 
 #: Elements a header, a footer or an aside can be part of the content inside.
 _SECTIONING = frozenset({"article", "main", "section"})
@@ -4477,10 +5085,38 @@ _SECTIONING = frozenset({"article", "main", "section"})
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 
 #: What closes an open <p> by beginning, as a browser reads it.
-_CLOSES_P = frozenset({
-    "p", "div", "ul", "ol", "dl", "table", "pre", "blockquote", "section", "article", "header", "footer", "aside",
-    "nav", "main", "figure", "form", "hr", "address", "fieldset", "details", "menu", "h1", "h2", "h3", "h4", "h5", "h6",
-})
+_CLOSES_P = frozenset(
+    {
+        "p",
+        "div",
+        "ul",
+        "ol",
+        "dl",
+        "table",
+        "pre",
+        "blockquote",
+        "section",
+        "article",
+        "header",
+        "footer",
+        "aside",
+        "nav",
+        "main",
+        "figure",
+        "form",
+        "hr",
+        "address",
+        "fieldset",
+        "details",
+        "menu",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+    }
+)
 
 #: A line the reader wrote as a list item: its indent, its marker, its words.
 _LIST_LINE = re.compile(r"^( *)(-|\d+\.)(?:\s+(.*))?$")
@@ -4502,7 +5138,9 @@ def _named_around(tag: str, given: Mapping[str, Optional[str]]) -> bool:
     whole = set(names.split())
     if whole & _READER_ONLY and not any("not-sr-only" in n for n in whole):
         return True
-    if whole & _HIDING_CLASSES and not any(_SHOWING_CLASS.search(n) for n in whole - _HIDING_CLASSES):
+    if whole & _HIDING_CLASSES and not any(
+        _SHOWING_CLASS.search(n) for n in whole - _HIDING_CLASSES
+    ):
         return True
     return bool(set(re.split(r"[^a-z0-9]+", names)) & _AROUND_WORDS)
 
@@ -4516,8 +5154,26 @@ class _HTMLText(html.parser.HTMLParser):
     """
 
     _block = {
-        "p", "div", "tr", "section", "article", "blockquote", "header", "footer", "main", "aside", "nav", "dd", "dt",
-        "hr", "address", "form", "fieldset", "dl", "details", "summary",
+        "p",
+        "div",
+        "tr",
+        "section",
+        "article",
+        "blockquote",
+        "header",
+        "footer",
+        "main",
+        "aside",
+        "nav",
+        "dd",
+        "dt",
+        "hr",
+        "address",
+        "form",
+        "fieldset",
+        "dl",
+        "details",
+        "summary",
     }
 
     def __init__(self, scope: Optional[str] = None) -> None:
@@ -4606,7 +5262,9 @@ class _HTMLText(html.parser.HTMLParser):
             return True
         if "hidden" in given and (given.get("hidden") or "").strip().lower() != "until-found":
             return True
-        if (given.get("aria-hidden") or "").strip().lower() == "true" or (given.get("aria-modal") or "").strip().lower() == "true":
+        if (given.get("aria-hidden") or "").strip().lower() == "true" or (
+            given.get("aria-modal") or ""
+        ).strip().lower() == "true":
             return True
         style = (given.get("style") or "").lower().replace(" ", "")
         if "display:none" in style or "visibility:hidden" in style:
@@ -4635,7 +5293,11 @@ class _HTMLText(html.parser.HTMLParser):
                 table["rows"].append([])
             given = dict(attrs)
             table["cell"] = []
-            table["span"] = (max(_int(given.get("colspan"), 1), 1), max(_int(given.get("rowspan"), 1), 1), tag == "th")
+            table["span"] = (
+                max(_int(given.get("colspan"), 1), 1),
+                max(_int(given.get("rowspan"), 1), 1),
+                tag == "th",
+            )
         elif tag == "caption":
             table["in_caption"] = True
         elif table["cell"] is not None:
@@ -4691,7 +5353,9 @@ class _HTMLText(html.parser.HTMLParser):
                 self._push(tag)
             return
         if self.scope is not None and self._scope_at is None:
-            if tag == self.scope or (self.scope == "main" and (given.get("role") or "").strip().lower() == "main"):
+            if tag == self.scope or (
+                self.scope == "main" and (given.get("role") or "").strip().lower() == "main"
+            ):
                 self._scope_at = len(self._open)
             else:
                 if not void:
@@ -4718,7 +5382,16 @@ class _HTMLText(html.parser.HTMLParser):
             if not self._lists:
                 self._emit("\n\n")
             start = _int(given.get("start"), 1)
-            self._lists.append({"numbered": tag == "ol", "count": start - 1, "at": len(self.parts), "words": 0, "links": 0, "items": 0})
+            self._lists.append(
+                {
+                    "numbered": tag == "ol",
+                    "count": start - 1,
+                    "at": len(self.parts),
+                    "words": 0,
+                    "links": 0,
+                    "items": 0,
+                }
+            )
         elif tag == "li":
             marker = "- "
             if self._lists:
@@ -4754,7 +5427,9 @@ class _HTMLText(html.parser.HTMLParser):
         src = given.get("src") or ""
         if src.startswith("data:"):
             src = ""
-        if (given.get("width") or "").strip() in ("0", "1") and (given.get("height") or "").strip() in ("0", "1"):
+        if (given.get("width") or "").strip() in ("0", "1") and (
+            given.get("height") or ""
+        ).strip() in ("0", "1"):
             return  # a counter, not a picture
         if self._in_figure:
             self._figure_alt = (alt or "").strip() or src or self._figure_alt
@@ -4811,7 +5486,9 @@ class _HTMLText(html.parser.HTMLParser):
             self._in_caption = False
         elif tag == "figure":
             caption = " ".join("".join(self._caption).split())
-            self._emit("\n\n" + figure_line(caption or (self._figure_alt or ""), self._figure_alt) + "\n\n")
+            self._emit(
+                "\n\n" + figure_line(caption or (self._figure_alt or ""), self._figure_alt) + "\n\n"
+            )
             self._in_figure = False
         elif tag in self._block and not self._li_fresh:
             self._emit(self._break())
@@ -4823,7 +5500,7 @@ class _HTMLText(html.parser.HTMLParser):
         top = self._lists.pop()
         menu = top["items"] >= 3 and top["words"] > 0 and top["links"] >= 0.9 * top["words"]
         if menu and self._scope_at is None and not self._within("main", "article"):
-            del self.parts[top["at"]:]
+            del self.parts[top["at"] :]
             self._length = sum(len(part) for part in self.parts)
             self.headings = [h for h in self.headings if h[0] < self._length]
             self.left_out += 1
@@ -4966,7 +5643,9 @@ def _load_html(markup: str) -> LoadedDocument:
             parser, text = whole_parser, whole
     headings = _markdown_headings(text)
     metadata: Dict[str, Any] = {}
-    title = _useful_title("".join(parser.title)) or next((h for _o, h, level in headings if level == 1), None)
+    title = _useful_title("".join(parser.title)) or next(
+        (h for _o, h, level in headings if level == 1), None
+    )
     if title:
         metadata["title"] = title
     return LoadedDocument(text=text, headings=headings, metadata=metadata)
@@ -5085,7 +5764,9 @@ def chunk(
     if strategy not in STRATEGIES:
         raise ValueError(f"strategy must be one of {STRATEGIES}, got {strategy!r}")
     if strategy == "llm" and cut_with is None:
-        raise ValueError("llm chunking needs cut_with=, a model that says where each topic starts: see vectrixdb.chunk_models.llm_cutter")
+        raise ValueError(
+            "llm chunking needs cut_with=, a model that says where each topic starts: see vectrixdb.chunk_models.llm_cutter"
+        )
     if size <= 0:
         raise ValueError("size must be positive")
     if overlap < 0 or overlap >= size:
@@ -5108,7 +5789,11 @@ def chunk(
     figures = [(m.start(), m.end()) for m in _FIGURE_IN_TEXT.finditer(doc.text)]
     for fs, fe in figures + [(len(doc.text), len(doc.text))]:
         if fs > cursor:
-            spans.extend(_strategy_spans(doc, cursor, fs, strategy, size, overlap, embed, threshold, cut_with))
+            spans.extend(
+                _strategy_spans(
+                    doc, cursor, fs, strategy, size, overlap, embed, threshold, cut_with
+                )
+            )
         if fe > fs:
             spans.append((fs, fe))
         cursor = fe
@@ -5182,9 +5867,19 @@ def _recursive_spans(text: str, size: int, overlap: int) -> List[Tuple[int, int]
     from .core.document_index import chunk_text
 
     pieces = chunk_text(text, chunk_size=size, chunk_overlap=overlap)
+    # Searching for each piece is ambiguous on repeated words: an earlier
+    # repeat inside the previous chunk matches as well, and taking it loses
+    # the text the piece really covers. Splitting the same way with offsets
+    # is exact; the search remains for a chunk_text this no longer mirrors.
+    exact = _chunk_text_spans(text, size, overlap)
+    if exact is not None and [text[a:b] for a, b in exact] == pieces:
+        return [(a, b) for a, b in exact if b > a]
+
     spans: List[Tuple[int, int]] = []
     cursor = 0
     for piece in pieces:
+        if not piece:
+            continue
         # Search back by the overlap so a carried tail is found where it was
         # carried from, but never at or before the previous chunk's start:
         # on repetitive text ``find`` would return that same occurrence again
@@ -5198,6 +5893,49 @@ def _recursive_spans(text: str, size: int, overlap: int) -> List[Tuple[int, int]
         spans.append((found, found + len(piece)))
         cursor = found + len(piece)
     return spans
+
+
+def _chunk_text_spans(text: str, size: int, overlap: int) -> Optional[List[Tuple[int, int]]]:
+    """``document_index.chunk_text`` step for step, keeping offsets instead of strings."""
+    if not text:
+        return []
+    for sep in ("\n\n", "\n", ". ", " ", ""):
+        splits: List[Tuple[int, int]] = []
+        if sep:
+            pos = 0
+            for part in text.split(sep):
+                splits.append((pos, pos + len(part)))
+                pos += len(part) + len(sep)
+        else:
+            splits = [(i, i + 1) for i in range(len(text))]
+        if all(b - a <= size for a, b in splits):
+            break
+    else:
+        if size - overlap <= 0:
+            return None
+        return [(i, min(i + size, len(text))) for i in range(0, len(text), size - overlap)]
+
+    # Splits are contiguous with one separator between them, so a run of
+    # them joined is the text from the first's start to the last's end.
+    chunks: List[Tuple[int, int]] = []
+    current: List[Tuple[int, int]] = []
+    for split in splits:
+        if current and split[1] - current[0][0] > size:
+            chunks.append((current[0][0], current[-1][1]))
+            carried: List[Tuple[int, int]] = []
+            carried_size = 0
+            for prev in reversed(current):
+                if carried_size + (prev[1] - prev[0]) > overlap:
+                    break
+                carried.insert(0, prev)
+                carried_size += prev[1] - prev[0] + len(sep)
+            current = carried
+            if current and split[1] - current[0][0] > size:
+                current = []
+        current.append(split)
+    if current:
+        chunks.append((current[0][0], current[-1][1]))
+    return chunks
 
 
 def _pack(
@@ -5300,7 +6038,10 @@ def _fixed_spans(text: str, size: int, overlap: int) -> List[Tuple[int, int]]:
         start = max(start + 1, end - overlap)
         # Carried over from a word boundary, not from the middle of one.
         if overlap and start > 0 and not text[start - 1].isspace():
-            nxt = min((i for i in (text.find(" ", start, end), text.find("\n", start, end)) if i >= 0), default=-1)
+            nxt = min(
+                (i for i in (text.find(" ", start, end), text.find("\n", start, end)) if i >= 0),
+                default=-1,
+            )
             if nxt >= 0:
                 start = nxt + 1
     return out
@@ -5318,7 +6059,9 @@ def _paragraphs(text: str, size: int) -> List[Tuple[int, int]]:
     return units
 
 
-def _llm_spans(text: str, size: int, cut_with: Callable[[str, List[Tuple[int, int]]], Sequence[int]]) -> List[Tuple[int, int]]:
+def _llm_spans(
+    text: str, size: int, cut_with: Callable[[str, List[Tuple[int, int]]], Sequence[int]]
+) -> List[Tuple[int, int]]:
     """Paragraphs grouped where a model says a new topic starts; a group longer than ``size`` is packed to it."""
     units = _paragraphs(text, size)
     if not units:
@@ -5357,7 +6100,11 @@ def _markdown_spans(doc: LoadedDocument, size: int, overlap: int) -> List[Tuple[
     # A document of headings and nothing else, an outline say, had every section
     # dropped and was indexed as nothing at all. Its headings are its text.
     if not out and text.strip():
-        return [(0, len(text))] if len(text) <= size else _recursive_spans_offset(text, (0, len(text)), size)
+        return (
+            [(0, len(text))]
+            if len(text) <= size
+            else _recursive_spans_offset(text, (0, len(text)), size)
+        )
     return out
 
 
@@ -5640,7 +6387,9 @@ class _CosmosParents:
             except ImportError as exc:
                 raise DependencyError("azure-identity", "azure") from exc
             credential = DefaultAzureCredential()
-        client = CosmosClient(f"https://{parts.hostname}:{parts.port or 443}/", credential=credential)
+        client = CosmosClient(
+            f"https://{parts.hostname}:{parts.port or 443}/", credential=credential
+        )
         database_name, container_name = names
         container = client.get_database_client(database_name).get_container_client(container_name)
         try:
@@ -5662,12 +6411,20 @@ class _CosmosParents:
 
     def put(self, parent_id: str, doc_id: str, text: str, metadata: Dict[str, Any]) -> None:
         self._container.upsert_item(
-            {"id": self._safe(parent_id), "doc": self._safe(doc_id), "parent": parent_id, "text": text, "metadata": metadata}
+            {
+                "id": self._safe(parent_id),
+                "doc": self._safe(doc_id),
+                "parent": parent_id,
+                "text": text,
+                "metadata": metadata,
+            }
         )
 
     def get(self, parent_id: str, doc_id: str) -> Optional[Tuple[str, Dict[str, Any]]]:
         try:
-            item = self._container.read_item(item=self._safe(parent_id), partition_key=self._safe(doc_id))
+            item = self._container.read_item(
+                item=self._safe(parent_id), partition_key=self._safe(doc_id)
+            )
         except Exception as exc:
             if getattr(exc, "status_code", None) == 404:
                 return None
@@ -5716,7 +6473,9 @@ class ParentStore:
     file`` from three frames inside an unrelated-looking call.
     """
 
-    def __init__(self, path: Optional[Union[str, Path]] = None, *, key: Optional[str] = None) -> None:
+    def __init__(
+        self, path: Optional[Union[str, Path]] = None, *, key: Optional[str] = None
+    ) -> None:
         self.path: Optional[Path] = None
         self._memory: Dict[str, Tuple[str, Dict[str, Any]]] = {}
         self._conn: Optional[sqlite3.Connection] = None
@@ -5831,7 +6590,9 @@ def parent_spans(doc: LoadedDocument, parent_size: int) -> List[Tuple[int, int]]
 # this module's chunker.
 _cut = chunk
 
-_FIGURE_LABEL = re.compile(r"^\s*(figure|fig\.?|chart|table|exhibit|diagram)\s+(\d+[a-z]?(?:\.\d+)?)", re.IGNORECASE)
+_FIGURE_LABEL = re.compile(
+    r"^\s*(figure|fig\.?|chart|table|exhibit|diagram)\s+(\d+[a-z]?(?:\.\d+)?)", re.IGNORECASE
+)
 
 
 @dataclass
@@ -5869,7 +6630,9 @@ def texts_to_embed(texts: Sequence[str], metadata: Any) -> List[str]:
     return out
 
 
-def link_figures(doc_id: str, chunks: Sequence[Chunk], metas: List[Dict[str, Any]], ids: Sequence[str]) -> None:
+def link_figures(
+    doc_id: str, chunks: Sequence[Chunk], metas: List[Dict[str, Any]], ids: Sequence[str]
+) -> None:
     """Give every figure a stable id, and tie it to the text that mentions it.
 
     The id is the document, the page and the figure's place on it,
@@ -5889,7 +6652,11 @@ def link_figures(doc_id: str, chunks: Sequence[Chunk], metas: List[Dict[str, Any
         label = _FIGURE_LABEL.match(c.figure) or _FIGURE_LABEL.match(c.text.split("\n", 1)[-1])
         if not label:
             continue
-        kind = "(?:figure|fig\\.?)" if label.group(1).lower().startswith("fig") else re.escape(label.group(1))
+        kind = (
+            "(?:figure|fig\\.?)"
+            if label.group(1).lower().startswith("fig")
+            else re.escape(label.group(1))
+        )
         mention = re.compile(rf"\b{kind}\s*{re.escape(label.group(2))}(?![\w.]*\d)", re.IGNORECASE)
         for other, other_meta, other_id in zip(chunks, metas, ids):
             if other.figure:
@@ -5901,9 +6668,17 @@ def link_figures(doc_id: str, chunks: Sequence[Chunk], metas: List[Dict[str, Any
             other_meta.setdefault("_vx_refers_to", []).append(chunk_id)
             m.setdefault("referenced_by", []).append(other_id)
             if "_vx_embed_suffix" not in m:
-                start = max(other.text.rfind(". ", 0, found.start()), other.text.rfind("\n", 0, found.start())) + 1
+                start = (
+                    max(
+                        other.text.rfind(". ", 0, found.start()),
+                        other.text.rfind("\n", 0, found.start()),
+                    )
+                    + 1
+                )
                 stop = other.text.find(". ", found.end())
-                sentence = " ".join(other.text[start : stop + 1 if stop != -1 else len(other.text)].split())
+                sentence = " ".join(
+                    other.text[start : stop + 1 if stop != -1 else len(other.text)].split()
+                )
                 m["_vx_embed_suffix"] = f"Mentioned as: {sentence[:400]}"
 
 
@@ -5986,7 +6761,9 @@ def prepare_document(
         # A small chunk_size with the default overlap is a request for
         # small chunks, not for an error; keep a fifth as overlap.
         overlap = chunk_size // 5
-    chunks = _cut(doc, chunk, chunk_size, overlap, embed=embed, threshold=threshold, cut_with=cut_with)
+    chunks = _cut(
+        doc, chunk, chunk_size, overlap, embed=embed, threshold=threshold, cut_with=cut_with
+    )
     if not chunks:
         return None
     cutoff = DEFAULT_THRESHOLD if quality_threshold is None else quality_threshold
@@ -5994,7 +6771,10 @@ def prepare_document(
     # the document. A chunk is told the one thing it can use: whether the
     # page it came from was read by OCR.
     about_the_document = ("pages", "doc_id", "ocr_pages", "running_lines", "figures_described_by")
-    base_meta = {**{k: v for k, v in doc.metadata.items() if k not in about_the_document}, **(metadata or {})}
+    base_meta = {
+        **{k: v for k, v in doc.metadata.items() if k not in about_the_document},
+        **(metadata or {}),
+    }
     ocr_pages = {int(n) for n in doc.metadata.get("ocr_pages") or ()}
 
     parents: List[Tuple[str, str, Dict[str, Any]]] = []
@@ -6003,7 +6783,11 @@ def prepare_document(
         spans = parent_spans(doc, parent_size)
         for j, (start, end) in enumerate(spans):
             parents.append(
-                (f"{doc_id}:parent:{j}", doc.text[start:end].strip(), {**base_meta, "_vx_doc": doc_id, "_vx_start": start, "_vx_end": end})
+                (
+                    f"{doc_id}:parent:{j}",
+                    doc.text[start:end].strip(),
+                    {**base_meta, "_vx_doc": doc_id, "_vx_start": start, "_vx_end": end},
+                )
             )
         for c in chunks:
             for j, (start, end) in enumerate(spans):
@@ -6081,7 +6865,9 @@ def prepare_document(
             note = " ".join(str(context_with(doc.text, c.text, c.start, c.end) or "").split())
             if note:
                 m["_vx_context"] = note
-                m["_vx_embed_prefix"] = f"{m['_vx_embed_prefix']}. {note}" if m.get("_vx_embed_prefix") else note
+                m["_vx_embed_prefix"] = (
+                    f"{m['_vx_embed_prefix']}. {note}" if m.get("_vx_embed_prefix") else note
+                )
         metas.append(m)
     link_figures(doc_id, chunks, metas, ids)
     chunking: Dict[str, Any] = {"strategy": chunk, "chunk_size": chunk_size, "overlap": overlap}

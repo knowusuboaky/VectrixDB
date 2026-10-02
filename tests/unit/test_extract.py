@@ -52,7 +52,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-        seen = {"path": self.path, "headers": {k.lower(): v for k, v in self.headers.items()}, "body": body}
+        seen = {
+            "path": self.path,
+            "headers": {k.lower(): v for k, v in self.headers.items()},
+            "body": body,
+        }
         self.server.seen.append(seen)
         route = self.path.split("?")[0]
         if route == "/extract/pdf":
@@ -65,7 +69,11 @@ class _Handler(BaseHTTPRequestHandler):
             }
             self._send(200, "application/json", json.dumps(reply).encode())
         elif route == "/extract/badpages":
-            self._send(200, "application/json", json.dumps({"text": "short", "pages": [[0, 1], [900, 2]]}).encode())
+            self._send(
+                200,
+                "application/json",
+                json.dumps({"text": "short", "pages": [[0, 1], [900, 2]]}).encode(),
+            )
         elif route == "/extract/notjson":
             self._send(200, "application/json", b"<html>gateway</html>")
         else:
@@ -134,7 +142,9 @@ class TestRegistry:
             seen["source"] = source
             return "text"
 
-        load_bytes(b"x", "call.wav", extractors={".wav": reader}, source="s3://bucket/acme/call.wav")
+        load_bytes(
+            b"x", "call.wav", extractors={".wav": reader}, source="s3://bucket/acme/call.wav"
+        )
         assert seen["source"] == "s3://bucket/acme/call.wav"
 
     def test_whatever_an_extractor_raises_is_one_error_type(self):
@@ -158,14 +168,18 @@ class TestRegistry:
 
 class TestCoerce:
     def test_a_string_is_read_as_markdown(self):
-        doc = coerce("# Sales\n\n| Region | Revenue |\n|---|---|\n| EMEA | 1200 |\n\n![Revenue by region](q3.png)\n")
+        doc = coerce(
+            "# Sales\n\n| Region | Revenue |\n|---|---|\n| EMEA | 1200 |\n\n![Revenue by region](q3.png)\n"
+        )
         assert "Region: EMEA; Revenue: 1200" in doc.text and "|" not in doc.text
         assert "[Figure: Revenue by region]" in doc.text
         assert [h[1] for h in doc.headings] == ["Sales"]
 
     def test_a_mapping_keeps_its_pages_and_they_move_with_the_text(self):
         text = "| A | B |\n|---|---|\n| 1 | 2 |\n\nSecond page starts here."
-        doc = coerce({"text": text, "pages": [[0, 1], [text.index("Second"), 2]], "metadata": {"ocr": True}})
+        doc = coerce(
+            {"text": text, "pages": [[0, 1], [text.index("Second"), 2]], "metadata": {"ocr": True}}
+        )
         assert doc.text.startswith("A: 1; B: 2")
         assert doc.text[doc.pages[1][0] :].startswith("Second page")
         assert doc.page_at(doc.text.index("Second")) == 2 and doc.metadata == {"ocr": True}
@@ -207,7 +221,9 @@ class TestHttpExtractor:
 
     def test_multipart_is_the_default(self, server):
         httpd, url = server
-        HttpExtractor(url, routes={"pdf": "extract/pdf"}, headers={"x-api-key": "k"})(b"PDFDATA", 'we"ird.pdf')
+        HttpExtractor(url, routes={"pdf": "extract/pdf"}, headers={"x-api-key": "k"})(
+            b"PDFDATA", 'we"ird.pdf'
+        )
         seen = httpd.seen[-1]
         assert seen["headers"]["content-type"].startswith("multipart/form-data; boundary=")
         assert b'name="file"; filename="weird.pdf"' in seen["body"] and b"PDFDATA" in seen["body"]
@@ -216,7 +232,9 @@ class TestHttpExtractor:
     def test_a_name_a_header_cannot_carry_is_percent_encoded(self, server):
         httpd, url = server
         HttpExtractor(url, routes={".pdf": "/extract/pdf"}, body="raw")(b"x", "résumé 東京.pdf")
-        assert httpd.seen[-1]["headers"]["x-filename"] == "r%C3%A9sum%C3%A9%20%E6%9D%B1%E4%BA%AC.pdf"
+        assert (
+            httpd.seen[-1]["headers"]["x-filename"] == "r%C3%A9sum%C3%A9%20%E6%9D%B1%E4%BA%AC.pdf"
+        )
 
     def test_a_json_reply_carries_pages(self, server):
         _, url = server
@@ -226,7 +244,9 @@ class TestHttpExtractor:
 
     def test_anything_but_success_names_the_route_and_the_status(self, server):
         _, url = server
-        with pytest.raises(ExtractionError, match=r"/extract/wav answered 500 for call.wav: model not loaded") as caught:
+        with pytest.raises(
+            ExtractionError, match=r"/extract/wav answered 500 for call.wav: model not loaded"
+        ) as caught:
             HttpExtractor(url, routes={".wav": "/extract/wav"})(b"x", "call.wav")
         assert caught.value.route == "/extract/wav" and caught.value.status == 500
 
@@ -241,7 +261,9 @@ class TestHttpExtractor:
             HttpExtractor(url, routes={".pdf": "/extract/notjson"})(b"x", "scan.pdf")
 
     def test_an_endpoint_that_is_not_there(self):
-        reader = HttpExtractor("http://127.0.0.1:9", routes={".pdf": "/extract/pdf"}, timeout=2, retries=0)
+        reader = HttpExtractor(
+            "http://127.0.0.1:9", routes={".pdf": "/extract/pdf"}, timeout=2, retries=0
+        )
         with pytest.raises(ExtractionError, match="could not be reached") as caught:
             reader(b"x", "scan.pdf")
         assert caught.value.route == "/extract/pdf" and caught.value.status is None
@@ -259,7 +281,14 @@ class TestHttpExtractor:
                 return 429, {}, b"slow down"
             return 200, {"Content-Type": "text/plain"}, b"read at last"
 
-        reader = HttpExtractor("https://ai.example.test", routes={".pdf": "/extract/pdf"}, transport=transport, retries=3, backoff=1.0, sleep=waited.append)
+        reader = HttpExtractor(
+            "https://ai.example.test",
+            routes={".pdf": "/extract/pdf"},
+            transport=transport,
+            retries=3,
+            backoff=1.0,
+            sleep=waited.append,
+        )
         assert reader(b"x", "a.pdf").text == "read at last" and len(calls) == 4
         assert 0.5 <= waited[0] <= 1.5, "the first wait is about a second, with jitter"
         assert waited[1] == 2.0, "Retry-After is honoured as it is"
@@ -272,8 +301,16 @@ class TestHttpExtractor:
             calls.append(1)
             raise ConnectionError("refused")
 
-        reader = HttpExtractor("https://ai.example.test", routes={".pdf": "/extract/pdf"}, transport=down, retries=2, sleep=waited.append)
-        with pytest.raises(ExtractionError, match=r"/extract/pdf could not be reached after 3 tries: refused"):
+        reader = HttpExtractor(
+            "https://ai.example.test",
+            routes={".pdf": "/extract/pdf"},
+            transport=down,
+            retries=2,
+            sleep=waited.append,
+        )
+        with pytest.raises(
+            ExtractionError, match=r"/extract/pdf could not be reached after 3 tries: refused"
+        ):
             reader(b"x", "a.pdf")
         assert len(calls) == 3 and len(waited) == 2
 
@@ -283,14 +320,28 @@ class TestHttpExtractor:
 
         calls.clear()
         with pytest.raises(ExtractionError, match=r"answered 500 for a.pdf: model not loaded$"):
-            HttpExtractor("https://ai.example.test", routes={".pdf": "/extract/pdf"}, transport=broken, retries=3, sleep=waited.append)(b"x", "a.pdf")
-        assert calls == [2], "a 500 is the file's or the service's own fault, not the network's: asked once"
+            HttpExtractor(
+                "https://ai.example.test",
+                routes={".pdf": "/extract/pdf"},
+                transport=broken,
+                retries=3,
+                sleep=waited.append,
+            )(b"x", "a.pdf")
+        assert calls == [2], (
+            "a 500 is the file's or the service's own fault, not the network's: asked once"
+        )
 
         def busy(method, url, headers, body, timeout):
             return 503, {}, b"busy"
 
         with pytest.raises(ExtractionError, match=r"answered 503 for a.pdf: busy \(2 tries\)"):
-            HttpExtractor("https://ai.example.test", routes={".pdf": "/extract/pdf"}, transport=busy, retries=1, sleep=waited.append)(b"x", "a.pdf")
+            HttpExtractor(
+                "https://ai.example.test",
+                routes={".pdf": "/extract/pdf"},
+                transport=busy,
+                retries=1,
+                sleep=waited.append,
+            )(b"x", "a.pdf")
 
     def test_the_retries_come_from_the_environment(self, monkeypatch):
         monkeypatch.setenv("VECTRIXDB_EXTRACTOR_URL", "https://ai.example.test")
@@ -307,7 +358,9 @@ class TestHttpExtractor:
             calls.append((method, url, timeout))
             return 200, {"Content-Type": "text/plain"}, b"from the transport"
 
-        reader = HttpExtractor("https://ai.example.test/", routes={".png": "/ocr"}, timeout=7, transport=transport)
+        reader = HttpExtractor(
+            "https://ai.example.test/", routes={".png": "/ocr"}, timeout=7, transport=transport
+        )
         assert reader(b"x", "page.png").text == "from the transport"
         assert calls == [("POST", "https://ai.example.test/ocr", 7.0)]
 
@@ -317,36 +370,107 @@ class TestHttpExtractor:
         def transport(method, url, headers, body, timeout):
             calls.append(url)
             if "json" in headers.get("Accept", ""):
-                return 200, {"Content-Type": "application/json"}, json.dumps({"text": "Call [PHONE]", "masking": {"text": "never kept", "found": [{"type": "phone"}], "counts": {"phone": 1}, "score": 0.5, "engine": "regex", "language": "en", "regex_only": False}}).encode()
+                return (
+                    200,
+                    {"Content-Type": "application/json"},
+                    json.dumps(
+                        {
+                            "text": "Call [PHONE]",
+                            "masking": {
+                                "text": "never kept",
+                                "found": [{"type": "phone"}],
+                                "counts": {"phone": 1},
+                                "score": 0.5,
+                                "engine": "regex",
+                                "language": "en",
+                                "regex_only": False,
+                            },
+                        }
+                    ).encode(),
+                )
             return 200, {"Content-Type": "text/plain"}, b"x"
 
-        reader = HttpExtractor("https://ai.example.test", routes={".txt": "/extract/txt", ".md": "/extract/md?verbose=1"}, transport=transport, mask=True)
+        reader = HttpExtractor(
+            "https://ai.example.test",
+            routes={".txt": "/extract/txt", ".md": "/extract/md?verbose=1"},
+            transport=transport,
+            mask=True,
+        )
         doc = reader(b"Call 416-555-0199", "call.txt")
         assert calls[-1] == "https://ai.example.test/extract/txt?mask=1"
-        assert doc.text == "Call [PHONE]" and doc.metadata["masking"] == {"counts": {"phone": 1}, "score": 0.5, "engine": "regex", "language": "en", "regex_only": False}, "counts and the score, never the text or the offsets"
-        assert doc.metadata["extractor"] == "https://ai.example.test/extract/txt", "the route it went to, without the question"
+        assert doc.text == "Call [PHONE]" and doc.metadata["masking"] == {
+            "counts": {"phone": 1},
+            "score": 0.5,
+            "engine": "regex",
+            "language": "en",
+            "regex_only": False,
+        }, "counts and the score, never the text or the offsets"
+        assert doc.metadata["extractor"] == "https://ai.example.test/extract/txt", (
+            "the route it went to, without the question"
+        )
         reader(b"x", "notes.md")
-        assert calls[-1] == "https://ai.example.test/extract/md?verbose=1&mask=1", "a route with a query of its own keeps it"
-        typed = HttpExtractor("https://ai.example.test", routes={".txt": "/extract/txt"}, transport=transport, mask=["email", "SSN"])
+        assert calls[-1] == "https://ai.example.test/extract/md?verbose=1&mask=1", (
+            "a route with a query of its own keeps it"
+        )
+        typed = HttpExtractor(
+            "https://ai.example.test",
+            routes={".txt": "/extract/txt"},
+            transport=transport,
+            mask=["email", "SSN"],
+        )
         typed(b"x", "a.txt")
         assert calls[-1] == "https://ai.example.test/extract/txt?mask=1&types=email,ssn"
-        assert HttpExtractor("https://ai.example.test", routes={".txt": "/x"}, mask="all").mask == "mask=1&types=all"
-        assert HttpExtractor("https://ai.example.test", routes={".txt": "/x"}, mask="off").mask == "" and HttpExtractor("https://ai.example.test", routes={".txt": "/x"}).mask == ""
+        assert (
+            HttpExtractor("https://ai.example.test", routes={".txt": "/x"}, mask="all").mask
+            == "mask=1&types=all"
+        )
+        assert (
+            HttpExtractor("https://ai.example.test", routes={".txt": "/x"}, mask="off").mask == ""
+            and HttpExtractor("https://ai.example.test", routes={".txt": "/x"}).mask == ""
+        )
 
     def test_a_markdown_reply_carries_its_masking_in_a_header(self):
         def transport(method, url, headers, body, timeout):
-            return 200, {"Content-Type": "text/markdown", "X-Masking": json.dumps({"counts": {"email": 2}, "score": 0.7, "engine": "language", "regex_only": False})}, b"# Notes\n\na\u2022\u2022\u2022@example.com"
+            return (
+                200,
+                {
+                    "Content-Type": "text/markdown",
+                    "X-Masking": json.dumps(
+                        {
+                            "counts": {"email": 2},
+                            "score": 0.7,
+                            "engine": "language",
+                            "regex_only": False,
+                        }
+                    ),
+                },
+                b"# Notes\n\na\u2022\u2022\u2022@example.com",
+            )
 
-        reader = HttpExtractor("https://ai.example.test", routes={".md": "/extract/md"}, transport=transport, mask="1")
+        reader = HttpExtractor(
+            "https://ai.example.test", routes={".md": "/extract/md"}, transport=transport, mask="1"
+        )
         doc = reader(b"x", "notes.md")
-        assert doc.metadata["masking"]["counts"] == {"email": 2} and doc.metadata["masking"]["engine"] == "language"
+        assert (
+            doc.metadata["masking"]["counts"] == {"email": 2}
+            and doc.metadata["masking"]["engine"] == "language"
+        )
 
     def test_the_setting_asks_for_masking(self):
         url = {"VECTRIXDB_EXTRACTOR_URL": "https://extract.example.com"}
-        reader = HttpExtractor.from_environment({**url, "VECTRIXDB_EXTRACTOR_MASK": "1"}, routes={".pdf": "/extract/pdf"})
+        reader = HttpExtractor.from_environment(
+            {**url, "VECTRIXDB_EXTRACTOR_MASK": "1"}, routes={".pdf": "/extract/pdf"}
+        )
         assert reader.mask == "mask=1"
-        assert HttpExtractor.from_environment({**url, "VECTRIXDB_EXTRACTOR_MASK": "email, phone"}, routes={".pdf": "/extract/pdf"}).mask == "mask=1&types=email,phone"
-        assert HttpExtractor.from_environment(url, routes={".pdf": "/extract/pdf"}).mask == "", "not asked unless said"
+        assert (
+            HttpExtractor.from_environment(
+                {**url, "VECTRIXDB_EXTRACTOR_MASK": "email, phone"}, routes={".pdf": "/extract/pdf"}
+            ).mask
+            == "mask=1&types=email,phone"
+        )
+        assert HttpExtractor.from_environment(url, routes={".pdf": "/extract/pdf"}).mask == "", (
+            "not asked unless said"
+        )
 
     def test_what_construction_refuses(self):
         with pytest.raises(ValueError, match="http or https"):
@@ -374,7 +498,10 @@ class TestThroughVectrix:
         scan = tmp_path / "scan.pdf"
         scan.write_bytes(b"%PDF scanned")
         db = Vectrix(
-            "docs", path=str(tmp_path / "db"), embed_fn=embed, dimension=8,
+            "docs",
+            path=str(tmp_path / "db"),
+            embed_fn=embed,
+            dimension=8,
             extractors=HttpExtractor(url, routes={".pdf": "/extract/pages"}, body="raw"),
         )
         try:
@@ -392,8 +519,13 @@ class TestThroughVectrix:
         call = tmp_path / "call.wav"
         call.write_bytes(b"RIFF....")
         db = Vectrix(
-            "calls", path=str(tmp_path / "db"), embed_fn=embed, dimension=8,
-            extractors={".wav": lambda data, name: "The customer asked to defer the October payment."},
+            "calls",
+            path=str(tmp_path / "db"),
+            embed_fn=embed,
+            dimension=8,
+            extractors={
+                ".wav": lambda data, name: "The customer asked to defer the October payment."
+            },
         )
         try:
             assert db.add_document(call) == 1
@@ -406,7 +538,13 @@ class TestThroughVectrix:
         from vectrixdb import Vectrix
 
         with pytest.raises(TypeError, match="callable"):
-            Vectrix("bad", path=str(tmp_path / "db"), embed_fn=embed, dimension=8, extractors={".pdf": 3})
+            Vectrix(
+                "bad",
+                path=str(tmp_path / "db"),
+                embed_fn=embed,
+                dimension=8,
+                extractors={".pdf": 3},
+            )
 
 
 class TestEmbedHeading:
@@ -419,7 +557,9 @@ class TestEmbedHeading:
             seen.extend(texts)
             return embed(texts)
 
-        db = Vectrix("policy", path=str(tmp_path / "db"), embed_fn=spy, dimension=8, embedding_cache=False)
+        db = Vectrix(
+            "policy", path=str(tmp_path / "db"), embed_fn=spy, dimension=8, embedding_cache=False
+        )
         try:
             db.add_document(TWO_PAGES, chunk="markdown", embed_heading=True, doc_id="terms")
             assert "Terms > Late fees: Interest accrues monthly on any overdue balance." in seen
@@ -440,13 +580,18 @@ class TestEmbedHeading:
 
         seen = []
         db = Vectrix(
-            "plain", path=str(tmp_path / "db"), dimension=8, embedding_cache=False,
+            "plain",
+            path=str(tmp_path / "db"),
+            dimension=8,
+            embedding_cache=False,
             embed_fn=lambda texts: (seen.extend(texts), embed(texts))[1],
         )
         try:
             db.add_document(TWO_PAGES, chunk="markdown", doc_id="terms")
             assert "Interest accrues monthly on any overdue balance." in seen
-            assert all("_vx_embed_prefix" not in m for _, _, m in db._collection._iter_documents_raw())
+            assert all(
+                "_vx_embed_prefix" not in m for _, _, m in db._collection._iter_documents_raw()
+            )
         finally:
             db.close()
 
@@ -459,15 +604,25 @@ class TestWorker:
         from vectrixdb import Vectrix
         from vectrixdb.worker import IngestWorker, LocalFetcher
 
-        db = Vectrix("inbox", path=str(tmp_path / "db"), embed_fn=embed, dimension=8, extractors={".pdf": reader})
-        return db, IngestWorker(db, LocalFetcher(), doc_id_of=lambda uri: uri.rsplit("/", 1)[-1], **options)
+        db = Vectrix(
+            "inbox",
+            path=str(tmp_path / "db"),
+            embed_fn=embed,
+            dimension=8,
+            extractors={".pdf": reader},
+        )
+        return db, IngestWorker(
+            db, LocalFetcher(), doc_id_of=lambda uri: uri.rsplit("/", 1)[-1], **options
+        )
 
     def test_it_uses_the_extractors_the_collection_was_opened_with(self, tmp_path):
         from vectrixdb.worker import IngestEvent
 
         scan = tmp_path / "scan.pdf"
         scan.write_bytes(b"%PDF")
-        db, worker = self._worker(tmp_path, lambda data, name: "OCR says the covenant is tested quarterly.")
+        db, worker = self._worker(
+            tmp_path, lambda data, name: "OCR says the covenant is tested quarterly."
+        )
         try:
             outcome = worker.handle(IngestEvent("created", scan.as_uri()))
             assert outcome.action == "created" and outcome.chunks == 1 and outcome.error is None
@@ -511,7 +666,9 @@ class TestWorker:
 
         db, worker = self._worker(tmp_path, reader, on_error="record")
         try:
-            first, second = worker.handle_all([IngestEvent("created", bad.as_uri()), IngestEvent("created", good.as_uri())])
+            first, second = worker.handle_all(
+                [IngestEvent("created", bad.as_uri()), IngestEvent("created", good.as_uri())]
+            )
             assert first.action == "failed" and "unreadable" in first.error and first.chunks == 0
             assert second.action == "created"
         finally:
@@ -531,17 +688,26 @@ class TestFromTheEnvironment:
         assert HttpExtractor.from_environment({}, routes={".pdf": "/extract/pdf"}) is None
 
     def test_the_routes_given_are_what_it_reads_by(self):
-        reader = HttpExtractor.from_environment(self.URL, routes={".pdf": "/extract/pdf", ".png": "/transcribe/image"})
+        reader = HttpExtractor.from_environment(
+            self.URL, routes={".pdf": "/extract/pdf", ".png": "/transcribe/image"}
+        )
         assert reader.route_for("q3.pdf") == "/extract/pdf" and reader.route_for("x.zip") is None
         assert reader.body == "raw" and reader.timeout == 300 and reader.headers == {}
 
     def test_the_key_goes_in_the_header_it_is_told(self):
-        env = {**self.URL, "VECTRIXDB_EXTRACTOR_KEY": "k", "VECTRIXDB_EXTRACTOR_KEY_HEADER": "api-key", "VECTRIXDB_EXTRACTOR_TIMEOUT": "230"}
+        env = {
+            **self.URL,
+            "VECTRIXDB_EXTRACTOR_KEY": "k",
+            "VECTRIXDB_EXTRACTOR_KEY_HEADER": "api-key",
+            "VECTRIXDB_EXTRACTOR_TIMEOUT": "230",
+        }
         reader = HttpExtractor.from_environment(env, routes={".pdf": "/extract/pdf"})
         assert reader.headers == {"api-key": "k"} and reader.timeout == 230
 
     def test_the_key_header_is_x_api_key_unless_told(self):
-        reader = HttpExtractor.from_environment({**self.URL, "VECTRIXDB_EXTRACTOR_KEY": "k"}, routes={".pdf": "/extract/pdf"})
+        reader = HttpExtractor.from_environment(
+            {**self.URL, "VECTRIXDB_EXTRACTOR_KEY": "k"}, routes={".pdf": "/extract/pdf"}
+        )
         assert reader.headers == {"x-api-key": "k"}
 
     def test_the_routes_setting_wins_over_the_routes_given(self):
@@ -555,7 +721,13 @@ class TestFromTheEnvironment:
             ({"VECTRIXDB_EXTRACTOR_ROUTES": "{not json"}, "not JSON"),
             ({"VECTRIXDB_EXTRACTOR_ROUTES": "[1, 2]"}, "mapping of suffix"),
             ({}, "nothing says which route"),
-            ({"VECTRIXDB_EXTRACTOR_URL": "ftp://extract.example.com", "VECTRIXDB_EXTRACTOR_ROUTES": '{".pdf": "/p"}'}, "http or https"),
+            (
+                {
+                    "VECTRIXDB_EXTRACTOR_URL": "ftp://extract.example.com",
+                    "VECTRIXDB_EXTRACTOR_ROUTES": '{".pdf": "/p"}',
+                },
+                "http or https",
+            ),
         ],
     )
     def test_settings_it_cannot_use_are_refused_by_name(self, env, says):
@@ -563,4 +735,3 @@ class TestFromTheEnvironment:
 
         with pytest.raises(ConfigurationError, match=says):
             HttpExtractor.from_environment({**self.URL, **env})
-

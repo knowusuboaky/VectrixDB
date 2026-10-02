@@ -19,7 +19,10 @@ RFC_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # "12345678901234567890", the R
 
 
 class TestCodes:
-    @pytest.mark.parametrize("at, code", [(59, "287082"), (1111111109, "081804"), (1234567890, "005924"), (2000000000, "279037")])
+    @pytest.mark.parametrize(
+        "at, code",
+        [(59, "287082"), (1111111109, "081804"), (1234567890, "005924"), (2000000000, "279037")],
+    )
     def test_the_rfc_6238_vectors(self, at, code):
         assert totp.code_at(RFC_SECRET, at // 30) == code
 
@@ -34,7 +37,9 @@ class TestCodes:
         code = totp.code_at(RFC_SECRET, now // 30)
         step = totp.verify(RFC_SECRET, code, now=now)
         assert step is not None
-        assert totp.verify(RFC_SECRET, code, last_step=step, now=now) is None, "read over a shoulder, it is already spent"
+        assert totp.verify(RFC_SECRET, code, last_step=step, now=now) is None, (
+            "read over a shoulder, it is already spent"
+        )
 
     @pytest.mark.parametrize("junk", ["", "12345", "1234567", "abcdef", None])
     def test_what_is_not_six_digits_is_not_a_code(self, junk):
@@ -42,7 +47,11 @@ class TestCodes:
 
     def test_the_address_an_authenticator_app_reads(self):
         uri = totp.provisioning_uri("ABC", "ada@example.com")
-        assert uri.startswith("otpauth://totp/VectrixDB%3Aada%40example.com?") and "secret=ABC" in uri and "issuer=VectrixDB" in uri
+        assert (
+            uri.startswith("otpauth://totp/VectrixDB%3Aada%40example.com?")
+            and "secret=ABC" in uri
+            and "issuer=VectrixDB" in uri
+        )
 
     def test_recovery_codes(self):
         codes = totp.new_recovery_codes()
@@ -68,7 +77,15 @@ class TestTheStore:
         secret = store.begin_enrolment("ada@example.com")
         token = store.new_link("ada@example.com")
         codes = store.new_recovery_codes("ada@example.com")
-        sid, _ = store.open_session(subject="ada", email="ada@example.com", name=None, role="admin", principal={}, method="email", hours=1)
+        sid, _ = store.open_session(
+            subject="ada",
+            email="ada@example.com",
+            name=None,
+            role="admin",
+            principal={},
+            method="email",
+            hours=1,
+        )
         raw = sqlite3.connect(str(tmp_path / "auth" / "signin.db"))
         dump = "\n".join(str(row) for row in raw.execute("SELECT * FROM records"))
         raw.close()
@@ -79,7 +96,11 @@ class TestTheStore:
         old = SignInStore(":memory:", ["a" * 40])
         signed = old.sign("value")
         assert old.unsign(signed) == "value"
-        assert old.unsign(signed[:-2] + "zz") is None and old.unsign("value") is None and old.unsign(None) is None
+        assert (
+            old.unsign(signed[:-2] + "zz") is None
+            and old.unsign("value") is None
+            and old.unsign(None) is None
+        )
         rotating = SignInStore(":memory:", ["b" * 40, "a" * 40])
         assert rotating.unsign(signed) == "value", "the old secret still verifies"
         assert SignInStore(":memory:", ["b" * 40]).unsign(signed) is None, "until it is taken away"
@@ -89,12 +110,23 @@ class TestTheStore:
         secret = store.begin_enrolment("ada@example.com")
         assert store.pending_secret("ada@example.com") == secret
         now = time.time()
-        assert not store.check_code("ada@example.com", totp.code_at(secret, totp.step_now(now)), now=now), "not confirmed yet, so it cannot sign in"
-        assert store.check_code("ada@example.com", totp.code_at(secret, totp.step_now(now)), confirming=True, now=now)
-        assert store.person("ada@example.com").enrolled and store.pending_secret("ada@example.com") is None
-        assert not store.check_code("ada@example.com", totp.code_at(secret, totp.step_now(now)), now=now), "the confirming code is spent"
+        assert not store.check_code(
+            "ada@example.com", totp.code_at(secret, totp.step_now(now)), now=now
+        ), "not confirmed yet, so it cannot sign in"
+        assert store.check_code(
+            "ada@example.com", totp.code_at(secret, totp.step_now(now)), confirming=True, now=now
+        )
+        assert (
+            store.person("ada@example.com").enrolled
+            and store.pending_secret("ada@example.com") is None
+        )
+        assert not store.check_code(
+            "ada@example.com", totp.code_at(secret, totp.step_now(now)), now=now
+        ), "the confirming code is spent"
         later = now + 30
-        assert store.check_code("ada@example.com", totp.code_at(secret, totp.step_now(later)), now=later)
+        assert store.check_code(
+            "ada@example.com", totp.code_at(secret, totp.step_now(later)), now=later
+        )
 
     def test_a_link_works_once_and_not_late(self, store):
         store.put_person("ada@example.com", "viewer")
@@ -124,15 +156,31 @@ class TestTheStore:
         assert not store.locked("code:ada@example.com")
 
     def test_a_session_ends_by_the_clock_by_idleness_and_by_sign_out(self, store):
-        sid, session = store.open_session(subject="s", email=None, name="S", role="viewer", principal={"clients": ["a"]}, method="oidc", hours=1)
+        sid, session = store.open_session(
+            subject="s",
+            email=None,
+            name="S",
+            role="viewer",
+            principal={"clients": ["a"]},
+            method="oidc",
+            hours=1,
+        )
         found = store.session(sid)
-        assert found.role == "viewer" and found.principal == {"clients": ["a"]} and found.csrf == session.csrf
+        assert (
+            found.role == "viewer"
+            and found.principal == {"clients": ["a"]}
+            and found.csrf == session.csrf
+        )
         assert store.session("not-a-session") is None and store.session(None) is None
         assert store.session(sid, idle_minutes=-1) is None, "idle too long, and gone for good"
         assert store.session(sid) is None
-        expired, _ = store.open_session(subject="s", email=None, name=None, role="viewer", principal={}, method="oidc", hours=-1)
+        expired, _ = store.open_session(
+            subject="s", email=None, name=None, role="viewer", principal={}, method="oidc", hours=-1
+        )
         assert store.session(expired) is None
-        sid2, _ = store.open_session(subject="s", email=None, name=None, role="viewer", principal={}, method="oidc", hours=1)
+        sid2, _ = store.open_session(
+            subject="s", email=None, name=None, role="viewer", principal={}, method="oidc", hours=1
+        )
         store.close_session(sid2)
         assert store.session(sid2) is None
 
@@ -142,23 +190,62 @@ class TestTheStore:
         with pytest.raises(ConfigurationError):
             store.put_person("not an address", "admin")
         with pytest.raises(ConfigurationError):
-            store.open_session(subject="s", email=None, name=None, role="root", principal={}, method="oidc", hours=1)
+            store.open_session(
+                subject="s",
+                email=None,
+                name=None,
+                role="root",
+                principal={},
+                method="oidc",
+                hours=1,
+            )
 
     def test_changing_a_role_resetting_and_removing_all_end_sessions(self, store):
         store.put_person("ada@example.com", "operator")
-        sid, _ = store.open_session(subject="ada@example.com", email="ada@example.com", name=None, role="operator", principal={}, method="email", hours=1)
+        sid, _ = store.open_session(
+            subject="ada@example.com",
+            email="ada@example.com",
+            name=None,
+            role="operator",
+            principal={},
+            method="email",
+            hours=1,
+        )
         store.put_person("ada@example.com", "viewer")
         assert store.session(sid) is None, "a session carries the role it was opened with"
-        sid, _ = store.open_session(subject="ada@example.com", email="ada@example.com", name=None, role="viewer", principal={}, method="email", hours=1)
+        sid, _ = store.open_session(
+            subject="ada@example.com",
+            email="ada@example.com",
+            name=None,
+            role="viewer",
+            principal={},
+            method="email",
+            hours=1,
+        )
         store.reset_authenticator("ada@example.com")
         assert store.session(sid) is None and not store.person("ada@example.com").enrolled
-        sid, _ = store.open_session(subject="ada@example.com", email="ada@example.com", name=None, role="viewer", principal={}, method="email", hours=1)
-        assert store.remove_person("ada@example.com") and store.session(sid) is None and store.person("ada@example.com") is None
+        sid, _ = store.open_session(
+            subject="ada@example.com",
+            email="ada@example.com",
+            name=None,
+            role="viewer",
+            principal={},
+            method="email",
+            hours=1,
+        )
+        assert (
+            store.remove_person("ada@example.com")
+            and store.session(sid) is None
+            and store.person("ada@example.com") is None
+        )
 
     def test_seeding_adds_whoever_is_missing_and_changes_nobody(self, store):
         store.put_person("ada@example.com", "viewer")
         assert store.seed([("ada@example.com", "admin"), ("sam@example.com", "operator")]) == 1
-        assert store.person("ada@example.com").role == "viewer" and store.person("sam@example.com").role == "operator"
+        assert (
+            store.person("ada@example.com").role == "viewer"
+            and store.person("sam@example.com").role == "operator"
+        )
 
 
 class TestRoles:
@@ -198,12 +285,22 @@ class TestRoles:
         assert roles.can("viewer", "meta.read") and roles.can("viewer", "content.index")
         assert not roles.can("viewer", "content.read") and not roles.can("viewer", "search")
         assert roles.can("operator", "search") and roles.can("operator", "content.write")
-        assert not roles.can("operator", "collection.delete") and not roles.can("operator", "audit.read") and not roles.can("operator", "people.manage")
+        assert (
+            not roles.can("operator", "collection.delete")
+            and not roles.can("operator", "audit.read")
+            and not roles.can("operator", "people.manage")
+        )
         assert all(roles.can("admin", action) for action in roles.ACTIONS)
-        assert roles.can("reader", "content.read") and not roles.can("reader", "search") and not roles.can("reader", "content.write")
+        assert (
+            roles.can("reader", "content.read")
+            and not roles.can("reader", "search")
+            and not roles.can("reader", "content.write")
+        )
 
     def test_denied_by_default_twice(self):
-        assert not roles.can("operator", None), "a route nobody placed is closed to everyone but an admin"
+        assert not roles.can("operator", None), (
+            "a route nobody placed is closed to everyone but an admin"
+        )
         assert roles.can("admin", None)
         for role in ("root", "", None, "Admin"):
             assert not roles.can(role, "meta.read"), "a role nobody defined holds nothing"
@@ -229,30 +326,71 @@ class TestRoles:
         assert len(routes) > 60, "the walk found the routes"
         # Emergency sign-in is a way in, like the others, and answers 404 while it is off.
         open_to_all = {
-            "/", "/health", "/auth/status", "/auth/me", "/auth/signout", "/ws", "/brand.json", "/brand.css", "/brand/logo", "/brand/logo-dark",
-            "/auth/break-glass", "/auth/developer",
+            "/",
+            "/health",
+            "/auth/status",
+            "/auth/me",
+            "/auth/signout",
+            "/ws",
+            "/brand.json",
+            "/brand.css",
+            "/brand/logo",
+            "/brand/logo-dark",
+            "/auth/break-glass",
+            "/auth/developer",
         }
         unplaced = []
         for route in routes:
             path = getattr(route, "path", "")
-            if path in open_to_all or path.startswith(("/auth/oidc/", "/auth/email/", "/auth/passkey/", "/auth/password/", "/docs", "/redoc", "/openapi")):
+            if path in open_to_all or path.startswith(
+                (
+                    "/auth/oidc/",
+                    "/auth/email/",
+                    "/auth/passkey/",
+                    "/auth/password/",
+                    "/docs",
+                    "/redoc",
+                    "/openapi",
+                )
+            ):
                 continue
-            concrete = path.replace("{name}", "docs").replace("{point_id}", "p").replace("{doc_id:path}", "d").replace("{doc_id}", "d").replace("{email}", "a@b.c")
+            concrete = (
+                path.replace("{name}", "docs")
+                .replace("{point_id}", "p")
+                .replace("{doc_id:path}", "d")
+                .replace("{doc_id}", "d")
+                .replace("{email}", "a@b.c")
+            )
             for method in getattr(route, "methods", None) or ():
                 if method not in ("HEAD", "OPTIONS") and roles.action_for(method, concrete) is None:
                     unplaced.append(f"{method} {path}")
-        assert not unplaced, f"only an admin can call these until somebody decides who they are for: {unplaced}"
+        assert not unplaced, (
+            f"only an admin can call these until somebody decides who they are for: {unplaced}"
+        )
 
 
 class TestConfiguration:
-    BASE = {"VECTRIXDB_SIGNIN": "email", "VECTRIXDB_SIGNIN_SECRET": SECRET, "VECTRIXDB_PUBLIC_URL": "https://vectors.example.com/"}
+    BASE = {
+        "VECTRIXDB_SIGNIN": "email",
+        "VECTRIXDB_SIGNIN_SECRET": SECRET,
+        "VECTRIXDB_PUBLIC_URL": "https://vectors.example.com/",
+    }
 
     def test_off_unless_asked_for(self, tmp_path):
         assert not SignInConfig.from_env(tmp_path, {}).enabled
 
     def test_email(self, tmp_path):
-        config = SignInConfig.from_env(tmp_path, {**self.BASE, "VECTRIXDB_SIGNIN_USERS": "ada@example.com:admin, sam@example.com:viewer"})
-        assert config.enabled and config.users == (("ada@example.com", "admin"), ("sam@example.com", "viewer"))
+        config = SignInConfig.from_env(
+            tmp_path,
+            {
+                **self.BASE,
+                "VECTRIXDB_SIGNIN_USERS": "ada@example.com:admin, sam@example.com:viewer",
+            },
+        )
+        assert config.enabled and config.users == (
+            ("ada@example.com", "admin"),
+            ("sam@example.com", "viewer"),
+        )
         assert config.public_url == "https://vectors.example.com" and config.secure_cookies
         assert config.store_path == tmp_path / "auth" / "signin.db"
 
@@ -264,10 +402,36 @@ class TestConfiguration:
             ({"VECTRIXDB_PUBLIC_URL": ""}, "VECTRIXDB_PUBLIC_URL"),
             ({"VECTRIXDB_PUBLIC_URL": "http://vectors.example.com"}, "https"),
             ({"VECTRIXDB_SIGNIN_USERS": "ada@example.com:root"}, "address:role"),
-            ({"VECTRIXDB_SIGNIN": "oidc", "VECTRIXDB_OIDC_CLIENT_ID": "c"}, "VECTRIXDB_OIDC_ISSUER"),
-            ({"VECTRIXDB_SIGNIN": "oidc", "VECTRIXDB_OIDC_ISSUER": "https://idp", "VECTRIXDB_OIDC_CLIENT_ID": "c"}, "nobody who signs in has a role"),
-            ({"VECTRIXDB_SIGNIN": "oidc", "VECTRIXDB_OIDC_ISSUER": "https://idp", "VECTRIXDB_OIDC_CLIENT_ID": "c", "VECTRIXDB_OIDC_ROLE_MAP": '{"g": "root"}'}, "not a role"),
-            ({"VECTRIXDB_SIGNIN": "oidc", "VECTRIXDB_OIDC_ISSUER": "https://idp", "VECTRIXDB_OIDC_CLIENT_ID": "c", "VECTRIXDB_OIDC_ROLE_MAP": "not json"}, "must be JSON"),
+            (
+                {"VECTRIXDB_SIGNIN": "oidc", "VECTRIXDB_OIDC_CLIENT_ID": "c"},
+                "VECTRIXDB_OIDC_ISSUER",
+            ),
+            (
+                {
+                    "VECTRIXDB_SIGNIN": "oidc",
+                    "VECTRIXDB_OIDC_ISSUER": "https://idp",
+                    "VECTRIXDB_OIDC_CLIENT_ID": "c",
+                },
+                "nobody who signs in has a role",
+            ),
+            (
+                {
+                    "VECTRIXDB_SIGNIN": "oidc",
+                    "VECTRIXDB_OIDC_ISSUER": "https://idp",
+                    "VECTRIXDB_OIDC_CLIENT_ID": "c",
+                    "VECTRIXDB_OIDC_ROLE_MAP": '{"g": "root"}',
+                },
+                "not a role",
+            ),
+            (
+                {
+                    "VECTRIXDB_SIGNIN": "oidc",
+                    "VECTRIXDB_OIDC_ISSUER": "https://idp",
+                    "VECTRIXDB_OIDC_CLIENT_ID": "c",
+                    "VECTRIXDB_OIDC_ROLE_MAP": "not json",
+                },
+                "must be JSON",
+            ),
         ],
     )
     def test_a_mistake_is_said_at_start_up(self, tmp_path, change, says):
@@ -275,7 +439,9 @@ class TestConfiguration:
             SignInConfig.from_env(tmp_path, {**self.BASE, **change})
 
     def test_a_laptop_may_use_http(self, tmp_path):
-        config = SignInConfig.from_env(tmp_path, {**self.BASE, "VECTRIXDB_PUBLIC_URL": "http://localhost:7337"})
+        config = SignInConfig.from_env(
+            tmp_path, {**self.BASE, "VECTRIXDB_PUBLIC_URL": "http://localhost:7337"}
+        )
         assert not config.secure_cookies
 
 
@@ -283,11 +449,21 @@ class TestTheAccessLog:
     def test_a_line_per_event_newest_first_and_nothing_it_should_not_hold(self, tmp_path):
         log = AccessLog(tmp_path / "auth" / "access.jsonl")
         log.record("signin", who="ada@example.com", role="admin", method="email")
-        log.record("search", who="ada@example.com", role="admin", action="search", collection="docs", route="POST /x")
+        log.record(
+            "search",
+            who="ada@example.com",
+            role="admin",
+            action="search",
+            collection="docs",
+            route="POST /x",
+        )
         log.record("denied", who="sam@example.com", role="viewer", action="search", status=403)
         recent = log.recent()
         assert [r["event"] for r in recent] == ["denied", "search", "signin"]
-        assert log.recent(who="sam@example.com")[0]["status"] == 403 and len(log.recent(event="search")) == 1
+        assert (
+            log.recent(who="sam@example.com")[0]["status"] == 403
+            and len(log.recent(event="search")) == 1
+        )
         assert not {"query", "text", "result_ids", "ids"} & set().union(*recent)
 
     def test_an_event_nobody_defined_is_a_bug(self, tmp_path):

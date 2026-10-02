@@ -46,8 +46,19 @@ def data(tmp_path):
     plain = Vectrix("plain", path=str(root), dimension=4, embed_fn=_embed, embedding_cache=False)
     plain.add(["alpha", "beta"], ids=["p-alpha", "p-beta"])
     plain.close()
-    walled = Vectrix("walled", path=str(root), dimension=4, embed_fn=_embed, embedding_cache=False, policy=Policy([Overlap("client_id", "clients")]))
-    walled.add(["alpha", "beta"], ids=["w-acme", "w-zeta"], metadata=[{"client_id": "acme"}, {"client_id": "zeta"}])
+    walled = Vectrix(
+        "walled",
+        path=str(root),
+        dimension=4,
+        embed_fn=_embed,
+        embedding_cache=False,
+        policy=Policy([Overlap("client_id", "clients")]),
+    )
+    walled.add(
+        ["alpha", "beta"],
+        ids=["w-acme", "w-zeta"],
+        metadata=[{"client_id": "acme"}, {"client_id": "zeta"}],
+    )
     walled.close()
     return root
 
@@ -55,16 +66,38 @@ def data(tmp_path):
 def serve(data, idp, **oidc_over):
     from vectrixdb.api.server import create_app
 
-    oidc = OidcConfig(**{
-        "issuer": ISSUER, "client_id": "vectrixdb", "client_secret": "s3cret", "api_audience": AUDIENCE,
-        "role_map": {"g-admins": "admin", "g-readers": "viewer", "g-ops": "operator", "acme": "operator"},
-        "principal_claims": {"clients": "groups"}, "allowed_emails": ("*",), **oidc_over,
-    })
-    config = SignInConfig(
-        methods=("oidc",), secrets=(SECRET,), public_url=PUBLIC, oidc=oidc, users=(),
-        store_path=data / "auth" / "signin.db", access_log=data / "auth" / "access.jsonl",
+    oidc = OidcConfig(
+        **{
+            "issuer": ISSUER,
+            "client_id": "vectrixdb",
+            "client_secret": "s3cret",
+            "api_audience": AUDIENCE,
+            "role_map": {
+                "g-admins": "admin",
+                "g-readers": "viewer",
+                "g-ops": "operator",
+                "acme": "operator",
+            },
+            "principal_claims": {"clients": "groups"},
+            "allowed_emails": ("*",),
+            **oidc_over,
+        }
     )
-    return TestClient(create_app(db_path=str(data), enable_dashboard=False, signin=config, oidc_transport=idp.transport), base_url=PUBLIC)
+    config = SignInConfig(
+        methods=("oidc",),
+        secrets=(SECRET,),
+        public_url=PUBLIC,
+        oidc=oidc,
+        users=(),
+        store_path=data / "auth" / "signin.db",
+        access_log=data / "auth" / "access.jsonl",
+    )
+    return TestClient(
+        create_app(
+            db_path=str(data), enable_dashboard=False, signin=config, oidc_transport=idp.transport
+        ),
+        base_url=PUBLIC,
+    )
 
 
 @pytest.fixture
@@ -84,43 +117,82 @@ class TestAnAppIsThePersonUsingIt:
         with serve(data, idp) as client:
             head = bearer(idp.access_token())
             assert client.get("/api/v1/collections", headers=head).status_code == 200
-            found = client.post("/api/v1/collections/plain/search", json={"query": VECTORS["alpha"]}, headers=head)
-            assert found.status_code == 200 and found.json()["data"]["results"][0]["id"] == "p-alpha"
+            found = client.post(
+                "/api/v1/collections/plain/search", json={"query": VECTORS["alpha"]}, headers=head
+            )
+            assert (
+                found.status_code == 200 and found.json()["data"]["results"][0]["id"] == "p-alpha"
+            )
 
     def test_a_policy_judges_the_search_as_theirs(self, data, idp):
         """The thing a key can never do: the collection is closed to a key and open to a person."""
         idp.person = {"sub": "u-8", "email": "ama@example.com", "groups": ["acme"]}
         with serve(data, idp) as client:
-            found = client.post("/api/v1/collections/walled/search", json={"query": VECTORS["alpha"], "limit": 10}, headers=bearer(idp.access_token()))
+            found = client.post(
+                "/api/v1/collections/walled/search",
+                json={"query": VECTORS["alpha"], "limit": 10},
+                headers=bearer(idp.access_token()),
+            )
             assert found.status_code == 200, found.text
-            assert [r["id"] for r in found.json()["data"]["results"]] == ["w-acme"], "only what their clients claim allows"
+            assert [r["id"] for r in found.json()["data"]["results"]] == ["w-acme"], (
+                "only what their clients claim allows"
+            )
 
     def test_what_they_read_is_recorded_under_their_name(self, data, idp):
         idp.person = {"sub": "u-7", "email": "olu@example.com", "groups": ["g-ops"]}
         with serve(data, idp) as client:
-            client.post("/api/v1/collections/plain/search", json={"query": VECTORS["alpha"]}, headers=bearer(idp.access_token()))
-        lines = [json.loads(line) for line in (data / "auth" / "access.jsonl").read_text(encoding="utf-8").splitlines()]
+            client.post(
+                "/api/v1/collections/plain/search",
+                json={"query": VECTORS["alpha"]},
+                headers=bearer(idp.access_token()),
+            )
+        lines = [
+            json.loads(line)
+            for line in (data / "auth" / "access.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
         search = [line for line in lines if line.get("event") == "search"][-1]
-        assert search["who"] == "olu@example.com" and search["method"] == "token" and search["role"] == "operator"
+        assert (
+            search["who"] == "olu@example.com"
+            and search["method"] == "token"
+            and search["role"] == "operator"
+        )
 
     def test_a_viewer_is_still_a_viewer(self, data, idp):
         idp.person = {"sub": "u-9", "email": "vi@example.com", "groups": ["g-readers"]}
         with serve(data, idp) as client:
             head = bearer(idp.access_token())
             assert client.get("/api/v1/collections", headers=head).status_code == 200
-            assert client.post("/api/v1/collections/plain/search", json={"query": VECTORS["alpha"]}, headers=head).status_code == 403
+            assert (
+                client.post(
+                    "/api/v1/collections/plain/search",
+                    json={"query": VECTORS["alpha"]},
+                    headers=head,
+                ).status_code
+                == 403
+            )
 
     def test_a_write_needs_no_forgery_token_because_nothing_rides_on_a_cookie(self, data, idp):
         idp.person = {"sub": "u-7", "email": "olu@example.com", "groups": ["g-ops"]}
         with serve(data, idp) as client:
-            made = client.post("/api/v1/collections", json={"name": "fresh", "dimension": 4}, headers=bearer(idp.access_token()))
+            made = client.post(
+                "/api/v1/collections",
+                json={"name": "fresh", "dimension": 4},
+                headers=bearer(idp.access_token()),
+            )
             assert made.status_code == 200, made.text
 
     def test_a_change_that_wants_the_person_themselves_is_refused_to_an_app(self, data, idp):
         with serve(data, idp) as client:  # Ada is an admin
             reply = client.delete("/api/v1/collections/plain", headers=bearer(idp.access_token()))
-            assert reply.status_code == 403 and "signed in at the dashboard" in reply.json()["message"]
-            assert client.get("/api/v1/collections/plain", headers=bearer(idp.access_token())).status_code == 200
+            assert (
+                reply.status_code == 403 and "signed in at the dashboard" in reply.json()["message"]
+            )
+            assert (
+                client.get(
+                    "/api/v1/collections/plain", headers=bearer(idp.access_token())
+                ).status_code
+                == 200
+            )
 
 
 class TestATokenThatIsNotBelieved:
@@ -137,7 +209,9 @@ class TestATokenThatIsNotBelieved:
         assert "did not verify" in self.refused(data, idp, idp.access_token(audience="vectrixdb"))
 
     def test_one_for_another_api(self, data, idp):
-        assert "did not verify" in self.refused(data, idp, idp.access_token(audience="api://payroll"))
+        assert "did not verify" in self.refused(
+            data, idp, idp.access_token(audience="api://payroll")
+        )
 
     def test_one_that_has_expired(self, data, idp):
         idp.issued_ago, idp.expires_in = 7200, 300
@@ -195,9 +269,14 @@ class TestATokenThatIsNotBelieved:
 
 def test_the_setting_is_read_from_the_environment(tmp_path):
     env = {
-        "VECTRIXDB_SIGNIN": "oidc", "VECTRIXDB_SIGNIN_SECRET": SECRET, "VECTRIXDB_PUBLIC_URL": PUBLIC,
-        "VECTRIXDB_OIDC_ISSUER": ISSUER, "VECTRIXDB_OIDC_CLIENT_ID": "vectrixdb", "VECTRIXDB_OIDC_CLIENT_SECRET": "s3cret",
-        "VECTRIXDB_OIDC_DEFAULT_ROLE": "viewer", "VECTRIXDB_OIDC_API_AUDIENCE": " api://vectrixdb ",
+        "VECTRIXDB_SIGNIN": "oidc",
+        "VECTRIXDB_SIGNIN_SECRET": SECRET,
+        "VECTRIXDB_PUBLIC_URL": PUBLIC,
+        "VECTRIXDB_OIDC_ISSUER": ISSUER,
+        "VECTRIXDB_OIDC_CLIENT_ID": "vectrixdb",
+        "VECTRIXDB_OIDC_CLIENT_SECRET": "s3cret",
+        "VECTRIXDB_OIDC_DEFAULT_ROLE": "viewer",
+        "VECTRIXDB_OIDC_API_AUDIENCE": " api://vectrixdb ",
     }
     assert SignInConfig.from_env(tmp_path, env).oidc.api_audience == "api://vectrixdb"
     del env["VECTRIXDB_OIDC_API_AUDIENCE"]

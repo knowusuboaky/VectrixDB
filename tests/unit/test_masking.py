@@ -66,13 +66,23 @@ class TestTheShapes:
             "id": "ada@example.com:0",
             "doc_id": "ada@example.com",
             "text": "Call 416-555-0199",
-            "metadata": {"email": "ada@example.com", "tags": ["vip", "ada@example.com"], "count": 3},
+            "metadata": {
+                "email": "ada@example.com",
+                "tags": ["vip", "ada@example.com"],
+                "count": 3,
+            },
             "highlights": ["ada@example.com"],
         }
         shown = mask_value(result, keep=lambda key: key == "id" or key.endswith("_id"))
-        assert shown["id"] == "ada@example.com:0" and shown["doc_id"] == "ada@example.com", "an id is sent back to open the chunk"
+        assert shown["id"] == "ada@example.com:0" and shown["doc_id"] == "ada@example.com", (
+            "an id is sent back to open the chunk"
+        )
         assert shown["text"] == f"Call {M * 3}-{M * 3}-0199"
-        assert shown["metadata"] == {"email": f"a{M * 3}@example.com", "tags": ["vip", f"a{M * 3}@example.com"], "count": 3}
+        assert shown["metadata"] == {
+            "email": f"a{M * 3}@example.com",
+            "tags": ["vip", f"a{M * 3}@example.com"],
+            "count": 3,
+        }
         assert shown["highlights"] == [f"a{M * 3}@example.com"]
 
 
@@ -114,8 +124,15 @@ class Mail:
 
 @pytest.fixture(autouse=True)
 def quiet_environment(monkeypatch):
-    for name in ("VECTRIXDB_API_KEY_FILE", "VECTRIXDB_API_KEY_SHA256", "VECTRIXDB_READ_ONLY_API_KEY", "VECTRIXDB_PATH",
-                 "VECTRIXDB_STORAGE_BACKEND", "VECTRIXDB_CACHE_BACKEND", "VECTRIXDB_AUDIT_JSONL"):
+    for name in (
+        "VECTRIXDB_API_KEY_FILE",
+        "VECTRIXDB_API_KEY_SHA256",
+        "VECTRIXDB_READ_ONLY_API_KEY",
+        "VECTRIXDB_PATH",
+        "VECTRIXDB_STORAGE_BACKEND",
+        "VECTRIXDB_CACHE_BACKEND",
+        "VECTRIXDB_AUDIT_JSONL",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("VECTRIXDB_API_KEY", KEY)
 
@@ -126,7 +143,11 @@ def _embed(texts):
 
 def _collection(root: Path) -> None:
     calls = Vectrix("calls", path=str(root), dimension=4, embed_fn=_embed, embedding_cache=False)
-    calls.add([CALL, QUIET], ids=["c-1", "c-2"], metadata=[{"source": "calls.txt", "email": "ada@example.com"}, {"source": "faq.txt"}])
+    calls.add(
+        [CALL, QUIET],
+        ids=["c-1", "c-2"],
+        metadata=[{"source": "calls.txt", "email": "ada@example.com"}, {"source": "faq.txt"}],
+    )
     calls.close()
 
 
@@ -135,11 +156,18 @@ def server(tmp_path):
     root = tmp_path / "db"
     _collection(root)
     config = SignInConfig(
-        methods=("email",), secrets=(SECRET,), public_url=PUBLIC, guests=True, sender=Mail(),
+        methods=("email",),
+        secrets=(SECRET,),
+        public_url=PUBLIC,
+        guests=True,
+        sender=Mail(),
         users=(("olu@example.com", "operator"),),
-        store_path=root / "auth" / "signin.db", access_log=root / "auth" / "access.jsonl",
+        store_path=root / "auth" / "signin.db",
+        access_log=root / "auth" / "access.jsonl",
     )
-    with TestClient(create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC) as client:
+    with TestClient(
+        create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC
+    ) as client:
         yield client, config, root
 
 
@@ -148,8 +176,13 @@ def person(server) -> TestClient:
     client, config, _ = server
     browser = TestClient(client.app, base_url=PUBLIC)
     assert browser.post("/auth/email/begin", json={"email": "olu@example.com"}).status_code == 200
-    begun = browser.post("/auth/email/enrol/begin", json={"token": config.sender.token()}).json()["data"]
-    done = browser.post("/auth/email/enrol/confirm", json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())})
+    begun = browser.post("/auth/email/enrol/begin", json={"token": config.sender.token()}).json()[
+        "data"
+    ]
+    done = browser.post(
+        "/auth/email/enrol/confirm",
+        json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())},
+    )
     assert done.status_code == 200, done.text
     return browser
 
@@ -176,20 +209,31 @@ class TestOnTheServer:
     def test_a_search_is_masked_for_a_person_metadata_included(self, server):
         browser = person(server)
         token = {"x-csrf-token": browser.cookies.get("__Host-vx_csrf")}
-        reply = browser.post("/api/v1/collections/calls/search", json={"query": [1, 0, 0, 0], "limit": 2}, headers=token)
+        reply = browser.post(
+            "/api/v1/collections/calls/search",
+            json={"query": [1, 0, 0, 0], "limit": 2},
+            headers=token,
+        )
         assert reply.status_code == 200, reply.text
         results = reply.json()["data"]["results"]
         assert [r["id"] for r in results][0] == "c-1"
-        assert "ada@example.com" not in everything(results) and "416-555-0199" not in everything(results)
+        assert "ada@example.com" not in everything(results) and "416-555-0199" not in everything(
+            results
+        )
 
     def test_a_key_is_sent_the_text_as_stored(self, server):
-        assert "416-555-0199" in everything(point(server[0], headers=KEYED)), "a script feeding a pipeline needs the text"
+        assert "416-555-0199" in everything(point(server[0], headers=KEYED)), (
+            "a script feeding a pipeline needs the text"
+        )
 
     def test_a_guest_cannot_search_so_there_is_nothing_to_mask(self, server):
         guest = TestClient(server[0].app, base_url=PUBLIC)
-        reply = guest.post("/api/v1/collections/calls/search", json={"query": [1, 0, 0, 0], "limit": 1})
+        reply = guest.post(
+            "/api/v1/collections/calls/search", json={"query": [1, 0, 0, 0], "limit": 1}
+        )
         assert reply.status_code == 401 and reply.json()["data"] == {"signin": True}, reply.text
         assert "ada@example.com" not in reply.text and "416-555-0199" not in reply.text
+
 
 class TestMarkdownOnTheWayOut:
     """A kept document comes back as Markdown, not JSON, and is masked the same way."""
@@ -223,6 +267,12 @@ class TestMarkdownOnTheWayOut:
         app.state.signin = Runtime()
         client = TestClient(app)
         masked = client.get("/api/v1/collections/calls/documents/call.md")
-        assert masked.status_code == 200 and "ada@example.com" not in masked.text and "0199" in masked.text
+        assert (
+            masked.status_code == 200
+            and "ada@example.com" not in masked.text
+            and "0199" in masked.text
+        )
         assert masked.headers["content-type"].startswith("text/markdown")
-        assert "ada@example.com" not in client.get("/api/v1/collections/other/documents/call.md").text, "every collection, always"
+        assert (
+            "ada@example.com" not in client.get("/api/v1/collections/other/documents/call.md").text
+        ), "every collection, always"

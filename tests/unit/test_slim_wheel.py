@@ -10,8 +10,12 @@ downloads fetches it. Neither test touches the network.
 from __future__ import annotations
 
 import shutil
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.9 and 3.10
+    import tomli as tomllib  # type: ignore[no-redef]
 
 import pytest
 

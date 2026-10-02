@@ -5,7 +5,7 @@
     "method": "store",
     "allow": [
       {
-        "domain": "owusuboakye.com"
+        "domain": "example.com"
       }
     ]
   }

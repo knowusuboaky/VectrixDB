@@ -124,19 +124,35 @@ def import_snapshot(
     if manifest.get("format") != FORMAT:
         raise ConfigurationError(f"Unsupported snapshot format {manifest.get('format')!r}")
 
-    source_name = manifest["name"]
+    # Both names become paths under ``path``, so both are held to the rules
+    # a collection name is: the manifest's was used as it came.
+    from .core.database import validate_collection_name
+    from .exceptions import InvalidCollectionName
+
+    source_name: str = manifest.get("name", "")
     name = name or source_name
+    try:
+        validate_collection_name(source_name)
+        validate_collection_name(name)
+    except InvalidCollectionName as exc:
+        raise ConfigurationError(f"Snapshot cannot be imported: {exc}") from exc
     for existing in (path / f"{name}.db", path / name, path / f"{name}_graph"):
         if existing.exists():
             raise ConfigurationError(f"{existing} already exists; choose another name or path")
 
     path.mkdir(parents=True, exist_ok=True)
+    root = path.resolve()
     with zipfile.ZipFile(snapshot) as zf:
+        # Every destination is worked out and checked before anything is
+        # written, so a snapshot refused for one member leaves nothing behind.
+        planned = []
         for member in zf.namelist():
             if member == "manifest.json" or member.endswith("/"):
                 continue
             relative = Path(member)
             parts = list(relative.parts)
+            if not parts:
+                continue
             # Rename on the way in: the file, the folder and the graph folder
             # all carry the collection name.
             if parts[0] == f"{source_name}.db" or parts[0].startswith(f"{source_name}.db-"):
@@ -152,6 +168,16 @@ def import_snapshot(
             if len(parts) > 1 and parts[-1].startswith(source_name + "."):
                 inner = inner.with_name(parts[-1].replace(source_name, name, 1))
             destination = path / inner
+            # A member named "../x" or "/x" was written wherever it pointed.
+            try:
+                destination.resolve().relative_to(root)
+            except ValueError:
+                raise ConfigurationError(
+                    f"Snapshot member {member!r} would be written outside {path}; refusing it"
+                ) from None
+            planned.append((member, destination))
+
+        for member, destination in planned:
             destination.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src, open(destination, "wb") as dst:
                 dst.write(src.read())

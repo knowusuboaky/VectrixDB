@@ -14,7 +14,9 @@ import numpy as np
 
 
 def embed(texts):
-    return np.asarray([[1, 0, 0, 0] if "alpha" in t else [0, 1, 0, 0] for t in texts], dtype=np.float32)
+    return np.asarray(
+        [[1, 0, 0, 0] if "alpha" in t else [0, 1, 0, 0] for t in texts], dtype=np.float32
+    )
 
 
 def reopened(tmp_path):

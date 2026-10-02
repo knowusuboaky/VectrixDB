@@ -131,6 +131,7 @@ async def emit_event(event: str, data: Optional[dict] = None):
 # the door is the sign-in module's. A collection that is private to others
 # answers as one that does not exist.
 
+
 # API keys - read at runtime to allow setting before server start. Each may
 # also come from a file, VECTRIXDB_API_KEY_FILE, or be given as its SHA-256.
 def get_api_key():
@@ -172,7 +173,31 @@ READ_ONLY_METHODS = {"GET", "HEAD", "OPTIONS"}
 from . import chunk_source  # noqa: E402
 from .replies import message_of, refusal  # noqa: E402
 from .signin import AccessMiddleware as ApiKeyAuthMiddleware  # noqa: E402
-from .signin import SignInRuntime, caller_of, decide_for, presented_key, principal_of, runtime_of, sees_content, session_of  # noqa: E402
+from .signin import (
+    SignInRuntime,
+    caller_of,
+    decide_for,
+    presented_key,
+    principal_of,
+    reads_are_open,
+    runtime_of,
+    sees_content,
+    session_of,
+)  # noqa: E402
+from .signin import _hashed as _hashed_key  # noqa: E402
+from ..signin.keys import key_matches  # noqa: E402
+
+
+def _ws_has_a_key(websocket: WebSocket) -> bool:
+    """Whether the WebSocket carries the full or the read-only key, as a request would."""
+    given = presented_key(websocket)
+    if not given:
+        return False
+    return key_matches(
+        given, get_api_key(), _hashed_key("VECTRIXDB_API_KEY_SHA256")
+    ) or key_matches(given, get_read_only_key(), _hashed_key("VECTRIXDB_READ_ONLY_API_KEY_SHA256"))
+
+
 from ..signin import roles  # noqa: E402
 
 
@@ -209,13 +234,19 @@ class _DashboardFiles(StaticFiles):
             # before the brand was set would be told to keep it. So it is asked
             # without the question, and the branded page answers it below.
             stale = (b"if-none-match", b"if-modified-since")
-            scope = {**scope, "headers": [(k, v) for k, v in scope.get("headers", []) if k.lower() not in stale]}
+            scope = {
+                **scope,
+                "headers": [(k, v) for k, v in scope.get("headers", []) if k.lower() not in stale],
+            }
         response = await super().get_response(path, scope)
         response.headers["Cache-Control"] = "no-cache"
         if branded and getattr(response, "status_code", 200) == 200:
             page = (Path(self.directory or ".") / "index.html").read_text(encoding="utf-8")
             if brand is not None:
-                page = brand.render_index(page, visible=gateway.visible if gateway is not None and gateway.dressed else None)
+                page = brand.render_index(
+                    page,
+                    visible=gateway.visible if gateway is not None and gateway.dressed else None,
+                )
             if gateway is not None:
                 page = gateway.render_index(page)
             import hashlib
@@ -300,17 +331,31 @@ def _sink(request: Request) -> Any:
         # likewise somewhere the audit file cannot reach.
         import hashlib
 
-        key = hashlib.sha256(("vectrixdb audit query key|" + runtime.config.secrets[0]).encode()).hexdigest()
+        key = hashlib.sha256(
+            ("vectrixdb audit query key|" + runtime.config.secrets[0]).encode()
+        ).hexdigest()
     if _decision_sink is None or _decision_sink_for != (path, key):
         from ..audit import DENY, audit_sink_at
 
         days = os.environ.get("VECTRIXDB_AUDIT_RETAIN_DAYS", "").strip()
-        _decision_sink = audit_sink_at(path, query_key=key.encode(), on_failure=DENY, retain_days=int(days) if days.isdigit() else None)
+        _decision_sink = audit_sink_at(
+            path,
+            query_key=key.encode(),
+            on_failure=DENY,
+            retain_days=int(days) if days.isdigit() else None,
+        )
         _decision_sink_for = (path, key)
     return _decision_sink
 
 
-def _record_decision(request: Request, collection: Any, principal: Optional[dict], query: str, results: Any, started: float) -> None:
+def _record_decision(
+    request: Request,
+    collection: Any,
+    principal: Optional[dict],
+    query: str,
+    results: Any,
+    started: float,
+) -> None:
     """One decision record for a search a policy judged, the same record the library writes."""
     sink = _sink(request)
     if sink is None or principal is None or collection.policy is None:
@@ -350,7 +395,10 @@ def _record_decision(request: Request, collection: Any, principal: Optional[dict
         sink.write(record)
     except AuditUnavailable as exc:
         # The library's rule, kept here: a decision that cannot be recorded is not served.
-        raise HTTPException(status_code=503, detail="the audit trail cannot be written, so this search was not served") from exc
+        raise HTTPException(
+            status_code=503,
+            detail="the audit trail cannot be written, so this search was not served",
+        ) from exc
 
 
 _TEXT_KEYS = ("text", "text_content", "content")
@@ -402,7 +450,11 @@ def _judged(results_dict: dict, principal: Optional[dict]) -> dict:
 
 
 #: What a listing may say about a chunk. None of it is the chunk's own words.
-_INDEX_KEYS = (("source", ("_vx_citation", "_vx_source", "source", "_vx_doc")), ("document", ("_vx_doc_id", "_vx_doc")), ("page", ("_vx_page", "page")))
+_INDEX_KEYS = (
+    ("source", ("_vx_citation", "_vx_source", "source", "_vx_doc")),
+    ("document", ("_vx_doc_id", "_vx_doc")),
+    ("page", ("_vx_page", "page")),
+)
 
 
 def _index_rows(collection: Any, ids: List[str], principal: Optional[dict]) -> List[dict]:
@@ -883,7 +935,9 @@ def _azure_search_from_env() -> StorageConfig:
             "(or VECTRIXDB_AZURE_SEARCH_ENDPOINT) is the service to serve from, "
             "like https://<service>.search.windows.net"
         )
-    deployment = _setting("VECTRIXDB_AZURE_OPENAI_EMBED_DEPLOYMENT", "AZURE_OPENAI_EMBED_DEPLOYMENT")
+    deployment = _setting(
+        "VECTRIXDB_AZURE_OPENAI_EMBED_DEPLOYMENT", "AZURE_OPENAI_EMBED_DEPLOYMENT"
+    )
     openai = _setting("VECTRIXDB_AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_ENDPOINT")
     vectorizer = None
     if deployment and openai:
@@ -911,9 +965,13 @@ def _azure_search_from_env() -> StorageConfig:
             ),
             "vectrix",
         ),
-        azure_search_semantic=_setting("VECTRIXDB_AZURE_SEARCH_SEMANTIC", "AZURE_SEARCH_SEMANTIC").lower()
+        azure_search_semantic=_setting(
+            "VECTRIXDB_AZURE_SEARCH_SEMANTIC", "AZURE_SEARCH_SEMANTIC"
+        ).lower()
         in ("1", "true", "yes", "on"),
-        azure_search_filter_fields=_json_setting("VECTRIXDB_AZURE_SEARCH_FILTER_FIELDS", "AZURE_SEARCH_FILTER_FIELDS"),
+        azure_search_filter_fields=_json_setting(
+            "VECTRIXDB_AZURE_SEARCH_FILTER_FIELDS", "AZURE_SEARCH_FILTER_FIELDS"
+        ),
         azure_search_embeddings=_setting(
             "VECTRIXDB_AZURE_SEARCH_EMBEDDINGS", default="both" if vectorizer else "vectrixdb"
         ),
@@ -933,7 +991,9 @@ def chunk_store_from_env(given: Any = None, env: Optional[dict] = None) -> Any:
     from ..signin.keys import env_secret
 
     source = os.environ if env is None else env
-    where = given if given is not None else str(source.get("VECTRIXDB_CHUNK_STORE", "") or "").strip()
+    where = (
+        given if given is not None else str(source.get("VECTRIXDB_CHUNK_STORE", "") or "").strip()
+    )
     if where is None or where == "":
         return None
     key = env_secret(source, "VECTRIXDB_CHUNK_STORE_KEY") if isinstance(where, str) else None
@@ -1108,7 +1168,12 @@ def served_paths() -> List[str]:
     from .signin import router as signin_router
 
     routers = (router, inspection_router, documents_router, evaluations_router, signin_router)
-    return declared_paths([route for each in routers for route in each.routes]) + ["/dashboard", "/docs", "/redoc", "/openapi.json"]
+    return declared_paths([route for each in routers for route in each.routes]) + [
+        "/dashboard",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+    ]
 
 
 def create_app(
@@ -1145,7 +1210,13 @@ def create_app(
     """
     global _db
 
-    from .gateway import DEFAULT_KEY_HEADER, DEFAULT_TOKEN_HEADER, Gateway, GatewayPathsMiddleware, declared_paths
+    from .gateway import (
+        DEFAULT_KEY_HEADER,
+        DEFAULT_TOKEN_HEADER,
+        Gateway,
+        GatewayPathsMiddleware,
+        declared_paths,
+    )
 
     # The host's own path, then the prefix every route lives under, and each
     # route's own gateway path: read once, so a mistake stops the start.
@@ -1190,7 +1261,12 @@ def create_app(
     resolved_path = db_path or os.environ.get("VECTRIXDB_PATH", "./vectrixdb_data")
     signin_config = signin if signin is not None else SignInConfig.from_env(resolved_path)
     app.state.signin = (
-        SignInRuntime(signin_config, oidc_transport=oidc_transport, product=app.state.brand.name, gateway=gateway)
+        SignInRuntime(
+            signin_config,
+            oidc_transport=oidc_transport,
+            product=app.state.brand.name,
+            gateway=gateway,
+        )
         if signin_config.enabled
         else None
     )
@@ -1235,13 +1311,21 @@ def create_app(
         still does; ``message`` is the same thing as one sentence. See
         :mod:`vectrixdb.api.replies`.
         """
-        return refusal(exc.status_code, message_of(exc.detail), detail=exc.detail, headers=getattr(exc, "headers", None))
+        return refusal(
+            exc.status_code,
+            message_of(exc.detail),
+            detail=exc.detail,
+            headers=getattr(exc, "headers", None),
+        )
 
     @app.exception_handler(RequestValidationError)
     async def _not_the_shape_asked_for(request, exc):  # noqa: ANN001 - FastAPI's signature
         # The field errors as FastAPI lists them, minus the caller's own input
         # and anything that is not JSON, and the same said in words.
-        detail = [{k: v for k, v in error.items() if k in ("type", "loc", "msg")} for error in exc.errors()]
+        detail = [
+            {k: v for k, v in error.items() if k in ("type", "loc", "msg")}
+            for error in exc.errors()
+        ]
         return refusal(422, message_of(detail), detail=detail)
 
     # API Key Authentication Middleware (Qdrant-style)
@@ -1258,14 +1342,20 @@ def create_app(
     # server as whoever is signed in. So then it is the origins somebody
     # named, and none by default: the dashboard is same-origin and needs none.
     if app.state.signin is not None:
-        origins = [o.strip() for o in os.environ.get("VECTRIXDB_CORS_ORIGINS", "").split(",") if o.strip()]
+        origins = [
+            o.strip() for o in os.environ.get("VECTRIXDB_CORS_ORIGINS", "").split(",") if o.strip()
+        ]
         if "*" in origins:
             raise ConfigurationError(
                 "VECTRIXDB_CORS_ORIGINS is * while sign-in is on, which would let any website read this server as "
                 "whoever is signed in. Name the origins that may call it: https://app.company.com"
             )
         # The headers a key and a token arrive in, whatever the settings named them.
-        own = [name for name in (gateway.key_header, gateway.token_header) if name not in (DEFAULT_KEY_HEADER, DEFAULT_TOKEN_HEADER)]
+        own = [
+            name
+            for name in (gateway.key_header, gateway.token_header)
+            if name not in (DEFAULT_KEY_HEADER, DEFAULT_TOKEN_HEADER)
+        ]
         app.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
@@ -1279,16 +1369,23 @@ def create_app(
             allow_origins=["*"],
             allow_credentials=True,
             allow_methods=["*"],
-            allow_headers=["*", "api-key", *({gateway.key_header, gateway.token_header} - {DEFAULT_KEY_HEADER, DEFAULT_TOKEN_HEADER})],
+            allow_headers=[
+                "*",
+                "api-key",
+                *(
+                    {gateway.key_header, gateway.token_header}
+                    - {DEFAULT_KEY_HEADER, DEFAULT_TOKEN_HEADER}
+                ),
+            ],
         )
 
     # Added last, so it is the outermost layer: every reply carries these
     # headers, a refusal from the layers inside included.
     from .security_headers import SecurityHeadersMiddleware, frame_ancestors_from_env
 
-    https = bool(app.state.signin is not None and app.state.signin.config.secure_cookies) or os.environ.get(
-        "VECTRIXDB_PUBLIC_URL", ""
-    ).strip().startswith("https://")
+    https = bool(
+        app.state.signin is not None and app.state.signin.config.secure_cookies
+    ) or os.environ.get("VECTRIXDB_PUBLIC_URL", "").strip().startswith("https://")
     app.add_middleware(SecurityHeadersMiddleware, ancestors=frame_ancestors_from_env(), https=https)
 
     # Outside everything, because every layer below reads the path: with a
@@ -1406,7 +1503,10 @@ async def auth_status(request: Request):
         "message": None,
         "data": {
             "auth_enabled": _full_key_configured(),
-            "read_only_key_enabled": bool(get_read_only_key() or os.environ.get("VECTRIXDB_READ_ONLY_API_KEY_SHA256", "").strip()),
+            "read_only_key_enabled": bool(
+                get_read_only_key()
+                or os.environ.get("VECTRIXDB_READ_ONLY_API_KEY_SHA256", "").strip()
+            ),
             # Present only when sign-in is on, so the reply is what it always was otherwise.
             **({"signin": sorted(runtime.methods())} if runtime is not None else {}),
         },
@@ -1424,7 +1524,11 @@ async def brand_css(request: Request):
     """The brand's colours as a stylesheet, for a dashboard some other service sends. The library's own page has them inline."""
     from starlette.responses import Response as Plain
 
-    return Plain(content=request.app.state.brand.css(), media_type="text/css", headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
+    return Plain(
+        content=request.app.state.brand.css(),
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/api/v1/about", tags=["info"])
@@ -1517,6 +1621,15 @@ async def websocket_endpoint(websocket: WebSocket):
     if runtime is not None and session_of(websocket) is None:
         await websocket.close(code=4401)
         return
+    if (
+        runtime is None
+        and _full_key_configured()
+        and not reads_are_open()
+        and not _ws_has_a_key(websocket)
+    ):
+        # Reads closed: the feed names what was written, so it needs a key too.
+        await websocket.close(code=4401)
+        return
     await ws_manager.connect(websocket)
     try:
         # Send initial connection confirmation
@@ -1594,7 +1707,9 @@ async def database_info():
     # documents all went into collections.
     documents_count = 0
     try:
-        documents_count = sum(c.document_count() for c in list(getattr(db, "_collections", {}).values()))
+        documents_count = sum(
+            c.document_count() for c in list(getattr(db, "_collections", {}).values())
+        )
     except Exception:
         pass
     try:
@@ -1608,7 +1723,11 @@ async def database_info():
     total_vectors, shared_store = info.total_vectors, False
     total_size: Optional[int] = info.total_size_bytes
     try:
-        shared = [c for c in (db.get_collection(i.name) for i in db.list_collections()) if chunk_source.shared(c) is not None]
+        shared = [
+            c
+            for c in (db.get_collection(i.name) for i in db.list_collections())
+            if chunk_source.shared(c) is not None
+        ]
         if shared:
             total_vectors = sum(chunk_source.count(c) for c in shared)
             # And what is on this disk holds nothing of them, so its size says nothing.
@@ -1663,7 +1782,10 @@ async def list_collections(request: Request):
             continue
         row = info.to_dict()
         collection = db.get_collection(info.name)
-        if chunk_source.shared(collection) is not None and getattr(collection, "policy", None) is None:
+        if (
+            chunk_source.shared(collection) is not None
+            and getattr(collection, "policy", None) is None
+        ):
             # What every instance wrote, not what this one did.
             _from_the_shared_store(row, collection, request)
         if getattr(collection, "policy", None) is not None:
@@ -1849,7 +1971,10 @@ async def get_collection(name: str, request: Request):
     try:
         collection = db.get_collection(name)
         row = collection.info().to_dict()
-        if chunk_source.shared(collection) is not None and getattr(collection, "policy", None) is None:
+        if (
+            chunk_source.shared(collection) is not None
+            and getattr(collection, "policy", None) is None
+        ):
             # What every instance wrote, not what this one did: the same row the list gives.
             _from_the_shared_store(row, collection, request)
         return ApiResponse(ok=True, data=row)
@@ -1902,7 +2027,9 @@ async def policies(request: Request):
         entry: dict = {
             "method": policy.method if policy is not None else None,
             # A token policy's people are its list, beside its groups: someone must be in both.
-            "people": len(policy.people) if policy is not None and token else sum(1 for e in allow if "email" in e),
+            "people": len(policy.people)
+            if policy is not None and token
+            else sum(1 for e in allow if "email" in e),
             "domains": sum(1 for e in allow if "domain" in e),
             "groups": len(allow) if token else 0,
             "policied": getattr(db.get_collection(info.name), "policy", None) is not None,
@@ -1913,7 +2040,12 @@ async def policies(request: Request):
         shown[info.name] = entry
     return {
         "ok": True,
-        "data": {"signin": runtime is not None, "guests": bool(runtime and runtime.config.guests), "gated": records is not None, "collections": shown},
+        "data": {
+            "signin": runtime is not None,
+            "guests": bool(runtime and runtime.config.guests),
+            "gated": records is not None,
+            "collections": shown,
+        },
     }
 
 
@@ -1921,9 +2053,9 @@ class PolicyRequest(BaseModel):
     policy: Optional[dict] = Field(
         None,
         description=(
-            "Who may retrieve from the collection: {\"method\": \"token\", \"allow\": [{\"id\": ..., \"name\": ...}], \"people\": [{\"email\": ...}]} "
+            'Who may retrieve from the collection: {"method": "token", "allow": [{"id": ..., "name": ...}], "people": [{"email": ...}]} '
             "for security groups by object id from the sign-in token, narrowed to the people on the list, who must be in a group and on it; "
-            "or {\"method\": \"store\", \"allow\": [{\"email\": ...} | {\"domain\": ...}]} for a list of people kept with the collection. "
+            'or {"method": "store", "allow": [{"email": ...} | {"domain": ...}]} for a list of people kept with the collection. '
             "null is nobody"
         ),
     )
@@ -1936,7 +2068,10 @@ async def set_policy(name: str, body: PolicyRequest, request: Request):
 
     records = getattr(request.app.state, "collection_store", None)
     if records is None:
-        raise HTTPException(status_code=404, detail="Nothing is gated on this server: set VECTRIXDB_COLLECTION_STORE to where each collection's record is kept")
+        raise HTTPException(
+            status_code=404,
+            detail="Nothing is gated on this server: set VECTRIXDB_COLLECTION_STORE to where each collection's record is kept",
+        )
     try:
         collection = get_db().get_collection(name)
     except KeyError:
@@ -1947,10 +2082,17 @@ async def set_policy(name: str, body: PolicyRequest, request: Request):
         raise HTTPException(status_code=400, detail=str(exc))
     caller = caller_of(request)
     by = caller.who if caller else None
-    kept = records.set_policy(name, policy, by=by, generation=collection.info().created_at.isoformat())
+    kept = records.set_policy(
+        name, policy, by=by, generation=collection.info().created_at.isoformat()
+    )
     runtime = runtime_of(request)
     if runtime is not None:
-        runtime.access.record("policy_changed", collection=name, reason=policy.describe() if policy is not None else "nobody", by=by)
+        runtime.access.record(
+            "policy_changed",
+            collection=name,
+            reason=policy.describe() if policy is not None else "nobody",
+            by=by,
+        )
     return {"ok": True, "data": {"policy": kept.policy}}
 
 
@@ -2054,7 +2196,11 @@ async def get_point(name: str, point_id: str, req: Request):
     collection, principal = _servable_as(db, name, req)
 
     # Not there, and not yours, are one answer: a 403 here would confirm it exists.
-    point = collection.get(point_id, principal=principal) if principal is not None else collection.get(point_id)
+    point = (
+        collection.get(point_id, principal=principal)
+        if principal is not None
+        else collection.get(point_id)
+    )
     if point is None:
         raise HTTPException(status_code=404, detail=f"Point '{point_id}' not found")
 
@@ -2294,7 +2440,15 @@ async def extract_graph_entities(name: str):
         if store is not None and graphrag_path is not None:
             from ..graph_store import graph_json
 
-            store.put(name, graph_json(name, GraphStorage(str(graphrag_path / "graph.db")), build=collection.get_meta("index_build_id"), model="spaCy"))
+            store.put(
+                name,
+                graph_json(
+                    name,
+                    GraphStorage(str(graphrag_path / "graph.db")),
+                    build=collection.get_meta("index_build_id"),
+                    model="spaCy",
+                ),
+            )
 
         # Emit WebSocket event
         await emit_event(
@@ -2357,7 +2511,10 @@ async def list_points(
     limit: int = Query(default=100, gt=0, le=1000),
     offset: int = Query(default=0, ge=0),
     index: bool = Query(default=False),
-    q: Optional[str] = Query(default=None, description="A find: points whose id, or source when the chunks are kept, holds this."),
+    q: Optional[str] = Query(
+        default=None,
+        description="A find: points whose id, or source when the chunks are kept, holds this.",
+    ),
 ):
     """List points in a collection, a page at a time.
 
@@ -2372,7 +2529,11 @@ async def list_points(
 
     collection, principal = _servable_as(db, name, req)
 
-    ids, total = chunk_source.find(collection, q or "", limit, offset, principal) if (q or "").strip() else chunk_source.page(collection, limit, offset, principal)
+    ids, total = (
+        chunk_source.find(collection, q or "", limit, offset, principal)
+        if (q or "").strip()
+        else chunk_source.page(collection, limit, offset, principal)
+    )
     return ApiResponse(
         ok=True,
         data={
@@ -2408,7 +2569,11 @@ def is_authenticated(request: Request) -> bool:
         return True  # No key configured = everyone authenticated
     from ..signin.keys import key_matches
 
-    return key_matches(presented_key(request), get_api_key(), os.environ.get("VECTRIXDB_API_KEY_SHA256", "").strip() or None)
+    return key_matches(
+        presented_key(request),
+        get_api_key(),
+        os.environ.get("VECTRIXDB_API_KEY_SHA256", "").strip() or None,
+    )
 
 
 def redact_search_results(results_dict: dict) -> dict:
@@ -2452,7 +2617,14 @@ async def search(name: str, request: SearchRequest, req: Request):
             use_cache=request.use_cache,
             **({"principal": principal} if principal is not None else {}),
         )
-        _record_decision(req, collection, principal, json.dumps(list(map(float, request.query))), results, started)
+        _record_decision(
+            req,
+            collection,
+            principal,
+            json.dumps(list(map(float, request.query))),
+            results,
+            started,
+        )
         results_dict = _snipped(_judged(results.to_dict(), principal), req)
 
         # Auto-redact for read-only users
@@ -3091,14 +3263,23 @@ class IndexDocumentRequest(BaseModel):
 
 
 @router.get("/api/v1/documents", tags=["documents"])
-async def list_documents(q: Optional[str] = None, limit: int = Query(default=0, ge=0), offset: int = Query(default=0, ge=0)):
+async def list_documents(
+    q: Optional[str] = None,
+    limit: int = Query(default=0, ge=0),
+    offset: int = Query(default=0, ge=0),
+):
     """The document index, or a page of it: ``q`` finds by title, id or type; ``limit`` 0 is every document; ``total`` is how many match."""
     db = get_db()
     try:
         docs = db.documents.list_documents()
         needle = (q or "").strip().lower()
         if needle:
-            docs = [d for d in docs if needle in f"{d.title} {d.doc_id} {getattr(d.doc_type, 'value', d.doc_type)}".lower()]
+            docs = [
+                d
+                for d in docs
+                if needle
+                in f"{d.title} {d.doc_id} {getattr(d.doc_type, 'value', d.doc_type)}".lower()
+            ]
         total = len(docs)
         docs = docs[offset:] if not limit else docs[offset : offset + limit]
         return {
@@ -3266,7 +3447,10 @@ def refuse_open_server(host: str, *, api_key: Optional[str] = None) -> None:
     if host in _LOOPBACK or api_key or os.environ.get("VECTRIXDB_SIGNIN", "").strip():
         return
     if os.environ.get("VECTRIXDB_ALLOW_OPEN", "").strip().lower() in ("1", "true", "yes", "on"):
-        logger.warning("listening on %s with no API key and no sign-in, because VECTRIXDB_ALLOW_OPEN is set", host)
+        logger.warning(
+            "listening on %s with no API key and no sign-in, because VECTRIXDB_ALLOW_OPEN is set",
+            host,
+        )
         return
     raise ConfigurationError(
         f"refusing to listen on {host} with no API key and no sign-in: anybody who can reach the port could read "
@@ -3287,7 +3471,13 @@ def run_server(
     """Run the VectrixDB server."""
     import uvicorn
 
-    refuse_open_server(host, api_key=api_key or get_api_key() or os.environ.get("VECTRIXDB_API_KEY_SHA256", "").strip() or None)
+    refuse_open_server(
+        host,
+        api_key=api_key
+        or get_api_key()
+        or os.environ.get("VECTRIXDB_API_KEY_SHA256", "").strip()
+        or None,
+    )
     os.environ["VECTRIXDB_PATH"] = db_path
     os.environ["VECTRIXDB_DASHBOARD"] = "1" if enable_dashboard else "0"
     if api_key:
@@ -3322,5 +3512,8 @@ def __getattr__(name: str) -> Any:
     if name != "app":
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     global app
-    app = create_app(enable_dashboard=os.environ.get("VECTRIXDB_DASHBOARD", "1").lower() not in ("0", "false", "no"))
+    app = create_app(
+        enable_dashboard=os.environ.get("VECTRIXDB_DASHBOARD", "1").lower()
+        not in ("0", "false", "no")
+    )
     return app

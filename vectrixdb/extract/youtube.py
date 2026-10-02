@@ -53,7 +53,14 @@ __all__ = ["YOUTUBE_HOSTS", "is_youtube", "load_youtube", "video_id"]
 
 #: The hosts a video is fetched from, and no others.
 YOUTUBE_HOSTS = frozenset(
-    {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be", "www.youtu.be"}
+    {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
+        "youtu.be",
+        "www.youtu.be",
+    }
 )
 _ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
@@ -140,7 +147,9 @@ def _download_with_ytdlp(url: str, folder: str) -> Tuple[str, Dict[str, Any]]:
                 "can work on a laptop and fail in a function app; it is not a fault in the address",
                 route="youtube",
             ) from exc
-        raise ExtractionError(f"YouTube would not give the sound of {url}: {message}", route="youtube") from exc
+        raise ExtractionError(
+            f"YouTube would not give the sound of {url}: {message}", route="youtube"
+        ) from exc
     return path, dict(info or {})
 
 
@@ -252,7 +261,11 @@ def load_youtube(
             # The sound's own name, so whoever deletes it can say what went.
             "audio_file": name,
         }
-        heard = language or next(iter(getattr(listener, "locales", None) or []), None) or getattr(listener, "language", None)
+        heard = (
+            language
+            or next(iter(getattr(listener, "locales", None) or []), None)
+            or getattr(listener, "language", None)
+        )
         for key, value in (
             ("language", heard),
             ("title", title),

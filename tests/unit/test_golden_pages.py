@@ -59,7 +59,12 @@ ASKED = "How much was set aside for credit losses?"
 def report():
     text, pages = join_pages(PAGES)
     credit = pages[1][0]
-    return LoadedDocument(text=text, pages=pages, headings=[(credit, "Credit risk", 2)], page_labels={1: "i", 2: "ii", 3: "1", 4: "2"})
+    return LoadedDocument(
+        text=text,
+        pages=pages,
+        headings=[(credit, "Credit risk", 2)],
+        page_labels={1: "i", 2: "ii", 3: "1", 4: "2"},
+    )
 
 
 @pytest.fixture
@@ -67,15 +72,35 @@ def db(tmp_path):
     from vectrixdb import Vectrix
     from vectrixdb.extract.engines import segments_to_document
 
-    handle = Vectrix("annual", path=str(tmp_path / "db"), embed_fn=embed, dimension=WIDTH, mode="dense",
-                     keep_source=str(tmp_path / "kept"), embedding_cache=False)
+    handle = Vectrix(
+        "annual",
+        path=str(tmp_path / "db"),
+        embed_fn=embed,
+        dimension=WIDTH,
+        mode="dense",
+        keep_source=str(tmp_path / "kept"),
+        embedding_cache=False,
+    )
     handle.add_document(report(), doc_id="report.pdf", chunk="markdown", chunk_size=280, overlap=0)
-    handle.add_document("# Notes\n\nThe figures in these notes are unaudited and rounded to the nearest million dollars.", doc_id="notes.md")
+    handle.add_document(
+        "# Notes\n\nThe figures in these notes are unaudited and rounded to the nearest million dollars.",
+        doc_id="notes.md",
+    )
     # Parts long enough to be pages, so it is being a recording that keeps it to one row.
-    said = "and every region reported growth in lending, deposits and wealth, with the bank's revenue up on the year. " * 2
-    handle.add_document(segments_to_document([(0.0, 50.0, "Welcome to the call, " + said), (65.2, 120.0, "Revenue is up, " + said)]), doc_id="call.wav")
+    said = (
+        "and every region reported growth in lending, deposits and wealth, with the bank's revenue up on the year. "
+        * 2
+    )
+    handle.add_document(
+        segments_to_document(
+            [(0.0, 50.0, "Welcome to the call, " + said), (65.2, 120.0, "Revenue is up, " + said)]
+        ),
+        doc_id="call.wav",
+    )
     # One page is the document itself.
-    handle.add_document(LoadedDocument(text=PAGES[0] + " " + PAGES[2], pages=[(0, 1)]), doc_id="memo.pdf")
+    handle.add_document(
+        LoadedDocument(text=PAGES[0] + " " + PAGES[2], pages=[(0, 1)]), doc_id="memo.pdf"
+    )
     yield handle
     handle.close()
 
@@ -110,24 +135,43 @@ class TestAPageIsAnAnswer:
 class TestScoredByPage:
     def test_the_document_is_always_found_and_the_page_is_what_tells(self, db):
         """The whole reason: by document, the wrong page would score as perfectly as the right one."""
-        right = retrieval_report(db, [Question(ASKED, expected=["report.pdf#page=2"], id="p2")], k=(1,))
-        wrong = retrieval_report(db, [Question(ASKED, expected=["report.pdf#page=3"], id="p3")], k=(1,))
+        right = retrieval_report(
+            db, [Question(ASKED, expected=["report.pdf#page=2"], id="p2")], k=(1,)
+        )
+        wrong = retrieval_report(
+            db, [Question(ASKED, expected=["report.pdf#page=3"], id="p3")], k=(1,)
+        )
         whole = retrieval_report(db, [Question(ASKED, expected=["report.pdf"], id="doc")], k=(1,))
-        assert (right["recall"]["@1"], wrong["recall"]["@1"], whole["recall"]["@1"]) == (1.0, 0.0, 1.0)
+        assert (right["recall"]["@1"], wrong["recall"]["@1"], whole["recall"]["@1"]) == (
+            1.0,
+            0.0,
+            1.0,
+        )
         assert wrong["misses"] == [] or wrong["misses"][0]["got"][0].startswith("report.pdf#page=2")
 
     def test_results_are_ranked_by_page_so_a_later_page_of_the_same_document_is_found(self, db):
         """Ranked by document, the report would take one place, held by its first chunk, and page 3 would never be reached."""
-        further = retrieval_report(db, [Question(ASKED, expected=["report.pdf#page=3"], id="p3")], k=(10,))
+        further = retrieval_report(
+            db, [Question(ASKED, expected=["report.pdf#page=3"], id="p3")], k=(10,)
+        )
         assert further["recall"]["@10"] == 1.0 and further["misses"] == []
 
     def test_a_run_ranks_the_first_chunk_on_the_page(self, db):
-        questions = [Question(ASKED, expected=["report.pdf#page=2"], id="p2"), Question(ASKED, expected=["report.pdf#page=3"], id="p3")]
+        questions = [
+            Question(ASKED, expected=["report.pdf#page=2"], id="p2"),
+            Question(ASKED, expected=["report.pdf#page=3"], id="p3"),
+        ]
         ranks = run_setup(db, {"key": "dense", "search": {"mode": "dense"}}, questions)["ranks"]
         assert ranks[0] == 1 and (ranks[1] is None or ranks[1] > 1)
 
     def test_the_answer_cutoff_counts_the_wrong_page_as_a_near_miss(self, db):
-        found = answer_cutoff(db, [Question(ASKED, expected=["report.pdf#page=2"], id="p2"), Question(ASKED, expected=["report.pdf#page=3"], id="p3")])
+        found = answer_cutoff(
+            db,
+            [
+                Question(ASKED, expected=["report.pdf#page=2"], id="p2"),
+                Question(ASKED, expected=["report.pdf#page=3"], id="p3"),
+            ],
+        )
         assert (found["answers"], found["near_misses"]) == (1, 1)
 
     def test_a_page_is_looked_up_by_its_document(self, db):
@@ -138,26 +182,52 @@ class TestScoredByPage:
         assert gone == {"VectrixDB": {"documents": ["gone.pdf"], "questions": ["m2"]}}
         with warnings.catch_warnings():
             warnings.simplefilter("error", MissingDocumentsWarning)
-            assert missing_documents(db, [Question(ASKED, expected=["report.pdf#page=2"], id="ok")]) == {}
+            assert (
+                missing_documents(db, [Question(ASKED, expected=["report.pdf#page=2"], id="ok")])
+                == {}
+            )
 
 
 class TestATemplateAPageAtATime:
     def test_a_row_a_page_with_text_and_a_row_a_document_without_pages(self, db):
         rows = golden_template(db, n=50, by="page")
-        assert [r["expected"] for r in rows] == [["call.wav"], ["memo.pdf"], ["notes.md"], ["report.pdf#page=1"], ["report.pdf#page=2"], ["report.pdf#page=3"]]
+        assert [r["expected"] for r in rows] == [
+            ["call.wav"],
+            ["memo.pdf"],
+            ["notes.md"],
+            ["report.pdf#page=1"],
+            ["report.pdf#page=2"],
+            ["report.pdf#page=3"],
+        ]
         assert all(r["question"] == "" for r in rows), "a template is for a person to write in"
 
     def test_the_hint_says_which_page_its_printed_number_and_its_heading(self, db):
-        second = next(r for r in golden_template(db, n=50, by="page") if r["expected"] == ["report.pdf#page=2"])
-        assert second["hint"].startswith("Page 2, printed ii, under Credit risk: The provision for credit losses")
+        second = next(
+            r
+            for r in golden_template(db, n=50, by="page")
+            if r["expected"] == ["report.pdf#page=2"]
+        )
+        assert second["hint"].startswith(
+            "Page 2, printed ii, under Credit risk: The provision for credit losses"
+        )
 
     def test_a_long_report_is_asked_about_all_the_way_through(self, tmp_path):
         from vectrixdb import Vectrix
 
-        pages = [f"Section {n} of the report covers topic number {n} in depth, " * 5 for n in range(1, 31)]
+        pages = [
+            f"Section {n} of the report covers topic number {n} in depth, " * 5
+            for n in range(1, 31)
+        ]
         text, offsets = join_pages(pages)
-        handle = Vectrix("long", path=str(tmp_path / "long"), embed_fn=embed, dimension=WIDTH, mode="dense",
-                         keep_source=str(tmp_path / "kept-long"), embedding_cache=False)
+        handle = Vectrix(
+            "long",
+            path=str(tmp_path / "long"),
+            embed_fn=embed,
+            dimension=WIDTH,
+            mode="dense",
+            keep_source=str(tmp_path / "kept-long"),
+            embedding_cache=False,
+        )
         try:
             handle.add_document(LoadedDocument(text=text, pages=offsets), doc_id="long.pdf")
             first = golden_template(handle, n=5, by="page", seed=0)
@@ -166,14 +236,22 @@ class TestATemplateAPageAtATime:
             handle.close()
         numbers = [int(r["expected"][0].split("=")[1]) for r in first]
         assert first == again and len(numbers) == 5
-        assert [b - a for a, b in zip(numbers, numbers[1:])] == [6, 6, 6, 6], "evenly spread, one every six pages of thirty"
+        assert [b - a for a, b in zip(numbers, numbers[1:])] == [6, 6, 6, 6], (
+            "evenly spread, one every six pages of thirty"
+        )
 
     def test_filled_in_it_passes_the_check(self, db, tmp_path):
         rows = golden_template(db, tmp_path / "golden.jsonl", n=50, by="page")
         rows[4]["question"] = ASKED
-        (tmp_path / "golden.jsonl").write_text("".join(__import__("json").dumps(r) + "\n" for r in rows), encoding="utf-8")
+        (tmp_path / "golden.jsonl").write_text(
+            "".join(__import__("json").dumps(r) + "\n" for r in rows), encoding="utf-8"
+        )
         check = check_golden(tmp_path / "golden.jsonl", db)
-        assert check.ok and check.ready == 1 and check.warnings[0].message == "5 template rows are still waiting for a question"
+        assert (
+            check.ok
+            and check.ready == 1
+            and check.warnings[0].message == "5 template rows are still waiting for a question"
+        )
 
     def test_by_is_doc_or_page(self, db):
         with pytest.raises(ValueError, match="by is 'doc' or 'page'"):
@@ -183,13 +261,29 @@ class TestATemplateAPageAtATime:
         """A golden dataset is not one a collection: its rows name documents wherever they are held."""
         from vectrixdb import Vectrix
 
-        other = Vectrix("media", path=str(tmp_path / "media"), embed_fn=embed, dimension=WIDTH, mode="dense",
-                        keep_source=str(tmp_path / "kept-media"), embedding_cache=False)
+        other = Vectrix(
+            "media",
+            path=str(tmp_path / "media"),
+            embed_fn=embed,
+            dimension=WIDTH,
+            mode="dense",
+            keep_source=str(tmp_path / "kept-media"),
+            embedding_cache=False,
+        )
         try:
-            other.add_document("# Talk\n\nA talk about basalt and how it forms when lava cools quickly at the surface.", doc_id="talk.md")
+            other.add_document(
+                "# Talk\n\nA talk about basalt and how it forms when lava cools quickly at the surface.",
+                doc_id="talk.md",
+            )
             rows = golden_template([db, other], n=50, by="page")
         finally:
             other.close()
         assert [r["expected"][0] for r in rows] == [
-            "call.wav", "memo.pdf", "notes.md", "report.pdf#page=1", "report.pdf#page=2", "report.pdf#page=3", "talk.md",
+            "call.wav",
+            "memo.pdf",
+            "notes.md",
+            "report.pdf#page=1",
+            "report.pdf#page=2",
+            "report.pdf#page=3",
+            "talk.md",
         ]

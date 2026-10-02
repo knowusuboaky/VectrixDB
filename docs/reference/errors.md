@@ -22,7 +22,7 @@ Every way the server and the extraction service say no, read off the code, so a 
 
 Exceptions the library raises in Python are on [Exceptions](exceptions.md); the table at the end lists them. The server turns a `PolicyError` into 403 (or 503 for a records store that cannot be read), a route's `HTTPException` into its own status, and a body that is not the shape asked for into 422. The extraction service turns a `DependencyError` into 503, an `ExtractionError` into 502 when a service answered badly and 422 when the file could not be read, and a `ConfigurationError` in what was asked into 422.
 
-## What a route can send, 143 refusals
+## What a route can send, 144 refusals
 
 ### Sign-in and the door
 
@@ -40,6 +40,7 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 400 | This set-up has expired. Ask for a new link from the sign-in page. | `enrol_confirm`, `passkey_enrol_begin`, `passkey_enrol_finish` |
 | 400 | what is wrong with the password, in words | `password_reset`, `set_my_password` |
 | 401 | API key required for write operations. Provide api-key header. | `_keys_only` |
+| 401 | API key required. Provide api-key header. | `_keys_only` |
 | 401 | Developer Access is off. Sign in again. | `step_up` |
 | 401 | Emergency sign-in is off. Sign in again. | `step_up` |
 | 401 | Invalid API key | `dispatch` |

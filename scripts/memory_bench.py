@@ -176,7 +176,10 @@ def longmemeval_tasks(data: Any) -> Iterable[Dict[str, Any]]:
 
 
 def run(
-    tasks: Iterable[Dict[str, Any]], token_budget: int, limit: Optional[int], recent_turns: int,
+    tasks: Iterable[Dict[str, Any]],
+    token_budget: int,
+    limit: Optional[int],
+    recent_turns: int,
     dense_model: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     from vectrixdb import Vectrix
@@ -324,7 +327,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(
-            json.dumps({"benchmark": args.benchmark, "token_budget": args.token_budget, **_provenance(args.dense_model), **result}, indent=2),
+            json.dumps(
+                {
+                    "benchmark": args.benchmark,
+                    "token_budget": args.token_budget,
+                    **_provenance(args.dense_model),
+                    **result,
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
     return 0

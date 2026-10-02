@@ -62,6 +62,19 @@ class TestTheSignal:
         assert signals["known_words"] < 0.2
         assert signals["plain_characters"] < extraction_quality(PROSE).signals["plain_characters"]
 
+    def test_clean_markdown_is_usable(self):
+        """ "**Docs:**", "*what*" and "everything." are words with marks at
+        their edges; read as tokens whole, this scored 0.75 and was refused."""
+        markdown = (
+            "# Release notes\n\n"
+            "* **Faster search:** queries return sooner, especially on large collections.\n"
+            "* **Better errors:** messages now say *what* failed, and *why*.\n"
+            "* **Safer deletes:** `forget()` asks before removing everything.\n"
+            "* **Docs:** new guides for `memory`, `policy`, and `citations`.\n"
+        )
+        quality = extraction_quality(markdown)
+        assert quality.usable and quality.signals["whole_words"] > 0.9
+
     def test_a_heading_is_not_judged(self):
         """Two words are not enough to call an extraction failed, and a
         heading is not one."""
@@ -75,6 +88,180 @@ class TestTheSignal:
     def test_to_dict_round_trips(self):
         payload = extraction_quality(PROSE).to_dict()
         assert payload["usable"] is True and payload["threshold"] == DEFAULT_THRESHOLD
+
+
+# Clean documents of the shapes the docs prose is not, scored on 2026-10-02
+# when raising the threshold was weighed and declined; the numbers are quoted
+# beside DEFAULT_THRESHOLD. Each is (name, text, score then, clearly usable):
+# the last is True where the shape sits over the line with room, and the test
+# holds those there, and holds the threshold under the terse Markdown that
+# scores 0.81 to 0.82, which is what a raise to 0.80 or above would refuse.
+CLEAN_SHAPES = [
+    (
+        "terse markdown",
+        "# Deploy\n\n## Steps\n- Build the image\n- Push to registry\n- Roll out\n\n## Rollback\n- Revert the tag\n- Redeploy\n",
+        0.819,
+        True,
+    ),
+    (
+        "bullet checklist",
+        "# Release checklist\n\n- Changelog updated\n- Version bumped\n- Tests green\n- Tag pushed\n- Wheel uploaded\n- Docs published\n",
+        0.721,
+        False,
+    ),
+    (
+        "markdown table",
+        "| Region | Revenue | Growth |\n|---|---|---|\n| EMEA | 1200 | 4% |\n| APAC | 980 | 7% |\n| NA | 1500 | 2% |\n\nTotals exclude returns.\n",
+        0.780,
+        False,
+    ),
+    (
+        "bare csv",
+        "Region, Revenue, Growth\nEMEA, 1200, 4%\nAPAC, 980, 7%\nNA, 1500, 2%\nLATAM, 310, 9%\n",
+        0.537,
+        False,
+    ),
+    (
+        "email",
+        "Hi Dana,\n\nThanks for the draft. Two things before Friday: the budget table on page 3 still shows last year's numbers, and legal wants the indemnity clause back in section 7.\n\nCan you send a revised copy by Thursday noon? I'll circulate it to the board after that.\n\nBest,\nMark\n",
+        0.967,
+        True,
+    ),
+    (
+        "legal prose",
+        '1. Definitions. In this Agreement, "Confidential Information" means any information disclosed by either party to the other, whether orally or in writing, that is designated as confidential or that reasonably should be understood to be confidential given the nature of the information and the circumstances of disclosure.\n\n2. Obligations. The receiving party shall hold the Confidential Information in strict confidence and shall not disclose it to any third party without the prior written consent of the disclosing party, except as required by law.\n',
+        0.990,
+        True,
+    ),
+    (
+        "code readme",
+        '# fastcache\n\nIn-memory LRU cache with TTL.\n\n## Install\n\n```\npip install fastcache\n```\n\n## Usage\n\n```python\nfrom fastcache import Cache\n\nc = Cache(maxsize=1000, ttl=60)\nc.set("key", value)\nc.get("key")\n```\n\n## Options\n\n- `maxsize`: int, default 1000\n- `ttl`: seconds, default None\n- `on_evict`: callback(key, value)\n\n## License\n\nMIT\n',
+        0.641,
+        False,
+    ),
+    (
+        "slide outline",
+        "Q3 Review\n\nRevenue up 12%\nChurn down\nTwo new markets\n\nRisks\nHiring pace\nVendor costs\nFX exposure\n\nNext quarter\nLaunch v3\nClose Series B\nHire 20\n",
+        0.766,
+        False,
+    ),
+    (
+        "french",
+        "La réunion s'est tenue mardi matin dans la salle principale. Les participants ont examiné le budget de l'année prochaine et ont décidé de reporter l'achat du nouveau matériel. Le directeur a rappelé que les délais de livraison restaient serrés et qu'il faudrait prévenir les clients avant la fin du mois.\n",
+        0.661,
+        False,
+    ),
+    (
+        "spanish",
+        "El informe anual muestra un crecimiento sostenido en todas las regiones. Las ventas aumentaron un ocho por ciento respecto al año anterior, impulsadas por la demanda en el mercado europeo. La dirección propone invertir en nuevas instalaciones durante el próximo ejercicio.\n",
+        0.718,
+        False,
+    ),
+    (
+        "german",
+        "Die Sitzung begann um neun Uhr. Der Vorstand besprach die Ergebnisse des letzten Quartals und beschloss, die Investitionen in neue Anlagen zu erhöhen. Die Mitarbeiter werden nächste Woche informiert.\n",
+        0.741,
+        False,
+    ),
+    (
+        "minutes",
+        "Minutes, 14 March\n\nPresent: A. Okafor, L. Chen, R. Patel\nApologies: M. Silva\n\n1. Budget approved as circulated.\n2. Vendor contract: L. Chen to negotiate terms.\n3. Next meeting 28 March.\n",
+        0.741,
+        False,
+    ),
+    (
+        "api reference",
+        "## get_user(id)\n\nReturns the user record.\n\n**Parameters**\n\n- `id` (str): the user id\n\n**Returns**\n\ndict with `name`, `email`, `created_at`\n\n**Raises**\n\n- `NotFound` if no user has that id\n",
+        0.885,
+        True,
+    ),
+    (
+        "changelog",
+        "## [2.2.0] - 2026-10-01\n\n### Added\n- Sharded index for collections over RAM\n- Quality check at ingest\n\n### Fixed\n- Tokeniser kept punctuation on word edges\n- Download retries on 5xx\n",
+        0.765,
+        False,
+    ),
+    (
+        "recipe",
+        "Lemon pasta\n\nServes 2\n\n- 200 g spaghetti\n- 1 lemon\n- 50 g parmesan\n- olive oil, salt, pepper\n\nCook the pasta. Zest and juice the lemon. Toss everything together with a splash of the cooking water. Season and serve.\n",
+        0.837,
+        True,
+    ),
+    (
+        "faq",
+        'Q: How do I reset my password?\nA: Click "Forgot password" on the sign-in page and follow the link in the email.\n\nQ: Can I change my username?\nA: No. Usernames are permanent.\n\nQ: Where is my data stored?\nA: In the region you chose when you created the account.\n',
+        0.966,
+        True,
+    ),
+    (
+        "requirements list",
+        "Requirements\n\n- Must run offline\n- Python 3.9+\n- No GPU needed\n- Under 100 MB installed\n- Windows, macOS, Linux\n",
+        0.813,
+        True,
+    ),
+    (
+        "memo",
+        "To: All staff\nFrom: Facilities\nRe: Parking\n\nThe north lot is closed next week for resurfacing. Use the garage on Elm Street. Passes are at reception.\n",
+        1.000,
+        True,
+    ),
+    (
+        "product page",
+        "Trailrunner 3\n\nLightweight. Waterproof. Built for the long run.\n\n- 240 g per shoe\n- 8 mm drop\n- Recycled upper\n\nAvailable in three colours. Free returns within 30 days.\n",
+        0.867,
+        True,
+    ),
+    (
+        "log notes",
+        "2026-09-30 build failed on main, flaky network test, reran green\n2026-10-01 bumped onnxruntime to 1.19, all tests pass\n2026-10-02 released 2.2.0, wheel 98 MB\n",
+        0.740,
+        False,
+    ),
+]
+
+
+class TestTheShapesCleanTextTakes:
+    """The threshold was set on docs prose; these are the shapes clean text
+    takes that docs prose does not, and what they scored when a raise was
+    weighed. A shape can only move by a little without a detector change."""
+
+    @pytest.mark.parametrize(
+        "name, text, then, clearly", CLEAN_SHAPES, ids=[c[0] for c in CLEAN_SHAPES]
+    )
+    def test_a_clean_shape_scores_what_it_did(self, name, text, then, clearly):
+        now = extraction_quality(text).score
+        assert abs(now - then) < 0.03, (
+            f"{name} moved from {then:.3f} to {now:.3f}: re-run scripts/quality_eval.py and re-quote DEFAULT_THRESHOLD"
+        )
+        if clearly:
+            assert now >= DEFAULT_THRESHOLD + 0.02, (
+                f"{name} is a clean document and it is at the line"
+            )
+
+    def test_the_threshold_stays_under_terse_clean_markdown(self):
+        """A raise to 0.80 or above buys precision on the eval set with the
+        terse Markdown a person writes: headings, bullets, a requirements
+        list. Those sit at 0.81 to 0.82, so the line stays 0.02 under them."""
+        terse = [
+            text
+            for name, text, _then, _clearly in CLEAN_SHAPES
+            if name in ("terse markdown", "requirements list")
+        ]
+        lowest = min(extraction_quality(text).score for text in terse)
+        assert DEFAULT_THRESHOLD <= lowest - 0.02
+        assert all(extraction_quality(text).usable for text in terse)
+
+    def test_what_sits_under_the_line_is_the_documented_limit(self):
+        """Code, a bare table, lines of two to five words, and prose in a
+        language the common-word list does not hold: refused today, and said
+        to be in the docs. Not a target; a record, so a change is noticed."""
+        under = {
+            name
+            for name, text, _then, _clearly in CLEAN_SHAPES
+            if not extraction_quality(text).usable
+        }
+        assert {"bare csv", "code readme", "french", "spanish"} <= under
+        assert not {"email", "legal prose", "memo", "faq", "terse markdown"} & under
 
 
 class TestTheMeasurement:

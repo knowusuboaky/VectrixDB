@@ -35,13 +35,33 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import urlparse
 
-__all__ = ["GRAPH_STORE_ENV", "GraphStore", "graph_store", "graph_json", "nodes_and_edges", "is_stale", "written_since"]
+__all__ = [
+    "GRAPH_STORE_ENV",
+    "GraphStore",
+    "graph_store",
+    "graph_json",
+    "nodes_and_edges",
+    "is_stale",
+    "written_since",
+]
 
 #: The setting. A folder, ``s3://bucket/prefix`` or a Blob address; unset, ``<path>/graph`` beside the server.
 GRAPH_STORE_ENV = "VECTRIXDB_GRAPH_STORE"
 
 _ENTITY_FIELDS = ("id", "name", "type", "description", "importance")
-_RELATIONSHIP_FIELDS = ("id", "source_id", "target_id", "type", "description", "strength", "confidence", "bidirectional", "valid_from", "valid_to", "superseded_by")
+_RELATIONSHIP_FIELDS = (
+    "id",
+    "source_id",
+    "target_id",
+    "type",
+    "description",
+    "strength",
+    "confidence",
+    "bidirectional",
+    "valid_from",
+    "valid_to",
+    "superseded_by",
+)
 
 
 # ============================================================================
@@ -76,7 +96,9 @@ class GraphStore:
 
     def put(self, collection: str, graph: Dict[str, Any]) -> None:
         """Keep a finished graph, replacing the last one."""
-        self.files.write(self._rel(collection), json.dumps(graph, ensure_ascii=False).encode("utf-8"))
+        self.files.write(
+            self._rel(collection), json.dumps(graph, ensure_ascii=False).encode("utf-8")
+        )
 
     def delete(self, collection: str) -> bool:
         """Drop a collection's graph; False when there was none."""
@@ -111,7 +133,10 @@ def graph_store(where: Any) -> GraphStore:
         parts = urlparse(text).path.lstrip("/").split("/", 1)
         if not parts[0]:
             raise ValueError(f"{text}: a Blob address names a container")
-        return GraphStore(BlobFiles(_blob_client(account), parts[0], parts[1] if len(parts) > 1 else ""), where=text)
+        return GraphStore(
+            BlobFiles(_blob_client(account), parts[0], parts[1] if len(parts) > 1 else ""),
+            where=text,
+        )
     return GraphStore(LocalFiles(text), where=text)
 
 
@@ -138,7 +163,9 @@ def _pick(obj: Any, fields: Tuple[str, ...]) -> Dict[str, Any]:
     return out
 
 
-def graph_json(collection: str, storage: Any, *, build: Optional[str], model: str) -> Dict[str, Any]:
+def graph_json(
+    collection: str, storage: Any, *, build: Optional[str], model: str
+) -> Dict[str, Any]:
     """The object to keep, read off the pipeline's storage after an extraction."""
     entities = [_pick(e, _ENTITY_FIELDS) for e in storage.load_all_entities()]
     relationships = [_pick(r, _RELATIONSHIP_FIELDS) for r in storage.load_all_relationships()]
@@ -162,7 +189,9 @@ def graph_json(collection: str, storage: Any, *, build: Optional[str], model: st
     }
 
 
-def nodes_and_edges(graph: Dict[str, Any], limit: int = 500) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def nodes_and_edges(
+    graph: Dict[str, Any], limit: int = 500
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """A kept graph in the shape the page draws: Cytoscape nodes and edges, the first ``limit`` entities."""
     communities = graph.get("communities") or {}
     nodes = [

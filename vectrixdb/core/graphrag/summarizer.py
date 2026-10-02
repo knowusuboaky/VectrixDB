@@ -158,7 +158,12 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
 
         reply = post_json(
             f"{self._endpoint}/api/generate",
-            {"model": self.config.llm_model, "prompt": prompt, "stream": False, "options": {"temperature": 0.3}},
+            {
+                "model": self.config.llm_model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.3},
+            },
         )
         return reply["response"].strip()
 

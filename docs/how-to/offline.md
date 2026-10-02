@@ -37,6 +37,24 @@ from vectrixdb.models import download_models
 download_models("dense")
 ```
 
+## Where a download comes from
+
+`vectrixdb download-models` tries two sources in order, and says which it tried when both fail:
+
+1. **A GitHub release.** Each model in `vectrixdb.models.embedded.MODEL_CONFIG` names a release tag (`dense-en` for `dense_en`, `dense-multi` for `dense`, `mrebel` for `rebel`, and so on), and the downloader fetches `https://github.com/knowusuboaky/VectrixDB/releases/download/<tag>/<type>.zip`: a flat zip of the ONNX INT8 model directory, verified against the checksum manifest. This is the path for a host without HuggingFace access, and it needs no extra.
+2. **HuggingFace**, exported to ONNX on your machine, which needs `pip install "vectrixdb[setup-models]"` (optimum or torch). Two models, the English reranker and the English ColBERT, have no HuggingFace path because they ship in the wheel.
+
+A release tag that has not been published answers 404 to everyone, and the first source is only as real as the release behind it. The failure says so: `ModelDownloadError` lists the URL tried and what it answered, the HuggingFace attempt and its error, and, when the release is missing, the command that creates it. `dense_en` is the one that matters most: it is not in the wheel, and a collection written before 2.2 fetches it on first search, so until its release exists that fetch needs HuggingFace access.
+
+Publishing a release is a maintainer's act, in two steps, neither run for you:
+
+```bash
+python scripts/publish_models.py dense_en      # zips the model dir into dist/models/dense_en.zip, prints the next line
+gh release create dense-en dist/models/dense_en.zip --title "dense_en model" --notes "..."
+```
+
+`python scripts/publish_models.py` with no arguments lists every type, its tag, its asset name, and whether its model and checksums are here; record the checksums first (`python scripts/model_checksums.py --write dense_en`) or the download will be refused as unverified. `python scripts/check_model_releases.py` sends a HEAD to every release URL and exits 1 naming the ones that are missing; the nightly workflow runs it as an advisory job.
+
 ## Where models live
 
 Downloaded models go to the package's models directory, or to `VECTRIXDB_MODELS_DIR` when it is set. On a locked-down host, download once on a machine with a network, copy the directory across, and point the variable at it:
