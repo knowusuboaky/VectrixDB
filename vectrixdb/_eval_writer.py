@@ -1108,7 +1108,7 @@ class _Likeness:
                 parts = [np.asarray(self.handles[h].embed([p.text for p in items[i : i + self.BATCH]]), dtype=np.float32) for i in range(0, len(items), self.BATCH)]
                 matrix = np.vstack(parts)
                 norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-                matrix = matrix / np.where(norms == 0, 1.0, norms)
+                matrix = (matrix / np.where(norms == 0, 1.0, norms)).astype(np.float32)
             except Exception:  # noqa: BLE001 - a model with no dense vectors to compare gives no second place
                 matrix = None
             self.vectors[h] = matrix
