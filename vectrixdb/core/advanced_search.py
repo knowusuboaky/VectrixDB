@@ -7,7 +7,7 @@ Enterprise-grade search capabilities:
 - ACL/Security filtering
 - Text analyzers (stemming, synonyms, stopwords)
 
-Author: Daddy Nyame Owusu - Boakye
+Author: Kwadwo Daddy Nyame Owusu - Boakye
 """
 
 import re
@@ -20,9 +20,35 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import numpy as np
 
 
-# =============================================================================
-# Re-Ranking / Two-Stage Retrieval
-# =============================================================================
+__all__ = [
+    "RerankMethod",
+    "RerankConfig",
+    "Reranker",
+    "FacetConfig",
+    "FacetValue",
+    "FacetResult",
+    "FacetAggregator",
+    "ACLOperator",
+    "ACLPrincipal",
+    "ACLConfig",
+    "ACLFilter",
+    "AnalyzerType",
+    "TextAnalyzer",
+    "KeywordAnalyzer",
+    "SimpleStemmer",
+    "AnalyzerChain",
+    "EnhancedSearchResults",
+]
+
+
+# ============================================================================
+# RERANKING: two-stage retrieval
+# ============================================================================
+#
+# INPUT   candidates from a first search, a query, and a method
+# OUTPUT  the candidates rescored and reordered
+#
+# A fast ANN search, then a precise pass over what it found.
 
 
 class RerankMethod(str, Enum):
@@ -42,11 +68,13 @@ class RerankConfig:
     method: RerankMethod = RerankMethod.EXACT
     candidate_multiplier: int = 10  # Fetch limit * multiplier candidates
     diversity_lambda: float = 0.5  # For MMR: 0=diversity, 1=relevance
-    score_weights: Dict[str, float] = field(default_factory=lambda: {
-        "vector": 0.7,
-        "text": 0.2,
-        "recency": 0.1,
-    })
+    score_weights: Dict[str, float] = field(
+        default_factory=lambda: {
+            "vector": 0.7,
+            "text": 0.2,
+            "recency": 0.1,
+        }
+    )
 
     # Cross-encoder settings (if using neural reranking)
     cross_encoder_model: Optional[str] = None
@@ -71,7 +99,7 @@ class Reranker:
 
     def __init__(self, config: Optional[RerankConfig] = None):
         self.config = config or RerankConfig()
-        self._cross_encoder = None
+        self._cross_encoder: Any = None
 
     def rerank(
         self,
@@ -172,6 +200,14 @@ class Reranker:
                 vec = get_vector_fn(c["id"])
             vectors.append(np.array(vec) if vec is not None else None)
 
+        # MMR skips any candidate it has no vector for, so with none at all
+        # the selection loop ends immediately and this returned an empty list
+        # for a search that had candidates. An empty result is never the
+        # right answer to "give me a diverse subset of these": fall back to
+        # score order, the way _rerank_exact already does per candidate.
+        if all(v is None for v in vectors):
+            return sorted(candidates, key=lambda c: c.get("score", 0), reverse=True)[:limit]
+
         # Calculate query similarities
         query_norm = np.linalg.norm(query_vector)
         query_sims = []
@@ -183,7 +219,7 @@ class Reranker:
             query_sims.append(sim)
 
         # MMR selection
-        selected_indices = []
+        selected_indices: List[int] = []
         remaining = set(range(len(candidates)))
 
         while len(selected_indices) < limit and remaining:
@@ -191,7 +227,8 @@ class Reranker:
             best_mmr = float("-inf")
 
             for idx in remaining:
-                if vectors[idx] is None:
+                vec_idx = vectors[idx]
+                if vec_idx is None:
                     continue
 
                 # Relevance to query
@@ -200,9 +237,10 @@ class Reranker:
                 # Max similarity to already selected
                 max_sim_to_selected = 0
                 for sel_idx in selected_indices:
-                    if vectors[sel_idx] is not None:
-                        sim = np.dot(vectors[idx], vectors[sel_idx]) / (
-                            np.linalg.norm(vectors[idx]) * np.linalg.norm(vectors[sel_idx]) + 1e-10
+                    vec_sel = vectors[sel_idx]
+                    if vec_sel is not None:
+                        sim = np.dot(vec_idx, vec_sel) / (
+                            np.linalg.norm(vec_idx) * np.linalg.norm(vec_sel) + 1e-10
                         )
                         max_sim_to_selected = max(max_sim_to_selected, sim)
 
@@ -243,7 +281,9 @@ class Reranker:
             from sentence_transformers import CrossEncoder
 
             if self._cross_encoder is None:
-                model_name = self.config.cross_encoder_model or "cross-encoder/ms-marco-MiniLM-L-6-v2"
+                model_name = (
+                    self.config.cross_encoder_model or "cross-encoder/ms-marco-MiniLM-L-6-v2"
+                )
                 self._cross_encoder = CrossEncoder(model_name)
 
             # Prepare pairs
@@ -296,9 +336,14 @@ class Reranker:
         return results[:limit]
 
 
-# =============================================================================
-# Faceted Search
-# =============================================================================
+# ============================================================================
+# FACETS
+# ============================================================================
+#
+# INPUT   results, and the facets asked for
+# OUTPUT  each facet's values with counts
+#
+# What a filter panel is drawn from.
 
 
 @dataclass
@@ -405,8 +450,8 @@ class FacetAggregator:
             sorted_items = sorted(counter.items(), key=lambda x: str(x[0]))
 
         # Limit
-        top_items = sorted_items[:config.limit]
-        other_count = sum(count for _, count in sorted_items[config.limit:])
+        top_items = sorted_items[: config.limit]
+        other_count = sum(count for _, count in sorted_items[config.limit :])
 
         facet_values = [FacetValue(value=val, count=count) for val, count in top_items]
 
@@ -420,7 +465,7 @@ class FacetAggregator:
     def _get_nested_value(self, doc: Dict, field: str) -> Any:
         """Get value from nested dict using dot notation."""
         keys = field.split(".")
-        value = doc
+        value: Any = doc
 
         for key in keys:
             if isinstance(value, dict):
@@ -445,9 +490,14 @@ class FacetAggregator:
         }
 
 
-# =============================================================================
-# ACL / Security Filtering
-# =============================================================================
+# ============================================================================
+# ACL: security-aware search
+# ============================================================================
+#
+# INPUT   a principal's users, groups and roles, and each document's ACL
+# OUTPUT  only the documents the principal may see
+#
+# Filtered before ranking, so a count never gives away what was hidden.
 
 
 class ACLOperator(str, Enum):
@@ -652,9 +702,14 @@ class ACLFilter:
         }
 
 
-# =============================================================================
-# Text Analyzers
-# =============================================================================
+# ============================================================================
+# TEXT ANALYZERS
+# ============================================================================
+#
+# INPUT   text
+# OUTPUT  tokens: standard, keyword, or stemmed, chained as asked
+#
+# A simple suffix-stripping stemmer, so nothing depends on NLTK.
 
 
 class AnalyzerType(str, Enum):
@@ -686,13 +741,55 @@ class TextAnalyzer:
     """
 
     # Common English stopwords
-    ENGLISH_STOPWORDS = frozenset([
-        "a", "an", "and", "are", "as", "at", "be", "but", "by", "for",
-        "if", "in", "into", "is", "it", "no", "not", "of", "on", "or",
-        "such", "that", "the", "their", "then", "there", "these", "they",
-        "this", "to", "was", "will", "with", "the", "and", "but", "or",
-        "because", "as", "what", "which", "who", "when", "where", "how",
-    ])
+    ENGLISH_STOPWORDS = frozenset(
+        [
+            "a",
+            "an",
+            "and",
+            "are",
+            "as",
+            "at",
+            "be",
+            "but",
+            "by",
+            "for",
+            "if",
+            "in",
+            "into",
+            "is",
+            "it",
+            "no",
+            "not",
+            "of",
+            "on",
+            "or",
+            "such",
+            "that",
+            "the",
+            "their",
+            "then",
+            "there",
+            "these",
+            "they",
+            "this",
+            "to",
+            "was",
+            "will",
+            "with",
+            "the",
+            "and",
+            "but",
+            "or",
+            "because",
+            "as",
+            "what",
+            "which",
+            "who",
+            "when",
+            "where",
+            "how",
+        ]
+    )
 
     def __init__(
         self,
@@ -707,7 +804,9 @@ class TextAnalyzer:
     ):
         self.lowercase = lowercase
         self.remove_stopwords = remove_stopwords
-        self.stopwords = stopwords or self.ENGLISH_STOPWORDS
+        # An explicit empty set means strip nothing. ``or`` treated it as
+        # unset and substituted the English list.
+        self.stopwords = self.ENGLISH_STOPWORDS if stopwords is None else stopwords
         self.stemmer_type = stemmer
         self.synonyms = synonyms or {}
         self.min_token_length = min_token_length
@@ -715,7 +814,7 @@ class TextAnalyzer:
         self.token_pattern = re.compile(token_pattern)
 
         # Initialize stemmer if requested
-        self._stemmer = None
+        self._stemmer: Any = None
         if stemmer:
             self._init_stemmer(stemmer)
 
@@ -724,12 +823,15 @@ class TextAnalyzer:
         try:
             if stemmer_type == "porter":
                 from nltk.stem import PorterStemmer
+
                 self._stemmer = PorterStemmer()
             elif stemmer_type == "snowball":
                 from nltk.stem import SnowballStemmer
+
                 self._stemmer = SnowballStemmer("english")
             elif stemmer_type == "lancaster":
                 from nltk.stem import LancasterStemmer
+
                 self._stemmer = LancasterStemmer()
         except ImportError:
             # Fall back to simple suffix stripping
@@ -756,10 +858,7 @@ class TextAnalyzer:
         tokens = self.token_pattern.findall(text)
 
         # Filter by length
-        tokens = [
-            t for t in tokens
-            if self.min_token_length <= len(t) <= self.max_token_length
-        ]
+        tokens = [t for t in tokens if self.min_token_length <= len(t) <= self.max_token_length]
 
         # Remove stopwords
         if self.remove_stopwords:
@@ -839,10 +938,32 @@ class SimpleStemmer:
     """Simple suffix-stripping stemmer (no NLTK dependency)."""
 
     SUFFIXES = [
-        "ization", "ational", "fulness", "ousness", "iveness",
-        "ation", "eness", "ment", "ness", "ible", "able", "ity",
-        "ing", "ies", "ive", "ion", "ous", "ful", "ism", "ist",
-        "ly", "ed", "er", "es", "al", "s",
+        "ization",
+        "ational",
+        "fulness",
+        "ousness",
+        "iveness",
+        "ation",
+        "eness",
+        "ment",
+        "ness",
+        "ible",
+        "able",
+        "ity",
+        "ing",
+        "ies",
+        "ive",
+        "ion",
+        "ous",
+        "ful",
+        "ism",
+        "ist",
+        "ly",
+        "ed",
+        "er",
+        "es",
+        "al",
+        "s",
     ]
 
     def stem(self, word: str) -> str:
@@ -851,7 +972,7 @@ class SimpleStemmer:
 
         for suffix in self.SUFFIXES:
             if word.endswith(suffix) and len(word) - len(suffix) >= 3:
-                return word[:-len(suffix)]
+                return word[: -len(suffix)]
 
         return word
 
@@ -879,9 +1000,14 @@ class AnalyzerChain:
         return tokens
 
 
-# =============================================================================
-# Combined Search Result with All Features
-# =============================================================================
+# ============================================================================
+# THE COMBINED RESULT
+# ============================================================================
+#
+# INPUT   results with every feature on
+# OUTPUT  one shape carrying the reranking, the facets and the ACL verdicts
+#
+# What enterprise search answers with.
 
 
 @dataclass

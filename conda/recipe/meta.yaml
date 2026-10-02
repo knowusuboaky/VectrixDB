@@ -1,0 +1,60 @@
+# conda-forge recipe for VectrixDB.
+#
+# The wheel is pure Python (the ONNX models are package data), so this is a
+# noarch build. To submit: copy this directory to a fork of
+# conda-forge/staged-recipes under recipes/vectrixdb, update the version
+# and sha256 from the PyPI sdist, and open the pull request. Every runtime
+# dependency below already exists on conda-forge.
+{% set name = "vectrixdb" %}
+{% set version = "2.2.0" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  url: https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz
+  sha256: REPLACE_WITH_THE_SDIST_SHA256
+
+build:
+  noarch: python
+  number: 0
+  script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  entry_points:
+    - vectrixdb = vectrixdb.cli:app
+    - vectrixdb-mcp = vectrixdb.mcp_server:main
+
+requirements:
+  host:
+    - python >=3.9
+    - pip
+    - setuptools >=61
+  run:
+    - python >=3.9
+    - numpy >=1.24.0
+    - usearch >=2.0.0
+    - onnxruntime >=1.15.0
+    - rich >=13.0.0
+    - typer >=0.9.0
+
+test:
+  imports:
+    - vectrixdb
+    - vectrixdb.easy
+  commands:
+    - vectrixdb --help
+    - python -c "from vectrixdb import Vectrix; db = Vectrix('smoke'); db.add(['hello world']); print(db.search('hello').top.text)"
+  requires:
+    - pip
+
+about:
+  home: https://github.com/knowusuboaky/VectrixDB
+  summary: The vector database that works offline, with no API keys
+  license: Apache-2.0
+  license_file: LICENSE
+  doc_url: https://knowusuboaky.github.io/VectrixDB/
+  dev_url: https://github.com/knowusuboaky/VectrixDB
+
+extra:
+  recipe-maintainers:
+    - knowusuboaky

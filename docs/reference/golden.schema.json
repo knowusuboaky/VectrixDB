@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VectrixDB golden question",
+  "description": "One line of a golden file: a question, where the answer is, and the answer a person would accept. A row golden_template wrote and nobody has filled in yet has an empty question and a hint.",
+  "type": "object",
+  "required": [
+    "question",
+    "expected"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "description": "The question's name in reports. Numbered by its line when left out."
+    },
+    "question": {
+      "type": "string",
+      "description": "What a person would ask. Empty only on a template row, which has a hint."
+    },
+    "expected": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?:(?!#page=).)+(?:#page=[1-9][0-9]*)?$"
+      },
+      "description": "Where the answer is: a document by its id, td/report.pdf, or one page of it, td/report.pdf#page=41, the page's place in the file as its citation gives it."
+    },
+    "reference": {
+      "type": "string",
+      "description": "The answer a person would accept, for scoring written answers."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "The words on the expected pages that answer the question, exactly as they are there, one quote an item: what the golden writer checked each question against. A run can then ask whether these words came back, not only a piece of the right page. A quote of fewer than three words is not used."
+    },
+    "hint": {
+      "type": "string",
+      "description": "Where the answer is, for a person: on a template row, how the document or page starts, for whoever writes the question; on a written draft, the page and the words that answer it, for whoever checks it."
+    },
+    "draft": {
+      "type": "boolean",
+      "description": "True while a person has not checked a row that a model or suggest_expected wrote."
+    }
+  },
+  "if": {
+    "properties": {
+      "question": {
+        "pattern": "^\\s*$"
+      }
+    },
+    "required": [
+      "question"
+    ]
+  },
+  "then": {
+    "required": [
+      "hint"
+    ]
+  }
+}

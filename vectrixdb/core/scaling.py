@@ -8,25 +8,77 @@ Features:
 - Shard management for horizontal scaling
 - Connection pooling
 
-Author: Daddy Nyame Owusu - Boakye
+Author: Kwadwo Daddy Nyame Owusu - Boakye
 """
 
+import logging
 import os
-import psutil
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from collections import deque
-import logging
+
+from .._time import utcnow
+
+try:
+    import psutil
+except ImportError:  # pragma: no cover - exercised by the clean-install test
+    # Not a dependency. It reads whole-system memory and CPU, which is
+    # telemetry and pressure monitoring, never part of answering a query.
+    # Importing it at module scope meant a plain install could not create a
+    # collection, because core/__init__ reaches this module.
+    psutil = None
+
+
+__all__ = [
+    "ScalingStrategy",
+    "ScalingConfig",
+    "PerformanceMetrics",
+    "MetricsCollector",
+    "ResourceMonitor",
+    "IndexScaler",
+    "MemoryManager",
+    "ShardManager",
+    "AutoScaler",
+    "ConnectionPool",
+]
+
+
+# ============================================================================
+# SETTINGS: the logger
+# ============================================================================
+#
+# One logger for the scaler's lines.
 
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# MEMORY, THE STRATEGIES, THE CONFIG, AND THE METRICS
+# ============================================================================
+#
+# INPUT   the system, and a time window
+# OUTPUT  whether whole-system memory can be read at all; the strategies; the
+#         configuration; the metrics of a window, collected and aggregated
+#
+# Readings that cannot be taken are said, not guessed.
+
+
+def system_memory_available() -> bool:
+    """Whether whole-system memory readings can be taken at all.
+
+    False means psutil is not installed, so the figures below are absent
+    rather than zero. Callers that report them should say so.
+    """
+    return psutil is not None
+
+
 class ScalingStrategy(str, Enum):
     """Scaling strategies."""
+
     NONE = "none"  # No auto-scaling
     CONSERVATIVE = "conservative"  # Scale slowly, prioritize stability
     BALANCED = "balanced"  # Balance between performance and resources
@@ -36,6 +88,7 @@ class ScalingStrategy(str, Enum):
 @dataclass
 class ScalingConfig:
     """Configuration for auto-scaling."""
+
     strategy: ScalingStrategy = ScalingStrategy.BALANCED
 
     # Memory thresholds
@@ -48,6 +101,11 @@ class ScalingConfig:
     latency_max_p99: float = 200.0  # Max acceptable P99
 
     # Index sizing
+    # The share of capacity at which an index grows, and the share below
+    # which it shrinks. Both were hardcoded in the methods that read them
+    # while every number beside them came from here.
+    index_grow_at: float = 0.8
+    index_shrink_below: float = 0.25
     min_index_capacity: int = 1000
     max_index_capacity: int = 100_000_000
     index_growth_factor: float = 2.0  # Grow by 2x when needed
@@ -80,6 +138,7 @@ class ScalingConfig:
 @dataclass
 class PerformanceMetrics:
     """Performance metrics for a time window."""
+
     timestamp: datetime
     query_count: int = 0
     total_latency_ms: float = 0.0
@@ -106,7 +165,7 @@ class MetricsCollector:
         self._lock = threading.Lock()
         self._query_count = 0
         self._total_latency = 0.0
-        self._last_snapshot = datetime.utcnow()
+        self._last_snapshot = utcnow()
 
     def record_query(self, latency_ms: float) -> None:
         """Record a query's latency."""
@@ -126,19 +185,23 @@ class MetricsCollector:
             p95 = latencies[int(n * 0.95)] if n > 0 else 0
             p99 = latencies[int(n * 0.99)] if n > 0 else 0
 
-            # System metrics
-            memory = psutil.virtual_memory()
-            cpu = psutil.cpu_percent(interval=0.1)
+            # System metrics, when psutil is installed. Without it these
+            # read zero, which is what "not measured" looks like here; the
+            # latency figures above are the library's own and are unaffected.
+            memory = psutil.virtual_memory() if psutil else None
+            memory_used = memory.used if memory else 0
+            memory_percent = memory.percent if memory else 0.0
+            cpu = psutil.cpu_percent(interval=0.1) if psutil else 0.0
 
             return PerformanceMetrics(
-                timestamp=datetime.utcnow(),
+                timestamp=utcnow(),
                 query_count=self._query_count,
                 total_latency_ms=self._total_latency,
                 p50_latency_ms=p50,
                 p95_latency_ms=p95,
                 p99_latency_ms=p99,
-                memory_used_bytes=memory.used,
-                memory_percent=memory.percent,
+                memory_used_bytes=memory_used,
+                memory_percent=memory_percent,
                 cpu_percent=cpu,
             )
 
@@ -148,7 +211,19 @@ class MetricsCollector:
             self._latencies.clear()
             self._query_count = 0
             self._total_latency = 0.0
-            self._last_snapshot = datetime.utcnow()
+            self._last_snapshot = utcnow()
+
+
+# ============================================================================
+# THE MONITORS AND MANAGERS
+# ============================================================================
+#
+# INPUT   resources, an index, memory, shards
+# OUTPUT  scaling actions triggered by resources; index capacity grown; memory
+#         cleaned up under pressure; a collection sharded; all of it
+#         coordinated by the auto-scaler
+#
+# Each manager does one thing; the coordinator decides when.
 
 
 class ResourceMonitor:
@@ -248,10 +323,13 @@ class IndexScaler:
             self._current_capacity[collection] = capacity
 
     def should_grow(self, collection: str, current_count: int, current_capacity: int) -> bool:
-        """Check if index should grow."""
-        # Grow when 80% full
-        threshold = current_capacity * 0.8
-        return current_count >= threshold
+        """Whether the index for ``collection`` should grow.
+
+        The arithmetic is the same for every collection; the name identifies
+        which index the caller is asking about and is carried for the log and
+        for callers that key on it.
+        """
+        return current_count >= current_capacity * self.config.index_grow_at
 
     def calculate_new_capacity(self, current_capacity: int) -> int:
         """Calculate new capacity when growing."""
@@ -259,12 +337,10 @@ class IndexScaler:
         return min(new_capacity, self.config.max_index_capacity)
 
     def should_shrink(self, collection: str, current_count: int, current_capacity: int) -> bool:
-        """Check if index should shrink (to save memory)."""
-        # Shrink when less than 25% full and above minimum
+        """Whether the index for ``collection`` should shrink, to save memory."""
         if current_capacity <= self.config.min_index_capacity:
             return False
-        threshold = current_capacity * 0.25
-        return current_count < threshold
+        return current_count < current_capacity * self.config.index_shrink_below
 
     def calculate_shrink_capacity(self, current_count: int) -> int:
         """Calculate new capacity when shrinking."""
@@ -291,6 +367,11 @@ class MemoryManager:
         Returns:
             Tuple of (memory_percent, is_under_pressure)
         """
+        if psutil is None:
+            # No reading, so no pressure: firing the callbacks on a guess
+            # would evict caches for no reason.
+            return 0.0, False
+
         memory = psutil.virtual_memory()
         is_pressure = memory.percent >= self.config.memory_high_watermark
 
@@ -305,7 +386,14 @@ class MemoryManager:
         return memory.percent, is_pressure
 
     def get_available_memory_mb(self) -> float:
-        """Get available memory in MB."""
+        """Available system memory in MB, or infinity when it cannot be read.
+
+        Callers size allocations against this, so the honest answer without
+        psutil is "no limit known" rather than zero, which would read as a
+        machine with nothing free.
+        """
+        if psutil is None:
+            return float("inf")
         memory = psutil.virtual_memory()
         return memory.available / (1024 * 1024)
 
@@ -361,10 +449,7 @@ class ShardManager:
             return new_shard
 
     def should_add_shard(
-        self,
-        collection: str,
-        current_count: int,
-        vectors_per_shard: int = 1_000_000
+        self, collection: str, current_count: int, vectors_per_shard: int = 1_000_000
     ) -> bool:
         """Check if collection should be sharded."""
         if not self.config.enable_sharding:
@@ -387,11 +472,7 @@ class AutoScaler:
     - Shard management
     """
 
-    def __init__(
-        self,
-        config: ScalingConfig,
-        resource_monitor: Optional[ResourceMonitor] = None
-    ):
+    def __init__(self, config: ScalingConfig, resource_monitor: Optional[ResourceMonitor] = None):
         self.config = config
         self.monitor = resource_monitor or ResourceMonitor(config)
         self.index_scaler = IndexScaler(config)
@@ -489,15 +570,11 @@ class AutoScaler:
             logger.warning(f"Memory usage high: {metrics.memory_percent:.1f}%")
 
     def _record_decision(
-        self,
-        collection: str,
-        action: str,
-        old_value: Any,
-        new_value: Any
+        self, collection: str, action: str, old_value: Any, new_value: Any
     ) -> None:
         """Record a scaling decision."""
         decision = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
             "collection": collection,
             "action": action,
             "old_value": old_value,
@@ -507,9 +584,15 @@ class AutoScaler:
         logger.info(f"Scaling decision: {action} for {collection}: {old_value} -> {new_value}")
 
 
-# =============================================================================
-# Connection Pool
-# =============================================================================
+# ============================================================================
+# THE CONNECTION POOL
+# ============================================================================
+#
+# INPUT   a factory and a size
+# OUTPUT  connections lent and returned
+#
+# Generic, for any backend that opens a connection.
+
 
 class ConnectionPool:
     """Generic connection pool for database connections."""
@@ -528,7 +611,9 @@ class ConnectionPool:
 
     def acquire(self, timeout: Optional[float] = None) -> Any:
         """Acquire a connection from the pool."""
-        timeout = timeout or self.config.connection_timeout
+        # Zero is the standard non-blocking try-acquire and must not be
+        # read as no timeout given.
+        timeout = self.config.connection_timeout if timeout is None else timeout
 
         if not self._semaphore.acquire(timeout=timeout):
             raise TimeoutError("Could not acquire connection from pool")
@@ -556,10 +641,12 @@ class ConnectionPool:
             while self._pool:
                 conn = self._pool.popleft()
                 try:
-                    if hasattr(conn, 'close'):
+                    if hasattr(conn, "close"):
                         conn.close()
-                except:
-                    pass
+                except Exception as exc:
+                    # Teardown is best-effort: one bad handle must not strand the
+                    # rest of the pool. Narrowed so KeyboardInterrupt propagates.
+                    logger.debug("closing pooled connection failed: %s", exc)
 
     @property
     def stats(self) -> Dict[str, int]:

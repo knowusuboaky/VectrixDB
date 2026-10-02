@@ -1,0 +1,5 @@
+azure-functions
+azure-functions-durable
+azure-identity
+azure-storage-blob
+vectrixdb[azure]

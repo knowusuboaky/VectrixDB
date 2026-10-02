@@ -20,17 +20,37 @@ from .local_search import LocalSearcher, LocalSearchResult
 from .global_search import GlobalSearcher, GlobalSearchResult
 
 
+__all__ = [
+    "QueryType",
+    "GraphSearchResult",
+    "HybridSearcher",
+    "create_hybrid_searcher",
+]
+
+
+# ============================================================================
+# THE QUERY TYPES, AND THE RESULT
+# ============================================================================
+#
+# INPUT   a query
+# OUTPUT  what kind it is; the combined result
+#
+# The classification drives the routing.
+
+
 class QueryType(str, Enum):
     """Classification of query types."""
-    SPECIFIC = "specific"       # Entity-focused, fact-finding
-    BROAD = "broad"             # Open-ended, thematic
+
+    SPECIFIC = "specific"  # Entity-focused, fact-finding
+    BROAD = "broad"  # Open-ended, thematic
     RELATIONSHIP = "relationship"  # How are X and Y connected?
-    MIXED = "mixed"             # Contains both specific and broad elements
+    MIXED = "mixed"  # Contains both specific and broad elements
 
 
 @dataclass
 class GraphSearchResult:
     """Combined result from hybrid graph search."""
+
     query_type: QueryType
     local_result: Optional[LocalSearchResult] = None
     global_result: Optional[GlobalSearchResult] = None
@@ -51,10 +71,7 @@ class GraphSearchResult:
         return [c for c, _ in self.communities]
 
     def to_context_string(
-        self,
-        max_entities: int = 10,
-        max_communities: int = 3,
-        max_relationships: int = 10
+        self, max_entities: int = 10, max_communities: int = 3, max_relationships: int = 10
     ) -> str:
         """Convert to a context string for LLM."""
         lines = [f"## Search Results (Strategy: {self.search_strategy})\n"]
@@ -84,6 +101,17 @@ class GraphSearchResult:
         return "\n".join(lines)
 
 
+# ============================================================================
+# THE HYBRID SEARCHER: DRIFT-style
+# ============================================================================
+#
+# INPUT   a query
+# OUTPUT  routed between local and global by what the query looks like; a
+#         factory
+#
+# The best of both, and what graph mode runs.
+
+
 class HybridSearcher:
     """
     DRIFT-style hybrid search combining local and global strategies.
@@ -107,34 +135,34 @@ class HybridSearcher:
 
     # Query classification patterns
     SPECIFIC_PATTERNS = [
-        r'\bwho\s+is\b',
-        r'\bwhat\s+is\b',
-        r'\bwhen\s+did\b',
-        r'\bwhere\s+is\b',
-        r'\bhow\s+did\b',
-        r'\bdefine\b',
-        r'\bexplain\b.*\bspecific\b',
-        r'\bdetails?\s+(about|of|on)\b',
+        r"\bwho\s+is\b",
+        r"\bwhat\s+is\b",
+        r"\bwhen\s+did\b",
+        r"\bwhere\s+is\b",
+        r"\bhow\s+did\b",
+        r"\bdefine\b",
+        r"\bexplain\b.*\bspecific\b",
+        r"\bdetails?\s+(about|of|on)\b",
     ]
 
     BROAD_PATTERNS = [
-        r'\bwhat\s+are\s+the\s+(main|key|major|important)\b',
-        r'\bsummarize\b',
-        r'\boverview\b',
-        r'\bthemes?\b',
-        r'\btopics?\b',
-        r'\bgenerally\b',
-        r'\boverall\b',
-        r'\bbroad\b',
-        r'\bhigh.?level\b',
+        r"\bwhat\s+are\s+the\s+(main|key|major|important)\b",
+        r"\bsummarize\b",
+        r"\boverview\b",
+        r"\bthemes?\b",
+        r"\btopics?\b",
+        r"\bgenerally\b",
+        r"\boverall\b",
+        r"\bbroad\b",
+        r"\bhigh.?level\b",
     ]
 
     RELATIONSHIP_PATTERNS = [
-        r'\bhow\s+(is|are|does|do)\s+.+\s+(related|connected|linked)\b',
-        r'\brelationship\s+between\b',
-        r'\bconnection\s+between\b',
-        r'\bcompare\b',
-        r'\bdifference\s+between\b',
+        r"\bhow\s+(is|are|does|do)\s+.+\s+(related|connected|linked)\b",
+        r"\brelationship\s+between\b",
+        r"\bconnection\s+between\b",
+        r"\bcompare\b",
+        r"\bdifference\s+between\b",
     ]
 
     def __init__(
@@ -143,7 +171,7 @@ class HybridSearcher:
         hierarchy: CommunityHierarchy,
         config: Optional[GraphRAGConfig] = None,
         entity_embeddings: Optional[Dict[str, np.ndarray]] = None,
-        community_embeddings: Optional[Dict[str, np.ndarray]] = None
+        community_embeddings: Optional[Dict[str, np.ndarray]] = None,
     ):
         """
         Initialize hybrid searcher.
@@ -161,16 +189,14 @@ class HybridSearcher:
 
         # Initialize sub-searchers
         self.local_searcher = LocalSearcher(
-            graph=graph,
-            config=config,
-            entity_embeddings=entity_embeddings
+            graph=graph, config=config, entity_embeddings=entity_embeddings
         )
 
         self.global_searcher = GlobalSearcher(
             graph=graph,
             hierarchy=hierarchy,
             config=config,
-            community_embeddings=community_embeddings
+            community_embeddings=community_embeddings,
         )
 
     def search(
@@ -180,7 +206,7 @@ class HybridSearcher:
         k: int = 10,
         force_strategy: Optional[GraphSearchType] = None,
         local_weight: float = 0.6,
-        global_weight: float = 0.4
+        global_weight: float = 0.4,
     ) -> GraphSearchResult:
         """
         Search using hybrid DRIFT strategy.
@@ -214,7 +240,7 @@ class HybridSearcher:
                 query_vector=query_vector,
                 k=k,
                 depth=self.config.traversal_depth,
-                include_relationships=self.config.include_relationships
+                include_relationships=self.config.include_relationships,
             )
             return self._build_result_from_local(query_type, local_result)
 
@@ -223,7 +249,7 @@ class HybridSearcher:
                 query=query,
                 query_vector=query_vector,
                 k=self.config.global_search_k,
-                include_entities=True
+                include_entities=True,
             )
             return self._build_result_from_global(query_type, global_result)
 
@@ -234,14 +260,14 @@ class HybridSearcher:
                 query_vector=query_vector,
                 k=k,
                 depth=self.config.traversal_depth,
-                include_relationships=self.config.include_relationships
+                include_relationships=self.config.include_relationships,
             )
 
             global_result = self.global_searcher.search(
                 query=query,
                 query_vector=query_vector,
                 k=self.config.global_search_k,
-                include_entities=True
+                include_entities=True,
             )
 
             # Fuse results
@@ -251,7 +277,7 @@ class HybridSearcher:
                 global_result=global_result,
                 local_weight=local_weight,
                 global_weight=global_weight,
-                k=k
+                k=k,
             )
 
     def _classify_query(self, query: str) -> QueryType:
@@ -263,8 +289,8 @@ class HybridSearcher:
             if re.search(pattern, query_lower):
                 return QueryType.RELATIONSHIP
 
-        specific_score = 0
-        broad_score = 0
+        specific_score = 0.0
+        broad_score = 0.0
 
         # Check specific patterns
         for pattern in self.SPECIFIC_PATTERNS:
@@ -310,9 +336,7 @@ class HybridSearcher:
             return GraphSearchType.HYBRID
 
     def _build_result_from_local(
-        self,
-        query_type: QueryType,
-        local_result: LocalSearchResult
+        self, query_type: QueryType, local_result: LocalSearchResult
     ) -> GraphSearchResult:
         """Build hybrid result from local-only search."""
         return GraphSearchResult(
@@ -321,13 +345,11 @@ class HybridSearcher:
             entities=local_result.entities,
             relationships=local_result.relationships,
             context=local_result.context,
-            search_strategy="local"
+            search_strategy="local",
         )
 
     def _build_result_from_global(
-        self,
-        query_type: QueryType,
-        global_result: GlobalSearchResult
+        self, query_type: QueryType, global_result: GlobalSearchResult
     ) -> GraphSearchResult:
         """Build hybrid result from global-only search."""
         # Convert entities list to tuple format
@@ -339,7 +361,7 @@ class HybridSearcher:
             entities=entities,
             communities=global_result.communities,
             context=global_result.context,
-            search_strategy="global"
+            search_strategy="global",
         )
 
     def _fuse_results(
@@ -349,7 +371,7 @@ class HybridSearcher:
         global_result: GlobalSearchResult,
         local_weight: float,
         global_weight: float,
-        k: int
+        k: int,
     ) -> GraphSearchResult:
         """Fuse local and global results using weighted combination."""
         # Normalize weights
@@ -373,10 +395,7 @@ class HybridSearcher:
                 entity_scores[entity.id] = (entity, global_weight * 0.5)
 
         # Sort and get top k entities
-        fused_entities = sorted(
-            entity_scores.values(),
-            key=lambda x: -x[1]
-        )[:k]
+        fused_entities = sorted(entity_scores.values(), key=lambda x: -x[1])[:k]
 
         # Communities from global (already scored)
         communities = global_result.communities
@@ -385,9 +404,7 @@ class HybridSearcher:
         relationships = local_result.relationships
 
         # Build combined context
-        context = self._build_fused_context(
-            fused_entities, communities, relationships
-        )
+        context = self._build_fused_context(fused_entities, communities, relationships)
 
         return GraphSearchResult(
             query_type=query_type,
@@ -397,14 +414,14 @@ class HybridSearcher:
             communities=communities,
             relationships=relationships,
             context=context,
-            search_strategy="hybrid"
+            search_strategy="hybrid",
         )
 
     def _build_fused_context(
         self,
         entities: List[Tuple[Entity, float]],
         communities: List[Tuple[Community, float]],
-        relationships: List[Relationship]
+        relationships: List[Relationship],
     ) -> str:
         """Build context string from fused results."""
         lines = []
@@ -431,16 +448,14 @@ class HybridSearcher:
                 source = self.graph.get_entity(rel.source_id)
                 target = self.graph.get_entity(rel.target_id)
                 if source and target:
-                    lines.append(
-                        f"- {source.name} --[{rel.type}]--> {target.name}"
-                    )
+                    lines.append(f"- {source.name} --[{rel.type}]--> {target.name}")
 
         return "\n".join(lines)
 
     def set_embeddings(
         self,
         entity_embeddings: Optional[Dict[str, np.ndarray]] = None,
-        community_embeddings: Optional[Dict[str, np.ndarray]] = None
+        community_embeddings: Optional[Dict[str, np.ndarray]] = None,
     ) -> None:
         """Set embeddings for both searchers."""
         if entity_embeddings:
@@ -460,9 +475,7 @@ class HybridSearcher:
 
 
 def create_hybrid_searcher(
-    graph: KnowledgeGraph,
-    hierarchy: CommunityHierarchy,
-    config: Optional[GraphRAGConfig] = None
+    graph: KnowledgeGraph, hierarchy: CommunityHierarchy, config: Optional[GraphRAGConfig] = None
 ) -> HybridSearcher:
     """
     Factory function to create a hybrid searcher.
@@ -475,8 +488,4 @@ def create_hybrid_searcher(
     Returns:
         Configured HybridSearcher instance.
     """
-    return HybridSearcher(
-        graph=graph,
-        hierarchy=hierarchy,
-        config=config
-    )
+    return HybridSearcher(graph=graph, hierarchy=hierarchy, config=config)

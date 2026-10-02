@@ -31,3 +31,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# A collection written by 2.1.7, which the suite opens: kept, whatever its files are called
+!fixtures/legacy_2_1_7/**

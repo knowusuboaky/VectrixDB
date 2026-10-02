@@ -1,0 +1,31 @@
+azure-functions
+azure-identity
+azure-storage-blob
+# Step seven puts a request for the golden dataset on the app's own queue.
+azure-storage-queue
+
+# The library, with the extras this deployment actually uses:
+#   azure       the AI Search backend, and openai, which the second vector is
+#               embedded with
+#   documents   pypdf for the PDFs, python-docx for Word, openpyxl for sheets
+#   ocr-azure   the Document Intelligence client, for the pictures
+#   api         FastAPI, because this app hosts the library's own API
+#   signin      so a caller can be somebody, which a policied collection needs
+#   ffmpeg      the ffmpeg binary, which takes the sound out of a video and
+#               cuts a long recording into pieces, on a plan with no apt-get
+#
+# From the wheel beside this file, not from PyPI, because the point of the
+# walkthrough is to put *this* library through a real deployment. Build it
+# with: python -m build --no-isolation --wheel
+# Against PyPI instead, write: vectrixdb[azure,documents,ocr-azure,api,signin,ffmpeg]
+./vectrixdb-2.2.0-py3-none-any.whl[azure,documents,ocr-azure,api,signin,ffmpeg]
+
+# openai on a line of its own as well, because the azure extra brings it only
+# from 2.2.0 on, and with a release from before, every file is cut and then
+# fails to embed.
+openai
+
+# Pillow, because pypdf needs it to hand back the pictures inside a PDF.
+# Whisper is deliberately not here: Azure Speech does the transcribing, so
+# the deployment stays small and cold starts stay short.
+pillow

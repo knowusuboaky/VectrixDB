@@ -19,9 +19,27 @@ import numpy as np
 from .distance import DistanceFunctions
 
 
+__all__ = [
+    "HNSWConfig",
+    "SearchResult",
+    "NativeHNSWIndex",
+]
+
+
+# ============================================================================
+# THE CONFIG, AND A RESULT
+# ============================================================================
+#
+# INPUT   M, ef_construction, ef_search and a metric
+# OUTPUT  the configuration; one search result
+#
+# The three HNSW knobs, named as the paper names them.
+
+
 @dataclass
 class HNSWConfig:
     """Configuration for HNSW index."""
+
     dimension: int
     metric: str = "cosine"
     m: int = 16  # Number of connections per node
@@ -45,8 +63,20 @@ class HNSWConfig:
 @dataclass
 class SearchResult:
     """Result from HNSW search."""
+
     ids: np.ndarray  # Internal indices
     distances: np.ndarray  # Distances to query
+
+
+# ============================================================================
+# THE NATIVE INDEX
+# ============================================================================
+#
+# INPUT   vectors
+# OUTPUT  a Hierarchical Navigable Small World graph in pure Python and NumPy,
+#         with full control over persistence
+#
+# No external dependency, memory-mapped on disk, incremental add and remove.
 
 
 class NativeHNSWIndex:
@@ -156,15 +186,63 @@ class NativeHNSWIndex:
         if required > self._capacity:
             new_capacity = max(required, self._capacity * 2)
             new_vectors = np.zeros((new_capacity, self.config.dimension), dtype=np.float32)
-            new_vectors[:self._count] = self._vectors[:self._count]
+            new_vectors[: self._count] = self._vectors[: self._count]
             self._vectors = new_vectors
             self._capacity = new_capacity
 
-    def _select_neighbors_simple(
-        self,
-        candidates: List[Tuple[float, int]],
-        m: int
-    ) -> List[int]:
+    def _distances_to(self, query: np.ndarray, ids: List[int]) -> List[float]:
+        """Distances from ``query`` to every stored vector in ``ids``, in one call.
+
+        The whole cost of this index used to be here: four loops each called
+        the scalar distance function once per pair, and a build of 320 vectors
+        took 160 seconds. One vectorised call per loop iteration is the fix.
+        """
+        if not ids:
+            return []
+        return self._batch_distance_func(query, self._vectors[ids]).tolist()
+
+    def _pairwise_distances(self, ids: List[int]) -> np.ndarray:
+        """Distances between every pair of stored vectors in ``ids``.
+
+        One matrix product replaces a distance call per candidate in the
+        selection heuristic. Candidate sets are bounded by ef_construction, so
+        the matrix is small.
+        """
+        vectors = self._vectors[ids]
+        metric = self.config.metric.lower()
+        if metric == "cosine":
+            norms = np.maximum(np.linalg.norm(vectors, axis=1, keepdims=True), 1e-8)
+            unit = vectors / norms
+            return 1.0 - unit @ unit.T
+        if metric in ("dot", "ip"):
+            return -(vectors @ vectors.T)
+        if metric in ("euclidean", "l2", "euclidean_squared"):
+            squares = np.sum(vectors * vectors, axis=1)
+            d2 = squares[:, None] + squares[None, :] - 2.0 * (vectors @ vectors.T)
+            np.maximum(d2, 0.0, out=d2)
+            return d2 if metric == "euclidean_squared" else np.sqrt(d2)
+        return np.stack([self._batch_distance_func(vectors[i], vectors) for i in range(len(ids))])
+
+    def _greedy_descend(
+        self, query: np.ndarray, node: int, dist: float, top: int, bottom: int
+    ) -> Tuple[int, float]:
+        """Walk from ``top`` down to just above ``bottom``, always to the nearest neighbour."""
+        for level in range(top, bottom, -1):
+            changed = True
+            while changed:
+                changed = False
+                live = [n for n in self._neighbors[level].get(node, ()) if n not in self._deleted]
+                if not live:
+                    break
+                dists = self._distances_to(query, live)
+                best = min(range(len(live)), key=dists.__getitem__)
+                if dists[best] < dist:
+                    dist = dists[best]
+                    node = live[best]
+                    changed = True
+        return node, dist
+
+    def _select_neighbors_simple(self, candidates: List[Tuple[float, int]], m: int) -> List[int]:
         """
         Simple neighbor selection: take M nearest.
 
@@ -185,11 +263,21 @@ class NativeHNSWIndex:
         candidates: List[Tuple[float, int]],
         m: int,
         level: int,
-        extend_candidates: bool = True,
+        extend_candidates: bool = False,
         keep_pruned: bool = True,
     ) -> List[int]:
         """
         Heuristic neighbor selection for better graph connectivity.
+
+        A candidate is kept when no already-selected neighbour is closer to it
+        than the query is; that spreads connections across directions instead
+        of clustering them. Candidate-to-candidate distances come from one
+        pairwise matrix rather than one call per pair.
+
+        ``extend_candidates`` is off by default, as in the reference
+        implementation. It was on, and on again inside every pruning pass, so
+        each insert walked two hops of the graph a few dozen times; that, not
+        the distance arithmetic, was most of the build time.
 
         Args:
             query: Query vector
@@ -205,49 +293,36 @@ class NativeHNSWIndex:
         if len(candidates) <= m:
             return [node_id for _, node_id in candidates]
 
-        # Sort candidates by distance
         candidates.sort(key=lambda x: x[0])
 
-        # Extend candidates with their neighbors
-        if extend_candidates:
-            extended = set()
-            for dist, node_id in candidates:
-                extended.add(node_id)
-                if level < len(self._neighbors) and node_id in self._neighbors[level]:
-                    for neighbor in self._neighbors[level][node_id]:
-                        if neighbor not in extended and neighbor not in self._deleted:
-                            neighbor_dist = self._distance_func(
-                                query, self._vectors[neighbor]
-                            )
-                            extended.add(neighbor)
-                            candidates.append((neighbor_dist, neighbor))
+        if extend_candidates and level < len(self._neighbors):
+            seen = {node_id for _, node_id in candidates}
+            extra: List[int] = []
+            for _, node_id in list(candidates):
+                for neighbor in self._neighbors[level].get(node_id, ()):
+                    if neighbor not in seen and neighbor not in self._deleted:
+                        seen.add(neighbor)
+                        extra.append(neighbor)
+            if extra:
+                candidates.extend(zip(self._distances_to(query, extra), extra))
+                candidates.sort(key=lambda x: x[0])
 
-            candidates.sort(key=lambda x: x[0])
+        ids = [node_id for _, node_id in candidates]
+        position = {node_id: i for i, node_id in enumerate(ids)}
+        between = self._pairwise_distances(ids)
 
-        # Select neighbors using heuristic
-        selected = []
-        pruned = []
+        selected: List[int] = []
+        pruned: List[Tuple[float, int]] = []
 
         for dist, node_id in candidates:
             if len(selected) >= m:
                 break
-
-            # Check if this candidate is closer than all selected neighbors
-            good = True
-            for selected_id in selected:
-                selected_dist = self._distance_func(
-                    self._vectors[node_id], self._vectors[selected_id]
-                )
-                if selected_dist < dist:
-                    good = False
-                    break
-
-            if good:
+            row = between[position[node_id]]
+            if all(row[position[chosen]] >= dist for chosen in selected):
                 selected.append(node_id)
             else:
                 pruned.append((dist, node_id))
 
-        # Add pruned candidates if needed
         if keep_pruned and len(selected) < m:
             for dist, node_id in pruned:
                 if len(selected) >= m:
@@ -279,49 +354,41 @@ class NativeHNSWIndex:
             return []
 
         visited = set(entry_points)
+        live = [ep for ep in entry_points if ep not in self._deleted]
+        if not live:
+            return []
 
-        # Min-heap of candidates (distance, node_id)
-        candidates = []
-        for ep in entry_points:
-            if ep in self._deleted:
-                continue
-            dist = self._distance_func(query, self._vectors[ep])
-            heapq.heappush(candidates, (dist, ep))
-
-        # Max-heap of results (negative distance for max behavior)
-        results = []
-        for dist, node_id in candidates:
-            heapq.heappush(results, (-dist, node_id))
+        # Min-heap of candidates and max-heap of results (negated distances).
+        candidates: List[Tuple[float, int]] = list(zip(self._distances_to(query, live), live))
+        heapq.heapify(candidates)
+        results: List[Tuple[float, int]] = [(-dist, node_id) for dist, node_id in candidates]
+        heapq.heapify(results)
 
         while candidates:
             c_dist, c_node = heapq.heappop(candidates)
 
-            # Get furthest result distance
-            if results:
-                f_dist = -results[0][0]
-                if c_dist > f_dist:
-                    break
+            if results and c_dist > -results[0][0]:
+                break
 
-            # Explore neighbors
-            if c_node in self._neighbors[level]:
-                for neighbor in self._neighbors[level][c_node]:
-                    if neighbor not in visited and neighbor not in self._deleted:
-                        visited.add(neighbor)
-                        n_dist = self._distance_func(query, self._vectors[neighbor])
+            neighbors = [
+                n
+                for n in self._neighbors[level].get(c_node, ())
+                if n not in visited and n not in self._deleted
+            ]
+            if not neighbors:
+                continue
+            visited.update(neighbors)
 
-                        f_dist = -results[0][0] if results else float('inf')
+            for n_dist, neighbor in zip(self._distances_to(query, neighbors), neighbors):
+                f_dist = -results[0][0] if results else float("inf")
+                if n_dist < f_dist or len(results) < ef:
+                    heapq.heappush(candidates, (n_dist, neighbor))
+                    heapq.heappush(results, (-n_dist, neighbor))
+                    if len(results) > ef:
+                        heapq.heappop(results)
 
-                        if n_dist < f_dist or len(results) < ef:
-                            heapq.heappush(candidates, (n_dist, neighbor))
-                            heapq.heappush(results, (-n_dist, neighbor))
-
-                            if len(results) > ef:
-                                heapq.heappop(results)
-
-        # Convert results to sorted list
         result_list = [(-dist, node_id) for dist, node_id in results]
         result_list.sort(key=lambda x: x[0])
-
         return result_list
 
     def add(
@@ -344,9 +411,7 @@ class NativeHNSWIndex:
             vectors = vectors.reshape(1, -1)
 
         if vectors.shape[1] != self.config.dimension:
-            raise ValueError(
-                f"Expected dimension {self.config.dimension}, got {vectors.shape[1]}"
-            )
+            raise ValueError(f"Expected dimension {self.config.dimension}, got {vectors.shape[1]}")
 
         n_vectors = len(vectors)
 
@@ -395,19 +460,9 @@ class NativeHNSWIndex:
                     curr_dist = self._distance_func(vector, self._vectors[curr_node])
 
                     # Traverse from top to node_level + 1
-                    for level in range(self._max_level, node_level, -1):
-                        changed = True
-                        while changed:
-                            changed = False
-                            if curr_node in self._neighbors[level]:
-                                for neighbor in self._neighbors[level][curr_node]:
-                                    if neighbor in self._deleted:
-                                        continue
-                                    n_dist = self._distance_func(vector, self._vectors[neighbor])
-                                    if n_dist < curr_dist:
-                                        curr_dist = n_dist
-                                        curr_node = neighbor
-                                        changed = True
+                    curr_node, curr_dist = self._greedy_descend(
+                        vector, curr_node, curr_dist, self._max_level, node_level
+                    )
 
                     # For levels <= node_level, do full search and connect
                     entry_points = [curr_node]
@@ -442,14 +497,14 @@ class NativeHNSWIndex:
                             max_conn = self.config.m_max if level > 0 else self.config.m_max_0
                             if len(self._neighbors[level][neighbor]) > max_conn:
                                 # Re-select neighbors
-                                neighbor_candidates = [
-                                    (self._distance_func(
-                                        self._vectors[neighbor],
-                                        self._vectors[n]
-                                    ), n)
+                                live = [
+                                    n
                                     for n in self._neighbors[level][neighbor]
                                     if n not in self._deleted
                                 ]
+                                neighbor_candidates = list(
+                                    zip(self._distances_to(self._vectors[neighbor], live), live)
+                                )
                                 self._neighbors[level][neighbor] = self._select_neighbors_heuristic(
                                     self._vectors[neighbor],
                                     neighbor_candidates,
@@ -458,7 +513,7 @@ class NativeHNSWIndex:
                                 )
 
                         # Update entry points for next level
-                        entry_points = [n for _, n in candidates[:self.config.ef_construction]]
+                        entry_points = [n for _, n in candidates[: self.config.ef_construction]]
                         if not entry_points:
                             entry_points = [internal_id]
 
@@ -492,9 +547,7 @@ class NativeHNSWIndex:
         query = np.asarray(query, dtype=np.float32).flatten()
 
         if len(query) != self.config.dimension:
-            raise ValueError(
-                f"Expected dimension {self.config.dimension}, got {len(query)}"
-            )
+            raise ValueError(f"Expected dimension {self.config.dimension}, got {len(query)}")
 
         if ef is None:
             ef = self.config.ef_search
@@ -511,19 +564,9 @@ class NativeHNSWIndex:
             curr_dist = self._distance_func(query, self._vectors[curr_node])
 
             # Greedy search from top level to level 1
-            for level in range(self._max_level, 0, -1):
-                changed = True
-                while changed:
-                    changed = False
-                    if curr_node in self._neighbors[level]:
-                        for neighbor in self._neighbors[level][curr_node]:
-                            if neighbor in self._deleted:
-                                continue
-                            n_dist = self._distance_func(query, self._vectors[neighbor])
-                            if n_dist < curr_dist:
-                                curr_dist = n_dist
-                                curr_node = neighbor
-                                changed = True
+            curr_node, curr_dist = self._greedy_descend(
+                query, curr_node, curr_dist, self._max_level, 0
+            )
 
             # Search level 0 with ef candidates
             candidates = self._search_layer(query, [curr_node], ef, 0)
@@ -640,14 +683,11 @@ class NativeHNSWIndex:
                 json.dump(config, f, indent=2)
 
             # Save vectors
-            np.save(path / "vectors.npy", self._vectors[:self._count])
+            np.save(path / "vectors.npy", self._vectors[: self._count])
 
             # Save graph structure
             graph_data = {
-                "neighbors": [
-                    {str(k): v for k, v in level.items()}
-                    for level in self._neighbors
-                ],
+                "neighbors": [{str(k): v for k, v in level.items()} for level in self._neighbors],
                 "node_levels": {str(k): v for k, v in self._node_levels.items()},
             }
             with open(path / "graph.json", "w") as f:
@@ -698,7 +738,9 @@ class NativeHNSWIndex:
 
             # Update distance functions
             self._distance_func = DistanceFunctions.get_distance_func(self.config.metric)
-            self._batch_distance_func = DistanceFunctions.get_batch_distance_func(self.config.metric)
+            self._batch_distance_func = DistanceFunctions.get_batch_distance_func(
+                self.config.metric
+            )
 
             # Load vectors
             self._vectors = np.load(path / "vectors.npy")
@@ -709,8 +751,7 @@ class NativeHNSWIndex:
                 graph_data = json.load(f)
 
             self._neighbors = [
-                {int(k): v for k, v in level.items()}
-                for level in graph_data["neighbors"]
+                {int(k): v for k, v in level.items()} for level in graph_data["neighbors"]
             ]
             self._node_levels = {int(k): v for k, v in graph_data["node_levels"].items()}
 
@@ -749,11 +790,13 @@ class NativeHNSWIndex:
                     avg_connections = sum(len(v) for v in neighbors.values()) / n_nodes
                 else:
                     avg_connections = 0
-                level_stats.append({
-                    "level": level,
-                    "nodes": n_nodes,
-                    "avg_connections": avg_connections,
-                })
+                level_stats.append(
+                    {
+                        "level": level,
+                        "nodes": n_nodes,
+                        "avg_connections": avg_connections,
+                    }
+                )
 
             stats["level_stats"] = level_stats
 

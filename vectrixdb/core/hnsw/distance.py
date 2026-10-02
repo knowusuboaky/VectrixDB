@@ -9,8 +9,27 @@ from typing import Callable
 import numpy as np
 
 
+__all__ = [
+    "DistanceMetric",
+    "DistanceFunctions",
+    "normalize_vectors",
+]
+
+
+# ============================================================================
+# THE METRICS, AND THE DISTANCES
+# ============================================================================
+#
+# INPUT   vectors, and a metric
+# OUTPUT  cosine, euclidean, dot or manhattan, vectorised with NumPy; vectors
+#         L2-normalised
+#
+# One place for the arithmetic, so the index and the search agree.
+
+
 class DistanceMetric(str, Enum):
     """Supported distance metrics."""
+
     COSINE = "cosine"
     EUCLIDEAN = "euclidean"
     DOT = "dot"
@@ -109,7 +128,7 @@ class DistanceFunctions:
             Distances, shape (n,)
         """
         diff = vectors - query
-        return np.sqrt(np.sum(diff ** 2, axis=1))
+        return np.sqrt(np.sum(diff**2, axis=1))
 
     @staticmethod
     def batch_euclidean_squared(query: np.ndarray, vectors: np.ndarray) -> np.ndarray:
@@ -117,7 +136,7 @@ class DistanceFunctions:
         Squared Euclidean distance from query to multiple vectors.
         """
         diff = vectors - query
-        return np.sum(diff ** 2, axis=1)
+        return np.sum(diff**2, axis=1)
 
     @staticmethod
     def batch_dot(query: np.ndarray, vectors: np.ndarray) -> np.ndarray:

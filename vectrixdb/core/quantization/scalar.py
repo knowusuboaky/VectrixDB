@@ -10,7 +10,23 @@ from pathlib import Path
 from typing import Optional, Tuple
 import numpy as np
 
+from ...exceptions import QuantizationError
 from .base import BaseQuantizer
+
+
+__all__ = [
+    "ScalarQuantizer",
+]
+
+
+# ============================================================================
+# SCALAR: 8 bit
+# ============================================================================
+#
+# INPUT   float32 vectors
+# OUTPUT  one byte a dimension by per-dimension min and max: 4 times smaller
+#
+# The safe default when memory matters.
 
 
 class ScalarQuantizer(BaseQuantizer):
@@ -48,8 +64,8 @@ class ScalarQuantizer(BaseQuantizer):
         # Per-dimension calibration parameters
         self._min_vals: Optional[np.ndarray] = None  # shape: (dimension,)
         self._max_vals: Optional[np.ndarray] = None  # shape: (dimension,)
-        self._scale: Optional[np.ndarray] = None     # (max - min) / 255
-        self._offset: Optional[np.ndarray] = None    # min values
+        self._scale: Optional[np.ndarray] = None  # (max - min) / 255
+        self._offset: Optional[np.ndarray] = None  # min values
 
     @property
     def compression_ratio(self) -> float:
@@ -77,15 +93,11 @@ class ScalarQuantizer(BaseQuantizer):
             vectors = vectors.reshape(1, -1)
 
         if vectors.shape[1] != self.dimension:
-            raise ValueError(
-                f"Expected dimension {self.dimension}, got {vectors.shape[1]}"
-            )
+            raise ValueError(f"Expected dimension {self.dimension}, got {vectors.shape[1]}")
 
         # Use subset for calibration if too many vectors
         if len(vectors) > self.calibration_size:
-            indices = np.random.choice(
-                len(vectors), self.calibration_size, replace=False
-            )
+            indices = np.random.choice(len(vectors), self.calibration_size, replace=False)
             vectors = vectors[indices]
 
         # Compute per-dimension min/max
@@ -121,10 +133,23 @@ class ScalarQuantizer(BaseQuantizer):
             vectors = vectors.reshape(1, -1)
 
         # Scale to [0, 255]
+        # NaN and inf used to clip to a legitimate-looking code: a NaN
+        # vector decoded to the training minimum in every dimension and
+        # was indistinguishable from a real extreme vector.
+        if not np.all(np.isfinite(vectors)):
+            raise QuantizationError(
+                "cannot encode a vector containing NaN or inf; it would clip "
+                "to an ordinary-looking code and be impossible to spot later."
+            )
+
         scaled = (vectors - self._offset) / self._scale
 
-        # Clip and convert to uint8
-        codes = np.clip(scaled, 0, 255).astype(np.uint8)
+        # Round to the nearest code, then clip. `astype(np.uint8)` truncates,
+        # which biased every reconstructed value low by half a step, doubled
+        # the mean absolute error, and left code 255 unreachable: the training
+        # maximum itself encoded to 254. The existing accuracy test could not
+        # catch it because its tolerance is a whole step.
+        codes = np.clip(np.rint(scaled), 0, 255).astype(np.uint8)
 
         return codes
 
@@ -146,16 +171,18 @@ class ScalarQuantizer(BaseQuantizer):
         if codes.ndim == 1:
             codes = codes.reshape(1, -1)
 
+        scale = self._scale
+        offset = self._offset
+        if scale is None or offset is None:
+            raise RuntimeError("Quantizer not fitted. Call fit() first.")
+
         # Reverse the scaling
-        vectors = codes.astype(np.float32) * self._scale + self._offset
+        vectors = codes.astype(np.float32) * scale + offset
 
         return vectors
 
     def compute_distances(
-        self,
-        query: np.ndarray,
-        codes: np.ndarray,
-        metric: str = "cosine"
+        self, query: np.ndarray, codes: np.ndarray, metric: str = "cosine"
     ) -> np.ndarray:
         """
         Compute distances using asymmetric distance computation.
@@ -198,7 +225,7 @@ class ScalarQuantizer(BaseQuantizer):
         elif metric == "euclidean":
             # L2 distance
             diff = db_vectors - query
-            distances = np.sqrt(np.sum(diff ** 2, axis=1))
+            distances = np.sqrt(np.sum(diff**2, axis=1))
 
         elif metric == "dot":
             # Negative dot product (so smaller is better)
@@ -210,10 +237,7 @@ class ScalarQuantizer(BaseQuantizer):
         return distances
 
     def compute_distances_fast(
-        self,
-        query: np.ndarray,
-        codes: np.ndarray,
-        metric: str = "cosine"
+        self, query: np.ndarray, codes: np.ndarray, metric: str = "cosine"
     ) -> np.ndarray:
         """
         Fast distance computation using lookup tables.
@@ -245,19 +269,23 @@ class ScalarQuantizer(BaseQuantizer):
         # table[d, q] = contribution to distance
 
         if metric == "dot":
+            scale = self._scale
+            offset = self._offset
+            if scale is None or offset is None:
+                raise RuntimeError("Quantizer not fitted. Call fit() first.")
+
             # Pre-compute: query[d] * decoded_value[d, q]
             # decoded_value[d, q] = q * scale[d] + offset[d]
-            lookup_tables = np.zeros((self.dimension, 256), dtype=np.float32)
-
-            for d in range(self.dimension):
-                for q in range(256):
-                    decoded = q * self._scale[d] + self._offset[d]
-                    lookup_tables[d, q] = query[d] * decoded
+            # One outer product instead of a dimension-by-256 Python loop.
+            # Rebuilding that table per call made this 10 to 40 times slower
+            # than compute_distances, which is the opposite of the name.
+            levels = np.arange(256, dtype=np.float32)
+            decoded = np.outer(scale, levels) + offset[:, None]
+            lookup_tables = decoded * query[:, None]
 
             # Sum contributions using table lookup
-            distances = np.zeros(n_vectors, dtype=np.float32)
-            for d in range(self.dimension):
-                distances -= lookup_tables[d, codes[:, d]]
+            rows = np.arange(self.dimension)
+            distances = -lookup_tables[rows, codes].sum(axis=1).astype(np.float32)
 
         else:
             # Fall back to standard computation for other metrics
@@ -281,10 +309,16 @@ class ScalarQuantizer(BaseQuantizer):
 
         # Save calibration parameters
         if self._is_fitted:
-            np.save(path / "min_vals.npy", self._min_vals)
-            np.save(path / "max_vals.npy", self._max_vals)
-            np.save(path / "scale.npy", self._scale)
-            np.save(path / "offset.npy", self._offset)
+            min_vals = self._min_vals
+            max_vals = self._max_vals
+            scale = self._scale
+            offset = self._offset
+            if min_vals is None or max_vals is None or scale is None or offset is None:
+                raise RuntimeError("Quantizer state is corrupted: calibration parameters missing.")
+            np.save(path / "min_vals.npy", min_vals)
+            np.save(path / "max_vals.npy", max_vals)
+            np.save(path / "scale.npy", scale)
+            np.save(path / "offset.npy", offset)
 
     def load(self, path: Path) -> "ScalarQuantizer":
         """Load quantizer state from disk."""

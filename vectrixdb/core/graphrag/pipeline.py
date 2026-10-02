@@ -12,10 +12,11 @@ Orchestrates the full GraphRAG workflow:
 This is the main integration point for VectrixDB's GraphRAG capabilities.
 """
 
+import logging
 import os
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Callable, Union
-from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Any, Callable, Union, Tuple, FrozenSet
+from dataclasses import dataclass, field, replace
 import numpy as np
 
 from .config import GraphRAGConfig, ExtractorType, GraphSearchType
@@ -26,20 +27,73 @@ from .extractor.llm_extractor import LLMExtractor
 from .extractor.base import Entity, Relationship, ExtractionResult
 from .graph.knowledge_graph import KnowledgeGraph
 from .graph.community import CommunityHierarchy, detect_communities
+from .graph.incremental import only as _only_communities, update_hierarchy
+from . import queries as _queries
 from .graph.storage import GraphStorage
 from .summarizer import CommunitySummarizer
+from .extractor.base import BaseExtractor
+from ...exceptions import GraphUnavailable
 from .retriever import LocalSearcher, GlobalSearcher, HybridSearcher, GraphSearchResult
+
+
+__all__ = [
+    "GraphRAGStats",
+    "GraphRAGPipeline",
+    "create_pipeline",
+]
+
+
+# ============================================================================
+# SETTINGS: the logger
+# ============================================================================
+#
+# One logger for the pipeline's lines.
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# THE STATISTICS
+# ============================================================================
+#
+# INPUT   a run
+# OUTPUT  what it did, counted
+#
+# Chunks, entities, relationships, communities, and the time each stage took.
 
 
 @dataclass
 class GraphRAGStats:
     """Statistics from GraphRAG processing."""
+
     documents_processed: int = 0
     chunks_created: int = 0
     entities_extracted: int = 0
     relationships_extracted: int = 0
+    relationships_dropped: int = 0
+    """Edges discarded because an endpoint was not in the graph."""
+
+    relationships_self_loop: int = 0
+    """Edges whose endpoints merged into one entity, so they joined it to itself."""
+
     communities_detected: int = 0
+    hierarchy_reused: bool = False
+    communities_recomputed: int = 0
+    communities_kept: int = 0
+    """Community detection and summarisation were skipped: nothing changed."""
+
     processing_time_ms: float = 0.0
+
+
+# ============================================================================
+# THE PIPELINE
+# ============================================================================
+#
+# INPUT   documents, a config, a path and an embedder
+# OUTPUT  chunking, extraction, graph construction, community detection,
+#         summarisation and retrieval, in order; a factory
+#
+# The integration point: a collection with a graph calls this.
 
 
 class GraphRAGPipeline:
@@ -103,31 +157,33 @@ class GraphRAGPipeline:
         if isinstance(extractor_type, str):
             extractor_type = ExtractorType(extractor_type)
 
+        # Neither LLMExtractor nor HybridExtractor accepts entity_types or
+        # relationship_types; both read them from the config they are given.
+        # Passing them anyway raised TypeError, so those two extractors could
+        # not be constructed through the pipeline at all.
+        extractor: BaseExtractor
         if extractor_type == ExtractorType.REBEL:
             # mREBEL: bundled model, no LLM costs, 18 languages (default)
-            self.extractor = REBELExtractor(config=self.config)
+            extractor = REBELExtractor(config=self.config)
         elif extractor_type == ExtractorType.NLP:
-            self.extractor = NLPExtractor(
+            extractor = NLPExtractor(
                 model=self.config.nlp_model,
                 config=self.config,
             )
         elif extractor_type == ExtractorType.LLM:
-            self.extractor = LLMExtractor(
-                config=self.config,
-                entity_types=self.config.entity_types,
-                relationship_types=self.config.relationship_types,
-            )
+            extractor = LLMExtractor(config=self.config)
         else:  # HYBRID
-            self.extractor = HybridExtractor(
-                config=self.config,
-                entity_types=self.config.entity_types,
-                relationship_types=self.config.relationship_types,
-            )
+            extractor = HybridExtractor(config=self.config)
+        self.extractor = extractor
 
     def _init_graph(self) -> None:
         """Initialize knowledge graph."""
-        self.graph = KnowledgeGraph()
+        self.graph = KnowledgeGraph(
+            similarity_threshold=self.config.entity_similarity_threshold,
+            schemas=getattr(self.config, "entity_schemas", None),
+        )
         self.hierarchy: Optional[CommunityHierarchy] = None
+        self._generation = 0
 
     def _init_storage(self) -> None:
         """Initialize persistent storage if path provided."""
@@ -135,7 +191,7 @@ class GraphRAGPipeline:
         if self.path:
             # Use the path directly - caller is responsible for creating the graphrag subdirectory
             os.makedirs(self.path, exist_ok=True)
-            self.storage = GraphStorage(self.path / "graph.db")
+            self.storage = GraphStorage(str(self.path / "graph.db"))
             # Load existing graph if available
             self._load_from_storage()
 
@@ -154,31 +210,57 @@ class GraphRAGPipeline:
                 if self.graph and not self.graph.is_empty():
                     self._is_built = True
                     self._rebuild_searchers()
-            except Exception:
-                pass  # Start fresh if loading fails
+            except Exception as exc:
+                # Starting fresh is the right recovery, but doing it silently
+                # means a corrupt or unreadable store looks exactly like an empty
+                # one, and the user is told nothing while their graph disappears.
+                logger.warning(
+                    "Could not load the existing knowledge graph, starting fresh: %s", exc
+                )
+
+    def _structure_signature(self) -> Tuple[FrozenSet[str], FrozenSet[str]]:
+        """What community detection depends on: which nodes and edges exist.
+
+        Edge weights can drift as a relationship is seen again, and that is
+        deliberately not part of this. Re-clustering on every strength update
+        would defeat the point, and the communities a repeated sighting would
+        produce are the ones already there.
+        """
+        return frozenset(self.graph.nodes), frozenset(self.graph.edges)
 
     def _rebuild_searchers(self) -> None:
-        """Rebuild searchers after graph changes."""
-        if self.graph.is_empty():
-            return
+        """Rebuild searchers after graph changes.
 
+        This runs for an empty graph too. It used to return early on one, but
+        add_documents() marks the pipeline built regardless, so a corpus that
+        extracted no entities was "built" with no searchers and every query
+        raised "Hybrid searcher not initialized". Each searcher already answers
+        an empty graph with an empty result, which is the right answer.
+        """
         self.local_searcher = LocalSearcher(
             graph=self.graph,
             config=self.config,
         )
 
-        if self.hierarchy:
-            self.global_searcher = GlobalSearcher(
-                graph=self.graph,
-                hierarchy=self.hierarchy,
-                config=self.config,
-            )
+        # Build these against whatever hierarchy exists, including an empty one.
+        # Gating on truthiness meant a graph with no communities got no hybrid
+        # searcher, and since GraphSearchType.HYBRID is the default, search then
+        # raised "Hybrid searcher not initialized". A small corpus is a normal
+        # state, not a broken one.
+        hierarchy = self.hierarchy if self.hierarchy is not None else CommunityHierarchy()
+        self.hierarchy = hierarchy
 
-            self.hybrid_searcher = HybridSearcher(
-                graph=self.graph,
-                hierarchy=self.hierarchy,
-                config=self.config,
-            )
+        self.global_searcher = GlobalSearcher(
+            graph=self.graph,
+            hierarchy=hierarchy,
+            config=self.config,
+        )
+
+        self.hybrid_searcher = HybridSearcher(
+            graph=self.graph,
+            hierarchy=hierarchy,
+            config=self.config,
+        )
 
         # Compute embeddings if embed_fn available
         if self.embed_fn:
@@ -217,6 +299,7 @@ class GraphRAGPipeline:
             GraphRAGStats with processing statistics.
         """
         import time
+
         start_time = time.perf_counter()
 
         stats = GraphRAGStats()
@@ -268,49 +351,123 @@ class GraphRAGPipeline:
         if on_progress:
             on_progress(0, 1, "building_graph")
 
+        before_structure = self._structure_signature()
+
+        # add_entity returns the surviving id, which differs from entity.id
+        # whenever resolution merged this entity into an existing one. That
+        # return value is the only place the canonical id is knowable, so it has
+        # to be captured: relationships arrive carrying the extractor's
+        # pre-merge ids, and an id that lost a merge is no longer in the graph.
+        #
+        # Discarding it meant every relationship touching a merged entity was
+        # dropped by add_relationship while reporting success. Entity resolution
+        # made that worse, because it merges far more aggressively than the exact
+        # matching it replaced: a two-form name with one edge kept 1 of 2 edges.
+        canonical_id: Dict[str, str] = {}
         for entity in all_entities:
-            self.graph.add_entity(entity, merge_if_exists=self.config.deduplicate_entities)
+            surviving = self.graph.add_entity(
+                entity, merge_if_exists=self.config.deduplicate_entities
+            )
+            canonical_id[entity.id] = surviving
 
         for rel in all_relationships:
-            if rel.strength >= self.config.relationship_threshold:
-                self.graph.add_relationship(rel)
+            if rel.strength < self.config.relationship_threshold:
+                continue
+
+            source = canonical_id.get(rel.source_id, rel.source_id)
+            target = canonical_id.get(rel.target_id, rel.target_id)
+            if source != rel.source_id or target != rel.target_id:
+                rel = replace(rel, source_id=source, target_id=target)
+
+            if self.graph.add_relationship(rel) is None:
+                # Either an endpoint is genuinely unknown, or the two endpoints
+                # merged into one entity so the edge became a self-loop. Both are
+                # worth counting rather than losing silently.
+                if source == target:
+                    stats.relationships_self_loop += 1
+                else:
+                    stats.relationships_dropped += 1
 
         if on_progress:
             on_progress(1, 1, "building_graph")
 
-        # Stage 4: Detect communities
-        if on_progress:
-            on_progress(0, 1, "detecting_communities")
+        # Stages 4 and 5 run only when the graph's structure changed.
+        # Detection and summarisation are the expensive tail of every add():
+        # under an LLM extractor, summarising is one model call per community,
+        # and it was paid again on every message even when the message added
+        # no entity and no relationship. If the node and edge sets are the
+        # same as before this batch, the previous hierarchy still describes
+        # the graph and is kept as is.
+        reuse = self.hierarchy is not None and self._structure_signature() == before_structure
+        stats.hierarchy_reused = reuse
 
-        self.hierarchy = detect_communities(
-            self.graph,
-            max_levels=self.config.max_community_levels,
-            min_community_size=self.config.min_community_size,
-        )
+        if reuse:
+            assert self.hierarchy is not None
+            stats.communities_detected = self.hierarchy.total_communities
+            if on_progress:
+                on_progress(1, 1, "detecting_communities")
+                on_progress(1, 1, "summarizing")
+        else:
+            # Stage 4: Detect communities, only where the graph changed when
+            # there is a hierarchy to keep. A batch that adds a node to one
+            # component cannot move community boundaries in another, so the
+            # other components' communities and summaries are kept as they
+            # are and only the touched components are re-detected.
+            if on_progress:
+                on_progress(0, 1, "detecting_communities")
+            incremental = (
+                getattr(self.config, "incremental_communities", True)
+                and self.hierarchy is not None
+                and bool(before_structure[0])
+            )
+            if incremental:
+                assert self.hierarchy is not None
+                self._generation += 1
+                update = update_hierarchy(
+                    self.graph,
+                    self.hierarchy,
+                    before_structure[0],
+                    before_structure[1],
+                    max_levels=self.config.max_community_levels,
+                    min_community_size=self.config.min_community_size,
+                    generation=self._generation,
+                )
+                self.hierarchy = update.hierarchy
+                stats.communities_recomputed = len(update.added)
+                stats.communities_kept = self.hierarchy.total_communities - len(update.added)
+                to_summarize = _only_communities(self.hierarchy, update.new_ids)
+            else:
+                self.hierarchy = detect_communities(
+                    self.graph,
+                    max_levels=self.config.max_community_levels,
+                    min_community_size=self.config.min_community_size,
+                )
+                stats.communities_recomputed = self.hierarchy.total_communities
+                to_summarize = self.hierarchy
+            stats.communities_detected = self.hierarchy.total_communities
+            if on_progress:
+                on_progress(1, 1, "detecting_communities")
 
-        stats.communities_detected = self.hierarchy.total_communities
+            # Stage 5: Summarize the communities that are new
+            if on_progress:
+                on_progress(0, 1, "summarizing")
 
-        if on_progress:
-            on_progress(1, 1, "detecting_communities")
-
-        # Stage 5: Summarize communities
-        if on_progress:
-            on_progress(0, 1, "summarizing")
-
-        # Use LLM for summarization only if using LLM or HYBRID extractor
-        use_llm_for_summary = self.config.extractor in (ExtractorType.LLM, ExtractorType.HYBRID)
-        summarizer = CommunitySummarizer(
-            config=self.config,
-            use_llm=use_llm_for_summary,
-        )
-        self.hierarchy = summarizer.summarize_hierarchy(
-            self.graph,
-            self.hierarchy,
-            max_workers=self.config.max_workers,
-        )
-
-        if on_progress:
-            on_progress(1, 1, "summarizing")
+            # Use LLM for summarization only if using LLM or HYBRID extractor
+            use_llm_for_summary = self.config.extractor in (
+                ExtractorType.LLM,
+                ExtractorType.HYBRID,
+            )
+            summarizer = CommunitySummarizer(
+                config=self.config,
+                use_llm=use_llm_for_summary,
+            )
+            summarizer.summarize_hierarchy(
+                self.graph,
+                to_summarize,
+                max_workers=self.config.max_workers,
+            )
+            if on_progress:
+                on_progress(1, 1, "summarizing")
 
         # Stage 6: Rebuild searchers
         self._rebuild_searchers()
@@ -351,8 +508,23 @@ class GraphRAGPipeline:
         Returns:
             GraphSearchResult with entities, communities, and context.
         """
+        # Searching an empty graph finds nothing, the same as an empty vector
+        # collection. That covers both a pipeline nothing was added to and one
+        # whose documents produced no entities, without treating either as an
+        # error.
+        if self.graph.is_empty():
+            from .retriever.hybrid_search import QueryType
+
+            search_type = search_type or self.config.search_type
+            if isinstance(search_type, str):
+                search_type = GraphSearchType(search_type)
+            return GraphSearchResult(
+                query_type=QueryType.MIXED,
+                search_strategy=search_type.value,
+            )
+
         if not self._is_built:
-            raise RuntimeError("Graph not built. Call add_documents() first.")
+            raise GraphUnavailable("Graph not built. Call add_documents() first.")
 
         # Use configured search type if not overridden
         search_type = search_type or self.config.search_type
@@ -366,7 +538,7 @@ class GraphRAGPipeline:
         # Route to appropriate searcher
         if search_type == GraphSearchType.LOCAL:
             if not self.local_searcher:
-                raise RuntimeError("Local searcher not initialized")
+                raise GraphUnavailable("Local searcher not initialized")
             local_result = self.local_searcher.search(
                 query=query,
                 query_vector=query_vector,
@@ -375,6 +547,7 @@ class GraphRAGPipeline:
             )
             # Convert to GraphSearchResult
             from .retriever.hybrid_search import QueryType
+
             return GraphSearchResult(
                 query_type=QueryType.SPECIFIC,
                 local_result=local_result,
@@ -386,7 +559,7 @@ class GraphRAGPipeline:
 
         elif search_type == GraphSearchType.GLOBAL:
             if not self.global_searcher:
-                raise RuntimeError("Global searcher not initialized")
+                raise GraphUnavailable("Global searcher not initialized")
             global_result = self.global_searcher.search(
                 query=query,
                 query_vector=query_vector,
@@ -394,6 +567,7 @@ class GraphRAGPipeline:
             )
             # Convert to GraphSearchResult
             from .retriever.hybrid_search import QueryType
+
             return GraphSearchResult(
                 query_type=QueryType.BROAD,
                 global_result=global_result,
@@ -405,12 +579,33 @@ class GraphRAGPipeline:
 
         else:  # HYBRID
             if not self.hybrid_searcher:
-                raise RuntimeError("Hybrid searcher not initialized")
+                raise GraphUnavailable("Hybrid searcher not initialized")
             return self.hybrid_searcher.search(
                 query=query,
                 query_vector=query_vector,
                 k=k,
             )
+
+    def shortest_path(self, a: str, b: str, max_depth: int = 4) -> Dict[str, Any]:
+        """Shortest chain of live relationships between two entities, by name.
+
+        Named ``shortest_path`` because ``path`` is the pipeline's storage
+        directory; ``Vectrix.graph_path()`` is the everyday spelling.
+        """
+        return _queries.path(self.graph, a, b, max_depth=max_depth)
+
+    def explain(self, a: str, b: Optional[str] = None, max_depth: int = 4) -> Dict[str, Any]:
+        """What the graph knows about an entity, or about how two relate."""
+        return _queries.explain(self.graph, a, b, hierarchy=self.hierarchy, max_depth=max_depth)
+
+    def supersede(
+        self, old_relationship_id: str, new_relationship_id: str, when: Optional[str] = None
+    ) -> bool:
+        """Mark one relationship as replaced by another and persist it."""
+        ok = self.graph.supersede_relationship(old_relationship_id, new_relationship_id, when)
+        if ok and self.storage:
+            self.storage.save_graph(self.graph)
+        return ok
 
     def get_entity(self, name: str) -> Optional[Entity]:
         """Get an entity by name."""
@@ -448,7 +643,7 @@ class GraphRAGPipeline:
 
     def clear(self) -> None:
         """Clear all data and reset the pipeline."""
-        self.graph = KnowledgeGraph()
+        self.graph = KnowledgeGraph(similarity_threshold=self.config.entity_similarity_threshold)
         self.hierarchy = None
         self._is_built = False
         self._stats = GraphRAGStats()
@@ -462,7 +657,9 @@ class GraphRAGPipeline:
         """Save current state to storage."""
         if self.storage:
             self.storage.save_graph(self.graph)
-            if self.hierarchy:
+            # `is not None`, not truthiness: a hierarchy that has been emptied
+            # still has to be written, or its stale community rows survive.
+            if self.hierarchy is not None:
                 self.storage.save_hierarchy(self.hierarchy)
 
     def close(self) -> None:

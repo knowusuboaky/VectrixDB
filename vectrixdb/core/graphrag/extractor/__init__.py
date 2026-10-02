@@ -39,12 +39,27 @@ from .base import (
 from .nlp_extractor import NLPExtractor, create_nlp_extractor
 from .llm_extractor import LLMExtractor, create_llm_extractor
 from .rebel_extractor import REBELExtractor, create_rebel_extractor
-from .hybrid_extractor import HybridExtractor as SpacyRebelExtractor, create_hybrid_extractor as create_spacy_rebel_extractor
-from .hybrid_extractor import HybridExtractor  # Also export as HybridExtractor for backward compatibility
+from .hybrid_extractor import (
+    HybridExtractor as SpacyRebelExtractor,
+    create_hybrid_extractor as create_spacy_rebel_extractor,
+)
+from .hybrid_extractor import (
+    HybridExtractor,
+)  # Also export as HybridExtractor for backward compatibility
 
-from typing import Optional, List
+from typing import Optional, List, Dict
 from ..config import GraphRAGConfig, ExtractorType
 from ..chunker import TextUnit
+
+
+# ============================================================================
+# NLP FOR SPEED, AN LLM FOR QUALITY
+# ============================================================================
+#
+# INPUT   text units
+# OUTPUT  entities from spaCy, relationships from an LLM
+#
+# The one extractor here that costs money.
 
 
 class HybridLLMExtractor(BaseExtractor):
@@ -90,27 +105,25 @@ class HybridLLMExtractor(BaseExtractor):
                 pass
 
     def _identify_important_units(
-        self,
-        text_units: List[TextUnit],
-        nlp_result: ExtractionResult
+        self, text_units: List[TextUnit], nlp_result: ExtractionResult
     ) -> List[TextUnit]:
         """Identify chunks that should be processed with LLM."""
         # Count entities per text unit
-        unit_entity_counts = {}
+        unit_entity_counts: Dict[str, int] = {}
         for entity in nlp_result.entities:
             for source_id in entity.source_units:
                 unit_entity_counts[source_id] = unit_entity_counts.get(source_id, 0) + 1
 
         # Sort by entity count (descending)
         sorted_units = sorted(
-            [(unit, unit_entity_counts.get(unit.id, 0)) for unit in text_units],
-            key=lambda x: -x[1]
+            [(unit, unit_entity_counts.get(unit.id, 0)) for unit in text_units], key=lambda x: -x[1]
         )
 
         # Select top N% with at least min_entities
         num_to_select = max(1, int(len(text_units) * self.importance_threshold))
         important_units = [
-            unit for unit, count in sorted_units[:num_to_select]
+            unit
+            for unit, count in sorted_units[:num_to_select]
             if count >= self.min_entities_for_llm
         ]
 
@@ -175,10 +188,18 @@ class HybridLLMExtractor(BaseExtractor):
         return self.extract(text_units)
 
 
+# ============================================================================
+# THE FACTORY
+# ============================================================================
+#
+# INPUT   an extractor type and a config
+# OUTPUT  the extractor: spacy_rebel, rebel, nlp, llm, or hybrid
+#
+# spacy_rebel is the recommendation: best accuracy, no LLM.
+
+
 def create_extractor(
-    extractor_type: str = "spacy_rebel",
-    config: Optional[GraphRAGConfig] = None,
-    **kwargs
+    extractor_type: str = "spacy_rebel", config: Optional[GraphRAGConfig] = None, **kwargs
 ) -> BaseExtractor:
     """
     Factory function to create an entity extractor.
@@ -197,7 +218,11 @@ def create_extractor(
         An instance of BaseExtractor.
     """
     if config:
-        extractor_type = config.extractor.value if isinstance(config.extractor, ExtractorType) else config.extractor
+        extractor_type = (
+            config.extractor.value
+            if isinstance(config.extractor, ExtractorType)
+            else config.extractor
+        )
 
     if extractor_type == "spacy_rebel":
         return SpacyRebelExtractor(config=config, **kwargs)
@@ -221,7 +246,6 @@ __all__ = [
     "ExtractionResult",
     "EntityType",
     "RelationshipType",
-
     # Extractors
     "SpacyRebelExtractor",  # RECOMMENDED: spaCy NER + mREBEL relations
     "HybridExtractor",  # Alias for SpacyRebelExtractor (backward compatibility)
@@ -229,7 +253,6 @@ __all__ = [
     "NLPExtractor",
     "LLMExtractor",
     "HybridLLMExtractor",
-
     # Factory functions
     "create_extractor",
     "create_spacy_rebel_extractor",

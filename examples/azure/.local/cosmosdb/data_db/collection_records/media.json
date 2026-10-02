@@ -1,0 +1,12 @@
+{
+  "name": "media",
+  "path": "raw/media/",
+  "policy": {
+    "method": "store",
+    "allow": [
+      {
+        "email": "kwadwonyame@owusuboakye.com"
+      }
+    ]
+  }
+}

@@ -12,14 +12,28 @@ from vectrixdb import Vectrix, V, Result, Results
 # Check if models are available
 try:
     from vectrixdb import is_models_installed
+
     MODELS_AVAILABLE = is_models_installed()
-except:
+except (ImportError, AttributeError):
     MODELS_AVAILABLE = False
 
 requires_models = pytest.mark.skipif(
-    not MODELS_AVAILABLE,
-    reason="Requires embedding models to be installed"
+    not MODELS_AVAILABLE, reason="Requires embedding models to be installed"
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_working_directory(tmp_path, monkeypatch):
+    """Every test in this file builds ``Vectrix(name)`` with no path.
+
+    That writes to ./vectrixdb_data in the working directory, so the
+    collections outlived the run and the next one opened them again: the
+    first assertion of test_count is that a fresh collection is empty, and it
+    found four documents from last time. These were gated behind
+    ``requires_models``, which reported False on a correct install, so nobody
+    saw it until that check was fixed.
+    """
+    monkeypatch.chdir(tmp_path)
 
 
 class TestVectrixInit:
@@ -112,9 +126,9 @@ class TestVectrixSearch:
         results = db.search("machine learning")
 
         assert isinstance(results, Results)
-        assert hasattr(results, 'top')
-        assert hasattr(results, 'texts')
-        assert hasattr(results, 'scores')
+        assert hasattr(results, "top")
+        assert hasattr(results, "texts")
+        assert hasattr(results, "scores")
         db.close()
 
     @requires_models
@@ -191,3 +205,76 @@ class TestConvenienceFunctions:
         db2 = vectrix_open("test_open")
         assert db2 is not None
         db2.close()
+
+
+class TestRecordedModelNames:
+    """A collection an older server wrote records the embedder's key where
+    the library records the model's name. Both mean the same vectors."""
+
+    def test_a_key_and_its_name_are_the_same_model(self, tmp_path):
+        import warnings
+
+        from vectrixdb.exceptions import ModelMismatchWarning
+
+        with Vectrix("k", path=str(tmp_path)) as db:
+            db._collection.set_meta("embedding_model", "bge_small_en")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ModelMismatchWarning)
+            Vectrix("k", path=str(tmp_path)).close()
+
+    def test_another_model_still_warns(self, tmp_path):
+        from vectrixdb.exceptions import ModelMismatchWarning
+
+        with Vectrix("k", path=str(tmp_path)) as db:
+            db._collection.set_meta("embedding_model", "dense_en")
+        with pytest.warns(ModelMismatchWarning):
+            Vectrix("k", path=str(tmp_path)).close()
+
+
+class TestKeywordHalfSkipsHighlights:
+    """The library's hybrid and ultimate searches fetch ten times the limit
+    from the keyword index, and every one of those came back with highlights:
+    each candidate's whole text tokenized again, then thrown away, because
+    nothing in the library reads them. On SciFact that was nine tenths of a
+    hybrid query's time. The REST keyword route still asks for them."""
+
+    @pytest.fixture
+    def counted(self, monkeypatch):
+        from vectrixdb.core.collection import TextIndex
+
+        calls = []
+        real = TextIndex.get_highlights
+
+        def counting(self, doc_id, query, max_length=150):
+            calls.append(doc_id)
+            return real(self, doc_id, query, max_length)
+
+        monkeypatch.setattr(TextIndex, "get_highlights", counting)
+        return calls
+
+    @requires_models
+    @pytest.mark.parametrize("mode", ["hybrid", "sparse"])
+    def test_no_highlights_are_made_for_a_library_search(self, counted, mode, tmp_path):
+        texts = [f"invoice {i} for the harbour office, paid in {2000 + i}" for i in range(40)]
+        with Vectrix("h", path=str(tmp_path), mode="hybrid") as db:
+            db.add(texts)
+            results = db.search("harbour invoice", mode=mode, limit=5, rerank=False)
+        assert len(results) == 5
+        assert counted == []
+
+    def test_the_collection_still_makes_them_when_asked(self, counted, tmp_path):
+        import numpy as np
+
+        from vectrixdb.core.database import VectrixDB
+
+        db = VectrixDB(str(tmp_path / "raw"))
+        col = db.create_collection("c", dimension=4, enable_text_index=True)
+        col.add(
+            ids=["a", "b"],
+            vectors=np.eye(4, dtype=np.float32)[:2],
+            texts=["the harbour office pays invoices", "nothing about it"],
+        )
+        found = col.keyword_search("harbour", limit=2)
+        assert counted == ["a"]
+        assert found.results[0].highlights == ["the harbour office pays invoices"]
+        db.close()

@@ -4,15 +4,48 @@ Search Fusion Strategies
 Combines results from multiple search methods using various fusion algorithms.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 
+# ============================================================================
+# SETTINGS: the logger
+# ============================================================================
+#
+# One logger for the fusion's lines.
+
+logger = logging.getLogger(__name__)
+
+
+__all__ = [
+    "FusedResult",
+    "FusionStrategy",
+    "RRFFusion",
+    "LinearFusion",
+    "CondorcetFusion",
+    "HybridSearcher",
+    "Reranker",
+]
+
+
+# ============================================================================
+# A FUSED RESULT, AND THE STRATEGIES
+# ============================================================================
+#
+# INPUT   ranked lists from several searches
+# OUTPUT  one list: reciprocal rank fusion, a linear combination, or Condorcet
+#         voting
+#
+# RRF is the default; it needs no scores to be comparable.
+
+
 @dataclass
 class FusedResult:
     """Result from fused search."""
+
     id: str
     score: float
     rank: int
@@ -99,23 +132,21 @@ class RRFFusion(FusionStrategy):
         # Sort by fused score
         sorted_docs = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
-        results = []
+        fused_results: List[FusedResult] = []
         for rank, (doc_id, score) in enumerate(sorted_docs[:k], 1):
-            results.append(FusedResult(
-                id=doc_id,
-                score=score,
-                rank=rank,
-                source_scores={
-                    src: source_scores[src].get(doc_id, 0.0)
-                    for src in result_lists
-                },
-                source_ranks={
-                    src: source_ranks[src].get(doc_id, -1)
-                    for src in result_lists
-                },
-            ))
+            fused_results.append(
+                FusedResult(
+                    id=doc_id,
+                    score=score,
+                    rank=rank,
+                    source_scores={
+                        src: source_scores[src].get(doc_id, 0.0) for src in result_lists
+                    },
+                    source_ranks={src: source_ranks[src].get(doc_id, -1) for src in result_lists},
+                )
+            )
 
-        return results
+        return fused_results
 
 
 class LinearFusion(FusionStrategy):
@@ -165,24 +196,21 @@ class LinearFusion(FusionStrategy):
                 max_score = max(scores)
                 range_score = max_score - min_score or 1.0
                 normalized[source_name] = [
-                    (doc_id, (score - min_score) / range_score)
-                    for doc_id, score in results
+                    (doc_id, (score - min_score) / range_score) for doc_id, score in results
                 ]
 
             elif self.normalize == "zscore":
-                mean_score = np.mean(scores)
-                std_score = np.std(scores) or 1.0
+                mean_score = float(np.mean(scores))
+                std_score = float(np.std(scores)) or 1.0
                 normalized[source_name] = [
-                    (doc_id, (score - mean_score) / std_score)
-                    for doc_id, score in results
+                    (doc_id, (score - mean_score) / std_score) for doc_id, score in results
                 ]
 
             elif self.normalize == "rank":
                 # Rank-based normalization (1.0 for rank 1, decreasing)
                 n = len(results)
                 normalized[source_name] = [
-                    (doc_id, 1.0 - (rank / n))
-                    for rank, (doc_id, _) in enumerate(results)
+                    (doc_id, 1.0 - (rank / n)) for rank, (doc_id, _) in enumerate(results)
                 ]
 
             else:
@@ -220,23 +248,19 @@ class LinearFusion(FusionStrategy):
         # Sort by final score
         sorted_docs = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
 
-        results = []
+        fused_results: List[FusedResult] = []
         for rank, (doc_id, score) in enumerate(sorted_docs[:k], 1):
-            results.append(FusedResult(
-                id=doc_id,
-                score=score,
-                rank=rank,
-                source_scores={
-                    src: source_scores[src].get(doc_id, 0.0)
-                    for src in normalized
-                },
-                source_ranks={
-                    src: source_ranks[src].get(doc_id, -1)
-                    for src in normalized
-                },
-            ))
+            fused_results.append(
+                FusedResult(
+                    id=doc_id,
+                    score=score,
+                    rank=rank,
+                    source_scores={src: source_scores[src].get(doc_id, 0.0) for src in normalized},
+                    source_ranks={src: source_ranks[src].get(doc_id, -1) for src in normalized},
+                )
+            )
 
-        return results
+        return fused_results
 
 
 class CondorcetFusion(FusionStrategy):
@@ -267,7 +291,7 @@ class CondorcetFusion(FusionStrategy):
     ) -> List[FusedResult]:
         """Fuse using Condorcet voting."""
         # Get all unique document IDs
-        all_docs = set()
+        all_docs: set[str] = set()
         for results in result_lists.values():
             all_docs.update(doc_id for doc_id, _ in results)
 
@@ -281,10 +305,7 @@ class CondorcetFusion(FusionStrategy):
         rank_maps: Dict[str, Dict[str, int]] = {}
 
         for source_name, results in result_lists.items():
-            rank_maps[source_name] = {
-                doc_id: rank
-                for rank, (doc_id, _) in enumerate(results, 1)
-            }
+            rank_maps[source_name] = {doc_id: rank for rank, (doc_id, _) in enumerate(results, 1)}
 
         # Compute pairwise wins
         wins = np.zeros((n, n), dtype=np.float32)
@@ -298,8 +319,8 @@ class CondorcetFusion(FusionStrategy):
                 for source_name, rank_map in rank_maps.items():
                     weight = self.weights.get(source_name, 1.0)
 
-                    rank_a = rank_map.get(doc_a, float('inf'))
-                    rank_b = rank_map.get(doc_b, float('inf'))
+                    rank_a = rank_map.get(doc_a, float("inf"))
+                    rank_b = rank_map.get(doc_b, float("inf"))
 
                     if rank_a < rank_b:  # Lower rank = better
                         wins[i, j] += weight
@@ -321,24 +342,32 @@ class CondorcetFusion(FusionStrategy):
                 source_scores[source_name][doc_id] = score
                 source_ranks[source_name][doc_id] = rank
 
-        results = []
+        fused_results: List[FusedResult] = []
         for rank, idx in enumerate(sorted_indices[:k], 1):
             doc_id = doc_list[idx]
-            results.append(FusedResult(
-                id=doc_id,
-                score=float(condorcet_scores[idx]),
-                rank=rank,
-                source_scores={
-                    src: source_scores[src].get(doc_id, 0.0)
-                    for src in result_lists
-                },
-                source_ranks={
-                    src: source_ranks[src].get(doc_id, -1)
-                    for src in result_lists
-                },
-            ))
+            fused_results.append(
+                FusedResult(
+                    id=doc_id,
+                    score=float(condorcet_scores[idx]),
+                    rank=rank,
+                    source_scores={
+                        src: source_scores[src].get(doc_id, 0.0) for src in result_lists
+                    },
+                    source_ranks={src: source_ranks[src].get(doc_id, -1) for src in result_lists},
+                )
+            )
 
-        return results
+        return fused_results
+
+
+# ============================================================================
+# THE HYBRID SEARCHER, AND RERANKING
+# ============================================================================
+#
+# INPUT   several search methods and a query
+# OUTPUT  their results fused; the top reranked
+#
+# Fuse first, then spend the cross-encoder on the few that remain.
 
 
 class HybridSearcher:
@@ -414,10 +443,14 @@ class HybridSearcher:
         """
         source_k = source_k or (k * 10)
 
-        # Select sources
+        # Select sources. ``is not None``: an empty list names no source and
+        # must query none, which is what the early return below was written
+        # for. Read for truthiness it meant "no selection given" and queried
+        # every registered source, so that return was unreachable.
         active_sources = (
             {name: self._sources[name] for name in sources if name in self._sources}
-            if sources else self._sources
+            if sources is not None
+            else self._sources
         )
 
         if not active_sources:
@@ -435,14 +468,14 @@ class HybridSearcher:
                 for r in results:
                     if isinstance(r, tuple) and len(r) >= 2:
                         normalized_results.append((r[0], float(r[1])))
-                    elif hasattr(r, 'id') and hasattr(r, 'score'):
+                    elif hasattr(r, "id") and hasattr(r, "score"):
                         normalized_results.append((r.id, float(r.score)))
 
                 result_lists[name] = normalized_results
 
             except Exception as e:
                 # Log error but continue with other sources
-                print(f"Warning: Source {name} failed: {e}")
+                logger.warning("fusion source %r failed: %s", name, e)
 
         if not result_lists:
             return []
@@ -503,10 +536,7 @@ class HybridSearcher:
 
     def list_sources(self) -> List[Dict[str, Any]]:
         """List registered search sources."""
-        return [
-            {"name": name, "weight": weight}
-            for name, (_, weight) in self._sources.items()
-        ]
+        return [{"name": name, "weight": weight} for name, (_, weight) in self._sources.items()]
 
 
 class Reranker:
@@ -557,12 +587,12 @@ class Reranker:
         vectors_norm = vectors_array / (norms + 1e-8)
 
         # MMR selection
-        selected = []
+        selected: List[int] = []
         remaining = list(range(len(valid_results)))
 
         while len(selected) < k and remaining:
             best_idx = None
-            best_score = float('-inf')
+            best_score = float("-inf")
 
             for idx in remaining:
                 # Relevance (original score)
@@ -590,14 +620,16 @@ class Reranker:
         reranked = []
         for new_rank, idx in enumerate(selected, 1):
             result = valid_results[idx]
-            reranked.append(FusedResult(
-                id=result.id,
-                score=result.score,  # Keep original score
-                rank=new_rank,
-                source_scores=result.source_scores,
-                source_ranks=result.source_ranks,
-                payload=result.payload,
-            ))
+            reranked.append(
+                FusedResult(
+                    id=result.id,
+                    score=result.score,  # Keep original score
+                    rank=new_rank,
+                    source_scores=result.source_scores,
+                    source_ranks=result.source_ranks,
+                    payload=result.payload,
+                )
+            )
 
         return reranked
 

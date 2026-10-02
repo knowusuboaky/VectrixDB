@@ -1,0 +1,12 @@
+{
+  "name": "misc",
+  "path": "raw/misc/",
+  "policy": {
+    "method": "store",
+    "allow": [
+      {
+        "domain": "owusuboakye.com"
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "vectors": 20000,
+  "dims": 128,
+  "queries": 200,
+  "k": 10,
+  "deleted": 0.0,
+  "cold": false,
+  "ef": 400,
+  "seed": 0,
+  "vectrixdb": "2.2.0",
+  "usearch": "2.26.0",
+  "numpy": "2.3.4",
+  "date": "2026-09-19",
+  "machine": "AMD64 Windows Python 3.13.14",
+  "rows": [
+    {
+      "shards": 1,
+      "shard_size": 20000,
+      "ef": 400,
+      "build_s": 3.03,
+      "seal_s": 0.0,
+      "p50_ms": 1.904,
+      "p99_ms": 3.685,
+      "recall@10": 0.9475,
+      "live": 20000
+    }
+  ]
+}

@@ -6,11 +6,13 @@ Supports multiple cache backends:
 - Redis: Distributed cache (Azure Redis, Docker Redis, local)
 - Hybrid: Memory + Redis tiered caching
 
-Author: Daddy Nyame Owusu - Boakye
+Author: Kwadwo Daddy Nyame Owusu - Boakye
 """
 
 import hashlib
 import json
+
+import numpy as np
 import os
 import threading
 import time
@@ -22,8 +24,35 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import pickle
 
 
+__all__ = [
+    "CacheBackend",
+    "CacheConfig",
+    "CacheEntry",
+    "CacheStats",
+    "BaseCache",
+    "NoCache",
+    "MemoryCache",
+    "RedisCache",
+    "HybridCache",
+    "VectorCache",
+    "create_cache",
+]
+
+
+# ============================================================================
+# THE BACKENDS, THE CONFIG, AN ENTRY, AND THE STATS
+# ============================================================================
+#
+# INPUT   a configuration
+# OUTPUT  which backend, its settings, one cached entry with its metadata, and
+#         the statistics monitoring reads
+#
+# In-memory LRU, Redis, or both.
+
+
 class CacheBackend(str, Enum):
     """Available cache backends."""
+
     NONE = "none"
     MEMORY = "memory"
     REDIS = "redis"
@@ -33,6 +62,7 @@ class CacheBackend(str, Enum):
 @dataclass
 class CacheConfig:
     """Configuration for cache layer."""
+
     backend: CacheBackend = CacheBackend.MEMORY
 
     # Memory cache config
@@ -77,6 +107,7 @@ class CacheConfig:
 @dataclass
 class CacheEntry:
     """A cached entry with metadata."""
+
     value: Any
     created_at: float
     ttl: int
@@ -136,6 +167,17 @@ class CacheStats:
         }
 
 
+# ============================================================================
+# THE CACHES: none, memory, Redis, and hybrid
+# ============================================================================
+#
+# INPUT   a key and a value, with a TTL
+# OUTPUT  the same get, set and invalidate on each: a no-op, an in-memory LRU,
+#         Redis, or memory in front of Redis
+#
+# One base class, so a collection does not know which it has.
+
+
 class BaseCache(ABC):
     """Abstract base class for cache backends."""
 
@@ -167,6 +209,16 @@ class BaseCache(ABC):
     def clear(self) -> None:
         """Clear all cache entries."""
         pass
+
+    def delete_prefix(self, prefix: str) -> int:
+        """Forget every key that starts with ``prefix``; how many went.
+
+        A cache that cannot look its keys up by prefix forgets everything,
+        because forgetting too much costs a recomputation and forgetting
+        too little returns an answer that is no longer true.
+        """
+        self.clear()
+        return 0
 
     @abstractmethod
     def size(self) -> int:
@@ -221,6 +273,9 @@ class NoCache(BaseCache):
     def delete(self, key: str) -> bool:
         return False
 
+    def delete_prefix(self, prefix: str) -> int:
+        return 0
+
     def exists(self, key: str) -> bool:
         return False
 
@@ -267,7 +322,10 @@ class MemoryCache(BaseCache):
             return entry.value
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        ttl = ttl or self.config.memory_ttl_seconds
+        # ``is None``: a caller passing ttl=0 is asking for this not to be
+        # kept, and reading that as "no ttl given" cached it for the
+        # default hour and served it back.
+        ttl = self.config.memory_ttl_seconds if ttl is None else ttl
 
         with self._lock:
             # Evict if at capacity
@@ -291,6 +349,14 @@ class MemoryCache(BaseCache):
                 self.stats.record_delete()
                 return True
             return False
+
+    def delete_prefix(self, prefix: str) -> int:
+        with self._lock:
+            doomed = [k for k in self._cache if isinstance(k, str) and k.startswith(prefix)]
+            for key in doomed:
+                del self._cache[key]
+                self.stats.record_delete()
+            return len(doomed)
 
     def exists(self, key: str) -> bool:
         with self._lock:
@@ -332,7 +398,7 @@ class RedisCache(BaseCache):
 
     def __init__(self, config: CacheConfig):
         super().__init__(config)
-        self._client = None
+        self._client: Any = None
         self._connect()
 
     def _connect(self):
@@ -344,8 +410,7 @@ class RedisCache(BaseCache):
         # Azure Redis connection string
         if self.config.azure_redis_connection_string:
             self._client = redis.from_url(
-                self.config.azure_redis_connection_string,
-                decode_responses=False
+                self.config.azure_redis_connection_string, decode_responses=False
             )
         else:
             self._client = redis.Redis(
@@ -374,7 +439,7 @@ class RedisCache(BaseCache):
         return self._deserialize(data)
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        ttl = ttl or self.config.redis_ttl_seconds
+        ttl = self.config.redis_ttl_seconds if ttl is None else ttl
         full_key = self._make_key(key)
         data = self._serialize(value)
 
@@ -387,6 +452,20 @@ class RedisCache(BaseCache):
         if result:
             self.stats.record_delete()
         return result
+
+    def delete_prefix(self, prefix: str) -> int:
+        # SCAN, never KEYS: this runs on every write, against a server that
+        # other things are using.
+        pattern = self._make_key(prefix).replace("*", "[*]").replace("?", "[?]") + "*"
+        removed = 0
+        cursor = 0
+        while True:
+            cursor, keys = self._client.scan(cursor, match=pattern, count=1000)
+            if keys:
+                removed += int(self._client.delete(*keys) or 0)
+            if cursor == 0:
+                break
+        return removed
 
     def exists(self, key: str) -> bool:
         full_key = self._make_key(key)
@@ -431,7 +510,7 @@ class RedisCache(BaseCache):
 
     def set_many(self, items: Dict[str, Any], ttl: Optional[int] = None) -> None:
         """Optimized batch set using pipeline."""
-        ttl = ttl or self.config.redis_ttl_seconds
+        ttl = self.config.redis_ttl_seconds if ttl is None else ttl
 
         pipe = self._client.pipeline()
         for key, value in items.items():
@@ -504,6 +583,9 @@ class HybridCache(BaseCache):
     def exists(self, key: str) -> bool:
         return self._l1.exists(key) or self._l2.exists(key)
 
+    def delete_prefix(self, prefix: str) -> int:
+        return self._l1.delete_prefix(prefix) + self._l2.delete_prefix(prefix)
+
     def clear(self) -> None:
         self._l1.clear()
         self._l2.clear()
@@ -520,9 +602,16 @@ class HybridCache(BaseCache):
         }
 
 
-# =============================================================================
-# Specialized Caches for VectrixDB
-# =============================================================================
+# ============================================================================
+# SPECIALISED CACHES, AND THE FACTORY
+# ============================================================================
+#
+# INPUT   a search's vector and options; a configuration
+# OUTPUT  its results cached under a key made from them; the backend the
+#         configuration names
+#
+# A search cache keys on everything that changes the answer.
+
 
 class VectorCache:
     """
@@ -544,21 +633,22 @@ class VectorCache:
     def _vector_key(self, collection: str, vector_id: str) -> str:
         return f"{self._prefix}v:{collection}:{vector_id}"
 
-    def _hash_query(self, query: List[float], filter: Optional[Dict] = None, limit: int = 10) -> str:
-        """Create a hash for a query."""
-        data = json.dumps({
-            "q": [round(v, 6) for v in query],  # Round for cache hits
-            "f": filter,
-            "l": limit,
-        }, sort_keys=True)
-        return hashlib.md5(data.encode()).hexdigest()[:16]
+    def _hash_query(
+        self, query: List[float], filter: Optional[Dict] = None, limit: int = 10
+    ) -> str:
+        """Create a hash for a query.
+
+        The vector is hashed as rounded float32 bytes rather than through
+        JSON: a 384-float dump with a Python round() per element cost more
+        than the index search it was caching. Rounding keeps near-identical
+        queries on the same key.
+        """
+        vector = np.round(np.asarray(query, dtype=np.float32), 5).tobytes()
+        rest = json.dumps({"f": filter, "l": limit}, sort_keys=True).encode()
+        return hashlib.md5(vector + rest).hexdigest()[:16]  # noqa: S324 - not security
 
     def get_search_results(
-        self,
-        collection: str,
-        query: List[float],
-        filter: Optional[Dict] = None,
-        limit: int = 10
+        self, collection: str, query: List[float], filter: Optional[Dict] = None, limit: int = 10
     ) -> Optional[List[Dict]]:
         """Get cached search results."""
         query_hash = self._hash_query(query, filter, limit)
@@ -572,7 +662,7 @@ class VectorCache:
         results: List[Dict],
         filter: Optional[Dict] = None,
         limit: int = 10,
-        ttl: int = 300
+        ttl: int = 300,
     ) -> None:
         """Cache search results."""
         query_hash = self._hash_query(query, filter, limit)
@@ -590,11 +680,15 @@ class VectorCache:
         self._cache.set(key, data, ttl)
 
     def invalidate_collection(self, collection: str) -> None:
-        """Invalidate all cache entries for a collection."""
-        # This requires pattern-based deletion
-        # For memory cache, we'd need to scan
-        # For Redis, we can use SCAN with pattern
-        pass
+        """Forget every cached search and cached vector of a collection.
+
+        Called after every write. It was an empty function, so a search
+        repeated after an add or a delete returned the answer from before
+        it, for as long as the entry lived: an hour in memory, a day in
+        Redis.
+        """
+        for kind in ("q", "v"):
+            self._cache.delete_prefix(f"{self._prefix}{kind}:{collection}:")
 
     def invalidate_vector(self, collection: str, vector_id: str) -> None:
         """Invalidate cached vector data."""

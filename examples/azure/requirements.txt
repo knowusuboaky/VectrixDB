@@ -1,0 +1,28 @@
+# What the machine that runs the steps needs. The three things that are
+# deployed carry their own list beside their code: main_function_app/,
+# extraction_app/ and dashboard/Backend/. This one is for 00 to 99.
+#
+# Run it from this folder, because the path to the library is from here:
+#   pip install -r requirements.txt
+
+# The library, from this repository and not from PyPI, because the point of
+# the walkthrough is to put *this* library through a real deployment.
+#   azure       the Cosmos client the records go up with, steps 04 and 07,
+#               and the AI Search client
+#   api         FastAPI, which step 05 builds the extraction app with to
+#               check its paths before it publishes
+#   documents   pypdf, python-docx and openpyxl, to read a file on this
+#               machine before paying to read it in the cloud
+#   ocr-azure   the Document Intelligence client, for the same
+#   ffmpeg      the ffmpeg binary, which takes the sound out of a video
+# Against PyPI instead, write: vectrixdb[azure,api,documents,ocr-azure,ffmpeg]
+-e ../..[azure,api,documents,ocr-azure,ffmpeg]
+
+# Pillow, because pypdf needs it to hand back the pictures inside a PDF.
+pillow
+
+# What builds the wheel steps 05 and 06 publish:
+#   python -m build --no-isolation --wheel
+build
+wheel
+setuptools

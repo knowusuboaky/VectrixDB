@@ -13,9 +13,28 @@ from collections import defaultdict
 from .knowledge_graph import KnowledgeGraph
 
 
+__all__ = [
+    "Community",
+    "CommunityHierarchy",
+    "CommunityDetector",
+    "detect_communities",
+]
+
+
+# ============================================================================
+# COMMUNITIES, AND THE HIERARCHY
+# ============================================================================
+#
+# INPUT   entities grouped
+# OUTPUT  one community; the levels they nest in
+#
+# Level 0 is the finest grouping; each level above merges the one below.
+
+
 @dataclass
 class Community:
     """A community of related entities."""
+
     id: str
     level: int
     entity_ids: List[str]
@@ -36,8 +55,11 @@ class Community:
 @dataclass
 class CommunityHierarchy:
     """Hierarchical structure of communities."""
+
     levels: Dict[int, List[Community]] = field(default_factory=dict)
-    entity_to_community: Dict[str, Dict[int, str]] = field(default_factory=lambda: defaultdict(dict))
+    entity_to_community: Dict[str, Dict[int, str]] = field(
+        default_factory=lambda: defaultdict(dict)
+    )
 
     def add_community(self, community: Community) -> None:
         """Add a community to the hierarchy."""
@@ -84,6 +106,17 @@ class CommunityHierarchy:
         return sum(len(communities) for communities in self.levels.values())
 
 
+# ============================================================================
+# DETECTION: Leiden
+# ============================================================================
+#
+# INPUT   a graph
+# OUTPUT  hierarchical communities; a factory
+#
+# Leiden over the whole graph; the incremental module narrows it to what
+# changed.
+
+
 class CommunityDetector:
     """
     Hierarchical community detection using Leiden algorithm.
@@ -113,20 +146,18 @@ class CommunityDetector:
         try:
             import igraph
             import leidenalg
+
             self._use_igraph = True
         except ImportError:
             try:
                 import networkx as nx
                 from networkx.algorithms import community
+
                 self._use_networkx = True
             except ImportError:
                 pass
 
-    def detect(
-        self,
-        graph: KnowledgeGraph,
-        max_levels: int = 3
-    ) -> CommunityHierarchy:
+    def detect(self, graph: KnowledgeGraph, max_levels: int = 3) -> CommunityHierarchy:
         """
         Detect communities in the knowledge graph.
 
@@ -147,11 +178,7 @@ class CommunityDetector:
         else:
             return self._detect_simple(graph, max_levels)
 
-    def _detect_with_igraph(
-        self,
-        graph: KnowledgeGraph,
-        max_levels: int
-    ) -> CommunityHierarchy:
+    def _detect_with_igraph(self, graph: KnowledgeGraph, max_levels: int) -> CommunityHierarchy:
         """Detect communities using python-igraph and leidenalg."""
         import igraph
         import leidenalg
@@ -175,7 +202,7 @@ class CommunityDetector:
 
         if edges:
             g.add_edges(edges)
-            g.es['weight'] = weights
+            g.es["weight"] = weights
 
         # Detect communities at multiple resolutions
         current_resolution = self.resolution
@@ -183,8 +210,8 @@ class CommunityDetector:
             partition = leidenalg.find_partition(
                 g,
                 leidenalg.RBConfigurationVertexPartition,
-                weights='weight' if edges else None,
-                resolution_parameter=current_resolution
+                weights="weight" if edges else None,
+                resolution_parameter=current_resolution,
             )
 
             # Convert to communities
@@ -196,9 +223,7 @@ class CommunityDetector:
                 entity_ids_in_cluster = [entity_ids[idx] for idx in cluster]
 
                 community = Community(
-                    id=community_id,
-                    level=level,
-                    entity_ids=entity_ids_in_cluster
+                    id=community_id, level=level, entity_ids=entity_ids_in_cluster
                 )
                 hierarchy.add_community(community)
 
@@ -207,11 +232,7 @@ class CommunityDetector:
 
         return hierarchy
 
-    def _detect_with_networkx(
-        self,
-        graph: KnowledgeGraph,
-        max_levels: int
-    ) -> CommunityHierarchy:
+    def _detect_with_networkx(self, graph: KnowledgeGraph, max_levels: int) -> CommunityHierarchy:
         """Detect communities using networkx."""
         import networkx as nx
         from networkx.algorithms.community import louvain_communities
@@ -232,11 +253,7 @@ class CommunityDetector:
 
         if G.number_of_edges() == 0:
             # No edges, put all in one community
-            community = Community(
-                id="community_L0_0",
-                level=0,
-                entity_ids=list(graph.nodes.keys())
-            )
+            community = Community(id="community_L0_0", level=0, entity_ids=list(graph.nodes.keys()))
             hierarchy.add_community(community)
             return hierarchy
 
@@ -244,22 +261,14 @@ class CommunityDetector:
         current_resolution = self.resolution
         for level in range(max_levels):
             try:
-                communities = louvain_communities(
-                    G,
-                    weight='weight',
-                    resolution=current_resolution
-                )
+                communities = louvain_communities(G, weight="weight", resolution=current_resolution)
 
                 for cluster_idx, cluster in enumerate(communities):
                     if len(cluster) < self.min_community_size:
                         continue
 
                     community_id = f"community_L{level}_{cluster_idx}"
-                    community = Community(
-                        id=community_id,
-                        level=level,
-                        entity_ids=list(cluster)
-                    )
+                    community = Community(id=community_id, level=level, entity_ids=list(cluster))
                     hierarchy.add_community(community)
 
                 current_resolution *= 0.5
@@ -268,11 +277,7 @@ class CommunityDetector:
 
         return hierarchy
 
-    def _detect_simple(
-        self,
-        graph: KnowledgeGraph,
-        max_levels: int
-    ) -> CommunityHierarchy:
+    def _detect_simple(self, graph: KnowledgeGraph, max_levels: int) -> CommunityHierarchy:
         """Simple community detection without external libraries."""
         hierarchy = CommunityHierarchy()
 
@@ -304,9 +309,7 @@ class CommunityDetector:
 
             if len(component) >= self.min_community_size:
                 community = Community(
-                    id=f"community_L0_{cluster_idx}",
-                    level=0,
-                    entity_ids=list(component)
+                    id=f"community_L0_{cluster_idx}", level=0, entity_ids=list(component)
                 )
                 hierarchy.add_community(community)
                 cluster_idx += 1
@@ -315,9 +318,7 @@ class CommunityDetector:
 
 
 def detect_communities(
-    graph: KnowledgeGraph,
-    max_levels: int = 3,
-    min_community_size: int = 2
+    graph: KnowledgeGraph, max_levels: int = 3, min_community_size: int = 2
 ) -> CommunityHierarchy:
     """
     Factory function to detect communities.

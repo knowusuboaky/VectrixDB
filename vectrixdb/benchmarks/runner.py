@@ -12,9 +12,29 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 
 
+__all__ = [
+    "BenchmarkResult",
+    "BenchmarkRunner",
+    "RecallBenchmark",
+]
+
+
+# ============================================================================
+# A RESULT, THE RUNNER, AND RECALL
+# ============================================================================
+#
+# INPUT   a benchmark
+# OUTPUT  one run's result; runs timed with memory tracked; search recall
+#         measured against exact search
+#
+# Recall is measured, never assumed, because quantization and HNSW both trade
+# it away.
+
+
 @dataclass
 class BenchmarkResult:
     """Result of a single benchmark run."""
+
     name: str
     duration_ms: float = 0.0
     operations_per_second: float = 0.0
@@ -42,7 +62,8 @@ class BenchmarkResult:
             "latency_p99_ms": round(self.latency_p99_ms, 3),
             "latency_mean_ms": round(self.latency_mean_ms, 3),
             "latency_std_ms": round(self.latency_std_ms, 3),
-            "recall_at_k": round(self.recall_at_k, 4) if self.recall_at_k else None,
+            # A measured recall of zero is a result, not a missing one.
+            "recall_at_k": (round(self.recall_at_k, 4) if self.recall_at_k is not None else None),
             "throughput_items": self.throughput_items,
             "custom_metrics": self.custom_metrics,
         }
@@ -110,7 +131,7 @@ class BenchmarkRunner:
         Returns:
             BenchmarkResult with all metrics
         """
-        iterations = n_iterations or self.benchmark_iterations
+        iterations = self.benchmark_iterations if n_iterations is None else n_iterations
         latencies = []
 
         # Setup
@@ -152,9 +173,17 @@ class BenchmarkRunner:
         # Compute metrics
         total_duration_ms = (total_end - total_start) * 1000
         total_operations = iterations * n_operations
-        ops_per_second = (total_operations / total_duration_ms) * 1000
+        ops_per_second = (
+            (total_operations / total_duration_ms) * 1000 if total_duration_ms > 0 else 0.0
+        )
 
         latencies_array = np.array(latencies)
+
+        # Zero iterations is a legitimate request, and there is nothing to
+        # take a percentile of. numpy raises IndexError on an empty array
+        # rather than returning nothing, so the summary is zeros.
+        def percentile(values, point: float) -> float:
+            return float(np.percentile(values, point)) if values.size else 0.0
 
         result = BenchmarkResult(
             name=name,
@@ -162,11 +191,11 @@ class BenchmarkRunner:
             operations_per_second=ops_per_second,
             memory_peak_mb=memory_peak_mb,
             memory_delta_mb=memory_delta_mb,
-            latency_p50_ms=float(np.percentile(latencies_array, 50)),
-            latency_p95_ms=float(np.percentile(latencies_array, 95)),
-            latency_p99_ms=float(np.percentile(latencies_array, 99)),
-            latency_mean_ms=float(np.mean(latencies_array)),
-            latency_std_ms=float(np.std(latencies_array)),
+            latency_p50_ms=percentile(latencies_array, 50),
+            latency_p95_ms=percentile(latencies_array, 95),
+            latency_p99_ms=percentile(latencies_array, 99),
+            latency_mean_ms=float(np.mean(latencies_array)) if latencies_array.size else 0.0,
+            latency_std_ms=float(np.std(latencies_array)) if latencies_array.size else 0.0,
             throughput_items=total_operations,
         )
 
@@ -207,7 +236,7 @@ class BenchmarkRunner:
         self,
         name: str,
         benchmark: Callable[[int], None],
-        batch_sizes: List[int] = [100, 1000, 10000],
+        batch_sizes: Optional[List[int]] = None,
         n_iterations: int = 10,
     ) -> List[BenchmarkResult]:
         """
@@ -222,12 +251,20 @@ class BenchmarkRunner:
         Returns:
             List of BenchmarkResults for each batch size
         """
+        if batch_sizes is None:
+            batch_sizes = [100, 1000, 10000]
         results = []
+
+        def _make_batch_runner(bs: int) -> Callable[[Any], None]:
+            def _run(_: Any) -> None:
+                benchmark(bs)
+
+            return _run
 
         for batch_size in batch_sizes:
             result = self.run_benchmark(
                 name=f"{name}_batch_{batch_size}",
-                benchmark=lambda _, bs=batch_size: benchmark(bs),
+                benchmark=_make_batch_runner(batch_size),
                 n_iterations=n_iterations,
                 n_operations=batch_size,
             )
@@ -317,8 +354,8 @@ class RecallBenchmark:
         n_queries = len(results)
 
         for result, truth in zip(results, ground_truth):
-            result_set = set(result[:self.k])
-            truth_set = set(truth[:self.k])
+            result_set = set(result[: self.k])
+            truth_set = set(truth[: self.k])
 
             if truth_set:
                 recall = len(result_set & truth_set) / len(truth_set)
@@ -373,11 +410,11 @@ class RecallBenchmark:
         n_queries = len(results)
 
         for result, truth in zip(results, ground_truth):
-            truth_set = set(truth[:self.k])
+            truth_set = set(truth[: self.k])
 
             # DCG
             dcg = 0.0
-            for i, item in enumerate(result[:self.k]):
+            for i, item in enumerate(result[: self.k]):
                 if item in truth_set:
                     dcg += 1.0 / np.log2(i + 2)  # i+2 because rank starts at 1
 

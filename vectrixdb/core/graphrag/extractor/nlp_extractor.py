@@ -5,12 +5,14 @@ Uses spaCy for fast, free entity extraction without requiring an LLM.
 Extracts named entities and infers relationships from co-occurrence.
 """
 
+import logging
 import re
 from collections import defaultdict
 from typing import List, Dict, Set, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .base import (
+    Confidence,
     BaseExtractor,
     Entity,
     Relationship,
@@ -20,6 +22,36 @@ from .base import (
 )
 from ..chunker import TextUnit
 from ..config import GraphRAGConfig
+
+
+__all__ = [
+    "NLPExtractor",
+    "create_nlp_extractor",
+]
+
+
+# ============================================================================
+# SETTINGS: the logger, and whether the fallback was warned about
+# ============================================================================
+#
+# One logger, and a flag so a missing spaCy model is warned about once, not
+# once a chunk.
+
+logger = logging.getLogger(__name__)
+
+#: The regex fallback is announced once per process, not per extractor.
+_FALLBACK_WARNED = False
+
+
+# ============================================================================
+# THE NLP EXTRACTOR: spaCy alone
+# ============================================================================
+#
+# INPUT   text units
+# OUTPUT  named entities, and relationships inferred from co-occurrence; a
+#         factory
+#
+# Fast and free; relationships are guesses.
 
 
 class NLPExtractor(BaseExtractor):
@@ -87,20 +119,46 @@ class NLPExtractor(BaseExtractor):
         self._load_model()
 
     def _load_model(self):
-        """Load the spaCy model."""
+        """Load the spaCy model, or fall back to the regex extractor and say so."""
+        global _FALLBACK_WARNED
         try:
             import spacy
+
             try:
                 self._nlp = spacy.load(self.model_name)
             except OSError:
-                # Model not found, try to download it
-                print(f"Downloading spaCy model: {self.model_name}")
+                from vectrixdb._net import auto_download_allowed
+
+                if not auto_download_allowed():
+                    # spaCy is installed but its model is not. Fetching it here
+                    # would be a download nobody asked for, so fall back and say
+                    # exactly what to run.
+                    self._nlp = None
+                    logger.warning(
+                        "spaCy is installed but the %s model is not, so graph mode is "
+                        "using the regex extractor. Run: python -m spacy download %s "
+                        "(or set VECTRIXDB_AUTO_DOWNLOAD=1 to fetch it on first use).",
+                        self.model_name,
+                        self.model_name,
+                    )
+                    return
+                logger.info("Downloading spaCy model %s, as allowed", self.model_name)
                 spacy.cli.download(self.model_name)
                 self._nlp = spacy.load(self.model_name)
         except ImportError:
-            # spaCy not installed, use fallback
-            print("spaCy not installed. Using basic regex extraction.")
             self._nlp = None
+            # Once per process, at warning: a print() went to stdout on every
+            # extractor construction and said nothing about what to do.
+            if not _FALLBACK_WARNED:
+                _FALLBACK_WARNED = True
+                logger.warning(
+                    "spaCy is not installed, so graph mode is using the regex "
+                    "extractor, which only sees capitalised phrases, acronyms, "
+                    "quoted terms and repeated phrases. For real entity "
+                    'extraction: pip install "vectrixdb[nlp]" and '
+                    "python -m spacy download %s",
+                    self.model_name,
+                )
 
     def _normalize_entity_name(self, name: str) -> str:
         """Normalize entity name for deduplication."""
@@ -125,9 +183,14 @@ class NLPExtractor(BaseExtractor):
             return False
         return True
 
-    def _extract_with_spacy(self, text: str, text_unit_id: str) -> Tuple[List[Entity], List[Tuple[str, str, int]]]:
+    def _extract_with_spacy(
+        self, text: str, text_unit_id: str
+    ) -> Tuple[List[Entity], List[Tuple[str, str, int]]]:
         """Extract entities using spaCy."""
-        doc = self._nlp(text)
+        nlp = self._nlp
+        if nlp is None:
+            raise RuntimeError("spaCy model is not loaded")
+        doc = nlp(text)
         entities = []
         entity_positions: List[Tuple[str, str, int]] = []  # (name, type, position)
 
@@ -143,7 +206,7 @@ class NLPExtractor(BaseExtractor):
                 name=name,
                 entity_type=entity_type.value,
                 description=f"{entity_type.value}: {name}",
-                source_unit_id=text_unit_id
+                source_unit_id=text_unit_id,
             )
             entities.append(entity)
             entity_positions.append((name, entity_type.value, ent.start_char))
@@ -159,12 +222,14 @@ class NLPExtractor(BaseExtractor):
                     continue
 
                 # Only include substantial noun phrases
-                if len(name.split()) >= 2 or (chunk.root.pos_ in {"NOUN", "PROPN"} and len(name) > 5):
+                if len(name.split()) >= 2 or (
+                    chunk.root.pos_ in {"NOUN", "PROPN"} and len(name) > 5
+                ):
                     entity = Entity.create(
                         name=name,
                         entity_type=EntityType.CONCEPT.value,
                         description=f"Concept: {name}",
-                        source_unit_id=text_unit_id
+                        source_unit_id=text_unit_id,
                     )
                     entities.append(entity)
                     entity_positions.append((name, EntityType.CONCEPT.value, chunk.start_char))
@@ -172,43 +237,97 @@ class NLPExtractor(BaseExtractor):
 
         return entities, entity_positions
 
-    def _extract_with_regex(self, text: str, text_unit_id: str) -> Tuple[List[Entity], List[Tuple[str, str, int]]]:
-        """Fallback extraction using regex when spaCy is not available."""
-        entities = []
-        entity_positions = []
+    #: Words that never begin or end a concept phrase in the regex fallback.
+    _PHRASE_STOPWORDS = frozenset(
+        "a an the and or but if then of to in on at for from by with as is are was "
+        "were be been being it its this that these those i you he she we they my "
+        "your our their not no so do does did have has had can could will would "
+        "should may might must when where what which who how about into over "
+        "under also very just than there here again back out".split()
+    )
 
-        # Extract capitalized phrases (likely proper nouns)
-        pattern = r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b'
-        for match in re.finditer(pattern, text):
-            name = self._normalize_entity_name(match.group(1))
-            if not self._is_valid_entity(name):
-                continue
+    def _extract_with_regex(
+        self, text: str, text_unit_id: str
+    ) -> Tuple[List[Entity], List[Tuple[str, str, int]]]:
+        """Fallback extraction when spaCy is not installed.
 
-            # Guess type based on common patterns
-            if any(word in name.lower() for word in ["inc", "corp", "ltd", "company", "co"]):
-                entity_type = EntityType.ORGANIZATION
-            elif any(word in name.lower() for word in ["city", "country", "state", "street"]):
-                entity_type = EntityType.LOCATION
-            else:
-                entity_type = EntityType.OTHER
+        Capitalised phrases used to be the whole of this, so a lowercase corpus
+        (chat, tickets, notes) extracted nothing and graph mode silently had
+        no graph. Three more sources give it something to work with: acronyms,
+        quoted terms, and lowercase phrases that recur within the text. It is
+        still a heuristic; the warning at load time says how to get a model.
+        """
+        entities: List[Entity] = []
+        positions: List[Tuple[str, str, int]] = []
+        seen: List[str] = []
 
+        def emit(raw: str, entity_type: EntityType, start: int) -> None:
+            name = self._normalize_entity_name(raw)
+            key = name.lower()
+            if not self._is_valid_entity(name) or any(key == s or key in s for s in seen):
+                return
+            seen.append(key)
             entity = Entity.create(
                 name=name,
                 entity_type=entity_type.value,
                 description=f"{entity_type.value}: {name}",
-                source_unit_id=text_unit_id
+                source_unit_id=text_unit_id,
             )
             entities.append(entity)
-            entity_positions.append((name, entity_type.value, match.start()))
+            positions.append((name, entity_type.value, start))
 
-        return entities, entity_positions
+        # Capitalised phrases (likely proper nouns), typed by a few cue words.
+        for match in re.finditer(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", text):
+            name = match.group(1)
+            lower = name.lower()
+            if any(word in lower for word in ["inc", "corp", "ltd", "company", "co"]):
+                entity_type = EntityType.ORGANIZATION
+            elif any(word in lower for word in ["city", "country", "state", "street"]):
+                entity_type = EntityType.LOCATION
+            else:
+                entity_type = EntityType.OTHER
+            emit(name, entity_type, match.start())
+
+        # Acronyms and product-style tokens: PDF, API, GPT4.
+        for match in re.finditer(r"\b([A-Z][A-Z0-9]{1,9})\b", text):
+            emit(match.group(1), EntityType.OTHER, match.start())
+
+        # Quoted terms are things the writer chose to name.
+        for match in re.finditer(r"[\"\u201c']([^\"\u201d']{2,60})[\"\u201d']", text):
+            emit(match.group(1), EntityType.CONCEPT, match.start())
+
+        # Lowercase phrases that recur. Adjacent tokens only, so a phrase never
+        # spans punctuation, and no stopword at either end. Longer phrases are
+        # counted first so a bigram inside an emitted trigram is absorbed.
+        words = [(m.group(0), m.start()) for m in re.finditer(r"[a-z][a-z0-9\-]+", text)]
+        for n in (3, 2):
+            counts: Dict[str, int] = {}
+            first_seen: Dict[str, int] = {}
+            for i in range(len(words) - n + 1):
+                gram = words[i : i + n]
+                toks = [w for w, _ in gram]
+                if toks[0] in self._PHRASE_STOPWORDS or toks[-1] in self._PHRASE_STOPWORDS:
+                    continue
+                if any(len(tok) < 3 for tok in toks):
+                    continue
+                if any(gram[j + 1][1] != gram[j][1] + len(gram[j][0]) + 1 for j in range(n - 1)):
+                    continue
+                phrase = " ".join(toks)
+                counts[phrase] = counts.get(phrase, 0) + 1
+                first_seen.setdefault(phrase, gram[0][1])
+            for phrase, count in counts.items():
+                if count >= 2:
+                    emit(phrase, EntityType.CONCEPT, first_seen[phrase])
+
+        positions.sort(key=lambda item: item[2])
+        return entities, positions
 
     def _infer_relationships_from_cooccurrence(
         self,
         entities: List[Entity],
         entity_positions: List[Tuple[str, str, int]],
         text_unit_id: str,
-        window_size: int = 200
+        window_size: int = 200,
     ) -> List[Relationship]:
         """
         Infer relationships from entity co-occurrence.
@@ -230,7 +349,7 @@ class NLPExtractor(BaseExtractor):
         positioned_entities.sort(key=lambda x: x[1])
 
         # Find co-occurring entities within window
-        seen_pairs: Set[Tuple[str, str]] = set()
+        seen_pairs: Set[Tuple[str, ...]] = set()
         for i, (entity1, pos1) in enumerate(positioned_entities):
             for j in range(i + 1, len(positioned_entities)):
                 entity2, pos2 = positioned_entities[j]
@@ -262,7 +381,10 @@ class NLPExtractor(BaseExtractor):
                     rel_type=rel_type,
                     description=f"{entity1.name} is related to {entity2.name}",
                     strength=strength,
-                    source_unit_id=text_unit_id
+                    source_unit_id=text_unit_id,
+                    # Proximity in a window, nothing more: the text never said
+                    # these two are connected.
+                    confidence=Confidence.AMBIGUOUS,
                 )
                 relationships.append(relationship)
 
@@ -323,7 +445,7 @@ class NLPExtractor(BaseExtractor):
             entities=entities,
             relationships=relationships,
             source_units=[text_unit_id],
-            metadata={"extractor": "nlp", "model": self.model_name}
+            metadata={"extractor": "nlp", "model": self.model_name},
         )
 
     def extract(self, text_units: List[TextUnit]) -> ExtractionResult:
@@ -331,8 +453,8 @@ class NLPExtractor(BaseExtractor):
         if not text_units:
             return ExtractionResult()
 
-        all_entities = []
-        all_relationships = []
+        all_entities: List[Entity] = []
+        all_relationships: List[Relationship] = []
         all_source_units = []
 
         for unit in text_units:
@@ -351,20 +473,22 @@ class NLPExtractor(BaseExtractor):
             all_relationships.extend(relationships)
             all_source_units.append(unit.id)
 
-        # Deduplicate entities across all units
+        # The name behind every id, taken before deduplication. A merged
+        # entity keeps one id and loses the others, and a relationship that
+        # pointed at a lost id used to be dropped on the floor rather than
+        # remapped to the survivor.
+        id_to_name = {e.id: e.name.lower() for e in all_entities}
         all_entities = self._deduplicate_entities(all_entities)
 
-        # Update relationship IDs to point to deduplicated entities
         entity_name_to_id = {e.name.lower(): e.id for e in all_entities}
         updated_relationships = []
         for rel in all_relationships:
-            # Try to find the entities by name
-            source_entity = next((e for e in all_entities if e.id == rel.source_id), None)
-            target_entity = next((e for e in all_entities if e.id == rel.target_id), None)
+            source_id = entity_name_to_id.get(id_to_name.get(rel.source_id, ""))
+            target_id = entity_name_to_id.get(id_to_name.get(rel.target_id, ""))
 
-            if source_entity and target_entity:
-                rel.source_id = source_entity.id
-                rel.target_id = target_entity.id
+            if source_id and target_id:
+                rel.source_id = source_id
+                rel.target_id = target_id
                 updated_relationships.append(rel)
 
         # Deduplicate relationships
@@ -380,7 +504,7 @@ class NLPExtractor(BaseExtractor):
             entities=all_entities,
             relationships=list(rel_lookup.values()),
             source_units=all_source_units,
-            metadata={"extractor": "nlp", "model": self.model_name}
+            metadata={"extractor": "nlp", "model": self.model_name},
         )
 
     def extract_batch(self, text_units: List[TextUnit], batch_size: int = 50) -> ExtractionResult:
@@ -400,11 +524,14 @@ class NLPExtractor(BaseExtractor):
         texts = [unit.text for unit in text_units]
         unit_ids = [unit.id for unit in text_units]
 
-        all_entities = []
-        all_relationships = []
+        all_entities: List[Entity] = []
+        all_relationships: List[Relationship] = []
 
         # Process in batches using spaCy's pipe
-        for i, doc in enumerate(self._nlp.pipe(texts, batch_size=50)):
+        nlp = self._nlp
+        if nlp is None:
+            raise RuntimeError("spaCy model is not loaded")
+        for i, doc in enumerate(nlp.pipe(texts, batch_size=50)):
             unit_id = unit_ids[i]
 
             entities = []
@@ -421,7 +548,7 @@ class NLPExtractor(BaseExtractor):
                     name=name,
                     entity_type=entity_type.value,
                     description=f"{entity_type.value}: {name}",
-                    source_unit_id=unit_id
+                    source_unit_id=unit_id,
                 )
                 entities.append(entity)
                 positions.append((name, entity_type.value, ent.start_char))
@@ -434,8 +561,21 @@ class NLPExtractor(BaseExtractor):
             all_entities.extend(entities)
             all_relationships.extend(relationships)
 
-        # Deduplicate
+        # Deduplicate, remapping relationship endpoints onto the entity
+        # that survived rather than leaving them pointing at an id that is
+        # no longer in the result.
+        id_to_name = {e.id: e.name.lower() for e in all_entities}
         all_entities = self._deduplicate_entities(all_entities)
+        surviving = {e.name.lower(): e.id for e in all_entities}
+        remapped = []
+        for rel in all_relationships:
+            source_id = surviving.get(id_to_name.get(rel.source_id, ""))
+            target_id = surviving.get(id_to_name.get(rel.target_id, ""))
+            if source_id and target_id:
+                rel.source_id = source_id
+                rel.target_id = target_id
+                remapped.append(rel)
+        all_relationships = remapped
 
         # Deduplicate relationships
         rel_lookup: Dict[Tuple[str, str, str], Relationship] = {}
@@ -450,7 +590,7 @@ class NLPExtractor(BaseExtractor):
             entities=all_entities,
             relationships=list(rel_lookup.values()),
             source_units=unit_ids,
-            metadata={"extractor": "nlp", "model": self.model_name}
+            metadata={"extractor": "nlp", "model": self.model_name},
         )
 
 

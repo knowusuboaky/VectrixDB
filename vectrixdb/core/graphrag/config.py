@@ -6,12 +6,36 @@ entity extraction, graph construction, community detection, and retrieval.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Literal, List
+from typing import Dict, Optional, Literal, List
 from enum import Enum
+
+
+__all__ = [
+    "LLMProvider",
+    "ExtractorType",
+    "GraphSearchType",
+    "GraphRAGConfig",
+    "create_openai_config",
+    "create_ollama_config",
+    "create_nlp_only_config",
+    "create_rebel_config",
+    "create_default_config",
+]
+
+
+# ============================================================================
+# THE CHOICES
+# ============================================================================
+#
+# INPUT   a provider, an extractor, a search
+# OUTPUT  the enums a GraphRAG config is made of
+#
+# Three enums, one for each thing a caller picks.
 
 
 class LLMProvider(str, Enum):
     """Supported LLM providers for entity extraction."""
+
     OPENAI = "openai"
     OLLAMA = "ollama"
     AWS_BEDROCK = "aws_bedrock"
@@ -20,17 +44,80 @@ class LLMProvider(str, Enum):
 
 class ExtractorType(str, Enum):
     """Entity extraction methods."""
-    LLM = "llm"         # LLM-based extraction (high quality, costs money)
-    NLP = "nlp"         # NLP-based extraction (fast, free, lower quality)
-    HYBRID = "hybrid"   # NLP for all + LLM for important chunks
-    REBEL = "rebel"     # mREBEL model (bundled, no LLM costs, 18 languages) - DEFAULT
+
+    LLM = "llm"  # LLM-based extraction (high quality, costs money)
+    NLP = "nlp"  # NLP-based extraction (fast, free, lower quality)
+    HYBRID = "hybrid"  # NLP for all + LLM for important chunks
+    REBEL = "rebel"  # mREBEL model (bundled, no LLM costs, 18 languages) - DEFAULT
 
 
 class GraphSearchType(str, Enum):
     """Graph search strategies."""
-    LOCAL = "local"     # Entity-based search with graph traversal
-    GLOBAL = "global"   # Community-based search for broad queries
-    HYBRID = "hybrid"   # DRIFT-style combined search (default)
+
+    LOCAL = "local"  # Entity-based search with graph traversal
+    GLOBAL = "global"  # Community-based search for broad queries
+    HYBRID = "hybrid"  # DRIFT-style combined search (default)
+
+
+# ============================================================================
+# ENTITY SCHEMAS
+# ============================================================================
+#
+# INPUT   an entity type
+# OUTPUT  how entities of that type are resolved and merged, with the defaults
+#
+# A person and an organisation merge by different rules.
+
+
+@dataclass
+class EntitySchema:
+    """How entities of one type are resolved and merged.
+
+    A person's name has initials and surnames that fold together; a concept
+    does not: "Learning" is not "Machine Learning". The threshold is the
+    character-similarity floor for the typo rule, ``allow_subset`` is the
+    token-subset rule ("Curie" into "Marie Curie"), and
+    ``merge_across_types`` lets an entity of this type absorb a same-named
+    entity of another type, which is off by default so "Apple" the company
+    and "Apple" the fruit stay two nodes.
+    """
+
+    name: str
+    threshold: float = 0.85
+    allow_subset: bool = True
+    merge_across_types: bool = False
+    description: str = ""
+
+
+def default_entity_schemas() -> Dict[str, EntitySchema]:
+    return {
+        s.name: s
+        for s in (
+            EntitySchema(
+                "PERSON", 0.85, True, False, "People; initials and surnames fold together"
+            ),
+            EntitySchema("ORGANIZATION", 0.9, True, False, "Companies, institutions, teams"),
+            EntitySchema("LOCATION", 0.9, False, False, "Places; no partial-name merging"),
+            EntitySchema(
+                "CONCEPT", 0.95, False, False, "Ideas and topics; exact or near-exact only"
+            ),
+            EntitySchema("EVENT", 0.95, False, False, "Named events; a year is part of the name"),
+            EntitySchema("OBJECT", 0.9, False, False, "Physical things"),
+            EntitySchema("TECHNOLOGY", 0.9, False, False, "Tools, languages, systems"),
+            EntitySchema("PRODUCT", 0.9, False, False, "Named products; versions matter"),
+        )
+    }
+
+
+# ============================================================================
+# THE CONFIG
+# ============================================================================
+#
+# INPUT   every option
+# OUTPUT  one configuration: extraction, graph construction, community
+#         detection and retrieval
+#
+# The defaults run offline with the bundled mREBEL model.
 
 
 @dataclass
@@ -97,7 +184,7 @@ class GraphRAGConfig:
     Model name (provider-specific):
     - OpenAI: gpt-4o-mini, gpt-4o, gpt-4-turbo
     - Ollama: llama3.2, mistral, phi3
-    - AWS Bedrock: anthropic.claude-3-haiku-20240307-v1:0
+    - AWS Bedrock: the model id, as Bedrock lists it
     - Azure OpenAI: deployment name
     """
 
@@ -180,31 +267,44 @@ class GraphRAGConfig:
     # ===========================================
     # Entity Types
     # ===========================================
-    entity_types: List[str] = field(default_factory=lambda: [
-        "PERSON",
-        "ORGANIZATION",
-        "LOCATION",
-        "CONCEPT",
-        "EVENT",
-        "OBJECT",
-        "TECHNOLOGY",
-        "PRODUCT",
-    ])
+    entity_types: List[str] = field(
+        default_factory=lambda: [
+            "PERSON",
+            "ORGANIZATION",
+            "LOCATION",
+            "CONCEPT",
+            "EVENT",
+            "OBJECT",
+            "TECHNOLOGY",
+            "PRODUCT",
+        ]
+    )
     """Entity types to extract. Customize for domain-specific extraction."""
+
+    entity_schemas: Dict[str, EntitySchema] = field(default_factory=default_entity_schemas)
+    """Resolution and merge rules per entity type. Types without a schema
+    use the default resolver; add one for a domain type to control it."""
+
+    incremental_communities: bool = True
+    """Re-detect communities only in the connected components a batch
+    changed, keeping the others and their summaries. Off means a full
+    re-detection whenever the graph's structure changes."""
 
     # ===========================================
     # Relationship Types
     # ===========================================
-    relationship_types: List[str] = field(default_factory=lambda: [
-        "RELATED_TO",
-        "WORKS_FOR",
-        "LOCATED_IN",
-        "PART_OF",
-        "CREATED_BY",
-        "USED_BY",
-        "CAUSED_BY",
-        "MENTIONS",
-    ])
+    relationship_types: List[str] = field(
+        default_factory=lambda: [
+            "RELATED_TO",
+            "WORKS_FOR",
+            "LOCATED_IN",
+            "PART_OF",
+            "CREATED_BY",
+            "USED_BY",
+            "CAUSED_BY",
+            "MENTIONS",
+        ]
+    )
     """Relationship types to extract. Customize for domain-specific extraction."""
 
     def __post_init__(self):
@@ -222,21 +322,27 @@ class GraphRAGConfig:
         if self.max_community_levels < 1:
             raise ValueError("max_community_levels must be at least 1")
 
-    def with_openai(self, model: str = "gpt-4o-mini", api_key: Optional[str] = None) -> "GraphRAGConfig":
+    def with_openai(
+        self, model: str = "gpt-4o-mini", api_key: Optional[str] = None
+    ) -> "GraphRAGConfig":
         """Configure for OpenAI."""
         self.llm_provider = LLMProvider.OPENAI
         self.llm_model = model
         self.llm_api_key = api_key
         return self
 
-    def with_ollama(self, model: str = "llama3.2", endpoint: str = "http://localhost:11434") -> "GraphRAGConfig":
+    def with_ollama(
+        self, model: str = "llama3.2", endpoint: str = "http://localhost:11434"
+    ) -> "GraphRAGConfig":
         """Configure for local Ollama."""
         self.llm_provider = LLMProvider.OLLAMA
         self.llm_model = model
         self.llm_endpoint = endpoint
         return self
 
-    def with_azure(self, deployment: str, endpoint: str, api_key: Optional[str] = None) -> "GraphRAGConfig":
+    def with_azure(
+        self, deployment: str, endpoint: str, api_key: Optional[str] = None
+    ) -> "GraphRAGConfig":
         """Configure for Azure OpenAI."""
         self.llm_provider = LLMProvider.AZURE_OPENAI
         self.llm_model = deployment
@@ -244,42 +350,48 @@ class GraphRAGConfig:
         self.llm_api_key = api_key
         return self
 
-    def with_bedrock(self, model: str = "anthropic.claude-3-haiku-20240307-v1:0") -> "GraphRAGConfig":
+    def with_bedrock(
+        self, model: str = "amazon.nova-lite-v1:0"
+    ) -> "GraphRAGConfig":
         """Configure for AWS Bedrock."""
         self.llm_provider = LLMProvider.AWS_BEDROCK
         self.llm_model = model
         return self
 
 
+# ============================================================================
+# THE PRESETS
+# ============================================================================
+#
+# INPUT   a model, an endpoint
+# OUTPUT  a config for OpenAI, for local Ollama, for NLP only, for mREBEL, and
+#         the default, which is mREBEL and needs no LLM
+#
+# One call each, for the common set-ups.
 # Convenience factory functions
+
+
 def create_openai_config(model: str = "gpt-4o-mini", **kwargs) -> GraphRAGConfig:
     """Create a GraphRAG config for OpenAI."""
-    return GraphRAGConfig(
-        enabled=True,
-        llm_provider=LLMProvider.OPENAI,
-        llm_model=model,
-        **kwargs
-    )
+    return GraphRAGConfig(enabled=True, llm_provider=LLMProvider.OPENAI, llm_model=model, **kwargs)
 
 
-def create_ollama_config(model: str = "llama3.2", endpoint: str = "http://localhost:11434", **kwargs) -> GraphRAGConfig:
+def create_ollama_config(
+    model: str = "llama3.2", endpoint: str = "http://localhost:11434", **kwargs
+) -> GraphRAGConfig:
     """Create a GraphRAG config for local Ollama."""
     return GraphRAGConfig(
         enabled=True,
         llm_provider=LLMProvider.OLLAMA,
         llm_model=model,
         llm_endpoint=endpoint,
-        **kwargs
+        **kwargs,
     )
 
 
 def create_nlp_only_config(**kwargs) -> GraphRAGConfig:
     """Create a GraphRAG config that uses only NLP (no LLM costs). Consider using create_rebel_config() instead."""
-    return GraphRAGConfig(
-        enabled=True,
-        extractor=ExtractorType.NLP,
-        **kwargs
-    )
+    return GraphRAGConfig(enabled=True, extractor=ExtractorType.NLP, **kwargs)
 
 
 def create_rebel_config(**kwargs) -> GraphRAGConfig:
@@ -291,11 +403,7 @@ def create_rebel_config(**kwargs) -> GraphRAGConfig:
 
     No API keys or external services needed.
     """
-    return GraphRAGConfig(
-        enabled=True,
-        extractor=ExtractorType.REBEL,
-        **kwargs
-    )
+    return GraphRAGConfig(enabled=True, extractor=ExtractorType.REBEL, **kwargs)
 
 
 def create_default_config(**kwargs) -> GraphRAGConfig:

@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VectrixDB</title>
+  <link rel="icon" href="/favicon.svg">
+  <script src="/pages/theme.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/pages/app.css">
+  <link rel="stylesheet" href="/pages/setup.css">
+  <link rel="stylesheet" href="/brand.css">
+  <!-- Pinned by its hash: if the file the CDN serves ever differs from this one, the browser does not run it. -->
+</head>
+<body>
+<script src="/pages/sso-boot.js"></script>
+<div class="sso-screen" id="sso" hidden></div>
+<div class="gate" id="gate" hidden></div>
+<div class="app">
+  <aside class="side" id="side">
+    <div class="brand"><div class="mark" id="brand-mark" data-icon="layers" data-size="16"></div><div class="word"><b id="brand-name">VectrixDB</b></div><button class="btn icon side-toggle" id="side-toggle" aria-controls="side" aria-expanded="true" aria-label="Collapse the sidebar" title="Collapse the sidebar"></button><button class="btn icon side-close" id="side-close" aria-label="Close the menu" title="Close the menu" data-icon="x" data-size="18"></button></div>
+    <nav class="nav">
+      <div class="nav-group">Explore</div>
+      <a href="#/overview" data-page="overview" data-icon="home" title="Overview"><span>Overview</span></a>
+      <a href="#/collections" data-page="collections" data-icon="folder" title="Collections"><span>Collections</span></a>
+      <a href="#/search" data-page="search" data-icon="search" title="Search"><span>Search</span></a>
+      <a href="#/evaluate" data-page="evaluate" data-icon="gauge" title="Evaluate"><span>Evaluate</span></a>
+      <div class="nav-group" id="nav-manage">Manage</div>
+      <a href="#/ingest" data-page="ingest" data-icon="upload" title="Ingest"><span>Ingest</span></a>
+      <a href="#/audit" data-page="audit" data-icon="shield" title="Audit"><span>Audit</span></a>
+      <a href="#/access" data-page="access" data-icon="key" title="Access" hidden><span>Access</span></a>
+      <a href="#/console" data-page="console" data-icon="terminal" title="Console"><span>Console</span></a>
+    </nav>
+    <div class="foot">
+      <div class="row"><span class="pill" id="pill-backend">SQLITE</span><span class="pill" id="pill-live">Connecting</span><span class="pill" id="pill-guest" hidden>Browsing as a guest</span></div>
+      <p class="guest-note" id="guest-note" hidden>Signed-in people also get Search, Ingest, Audit, Access and Console.</p>
+      <div id="auth-foot"><span class="pill info" id="pill-auth">Checking</span></div>
+      <p class="copyline" id="copyline">&copy; 2026 VectrixDB</p>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <main>
+    <header class="top">
+      <a class="btn icon top-back" id="top-back" href="#/evaluate" aria-label="Back to results" title="Back to results" data-icon="arrow-left" data-size="20"></a>
+      <button class="btn icon hamburger" id="hamburger" aria-label="Open the menu" title="Open the menu" aria-controls="side" aria-expanded="false" data-icon="menu" data-size="18"></button>
+      <h1 id="top-title">Overview</h1>
+      <div class="grow"></div>
+      <button class="btn primary" id="btn-signin" hidden data-icon="log-in" data-size="16">Sign in</button>
+      <div class="menu-wrap" id="account-wrap">
+        <button class="account" id="btn-account" aria-haspopup="true" aria-expanded="false" aria-controls="account-menu" title="Your account and settings"><span class="face" id="account-face" aria-hidden="true"></span><span class="who-text"><b id="account-name">This server</b><small id="account-role">Settings</small></span><span class="chev" data-icon="chevron-down" data-size="16"></span></button>
+        <div class="menu account-menu" id="account-menu" hidden>
+          <div id="menu-id"></div>
+          <div class="menu-sep" id="menu-id-sep"></div>
+          <a class="menu-item" id="mi-access" href="#/access" data-icon="key" data-size="16">Access and people</a>
+          <button class="menu-item" id="mi-keys" data-icon="terminal" data-size="16">API keys for scripts</button>
+          <button class="menu-item" id="mi-ways" data-icon="key-round" data-size="16">How you sign in</button>
+          <div class="menu-sep" id="mi-sep"></div>
+          <div class="menu-label">Settings</div>
+          <div class="seg" role="group" aria-label="Theme"><button data-theme-chip="light" data-on-click='[["setTheme","light"]]'>Light</button><button data-theme-chip="dark" data-on-click='[["setTheme","dark"]]'>Dark</button></div>
+          <div class="menu-kv" id="set-server"></div>
+          <button class="menu-item" id="btn-key" data-icon="lock" data-size="16">API key</button>
+          <a class="menu-item" href="/docs" target="_blank" rel="noopener" data-icon="code" data-size="16">API reference</a>
+          <button class="menu-item" id="mi-about" data-icon="info" data-size="16" hidden><span class="mi-two"><span>About</span><small id="mi-about-v">VectrixDB</small></span></button>
+          <div class="menu-sep" id="so-sep"></div>
+          <button class="menu-item danger" id="mi-signout" data-icon="log-out" data-size="16">Sign out</button>
+        </div>
+      </div>
+    </header>
+    <div class="glass-banner" id="glass-banner" role="status" hidden></div>
+
+    <div class="content">
+      <!-- ============================================================ overview -->
+      <section class="page active" id="page-overview">
+        <div class="notice info" id="ov-guest" hidden><span data-icon="info"></span><div><b>You're browsing as a guest.</b> <span id="ov-guest-text">Sign in to search.</span></div></div>
+        <div class="grid metrics" id="ov-metrics"></div>
+        <div class="stack" id="ov-alerts" hidden></div>
+        <div class="grid lay-trends" id="ov-trends" hidden></div>
+        <div id="ov-empty" class="empty" style="display: none">
+          <div class="glyph" data-icon="layers" data-size="28"></div>
+          <h2>Start your first collection</h2>
+          <div id="ov-empty-note"></div>
+          <div class="row"><button class="btn" data-on-click='[["openCreate"]]'>Create collection</button></div>
+          <div class="row"><code>pip install vectrixdb &amp;&amp; vectrixdb serve</code><button class="btn sm" data-on-click='[["copyText","pip install vectrixdb && vectrixdb serve"]]'>Copy</button></div>
+        </div>
+        <div id="ov-body" class="grid lay-overview">
+          <div class="card"><div class="head"><h2 id="ov-col-title">Collections</h2><div class="row" id="ov-col-actions"><button class="btn sm" data-on-click='[["go","#/collections"]]'>View all</button><button class="btn sm primary" id="ov-new" data-on-click='[["openCreate"]]'>New collection</button></div></div><div id="ov-collections"></div></div>
+          <div style="display: flex; flex-direction: column; gap: 18px" id="ov-side">
+            <div class="card" id="ov-attn-card"><div class="head"><h2>Needs attention</h2><span id="ov-attn-count"></span></div><div id="ov-attention" style="display: flex; flex-direction: column; gap: 8px"></div></div>
+            <div class="card" id="ov-start"><div class="head"><h2>Start here</h2></div><div style="display: flex; flex-direction: column; gap: 6px">
+              <button class="btn" style="justify-content: flex-start" id="ov-search" data-on-click='[["go","#/search"]]' data-icon="search" data-size="16">Run a search</button>
+            </div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= collections -->
+      <section class="page" id="page-collections">
+        <div class="toolbar">
+          <input id="col-filter" placeholder="Filter collections" aria-label="Filter collections" data-on-input='[["renderCollections"]]'>
+          <div class="chips" role="group" aria-label="Show">
+            <button class="chip on" data-col-filter="all" data-label="All" data-on-click='[["setColFilter","all"]]'>All</button>
+            <button class="chip" data-col-filter="policied" data-label="Policied" data-on-click='[["setColFilter","policied"]]'>Policied</button>
+            <button class="chip" data-col-filter="attention" data-label="Needs attention" data-on-click='[["setColFilter","attention"]]'>Needs attention</button>
+            <span class="sep" aria-hidden="true"></span>
+            <button class="chip" data-col-filter="hybrid" data-label="Hybrid" data-on-click='[["setColFilter","hybrid"]]'>Hybrid</button>
+            <button class="chip" data-col-filter="dense" data-label="Dense" data-on-click='[["setColFilter","dense"]]'>Dense</button>
+          </div>
+          <button class="btn primary" id="col-new" data-on-click='[["openCreate"]]'>New collection</button>
+        </div>
+        <div id="col-grid"></div>
+      </section>
+
+      <!-- ====================================================== the app's own flows -->
+      <section class="page" id="page-setup">
+        <div class="setup-stage" aria-live="polite">
+          <div class="spin" id="su-mark" aria-hidden="true"></div>
+          <h1 id="su-title"></h1>
+          <p id="su-line"></p>
+          <p class="faint" id="su-note">You can close this. It keeps going.</p>
+          <div class="row" id="su-actions" hidden></div>
+        </div>
+      </section>
+      <!-- ================================================== end of the app's own flows -->
+
+      <!-- ========================================================== collection -->
+      <section class="page" id="page-collection">
+        <div class="crumbs" id="c-crumbs"></div>
+        <div id="c-header"></div>
+        <div class="tabs">
+          <button id="ctab-overview" data-on-click='[["setTab","overview"]]'>Overview</button>
+          <button id="ctab-points" data-on-click='[["setTab","points"]]'>Points</button>
+          <button id="ctab-policy" data-on-click='[["setTab","policy"]]'>Policy</button>
+          <button id="ctab-builds" data-on-click='[["setTab","builds"]]'>Builds</button>
+          <button id="ctab-quality" data-on-click='[["setTab","quality"]]'>Quality</button>
+        </div>
+        <div class="panel" id="cpanel-overview"></div>
+        <div class="panel" id="cpanel-points"></div>
+        <div class="panel" id="cpanel-policy"></div>
+        <div class="panel" id="cpanel-builds"></div>
+        <div class="panel" id="cpanel-quality"></div>
+      </section>
+
+      <!-- ============================================================== search -->
+      <section class="page" id="page-search">
+        <div class="card">
+          <div class="grid lay-searchbar">
+            <label class="field">Query<input id="s-query" placeholder="how does sleep affect memory" data-on-keydown='[["runSearch"]]' data-key="Enter"></label>
+            <label class="field">Collection<select id="s-collection" data-collections></select></label>
+            <label class="field">Limit<input id="s-limit" type="number" value="10" min="1" max="50"></label>
+          </div>
+          <div class="row">
+            <button class="chip" data-mode="hybrid" data-on-click='[["setMode","hybrid"]]' title="Dense and sparse fused with RRF">Hybrid</button>
+            <button class="chip" data-mode="dense" data-on-click='[["setMode","dense"]]' title="Vector similarity">Dense</button>
+            <button class="chip" data-mode="keyword" data-on-click='[["setMode","keyword"]]' title="BM25 over the text index">Keyword</button>
+            <button class="chip" data-mode="rerank" data-on-click='[["setMode","rerank"]]' title="Dense candidates re-ranked by the cross-encoder">Rerank</button>
+            <div class="grow"></div>
+            <span class="faint" id="s-hint">Press / anywhere to search</span>
+            <button class="btn primary" data-on-click='[["runSearch"]]'>Search</button>
+          </div>
+        </div>
+        <div class="tabs">
+          <button id="tab-results" class="on" data-on-click='[["switchTab","results"]]'>Results</button>
+        </div>
+        <div class="panel on" id="tabpanel-results">
+          <div class="grid metrics" id="s-metrics"></div>
+          <div id="s-results"><div class="empty"><h2>Search a collection</h2><div>Hybrid is the default: dense similarity and BM25 keywords fused. Keyword alone is exact terms; Rerank re-scores the dense candidates with the cross-encoder.</div></div></div>
+        </div>
+      </section>
+
+      <!-- ============================================================ evaluate -->
+      <section class="page" id="page-evaluate">
+        <div class="tabs ev-tabs" role="tablist" aria-label="What to compare">
+          <button id="etab-chunking" role="tab" aria-selected="false" data-on-click='[["go","#/evaluate/chunking"]]'>Chunking</button>
+          <button id="etab-retrieval" role="tab" aria-selected="false" data-on-click='[["go","#/evaluate/retrieval"]]'>Retrieval</button>
+        </div>
+        <div id="ev-body"></div>
+      </section>
+
+      <!-- ============================================================== ingest -->
+      <section class="page" id="page-ingest">
+        <!-- ====================================================== the app's own flows -->
+        <div id="ing-state"></div>
+        <!-- ================================================== end of the app's own flows -->
+        <div class="notice warn" id="ing-nokey" style="display: none"><span data-icon="lock"></span><div>This server has an API key and none is entered, so nothing can be written from here. <a href="#" data-on-click='[["openKeyDialog"]]' data-prevent>Enter the key</a>.</div></div>
+        <div class="grid two" id="ing-write">
+          <div class="card">
+            <div class="head"><h2>Add documents</h2></div>
+            <div class="drop" id="drop"><span data-icon="upload" data-size="24"></span>Drop files here<span class="faint">or</span><label class="btn sm" for="file-input">Choose files</label><input id="file-input" type="file" multiple style="display: none"></div>
+            <div class="faint" id="ing-readers"></div>
+            <div class="table" id="file-list"></div>
+            <label class="field">Or paste text<textarea id="ing-text" rows="5" placeholder="Paragraphs become chunks. Blank lines separate them."></textarea></label>
+            <div class="grid two">
+              <label class="field">Write to<select id="ing-target" data-on-change='[["ingTarget",{"$":"value"}]]'><option value="server">A collection, read by the server</option><option value="collection">A collection, as pasted paragraphs</option><option value="documents">The document index, as a document</option></select></label>
+              <label class="field" id="ing-coll-wrap">Collection<select id="ing-collection" data-collections></select></label>
+              <label class="field">Title<input id="ing-title" placeholder="used for pasted text"></label>
+              <label class="field">Chunk size, characters<input id="ing-chunk" type="number" value="800" min="200"></label>
+            </div>
+            <label class="field">Metadata on every chunk, JSON<input id="ing-meta" placeholder='{"topic": "neuroscience", "client_id": "acme"}'></label>
+            <div class="row end"><button class="btn primary" data-on-click='[["runIngest"]]'><span data-icon="upload" data-size="15"></span>Ingest</button></div>
+            <div class="faint">Read by the server is the real road: the file goes to the documents route, whoever reads that file type reads it, and every chunk comes back with its citation. Pasted paragraphs is a plain splitter in this page, for trying things out. Parent sections, deduplication and the metadata contract of a policied collection belong to add_document() in Python.</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 18px">
+            <div class="card"><div class="head"><h2>This run</h2></div><div id="ing-quality"></div><div id="ing-log" style="display: flex; flex-direction: column; gap: 8px"><span class="faint">Nothing yet.</span></div></div>
+            <!-- ====================================================== the app's own flows -->
+            <div id="ing-poison"></div>
+            <!-- ================================================== end of the app's own flows -->
+            <div class="card"><div class="head"><h2>Document index</h2></div><div id="doc-list"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== audit -->
+      <section class="page" id="page-audit">
+        <div id="audit-body"></div>
+      </section>
+
+      <!-- ============================================================== access -->
+      <section class="page" id="page-access">
+        <div id="access-body"></div>
+      </section>
+
+      <!-- ============================================================= console -->
+      <section class="page" id="page-console">
+        <div class="presets">
+          <div class="chips" role="group" aria-label="Presets">
+            <button class="chip" data-on-click='[["presetConsole","info"]]'>info</button>
+            <button class="chip" data-on-click='[["presetConsole","list"]]'>collections</button>
+            <button class="chip" data-on-click='[["presetConsole","search"]]'>hybrid search</button>
+            <button class="chip" data-on-click='[["presetConsole","upsert"]]'>text upsert</button>
+            <button class="chip" data-on-click='[["presetConsole","health"]]'>health</button>
+            <button class="chip" data-on-click='[["presetConsole","quality"]]'>quality</button>
+            <button class="chip" data-on-click='[["presetConsole","models"]]'>models</button>
+          </div>
+          <a class="faint" href="/docs" target="_blank" rel="noopener">OpenAPI reference</a>
+        </div>
+        <div class="grid two">
+          <div class="card">
+            <div class="head"><h2>Request</h2><div class="row"><button class="btn primary sm" data-on-click='[["runConsole"]]'><span data-icon="play" data-size="14"></span>Send</button></div></div>
+            <div class="row"><select id="con-method" style="width: 110px"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select><input id="con-path" class="mono" style="flex-grow: 1" value="/api/v1/info" data-on-keydown='[["runConsole"]]' data-key="Enter"></div>
+            <textarea id="con-body" rows="12" placeholder="JSON body for POST and PUT"></textarea>
+            <pre id="con-curl" class="faint" style="white-space: pre-wrap">curl is shown here after a request</pre>
+          </div>
+          <div class="card"><div class="head"><h2>Response</h2><span id="con-status"></span></div><pre id="con-out" style="min-height: 320px; white-space: pre-wrap">Send a request.</pre></div>
+        </div>
+      </section>
+
+
+    </div>
+  </main>
+</div>
+
+<!-- dialogs -->
+<!-- ====================================================== the app's own flows -->
+<div class="backdrop" id="dlg-create"><div class="dialog">
+  <h2>New collection</h2>
+  <label class="field">Name<input id="cc-name" class="mono" placeholder="lending-memos" data-on-keydown='[["createCollection"]]' data-key="Enter"></label>
+  <div class="faint">Lowercase letters, digits and dashes. It names the folder and the search index.</div>
+  <div class="seg cc-modes" id="cc-modes"><button type="button" class="on" data-mode="up" data-on-click='[["pickCcMode","up"]]'>Upload files</button><button type="button" data-mode="type" data-on-click='[["pickCcMode","type"]]'>Type it</button></div>
+  <div id="cc-up">
+    <div class="drop" id="cc-drop"><span data-icon="upload" data-size="24"></span>Drop files here, as many as you like<label class="btn sm" for="cc-input">Choose files</label><input id="cc-input" type="file" multiple hidden></div>
+    <div class="table" id="cc-files"></div>
+  </div>
+  <div id="cc-type" hidden>
+    <label class="field">Title<input id="cc-title" placeholder="Q2 credit memo"></label>
+    <label class="field">Text<textarea id="cc-text" rows="4" placeholder="Write or paste the text to index"></textarea></label>
+  </div>
+  <div class="field">Who can retrieve from it<div id="who-holder-cc"></div></div>
+  <div class="faint">Required. Without it, nobody can retrieve from the collection. Everything goes to <span class="mono">raw/&lt;name&gt;/</span>, then through every step the other collections went through.</div>
+  <div class="faint" id="cc-error" style="color: var(--bad)"></div>
+  <div class="row end"><button class="btn" data-on-click='[["closeDialog","dlg-create"]]'>Cancel</button><button class="btn primary" data-on-click='[["createCollection"]]'>Create</button></div>
+</div></div>
+<div class="backdrop" id="dlg-files"><div class="dialog">
+  <h2>Add files to <span class="mono" id="af-name"></span></h2>
+  <div class="drop" id="af-drop"><span data-icon="upload" data-size="24"></span>Drop files here, as many as you like<label class="btn sm" for="af-input">Choose files</label><input id="af-input" type="file" multiple hidden></div>
+  <div class="table" id="af-files"></div>
+  <div class="notice" id="af-policy"></div>
+  <div class="faint">They go to <span class="mono">raw/&lt;name&gt;/</span>, then through every step, the policy included.</div>
+  <div class="faint" id="af-error" style="color: var(--bad)"></div>
+  <div class="row end"><button class="btn" data-on-click='[["closeDialog","dlg-files"]]'>Cancel</button><button class="btn primary" data-on-click='[["uploadFiles"]]'>Upload</button></div>
+</div></div>
+<div class="backdrop" id="dlg-delete"><div class="dialog">
+  <h2>Delete <span class="mono" id="del-name"></span></h2>
+  <div class="faint">Deleting will remove</div>
+  <div class="del-list">
+    <div><span data-icon="x" data-size="16"></span>Its ingestion documents</div>
+    <div><span data-icon="x" data-size="16"></span>The search index</div>
+    <div><span data-icon="x" data-size="16"></span>Its chunk records and parent sections</div>
+    <div><span data-icon="x" data-size="16"></span>Its place in the collections</div>
+  </div>
+  <label class="field">Type the name to confirm<input id="del-typed" class="mono" data-on-keydown='[["deleteEverything"]]' data-key="Enter"></label>
+  <div class="faint" id="del-error" style="color: var(--bad)"></div>
+  <div class="row end"><button class="btn" data-on-click='[["closeDialog","dlg-delete"]]'>Cancel</button><button class="btn danger" data-on-click='[["deleteEverything"]]'>Delete collection</button></div>
+</div></div>
+<!-- ================================================== end of the app's own flows -->
+<div class="backdrop" id="dlg-key"><div class="dialog">
+  <h2>API key</h2>
+  <div class="muted" id="key-note"></div>
+  <label class="field">Key<input id="key-input" type="password" placeholder="paste the key" data-on-keydown='[["saveKey"]]' data-key="Enter"></label>
+  <div class="row end"><button class="btn" data-on-click='[["closeDialog","dlg-key"]]'>Cancel</button><button class="btn" data-on-click='[["clearKey"]]'>Clear</button><button class="btn primary" data-on-click='[["saveKey"]]'>Save</button></div>
+</div></div>
+<div class="backdrop" id="dlg-doc"><div class="dialog wide">
+  <div class="head"><h2 id="doc-title">Document</h2><button class="btn sm" data-on-click='[["closeDialog","dlg-doc"]]'>Close</button></div>
+  <div class="faint" id="doc-note"></div>
+  <pre class="doc-view" id="doc-view" tabindex="0"></pre>
+</div></div>
+<div class="backdrop" id="dlg-person"><div class="dialog">
+  <h2>Add somebody</h2>
+  <div class="muted">They sign in with this address. The first time, a link by email lets them choose a passkey or an authenticator app.</div>
+  <label class="field">Work email<input id="person-email" type="email" placeholder="name@company.com" data-on-keydown='[["addPerson"]]' data-key="Enter"></label>
+  <label class="field">Role<select id="person-role"><option>viewer</option><option>operator</option><option>admin</option></select></label>
+  <div class="row end"><button class="btn" data-on-click='[["closeDialog","dlg-person"]]'>Cancel</button><button class="btn primary" data-on-click='[["addPerson"]]'>Add</button></div>
+</div></div>
+<div class="backdrop" id="dlg-confirm"><div class="dialog">
+  <h2>Are you sure?</h2>
+  <div id="confirm-text"></div>
+  <div class="row end"><button class="btn" data-on-click='[["closeDialog","dlg-confirm"]]'>Cancel</button><button class="btn danger" id="confirm-btn">Delete</button></div>
+</div></div>
+<div class="backdrop" id="dlg-ways"><div class="dialog ways" id="ways-body"></div></div>
+<div class="backdrop" id="dlg-keys"><div class="dialog ways" id="keys-body"></div></div>
+<div class="backdrop" id="dlg-stepup"><div class="dialog" id="stepup-body"></div></div>
+<div class="backdrop" id="dlg-about"><div class="dialog about" id="about-body" role="dialog" aria-label="About"></div></div>
+<div class="snack" id="snackbar" role="status"></div>
+
+<!-- The brand is data, not script: the page runs no inline script. Yours to set. -->
+<script id="vx-brand-data" type="application/json">{"name": "VectrixDB", "logo": null, "logo_dark": null, "custom": false}</script>
+<script src="/pages/app.js"></script>
+<script src="/pages/setup.js"></script>
+<script src="/pages/trends.js"></script>
+<script src="/pages/evaluate.js"></script>
+<script src="/pages/chunking.js"></script>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

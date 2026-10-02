@@ -1,0 +1,35 @@
+{
+  "benchmark": "locomo",
+  "token_budget": 1500,
+  "model": "vectrixdb/bge-small-en-v1.5",
+  "vectrixdb": "2.2.0",
+  "date": "2026-09-19",
+  "machine": "AMD64 Windows Python 3.13.14",
+  "questions": 1536,
+  "evidence_recall_memory": 0.6234,
+  "evidence_recall_search": 0.6195,
+  "mean_block_tokens": 334,
+  "by_category": {
+    "2": {
+      "n": 321,
+      "memory": 0.714,
+      "search": 0.711
+    },
+    "3": {
+      "n": 92,
+      "memory": 0.3,
+      "search": 0.29
+    },
+    "1": {
+      "n": 282,
+      "memory": 0.394,
+      "search": 0.392
+    },
+    "4": {
+      "n": 841,
+      "memory": 0.701,
+      "search": 0.697
+    }
+  },
+  "seconds": 437.8
+}

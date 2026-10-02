@@ -1,0 +1,46 @@
+{
+  "bge_small_en": {
+    "config.json": "094f8e891b932f2000c92cfc663bac4c62069f5d8af5b5278c4306aef3084750",
+    "model.onnx": "68807e3ff2abb83cdd708d8243fd398246e397bfee2ba611c2bad728e27df743",
+    "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+    "tokenizer_config.json": "9261e7d79b44c8195c1cada2b453e55b00aeb81e907a6664974b4d7776172ab3",
+    "vocab.txt": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+  },
+  "colbert": {
+    "model.onnx": "4980983628c18e4f0a4c756114abd2d7c097c6ccad9cffc70e77302d21e05df0",
+    "special_tokens_map.json": "5aa43c2f985a25296d5a5ce621c2f77376ca8091a47993c492fd5460b895b140",
+    "tokenizer.json": "55b68f6407c0aa46551616c08e01f4b4605aef14f36aa1447d548f953ec764d1",
+    "tokenizer_config.json": "a5c2e5a7b1a29a0702cd28c08a399b5ecc110c263009d17f7e3b415f25905fd8",
+    "vectrix_config.json": "2e08035adef18284547acfbc922e1a63ff3c7b261a83286584dce756375b1ecc",
+    "vocab.txt": "b49e80874c5efbc7f4cde245a812673b05ef1360ced56b8bc8c750eaeef3fe0f"
+  },
+  "dense": {
+    "model.onnx": "c858c3260e7548d0287fea0e779258acdd71f1480c3c1b324fa40854c24a0811",
+    "sentencepiece.bpe.model": "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865",
+    "special_tokens_map.json": "edd71739099fe63dc2f70815facad5253c70ded0e0d4df49ef883ce4511af365",
+    "tokenizer.json": "cd98e5698b201ba914efb8c18b6709fa8735ab71dcad8d2b431e52e8bf68d932",
+    "tokenizer_config.json": "1323501c4a6623cfadc7942c5030f4977887557f96bbdca61de0a61890f8005a",
+    "vectrix_config.json": "2889e031516b5abf83f32b4576d0a99b38efc742b6f934e09cb991e266f163ad"
+  },
+  "dense_en": {
+    "model.onnx": "d74a213ce7122581aa2e024601e79e969373e7fe3cd3aa78c4996a5c79d4c5ad",
+    "special_tokens_map.json": "5aa43c2f985a25296d5a5ce621c2f77376ca8091a47993c492fd5460b895b140",
+    "tokenizer.json": "55b68f6407c0aa46551616c08e01f4b4605aef14f36aa1447d548f953ec764d1",
+    "tokenizer_config.json": "c709b7b834bdb716d8d328fdc8a26d746b9f3af7c9bf49523677025bcbc6bf24",
+    "vectrix_config.json": "3047d1712d20576f1f717f2a52999eabc238f15c9fc3bd398b8ea5cb65a5ae0f",
+    "vocab.txt": "b49e80874c5efbc7f4cde245a812673b05ef1360ced56b8bc8c750eaeef3fe0f"
+  },
+  "reranker_en": {
+    "model.onnx": "1225ccd6afd0f1b43a1b08bf67cd1cb68c05aafb443e9d8450015b8b3837ffd1",
+    "special_tokens_map.json": "5aa43c2f985a25296d5a5ce621c2f77376ca8091a47993c492fd5460b895b140",
+    "tokenizer.json": "55b68f6407c0aa46551616c08e01f4b4605aef14f36aa1447d548f953ec764d1",
+    "tokenizer_config.json": "a5c2e5a7b1a29a0702cd28c08a399b5ecc110c263009d17f7e3b415f25905fd8",
+    "vectrix_config.json": "da1c9b694c310cede9ea52e6363b54d4a61561d39fe5af11608304f3cf7ef706",
+    "vocab.txt": "b49e80874c5efbc7f4cde245a812673b05ef1360ced56b8bc8c750eaeef3fe0f"
+  },
+  "sparse": {
+    "config.json": "1b860d0f20494288b299c550017b14c18fb11f3d644bee97019a1cb3e9a3432e",
+    "idf.json": "08eaf5a3a2d07710b60989875c6127cb85bb9116ab1cf1709cdae4d51db31924",
+    "vocab.json": "e990ef07515242e678a1b0393aa72ad0f2ef2741e155021fe0ce393a8906c815"
+  }
+}

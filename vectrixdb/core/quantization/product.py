@@ -7,10 +7,26 @@ Provides configurable compression with good accuracy retention.
 
 import json
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Any, Dict, Optional, List, Tuple
 import numpy as np
 
 from .base import BaseQuantizer
+
+
+__all__ = [
+    "ProductQuantizer",
+]
+
+
+# ============================================================================
+# PRODUCT QUANTIZATION
+# ============================================================================
+#
+# INPUT   float32 vectors
+# OUTPUT  subvectors, each replaced by the nearest codebook entry:
+#         configurable compression that keeps accuracy
+#
+# Trained on a sample; asymmetric distance at query time.
 
 
 class ProductQuantizer(BaseQuantizer):
@@ -57,9 +73,7 @@ class ProductQuantizer(BaseQuantizer):
             )
 
         if n_clusters > 256:
-            raise ValueError(
-                f"n_clusters must be <= 256 for uint8 codes, got {n_clusters}"
-            )
+            raise ValueError(f"n_clusters must be <= 256 for uint8 codes, got {n_clusters}")
 
         self.n_subvectors = n_subvectors
         self.n_clusters = n_clusters
@@ -70,6 +84,9 @@ class ProductQuantizer(BaseQuantizer):
 
         # Codebooks: one per subvector, shape (n_clusters, subvector_dim)
         self._codebooks: Optional[List[np.ndarray]] = None
+        self._centroid_sq_norms: np.ndarray = np.zeros(
+            (self.n_subvectors, self.n_clusters), dtype=np.float32
+        )
 
     @property
     def compression_ratio(self) -> float:
@@ -99,15 +116,11 @@ class ProductQuantizer(BaseQuantizer):
             vectors = vectors.reshape(1, -1)
 
         if vectors.shape[1] != self.dimension:
-            raise ValueError(
-                f"Expected dimension {self.dimension}, got {vectors.shape[1]}"
-            )
+            raise ValueError(f"Expected dimension {self.dimension}, got {vectors.shape[1]}")
 
         # Use subset for training
         if len(vectors) > self.train_size:
-            indices = np.random.choice(
-                len(vectors), self.train_size, replace=False
-            )
+            indices = np.random.choice(len(vectors), self.train_size, replace=False)
             vectors = vectors[indices]
 
         # Split into subvectors and train codebook for each
@@ -122,8 +135,23 @@ class ProductQuantizer(BaseQuantizer):
             codebook = self._train_codebook(subvectors)
             self._codebooks.append(codebook)
 
+        self._cache_centroid_norms()
         self._is_fitted = True
         return self
+
+    def _cache_centroid_norms(self) -> None:
+        """Squared norm of every centroid, for the cosine denominator.
+
+        A reconstructed vector is one centroid per subvector concatenated, so
+        its squared norm is the sum of these. Computed once here rather than
+        per query.
+        """
+        if not self._codebooks:
+            self._centroid_sq_norms = np.zeros((self.n_subvectors, self.n_clusters), np.float32)
+            return
+        self._centroid_sq_norms = np.stack(
+            [np.sum(book.astype(np.float32) ** 2, axis=1) for book in self._codebooks]
+        )
 
     def _train_codebook(self, subvectors: np.ndarray) -> np.ndarray:
         """
@@ -144,14 +172,10 @@ class ProductQuantizer(BaseQuantizer):
             # Assign to nearest centroid
             assignments = self._assign_to_centroids(subvectors, centroids)
 
-            # Update centroids
+            # Update centroids: one scatter-add instead of a Python loop.
             new_centroids = np.zeros_like(centroids)
-            counts = np.zeros(self.n_clusters)
-
-            for i in range(n_samples):
-                cluster = assignments[i]
-                new_centroids[cluster] += subvectors[i]
-                counts[cluster] += 1
+            np.add.at(new_centroids, assignments, subvectors)
+            counts = np.bincount(assignments, minlength=self.n_clusters).astype(np.float32)
 
             # Avoid division by zero
             counts = np.maximum(counts, 1)
@@ -161,7 +185,7 @@ class ProductQuantizer(BaseQuantizer):
             empty_clusters = counts < 1
             if np.any(empty_clusters):
                 # Reinitialize from random samples
-                n_empty = np.sum(empty_clusters)
+                n_empty = int(np.sum(empty_clusters))
                 random_indices = np.random.choice(n_samples, n_empty, replace=False)
                 new_centroids[empty_clusters] = subvectors[random_indices]
 
@@ -185,26 +209,32 @@ class ProductQuantizer(BaseQuantizer):
         # First centroid: random sample
         centroids[0] = subvectors[np.random.randint(n_samples)]
 
-        # Remaining centroids: weighted by squared distance
+        # Remaining centroids, weighted by squared distance to the nearest one
+        # chosen so far. That minimum is kept running and refreshed against the
+        # newest centroid only; recomputing it against all k at every step was
+        # O(n k^2 d) and dominated fit() outright.
+        min_d2 = np.sum((subvectors - centroids[0]) ** 2, axis=1)
         for k in range(1, self.n_clusters):
-            # Compute squared distances to nearest centroid
-            distances = np.min(
-                np.sum((subvectors[:, np.newaxis] - centroids[:k]) ** 2, axis=2),
-                axis=1
-            )
-
-            # Sample proportional to squared distance
-            probs = distances / (np.sum(distances) + 1e-8)
-            idx = np.random.choice(n_samples, p=probs)
+            total = float(np.sum(min_d2))
+            if total <= 0.0:
+                # Every distinct point is already a centroid, so there is no
+                # distance left to weight by. Dividing by the sum here gave a
+                # probability vector of zeros and numpy refused it with
+                # "probabilities do not sum to 1", which is a long way from
+                # the real cause. It is not a small-corpus problem either:
+                # fifty thousand vectors drawn from a forty-entry palette hit
+                # it too. The remaining centroids are filled uniformly; they
+                # duplicate points no sample will prefer, which costs a
+                # little codebook space and nothing else.
+                idx = int(np.random.randint(n_samples))
+            else:
+                idx = int(np.random.choice(n_samples, p=min_d2 / total))
             centroids[k] = subvectors[idx]
+            min_d2 = np.minimum(min_d2, np.sum((subvectors - centroids[k]) ** 2, axis=1))
 
         return centroids
 
-    def _assign_to_centroids(
-        self,
-        subvectors: np.ndarray,
-        centroids: np.ndarray
-    ) -> np.ndarray:
+    def _assign_to_centroids(self, subvectors: np.ndarray, centroids: np.ndarray) -> np.ndarray:
         """
         Assign subvectors to nearest centroid.
 
@@ -215,12 +245,11 @@ class ProductQuantizer(BaseQuantizer):
         Returns:
             Assignments, shape (n,), dtype=uint8
         """
-        # Compute squared distances using broadcasting
-        # (n, 1, d) - (1, k, d) -> (n, k, d) -> sum -> (n, k)
-        sq_distances = np.sum(
-            (subvectors[:, np.newaxis, :] - centroids[np.newaxis, :, :]) ** 2,
-            axis=2
-        )
+        # ||a - b||^2 = ||a||^2 + ||b||^2 - 2 a.b, as one (n, k) matrix product
+        # rather than an (n, k, d) difference tensor, which was 245 MB at n=5000.
+        a2 = np.sum(subvectors * subvectors, axis=1)[:, np.newaxis]
+        b2 = np.sum(centroids * centroids, axis=1)[np.newaxis, :]
+        sq_distances = a2 + b2 - 2.0 * (subvectors @ centroids.T)
 
         return np.argmin(sq_distances, axis=1).astype(np.uint8)
 
@@ -237,6 +266,10 @@ class ProductQuantizer(BaseQuantizer):
         if not self._is_fitted:
             raise RuntimeError("Quantizer not fitted. Call fit() first.")
 
+        codebooks = self._codebooks
+        if codebooks is None:
+            raise RuntimeError("Quantizer not fitted. Call fit() first.")
+
         vectors = np.asarray(vectors, dtype=np.float32)
 
         if vectors.ndim == 1:
@@ -250,7 +283,7 @@ class ProductQuantizer(BaseQuantizer):
             end = start + self._subvector_dim
             subvectors = vectors[:, start:end]
 
-            codes[:, m] = self._assign_to_centroids(subvectors, self._codebooks[m])
+            codes[:, m] = self._assign_to_centroids(subvectors, codebooks[m])
 
         return codes
 
@@ -267,6 +300,10 @@ class ProductQuantizer(BaseQuantizer):
         if not self._is_fitted:
             raise RuntimeError("Quantizer not fitted. Call fit() first.")
 
+        codebooks = self._codebooks
+        if codebooks is None:
+            raise RuntimeError("Quantizer not fitted. Call fit() first.")
+
         codes = np.asarray(codes)
 
         if codes.ndim == 1:
@@ -280,15 +317,12 @@ class ProductQuantizer(BaseQuantizer):
             end = start + self._subvector_dim
 
             # Lookup centroids
-            vectors[:, start:end] = self._codebooks[m][codes[:, m]]
+            vectors[:, start:end] = codebooks[m][codes[:, m]]
 
         return vectors
 
     def compute_distances(
-        self,
-        query: np.ndarray,
-        codes: np.ndarray,
-        metric: str = "cosine"
+        self, query: np.ndarray, codes: np.ndarray, metric: str = "cosine"
     ) -> np.ndarray:
         """
         Compute distances using Asymmetric Distance Computation (ADC).
@@ -325,20 +359,42 @@ class ProductQuantizer(BaseQuantizer):
             distances += distance_tables[m, codes[:, m]]
 
         # Post-process based on metric
+        if metric == "euclidean":
+            # The tables hold squared L2, which is what the lookup sums. Take
+            # the root so this agrees with ScalarQuantizer, which returns the
+            # distance itself. Ranking is unchanged either way; a caller
+            # comparing the two quantisers against one threshold was not.
+            distances = np.sqrt(np.maximum(distances, 0.0)).astype(np.float32)
+
         if metric == "cosine":
-            # We computed negative dot products, convert to cosine distance
-            # Need to normalize by query and codebook norms
-            query_norm = np.linalg.norm(query)
-            # Approximate: assume unit norm for simplicity
-            distances = 1.0 - (-distances / (query_norm + 1e-8))
+            # The table holds negative dot products, so -distances is the dot
+            # product between the query and each reconstructed vector. Cosine
+            # divides that by both norms. Dividing by the query norm alone,
+            # which is what this did while calling it an approximation, ranks
+            # by projection rather than angle: two vectors pointing the same
+            # way got different distances if one was longer, and the result
+            # could fall outside the valid range, negatives included.
+            #
+            # A reconstructed vector is the concatenation of one centroid per
+            # subvector, so its squared norm is the sum of those centroids'
+            # squared norms, looked up exactly like the distances above.
+            query_norm = float(np.linalg.norm(query))
+            recon_sq = np.zeros(n_vectors, dtype=np.float32)
+            for m in range(self.n_subvectors):
+                recon_sq += self._centroid_sq_norms[m, codes[:, m]]
+            recon_norm = np.sqrt(recon_sq)
+            denominator = query_norm * recon_norm
+            cosine = np.divide(
+                -distances,
+                denominator,
+                out=np.zeros_like(distances),
+                where=denominator > 0,
+            )
+            distances = (1.0 - np.clip(cosine, -1.0, 1.0)).astype(np.float32)
 
         return distances
 
-    def _build_distance_tables(
-        self,
-        query: np.ndarray,
-        metric: str
-    ) -> np.ndarray:
+    def _build_distance_tables(self, query: np.ndarray, metric: str) -> np.ndarray:
         """
         Build distance lookup tables for ADC.
 
@@ -349,6 +405,10 @@ class ProductQuantizer(BaseQuantizer):
         Returns:
             Distance tables, shape (n_subvectors, n_clusters)
         """
+        codebooks = self._codebooks
+        if codebooks is None:
+            raise RuntimeError("Quantizer not fitted. Call fit() first.")
+
         tables = np.zeros((self.n_subvectors, self.n_clusters), dtype=np.float32)
 
         for m in range(self.n_subvectors):
@@ -358,12 +418,12 @@ class ProductQuantizer(BaseQuantizer):
 
             if metric == "euclidean":
                 # Squared L2 distance
-                diff = self._codebooks[m] - query_sub
-                tables[m] = np.sum(diff ** 2, axis=1)
+                diff = codebooks[m] - query_sub
+                tables[m] = np.sum(diff**2, axis=1)
 
             elif metric == "dot" or metric == "cosine":
                 # Negative dot product (negate to use as "distance")
-                tables[m] = -np.dot(self._codebooks[m], query_sub)
+                tables[m] = -np.dot(codebooks[m], query_sub)
 
             else:
                 raise ValueError(f"Unknown metric: {metric}")
@@ -390,7 +450,10 @@ class ProductQuantizer(BaseQuantizer):
 
         # Save codebooks
         if self._is_fitted:
-            for m, codebook in enumerate(self._codebooks):
+            codebooks = self._codebooks
+            if codebooks is None:
+                raise RuntimeError("Quantizer state is corrupted: codebooks missing.")
+            for m, codebook in enumerate(codebooks):
                 np.save(path / f"codebook_{m}.npy", codebook)
 
     def load(self, path: Path) -> "ProductQuantizer":
@@ -416,6 +479,7 @@ class ProductQuantizer(BaseQuantizer):
                 codebook = np.load(path / f"codebook_{m}.npy")
                 self._codebooks.append(codebook)
 
+        self._cache_centroid_norms()
         return self
 
     def get_quantization_error(self, vectors: np.ndarray) -> Tuple[float, float]:
@@ -442,12 +506,16 @@ class ProductQuantizer(BaseQuantizer):
 
         return float(np.mean(relative_errors)), float(np.max(relative_errors))
 
-    def get_codebook_stats(self) -> dict:
+    def get_codebook_stats(self) -> Dict[str, Any]:
         """Get statistics about trained codebooks."""
         if not self._is_fitted:
             return {"fitted": False}
 
-        stats = {
+        codebooks = self._codebooks
+        if codebooks is None:
+            raise RuntimeError("Quantizer state is corrupted: codebooks missing.")
+
+        stats: Dict[str, Any] = {
             "fitted": True,
             "n_subvectors": self.n_subvectors,
             "n_clusters": self.n_clusters,
@@ -458,12 +526,14 @@ class ProductQuantizer(BaseQuantizer):
 
         # Per-codebook statistics
         codebook_stats = []
-        for m, codebook in enumerate(self._codebooks):
-            codebook_stats.append({
-                "index": m,
-                "centroid_mean_norm": float(np.mean(np.linalg.norm(codebook, axis=1))),
-                "centroid_std_norm": float(np.std(np.linalg.norm(codebook, axis=1))),
-            })
+        for m, codebook in enumerate(codebooks):
+            codebook_stats.append(
+                {
+                    "index": m,
+                    "centroid_mean_norm": float(np.mean(np.linalg.norm(codebook, axis=1))),
+                    "centroid_std_norm": float(np.std(np.linalg.norm(codebook, axis=1))),
+                }
+            )
 
         stats["codebooks"] = codebook_stats
 

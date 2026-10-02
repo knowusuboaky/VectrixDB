@@ -43,6 +43,25 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
 from .embedded import get_models_dir, MODEL_CONFIG, GITHUB_REPO, GITHUB_RELEASE_BASE
+from .checksums import verify as _verify_checksums
+from .._net import assert_network
+from ..exceptions import ModelDownloadError
+
+
+__all__ = [
+    "ModelDownloader",
+    "download_models_cli",
+]
+
+
+# ============================================================================
+# THE DOWNLOADER
+# ============================================================================
+#
+# INPUT   a model's name, and where it goes
+# OUTPUT  the model fetched from Hugging Face and converted to ONNX, once
+#
+# A one-time set-up; after it, no network calls.
 
 
 class ModelDownloader:
@@ -79,6 +98,7 @@ class ModelDownloader:
 
         print(f"  Trying GitHub fallback: {zip_url}")
 
+        tmp_path = None
         try:
             # Download with progress
             req = Request(zip_url, headers={"User-Agent": "VectrixDB-Downloader/1.0"})
@@ -100,7 +120,11 @@ class ModelDownloader:
 
                         if self.progress and total_size > 0:
                             pct = (downloaded / total_size) * 100
-                            print(f"\r  Downloading: {pct:.1f}% ({downloaded // 1024 // 1024}MB)", end="", flush=True)
+                            print(
+                                f"\r  Downloading: {pct:.1f}% ({downloaded // 1024 // 1024}MB)",
+                                end="",
+                                flush=True,
+                            )
 
                     if self.progress:
                         print()  # New line after progress
@@ -117,12 +141,13 @@ class ModelDownloader:
                 root_folder = first_item.split("/")[0] if "/" in first_item else None
 
                 # Check if all files are under the same root folder
-                has_nested_folder = (
-                    root_folder and
-                    all(n.startswith(root_folder + "/") or n == root_folder + "/" for n in namelist)
+                has_nested_folder = root_folder and all(
+                    n.startswith(root_folder + "/") or n == root_folder + "/" for n in namelist
                 )
 
                 if has_nested_folder:
+                    # has_nested_folder is only truthy when root_folder is a non-empty string.
+                    assert root_folder is not None
                     # Extract with flattening - remove the root folder prefix
                     print(f"  Flattening nested folder: {root_folder}/")
                     for member in namelist:
@@ -130,7 +155,7 @@ class ModelDownloader:
                         if member == root_folder + "/":
                             continue
                         # Remove the root folder prefix
-                        relative_path = member[len(root_folder) + 1:]
+                        relative_path = member[len(root_folder) + 1 :]
                         if not relative_path:
                             continue
                         # Extract to the correct location
@@ -145,10 +170,10 @@ class ModelDownloader:
                     # Normal extraction
                     zip_ref.extractall(model_dir)
 
-            # Clean up temp file
-            os.unlink(tmp_path)
+            # A corrupt or substituted asset must not pass as a model.
+            _verify_checksums(model_type, model_dir)
 
-            print(f"  Successfully downloaded from GitHub!")
+            print("  Successfully downloaded from GitHub!")
             return True
 
         except HTTPError as e:
@@ -160,9 +185,20 @@ class ModelDownloader:
         except URLError as e:
             print(f"  GitHub download failed: {e.reason}")
             return False
+        except ModelDownloadError:
+            raise  # a checksum failure is not a reason to try another source
         except Exception as e:
             print(f"  GitHub download failed: {e}")
             return False
+        finally:
+            # The zip is a temporary file with delete=False, so a download that
+            # failed part way, or a zip that would not open, used to leave it
+            # in the system temp directory for good.
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     def download(self, model_type: str) -> Path:
         """
@@ -176,6 +212,7 @@ class ModelDownloader:
         Returns:
             Path to model directory
         """
+        assert_network(f"download the {model_type} model")
         if model_type == "dense":
             return self._download_dense()
         elif model_type == "sparse":
@@ -186,6 +223,8 @@ class ModelDownloader:
             return self._download_reranker_en()
         elif model_type == "bge_base_en":
             return self._download_bge_base_en()
+        elif model_type == "dense_en":
+            return self._download_dense_en()
         elif model_type == "bge_reranker_base":
             return self._download_bge_reranker_base()
         elif model_type == "colbert":
@@ -201,7 +240,9 @@ class ModelDownloader:
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
-    def download_all(self, include_graphrag: bool = True, include_multilingual: bool = True) -> None:
+    def download_all(
+        self, include_graphrag: bool = True, include_multilingual: bool = True
+    ) -> None:
         """Download all models."""
         print("Downloading VectrixDB models (one-time setup)...")
         size = "~250MB"
@@ -397,10 +438,45 @@ class ModelDownloader:
         # These are approximate IDFs for common words
         default_idf = {word: 1.0 for word in default_vocab.keys()}
         # Lower IDF for very common words
-        common_words = ["the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-                       "have", "has", "had", "do", "does", "did", "will", "would", "could",
-                       "should", "may", "might", "must", "shall", "can", "to", "of", "in",
-                       "for", "on", "with", "at", "by", "from", "as", "into", "through"]
+        common_words = [
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "must",
+            "shall",
+            "can",
+            "to",
+            "of",
+            "in",
+            "for",
+            "on",
+            "with",
+            "at",
+            "by",
+            "from",
+            "as",
+            "into",
+            "through",
+        ]
         for word in common_words:
             if word in default_idf:
                 default_idf[word] = 0.1
@@ -431,77 +507,499 @@ class ModelDownloader:
         # Basic English vocabulary
         words = [
             # Articles, prepositions, conjunctions
-            "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
-            "of", "with", "by", "from", "as", "into", "through", "during", "before",
-            "after", "above", "below", "between", "under", "over",
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "with",
+            "by",
+            "from",
+            "as",
+            "into",
+            "through",
+            "during",
+            "before",
+            "after",
+            "above",
+            "below",
+            "between",
+            "under",
+            "over",
             # Pronouns
-            "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us",
-            "them", "my", "your", "his", "its", "our", "their", "this", "that",
-            "these", "those", "who", "whom", "which", "what", "whose",
+            "i",
+            "you",
+            "he",
+            "she",
+            "it",
+            "we",
+            "they",
+            "me",
+            "him",
+            "her",
+            "us",
+            "them",
+            "my",
+            "your",
+            "his",
+            "its",
+            "our",
+            "their",
+            "this",
+            "that",
+            "these",
+            "those",
+            "who",
+            "whom",
+            "which",
+            "what",
+            "whose",
             # Verbs
-            "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
-            "do", "does", "did", "will", "would", "could", "should", "may", "might",
-            "must", "shall", "can", "need", "get", "got", "make", "made", "take",
-            "took", "come", "came", "go", "went", "see", "saw", "know", "knew",
-            "think", "thought", "want", "use", "find", "found", "give", "gave",
-            "tell", "told", "work", "call", "try", "ask", "seem", "feel", "leave",
-            "put", "mean", "keep", "let", "begin", "show", "hear", "play", "run",
-            "move", "live", "believe", "hold", "bring", "happen", "write", "provide",
-            "sit", "stand", "lose", "pay", "meet", "include", "continue", "set",
-            "learn", "change", "lead", "understand", "watch", "follow", "stop",
-            "create", "speak", "read", "allow", "add", "spend", "grow", "open",
-            "walk", "win", "offer", "remember", "love", "consider", "appear", "buy",
-            "wait", "serve", "die", "send", "expect", "build", "stay", "fall",
-            "cut", "reach", "kill", "remain",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "must",
+            "shall",
+            "can",
+            "need",
+            "get",
+            "got",
+            "make",
+            "made",
+            "take",
+            "took",
+            "come",
+            "came",
+            "go",
+            "went",
+            "see",
+            "saw",
+            "know",
+            "knew",
+            "think",
+            "thought",
+            "want",
+            "use",
+            "find",
+            "found",
+            "give",
+            "gave",
+            "tell",
+            "told",
+            "work",
+            "call",
+            "try",
+            "ask",
+            "seem",
+            "feel",
+            "leave",
+            "put",
+            "mean",
+            "keep",
+            "let",
+            "begin",
+            "show",
+            "hear",
+            "play",
+            "run",
+            "move",
+            "live",
+            "believe",
+            "hold",
+            "bring",
+            "happen",
+            "write",
+            "provide",
+            "sit",
+            "stand",
+            "lose",
+            "pay",
+            "meet",
+            "include",
+            "continue",
+            "set",
+            "learn",
+            "change",
+            "lead",
+            "understand",
+            "watch",
+            "follow",
+            "stop",
+            "create",
+            "speak",
+            "read",
+            "allow",
+            "add",
+            "spend",
+            "grow",
+            "open",
+            "walk",
+            "win",
+            "offer",
+            "remember",
+            "love",
+            "consider",
+            "appear",
+            "buy",
+            "wait",
+            "serve",
+            "die",
+            "send",
+            "expect",
+            "build",
+            "stay",
+            "fall",
+            "cut",
+            "reach",
+            "kill",
+            "remain",
             # Nouns
-            "time", "year", "people", "way", "day", "man", "thing", "woman", "life",
-            "child", "world", "school", "state", "family", "student", "group", "country",
-            "problem", "hand", "part", "place", "case", "week", "company", "system",
-            "program", "question", "work", "government", "number", "night", "point",
-            "home", "water", "room", "mother", "area", "money", "story", "fact",
-            "month", "lot", "right", "study", "book", "eye", "job", "word", "business",
-            "issue", "side", "kind", "head", "house", "service", "friend", "father",
-            "power", "hour", "game", "line", "end", "member", "law", "car", "city",
-            "community", "name", "president", "team", "minute", "idea", "kid", "body",
-            "information", "back", "parent", "face", "others", "level", "office",
-            "door", "health", "person", "art", "war", "history", "party", "result",
-            "change", "morning", "reason", "research", "girl", "guy", "moment",
-            "air", "teacher", "force", "education",
+            "time",
+            "year",
+            "people",
+            "way",
+            "day",
+            "man",
+            "thing",
+            "woman",
+            "life",
+            "child",
+            "world",
+            "school",
+            "state",
+            "family",
+            "student",
+            "group",
+            "country",
+            "problem",
+            "hand",
+            "part",
+            "place",
+            "case",
+            "week",
+            "company",
+            "system",
+            "program",
+            "question",
+            "work",
+            "government",
+            "number",
+            "night",
+            "point",
+            "home",
+            "water",
+            "room",
+            "mother",
+            "area",
+            "money",
+            "story",
+            "fact",
+            "month",
+            "lot",
+            "right",
+            "study",
+            "book",
+            "eye",
+            "job",
+            "word",
+            "business",
+            "issue",
+            "side",
+            "kind",
+            "head",
+            "house",
+            "service",
+            "friend",
+            "father",
+            "power",
+            "hour",
+            "game",
+            "line",
+            "end",
+            "member",
+            "law",
+            "car",
+            "city",
+            "community",
+            "name",
+            "president",
+            "team",
+            "minute",
+            "idea",
+            "kid",
+            "body",
+            "information",
+            "back",
+            "parent",
+            "face",
+            "others",
+            "level",
+            "office",
+            "door",
+            "health",
+            "person",
+            "art",
+            "war",
+            "history",
+            "party",
+            "result",
+            "change",
+            "morning",
+            "reason",
+            "research",
+            "girl",
+            "guy",
+            "moment",
+            "air",
+            "teacher",
+            "force",
+            "education",
             # Adjectives
-            "good", "new", "first", "last", "long", "great", "little", "own", "other",
-            "old", "right", "big", "high", "different", "small", "large", "next",
-            "early", "young", "important", "few", "public", "bad", "same", "able",
-            "human", "local", "sure", "free", "better", "true", "whole", "real",
-            "best", "hard", "possible", "special", "clear", "recent", "certain",
-            "personal", "open", "red", "difficult", "available", "likely", "short",
-            "single", "medical", "current", "wrong", "private", "past", "foreign",
-            "fine", "common", "poor", "natural", "significant", "similar", "hot",
-            "dead", "central", "happy", "serious", "ready", "simple", "left",
-            "physical", "general", "environmental", "financial", "blue", "democratic",
-            "dark", "various", "entire", "close", "legal", "religious", "cold",
-            "final", "main", "green", "nice", "huge", "popular", "traditional",
+            "good",
+            "new",
+            "first",
+            "last",
+            "long",
+            "great",
+            "little",
+            "own",
+            "other",
+            "old",
+            "right",
+            "big",
+            "high",
+            "different",
+            "small",
+            "large",
+            "next",
+            "early",
+            "young",
+            "important",
+            "few",
+            "public",
+            "bad",
+            "same",
+            "able",
+            "human",
+            "local",
+            "sure",
+            "free",
+            "better",
+            "true",
+            "whole",
+            "real",
+            "best",
+            "hard",
+            "possible",
+            "special",
+            "clear",
+            "recent",
+            "certain",
+            "personal",
+            "open",
+            "red",
+            "difficult",
+            "available",
+            "likely",
+            "short",
+            "single",
+            "medical",
+            "current",
+            "wrong",
+            "private",
+            "past",
+            "foreign",
+            "fine",
+            "common",
+            "poor",
+            "natural",
+            "significant",
+            "similar",
+            "hot",
+            "dead",
+            "central",
+            "happy",
+            "serious",
+            "ready",
+            "simple",
+            "left",
+            "physical",
+            "general",
+            "environmental",
+            "financial",
+            "blue",
+            "democratic",
+            "dark",
+            "various",
+            "entire",
+            "close",
+            "legal",
+            "religious",
+            "cold",
+            "final",
+            "main",
+            "green",
+            "nice",
+            "huge",
+            "popular",
+            "traditional",
             "cultural",
             # Adverbs
-            "not", "also", "very", "often", "however", "too", "usually", "really",
-            "early", "never", "always", "sometimes", "together", "likely", "simply",
-            "generally", "instead", "actually", "already", "enough", "both", "well",
-            "much", "even", "again", "still", "almost", "ever", "why", "here",
-            "there", "where", "when", "how", "now", "then", "today", "just", "only",
+            "not",
+            "also",
+            "very",
+            "often",
+            "however",
+            "too",
+            "usually",
+            "really",
+            "early",
+            "never",
+            "always",
+            "sometimes",
+            "together",
+            "likely",
+            "simply",
+            "generally",
+            "instead",
+            "actually",
+            "already",
+            "enough",
+            "both",
+            "well",
+            "much",
+            "even",
+            "again",
+            "still",
+            "almost",
+            "ever",
+            "why",
+            "here",
+            "there",
+            "where",
+            "when",
+            "how",
+            "now",
+            "then",
+            "today",
+            "just",
+            "only",
             # Tech terms
-            "data", "computer", "software", "system", "network", "internet", "web",
-            "database", "server", "code", "program", "application", "app", "user",
-            "file", "document", "search", "query", "vector", "embedding", "model",
-            "machine", "learning", "ai", "artificial", "intelligence", "algorithm",
-            "api", "cloud", "service", "platform", "development", "developer",
-            "python", "javascript", "java", "programming", "language", "function",
-            "class", "method", "variable", "string", "number", "array", "list",
-            "object", "json", "xml", "html", "css", "framework", "library",
-            "package", "module", "import", "export", "install", "run", "build",
-            "test", "debug", "error", "exception", "log", "config", "setting",
-            "option", "parameter", "argument", "value", "key", "index", "table",
-            "row", "column", "field", "record", "schema", "query", "select",
-            "insert", "update", "delete", "create", "drop", "join", "where",
-            "order", "group", "limit", "offset",
+            "data",
+            "computer",
+            "software",
+            "system",
+            "network",
+            "internet",
+            "web",
+            "database",
+            "server",
+            "code",
+            "program",
+            "application",
+            "app",
+            "user",
+            "file",
+            "document",
+            "search",
+            "query",
+            "vector",
+            "embedding",
+            "model",
+            "machine",
+            "learning",
+            "ai",
+            "artificial",
+            "intelligence",
+            "algorithm",
+            "api",
+            "cloud",
+            "service",
+            "platform",
+            "development",
+            "developer",
+            "python",
+            "javascript",
+            "java",
+            "programming",
+            "language",
+            "function",
+            "class",
+            "method",
+            "variable",
+            "string",
+            "number",
+            "array",
+            "list",
+            "object",
+            "json",
+            "xml",
+            "html",
+            "css",
+            "framework",
+            "library",
+            "package",
+            "module",
+            "import",
+            "export",
+            "install",
+            "run",
+            "build",
+            "test",
+            "debug",
+            "error",
+            "exception",
+            "log",
+            "config",
+            "setting",
+            "option",
+            "parameter",
+            "argument",
+            "value",
+            "key",
+            "index",
+            "table",
+            "row",
+            "column",
+            "field",
+            "record",
+            "schema",
+            "query",
+            "select",
+            "insert",
+            "update",
+            "delete",
+            "create",
+            "drop",
+            "join",
+            "where",
+            "order",
+            "group",
+            "limit",
+            "offset",
         ]
 
         return {word: i for i, word in enumerate(words)}
@@ -539,6 +1037,33 @@ class ModelDownloader:
             f"Failed to download English ColBERT model from GitHub.\n"
             f"Please check your internet connection or try again later."
         )
+
+    def _download_dense_en(self) -> Path:
+        """Fetch e5-small-v2, the English default before 2.2.
+
+        Not in the wheel since 2.2. A collection written before then was
+        built with it, and either fetches it once through here or moves to
+        the current default with reembed().
+        """
+        config = MODEL_CONFIG["dense_en"]
+        model_dir = self.models_dir / "dense_en"
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Downloading e5-small-v2 (the pre-2.2 English default): {config['name']}...")
+        if self._download_from_github("dense_en", model_dir, config):
+            return model_dir
+
+        print("  GitHub download failed, falling back to HuggingFace...")
+        try:
+            self._manual_dense_export(model_dir, config)
+            return model_dir
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to download e5-small-v2.\nError: {e}\n\n"
+                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type dense_en\n"
+                f"Or move the collection to the current default: "
+                f'Vectrix(name, path=..., dense_model="bge-small").reembed()'
+            )
 
     def _download_bge_base_en(self) -> Path:
         """Download BGE-base-en-v1.5 model (higher quality dense embeddings)."""
@@ -757,8 +1282,14 @@ class ModelDownloader:
         print(f"  Reranker model exported to: {model_dir}")
 
     def _download_colbert(self) -> Path:
-        """Download and convert ColBERT model to ONNX."""
-        config = MODEL_CONFIG["colbert"]
+        """Download and convert ColBERT model to ONNX.
+
+        ``colbert`` is the older name for the English late-interaction model
+        and installs into the same directory. This read MODEL_CONFIG["colbert"],
+        a key that has never existed, so the advertised ``--type colbert``
+        raised KeyError before it reached the network.
+        """
+        config = MODEL_CONFIG["late_interaction_en"]
         model_dir = self.models_dir / "colbert"
         model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1173,7 +1704,9 @@ class ModelDownloader:
                 super().__init__()
                 self.model = model
 
-            def forward(self, input_ids, attention_mask, encoder_hidden_states, encoder_attention_mask):
+            def forward(
+                self, input_ids, attention_mask, encoder_hidden_states, encoder_attention_mask
+            ):
                 outputs = self.model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -1195,7 +1728,12 @@ class ModelDownloader:
                 dummy_input["attention_mask"],
             ),
             decoder_path,
-            input_names=["input_ids", "attention_mask", "encoder_hidden_states", "encoder_attention_mask"],
+            input_names=[
+                "input_ids",
+                "attention_mask",
+                "encoder_hidden_states",
+                "encoder_attention_mask",
+            ],
             output_names=["logits"],
             dynamic_axes={
                 "input_ids": {0: "batch_size", 1: "sequence"},
@@ -1224,6 +1762,16 @@ class ModelDownloader:
         print(f"  mREBEL model exported to: {model_dir}")
 
 
+# ============================================================================
+# MAIN SCRIPT
+# ============================================================================
+#
+# INPUT   the command line
+# OUTPUT  the models downloaded
+#
+# The entry point vectrixdb download-models runs through.
+
+
 def download_models_cli():
     """CLI entry point for downloading models."""
     import argparse
@@ -1231,7 +1779,17 @@ def download_models_cli():
     parser = argparse.ArgumentParser(description="Download VectrixDB models")
     parser.add_argument(
         "--type",
-        choices=["all", "dense", "sparse", "reranker", "colbert", "late_interaction", "rebel", "graphrag"],
+        choices=[
+            "all",
+            "dense",
+            "dense_en",
+            "sparse",
+            "reranker",
+            "colbert",
+            "late_interaction",
+            "rebel",
+            "graphrag",
+        ],
         default="all",
         help="Model type to download (late_interaction = BGE-M3, graphrag = rebel for triplet extraction)",
     )

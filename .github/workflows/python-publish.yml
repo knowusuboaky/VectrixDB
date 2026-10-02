@@ -1,4 +1,13 @@
-# This workflow will upload a Python Package to PyPI when a release is created
+# Publish to PyPI when a GitHub release is published.
+#
+# Two things differ from the usual template:
+#   1. The full CI suite must pass before anything is built. A release that
+#      cannot pass its own tests should never reach PyPI.
+#   2. Publishing uses PyPI Trusted Publishing (OIDC) instead of a stored API
+#      token, so there is no long-lived credential in repository secrets.
+#      Configure it once at https://pypi.org/manage/project/vectrixdb/settings/publishing/
+#      with owner `knowusuboaky`, repo `VectrixDB`, workflow `python-publish.yml`,
+#      environment `pypi`. The old PYPI_API_TOKEN secret can then be deleted.
 
 name: Upload Python Package
 
@@ -10,9 +19,15 @@ permissions:
   contents: read
 
 jobs:
-  release-build:
-    runs-on: ubuntu-latest
+  ci:
+    name: CI must pass
+    uses: ./.github/workflows/ci.yml
 
+  release-build:
+    needs: [ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to attach the OpenAPI document to the release
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,8 +42,28 @@ jobs:
 
       - name: Build release distributions
         run: |
-          python -m pip install build
+          python -m pip install --upgrade pip build
           python -m build
+
+      - name: Verify the tag matches the packaged version
+        run: |
+          python - <<'PY'
+          import os, pathlib, re, sys
+          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          wheel = next(pathlib.Path("dist").glob("*.whl")).name
+          built = re.match(r"vectrixdb-([^-]+)-", wheel).group(1)
+          if tag != built:
+              sys.exit(f"release tag {tag!r} does not match built version {built!r}")
+          print(f"tag and version agree: {built}")
+          PY
+
+      # A gateway team imports this to make its operations, so every release
+      # carries the route table it was built from, at a stable address. The
+      # suite that ran above holds it to the routes the server serves.
+      - name: Attach the OpenAPI document to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" docs/reference/openapi.json --clobber
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4
@@ -37,10 +72,11 @@ jobs:
           path: dist/
 
   pypi-publish:
+    needs: [release-build]
     runs-on: ubuntu-latest
-    needs:
-      - release-build
-
+    environment: pypi
+    permissions:
+      id-token: write # required for Trusted Publishing; replaces the API token
     steps:
       - name: Retrieve release distributions
         uses: actions/download-artifact@v4
@@ -52,4 +88,3 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
-          password: ${{ secrets.PYPI_API_TOKEN }}

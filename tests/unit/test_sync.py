@@ -36,7 +36,7 @@ class TestVectrixSync:
             target=target,
             sync_collections=True,
             sync_documents=False,
-            batch_size=500
+            batch_size=500,
         )
 
         assert sync.sync_collections is True
@@ -159,7 +159,7 @@ class TestSyncResult:
             collections_synced=["coll1", "coll2"],
             documents_synced=5,
             nodes_synced=25,
-            duration_seconds=1.5
+            duration_seconds=1.5,
         )
 
         assert result.success is True
@@ -179,7 +179,7 @@ class TestSyncResult:
             documents_synced=0,
             nodes_synced=0,
             duration_seconds=0.5,
-            errors=["Error 1", "Error 2"]
+            errors=["Error 1", "Error 2"],
         )
 
         assert result.success is False
@@ -196,7 +196,7 @@ class TestSyncStatus:
             rows_synced=100,
             lag_seconds=30.0,
             is_running=False,
-            collections={"coll1": {"source": 100, "target": 100, "pending": 0}}
+            collections={"coll1": {"source": 100, "target": 100, "pending": 0}},
         )
 
         assert status.last_sync == "2024-01-01T00:00:00"

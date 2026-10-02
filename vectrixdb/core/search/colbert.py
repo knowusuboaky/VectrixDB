@@ -9,6 +9,25 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 
+__all__ = [
+    "TokenEmbeddings",
+    "ColBERTResult",
+    "MaxSimScorer",
+    "ColBERTSearch",
+    "ColBERTEncoder",
+]
+
+
+# ============================================================================
+# TOKEN EMBEDDINGS, AND A RESULT
+# ============================================================================
+#
+# INPUT   a text
+# OUTPUT  one vector a token; one search result
+#
+# The shapes late interaction works on.
+
+
 @dataclass
 class TokenEmbeddings:
     """
@@ -16,6 +35,7 @@ class TokenEmbeddings:
 
     Stores embeddings for each token in a text.
     """
+
     embeddings: np.ndarray  # Shape: (n_tokens, embedding_dim)
     tokens: Optional[List[str]] = None  # Original tokens (optional)
     mask: Optional[np.ndarray] = None  # Attention mask (optional)
@@ -44,11 +64,23 @@ class TokenEmbeddings:
 @dataclass
 class ColBERTResult:
     """ColBERT search result."""
+
     id: str
     score: float
     token_scores: Optional[List[float]] = None
     matched_tokens: Optional[List[Tuple[int, int, float]]] = None  # (query_idx, doc_idx, score)
     payload: Optional[Dict[str, Any]] = None
+
+
+# ============================================================================
+# MAXSIM, AND THE SEARCH
+# ============================================================================
+#
+# INPUT   a query's token vectors and documents' token vectors
+# OUTPUT  each document scored by the sum of each query token's best match;
+#         the search over them
+#
+# What ultimate mode adds over a single dense vector.
 
 
 class MaxSimScorer:
@@ -111,17 +143,19 @@ class MaxSimScorer:
         # Apply document mask if available
         if self.use_mask and document.mask is not None:
             # Mask out padding tokens (set to -inf)
-            similarities[:, ~document.mask.astype(bool)] = float('-inf')
+            similarities[:, ~document.mask.astype(bool)] = float("-inf")
 
-        # MaxSim: for each query token, take max over document tokens
+        # MaxSim: for each query token, take max over document tokens. A
+        # document with no tokens has nothing to take a maximum over, and
+        # numpy raises rather than returning nothing, so it scores zero.
+        if similarities.size == 0 or similarities.shape[1] == 0:
+            # score() always returns a pair, so the empty case does too.
+            return 0.0, ([] if return_token_scores else None)
         token_scores = similarities.max(axis=1).tolist()
 
         # Apply query mask if available
         if self.use_mask and query.mask is not None:
-            token_scores = [
-                score if mask else 0.0
-                for score, mask in zip(token_scores, query.mask)
-            ]
+            token_scores = [score if mask else 0.0 for score, mask in zip(token_scores, query.mask)]
 
         total_score = sum(token_scores)
 
@@ -227,9 +261,7 @@ class ColBERTSearch:
             embeddings: Token embeddings
         """
         if embeddings.dimension != self.dimension:
-            raise ValueError(
-                f"Embedding dimension {embeddings.dimension} != {self.dimension}"
-            )
+            raise ValueError(f"Embedding dimension {embeddings.dimension} != {self.dimension}")
 
         self._documents[id] = embeddings
 
@@ -278,7 +310,8 @@ class ColBERTSearch:
             List of ColBERT results
         """
         # Determine documents to search
-        if filter_ids:
+        if filter_ids is not None:
+            # An empty filter means search nothing, not search everything.
             doc_ids = [id_ for id_ in filter_ids if id_ in self._documents]
         else:
             doc_ids = list(self._documents.keys())
@@ -292,15 +325,16 @@ class ColBERTSearch:
         for doc_id in doc_ids:
             doc = self._documents[doc_id]
             score, token_scores = self._scorer.score(
-                query, doc,
-                return_token_scores=return_token_scores
+                query, doc, return_token_scores=return_token_scores
             )
 
-            scored.append(ColBERTResult(
-                id=doc_id,
-                score=score,
-                token_scores=token_scores,
-            ))
+            scored.append(
+                ColBERTResult(
+                    id=doc_id,
+                    score=score,
+                    token_scores=token_scores,
+                )
+            )
 
         # Sort by score
         scored.sort(key=lambda x: x.score, reverse=True)
@@ -412,13 +446,37 @@ class ColBERTSearch:
         }
 
 
-class ColBERTEncoder:
-    """
-    Helper for encoding text to ColBERT token embeddings.
+# ============================================================================
+# A NAME KEPT
+# ============================================================================
+#
+# INPUT   an old import
+# OUTPUT  nothing: not an encoder, kept only so an existing import still
+#         resolves
+#
+# The encoder lives in the models package.
 
-    This is a placeholder that uses random embeddings.
-    In production, use a real ColBERT model.
+
+class ColBERTEncoder:
+    """Not a ColBERT encoder. Kept only so an existing import still resolves.
+
+    This produced token embeddings by seeding a random generator from the
+    hash of each token: deterministic for the same text, and unrelated to
+    what the text means. Nothing in the package ever used it, and the real
+    late-interaction path loads the bundled ONNX model, but it sat in this
+    module's ``__all__`` reading like a working component.
+
+    Constructing it raises. Use ``vectrixdb.models.LateInteractionEmbedder``,
+    or ``Vectrix(mode="ultimate")``, which wires that up for you.
     """
+
+    def __new__(cls, *args: object, **kwargs: object) -> "ColBERTEncoder":
+        raise NotImplementedError(
+            "ColBERTEncoder never encoded anything: it returned random vectors "
+            "seeded from a hash of each token. Use "
+            "vectrixdb.models.LateInteractionEmbedder for real ColBERT "
+            "embeddings, or Vectrix(mode='ultimate'), which sets it up."
+        )
 
     def __init__(
         self,
@@ -454,7 +512,7 @@ class ColBERTEncoder:
             Token embeddings
         """
         # Simple tokenization (placeholder)
-        tokens = text.lower().split()[:self.max_tokens]
+        tokens = text.lower().split()[: self.max_tokens]
 
         if not tokens:
             tokens = ["[PAD]"]

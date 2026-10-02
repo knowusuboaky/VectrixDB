@@ -1,0 +1,16 @@
+# What the machine that runs the custom dashboard needs, in one place.
+#
+# Run it from this folder:
+#   pip install -r requirements.txt
+#
+# The Backend is the only part with Python packages, and its list is beside
+# its code, where a deployment looks for it. This file reads that one, so
+# the two can never say different things.
+-r Backend/requirements.txt
+
+# The Frontend is JavaScript. Its packages are in Frontend/package.json:
+#   cd Frontend && npm install
+# Its run_dev.py, run_prod.py and run_tests.py use nothing past Python itself.
+#
+# The tests, under tests/, need pytest, httpx and FastAPI, which are the
+# Backend's own list, so nothing is added for them.

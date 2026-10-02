@@ -11,12 +11,38 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generic, Iterator, List, Optional, TypeVar
 import numpy as np
 
-T = TypeVar('T')
+
+__all__ = [
+    "BatchResult",
+    "ParallelBatchProcessor",
+    "ParallelVectorInserter",
+]
+
+
+# ============================================================================
+# SETTINGS: the type variable
+# ============================================================================
+#
+# Whatever a batch holds.
+
+T = TypeVar("T")
+
+
+# ============================================================================
+# RESULTS, THE PROCESSOR, AND THE INSERTER
+# ============================================================================
+#
+# INPUT   items and a function, with a concurrency; vectors to insert
+# OUTPUT  what a batch did, with its failures; batches processed in threads or
+#         processes; vectors inserted in parallel
+#
+# Thread and process based, chosen by what the work is bound by.
 
 
 @dataclass
 class BatchResult:
     """Result of a batch operation."""
+
     success_count: int = 0
     error_count: int = 0
     errors: List[Dict[str, Any]] = field(default_factory=list)
@@ -77,7 +103,7 @@ class ParallelBatchProcessor(Generic[T]):
     def _chunk_items(self, items: List[T]) -> Iterator[List[T]]:
         """Split items into batches."""
         for i in range(0, len(items), self.batch_size):
-            yield items[i:i + self.batch_size]
+            yield items[i : i + self.batch_size]
 
     def process_batch(
         self,
@@ -112,10 +138,7 @@ class ParallelBatchProcessor(Generic[T]):
 
         with executor_class(max_workers=self.max_workers) as executor:
             # Submit all batches
-            futures = {
-                executor.submit(processor, batch): i
-                for i, batch in enumerate(batches)
-            }
+            futures = {executor.submit(processor, batch): i for i, batch in enumerate(batches)}
 
             # Process results as they complete
             for future in as_completed(futures):
@@ -127,11 +150,13 @@ class ParallelBatchProcessor(Generic[T]):
                     batch_idx = futures[future]
                     batch_size = len(batches[batch_idx])
                     combined_result.error_count += batch_size
-                    combined_result.errors.append({
-                        "batch": batch_idx,
-                        "error": str(e),
-                        "type": type(e).__name__,
-                    })
+                    combined_result.errors.append(
+                        {
+                            "batch": batch_idx,
+                            "error": str(e),
+                            "type": type(e).__name__,
+                        }
+                    )
 
                 completed_batches += 1
 
@@ -232,10 +257,10 @@ class ParallelVectorInserter:
         start_time = time.perf_counter()
 
         # Create batches
-        batches = []
+        batches: List[Dict[str, Any]] = []
         for i in range(0, n_vectors, self.batch_size):
             end = min(i + self.batch_size, n_vectors)
-            batch = {
+            batch: Dict[str, Any] = {
                 "ids": ids[i:end],
                 "vectors": vectors[i:end],
                 "metadata": metadata[i:end] if metadata else None,
@@ -250,8 +275,7 @@ class ParallelVectorInserter:
         # Use ThreadPoolExecutor for I/O-bound database operations
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {
-                executor.submit(self._process_batch, batch): i
-                for i, batch in enumerate(batches)
+                executor.submit(self._process_batch, batch): i for i, batch in enumerate(batches)
             }
 
             for future in as_completed(futures):
@@ -262,10 +286,12 @@ class ParallelVectorInserter:
                     batch_idx = futures[future]
                     batch_size = len(batches[batch_idx]["ids"])
                     combined_result.error_count += batch_size
-                    combined_result.errors.append({
-                        "batch": batch_idx,
-                        "error": str(e),
-                    })
+                    combined_result.errors.append(
+                        {
+                            "batch": batch_idx,
+                            "error": str(e),
+                        }
+                    )
 
                 completed += 1
                 if on_progress:
@@ -295,7 +321,4 @@ class ParallelVectorInserter:
             return BatchResult(success_count=len(batch["ids"]))
 
         except Exception as e:
-            return BatchResult(
-                error_count=len(batch["ids"]),
-                errors=[{"error": str(e)}]
-            )
+            return BatchResult(error_count=len(batch["ids"]), errors=[{"error": str(e)}])

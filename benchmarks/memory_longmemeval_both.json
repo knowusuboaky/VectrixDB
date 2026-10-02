@@ -1,0 +1,30 @@
+{
+  "benchmark": "longmemeval",
+  "token_budget": 1500,
+  "model": "bge-small + e5-small",
+  "vectrixdb": "2.2.0",
+  "date": "2026-09-20",
+  "machine": "AMD64 Windows Python 3.13.14",
+  "questions": 150,
+  "evidence_recall_memory": 0.8141,
+  "evidence_recall_search": 0.8124,
+  "mean_block_tokens": 1218,
+  "by_category": {
+    "temporal-reasoning": {
+      "n": 59,
+      "memory": 0.89,
+      "search": 0.89
+    },
+    "multi-session": {
+      "n": 57,
+      "memory": 0.677,
+      "search": 0.673
+    },
+    "knowledge-update": {
+      "n": 34,
+      "memory": 0.912,
+      "search": 0.912
+    }
+  },
+  "seconds": 3949.8
+}

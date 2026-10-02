@@ -53,7 +53,9 @@ class TestCollections:
         coll_cosine = db.create_collection("cosine", dimension=4, metric=DistanceMetric.COSINE)
         assert coll_cosine.metric == DistanceMetric.COSINE
 
-        coll_euclidean = db.create_collection("euclidean", dimension=4, metric=DistanceMetric.EUCLIDEAN)
+        coll_euclidean = db.create_collection(
+            "euclidean", dimension=4, metric=DistanceMetric.EUCLIDEAN
+        )
         assert coll_euclidean.metric == DistanceMetric.EUCLIDEAN
 
         db.close()
@@ -183,11 +185,7 @@ class TestSearch:
         coll.add(ids=ids, vectors=sample_vectors, metadata=sample_metadata)
 
         # Search with filter
-        results = coll.search(
-            query=sample_vectors[0],
-            limit=10,
-            filter={"category": "programming"}
-        )
+        results = coll.search(query=sample_vectors[0], limit=10, filter={"category": "programming"})
 
         assert results is not None
         assert len(results.results) >= 1
@@ -207,3 +205,78 @@ class TestSearch:
         results = coll.search(query=sample_vectors[0], limit=1)
         assert len(results.results) == 1
         db.close()
+
+
+class TestOneBackendTwoProcesses:
+    """A server beside an ingest worker reads what the worker made, not only what it made itself.
+
+    One in-memory store stands in for the backend both reach. It is handed
+    over as a Cosmos DB one, because what makes a backend shared is that it
+    is not SQLite or memory on this machine; nothing here opens Cosmos.
+    """
+
+    @pytest.fixture
+    def shared(self, monkeypatch):
+        from vectrixdb.core.storage import InMemoryStorage, StorageBackend, StorageConfig
+
+        store = InMemoryStorage(StorageConfig(backend=StorageBackend.MEMORY))
+        monkeypatch.setattr("vectrixdb.core.database.create_storage", lambda config: store)
+        return StorageConfig(backend=StorageBackend.COSMOSDB), store
+
+    def test_the_server_lists_and_opens_what_the_worker_made(self, shared, tmp_path):
+        config, _ = shared
+        worker = VectrixDB(path=tmp_path / "worker", storage_config=config)
+        worker.create_collection("handbook", dimension=4, tags=["Hybrid"], description="the staff handbook")
+        server = VectrixDB(path=tmp_path / "server", storage_config=config, follow_shared=True)
+        assert [info.name for info in server.list_collections()] == ["handbook"]
+        opened = server.get_collection("handbook")
+        assert (opened.dimension, opened.info().has_text_index, opened.info().description) == (4, True, "the staff handbook")
+
+    def test_one_made_after_the_server_started_is_found_by_name(self, shared, tmp_path):
+        config, _ = shared
+        server = VectrixDB(path=tmp_path / "server", storage_config=config, follow_shared=True)
+        VectrixDB(path=tmp_path / "worker", storage_config=config).create_collection("late", dimension=4)
+        assert server.has_collection("late") and server.get_collection("late").dimension == 4
+        assert "late" in [info.name for info in server.list_collections()]
+
+    def test_without_follow_shared_nothing_changes(self, shared, tmp_path):
+        """Vectrix creates its collection when the lookup misses, with its own options, so the default must still miss."""
+        config, _ = shared
+        VectrixDB(path=tmp_path / "worker", storage_config=config).create_collection("handbook", dimension=4)
+        handle = VectrixDB(path=tmp_path / "handle", storage_config=config)
+        assert handle.list_collections() == [] and not handle.has_collection("handbook")
+        with pytest.raises(KeyError):
+            handle.get_collection("handbook")
+        assert handle.open_shared() == ["handbook"] and handle.get_collection("handbook").dimension == 4
+
+    def test_a_backend_on_this_machine_is_left_alone(self, tmp_path):
+        db = VectrixDB(path=tmp_path / "local", follow_shared=True)
+        assert db.open_shared() == [] and db.list_collections() == []
+
+    def test_a_backend_that_cannot_be_read_leaves_the_server_up(self, shared, tmp_path, monkeypatch):
+        config, store = shared
+
+        def down():
+            raise ConnectionError("the service did not answer")
+
+        monkeypatch.setattr(store, "list_collections", down)
+        server = VectrixDB(path=tmp_path / "server", storage_config=config, follow_shared=True)
+        assert server.list_collections() == []
+
+    def test_a_record_that_will_not_open_is_named_and_the_others_open(self, shared, tmp_path):
+        from vectrixdb.exceptions import StorageOperationError
+
+        config, store = shared
+        store.create_collection("broken", {"metric": "cosine"})
+        store.create_collection("fine", {"dimension": 4, "metric": "cosine"})
+        server = VectrixDB(path=tmp_path / "server", storage_config=config, follow_shared=True)
+        assert [info.name for info in server.list_collections()] == ["fine"]
+        assert "names no dimension" in server.failed_collections["broken"]
+        with pytest.raises(StorageOperationError):
+            server.get_collection("broken")
+
+    def test_the_api_server_follows_what_it_shares(self):
+        import vectrixdb.api.server as server
+
+        source = Path(server.__file__).read_text(encoding="utf-8")
+        assert "follow_shared=True" in source.split("_db = VectrixDB(", 1)[1][:600]

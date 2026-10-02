@@ -1,0 +1,27 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "INGEST_QUEUE": "ingest",
+    "INGEST_COLLECTION": "reports",
+    "INGEST_BLOB_ACCOUNT": "https://youraccount.blob.core.windows.net",
+    "INGEST_PATH": "/tmp/vectrixdb",
+    "AZURE_SEARCH_ENDPOINT": "https://yourservice.search.windows.net",
+    "AZURE_SEARCH_KEY": "",
+    "AZURE_SEARCH_SEMANTIC": "true",
+    "AZURE_DOCINTEL_ENDPOINT": "",
+    "AZURE_DOCINTEL_KEY": "",
+    "AZURE_SPEECH_ENDPOINT": "",
+    "AZURE_SPEECH_KEY": "",
+    "AZURE_OPENAI_ENDPOINT": "",
+    "AZURE_OPENAI_KEY": "",
+    "AZURE_OPENAI_VISION_DEPLOYMENT": "gpt-5.4-mini",
+    "AZURE_OPENAI_EMBED_DEPLOYMENT": "text-embedding-3-small",
+    "AZURE_OPENAI_WRITER_DEPLOYMENT": "",
+    "AZURE_OPENAI_API_VERSION": "",
+    "VECTRIXDB_EVALUATIONS": "https://youraccount.blob.core.windows.net/evals",
+    "INGEST_CHUNKING": "auto",
+    "RETRIEVAL_SETUP": "auto"
+  }
+}

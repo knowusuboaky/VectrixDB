@@ -7,7 +7,7 @@ Provides page/section navigation alongside vector search:
 - Document lifecycle tracking (indexed_at, last_synced, etag)
 - Integration with VectrixDB storage backends
 
-Author: Daddy Nyame Owusu - Boakye
+Author: Kwadwo Daddy Nyame Owusu - Boakye
 """
 
 from __future__ import annotations
@@ -17,16 +17,45 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from .._time import parse_iso
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
+
+
+__all__ = [
+    "DocumentType",
+    "DocumentNode",
+    "DocumentInfo",
+    "ChunkInfo",
+    "SearchResultWithContext",
+    "chunk_text",
+    "chunk_with_context",
+    "build_tree_from_markdown",
+    "build_tree_from_pdf",
+    "build_tree_from_text",
+    "get_section_path",
+    "DocumentIndex",
+]
 
 if TYPE_CHECKING:
     from .storage import BaseStorage
 
 
+# ============================================================================
+# THE TYPES: documents, nodes, chunks, and results with context
+# ============================================================================
+#
+# INPUT   a document
+# OUTPUT  its type, a node in its tree, its metadata, a chunk for
+#         vectorisation, and a result carrying its context
+#
+# Page and section navigation beside vector search.
+
+
 class DocumentType(str, Enum):
     """Supported document types."""
+
     PDF = "pdf"
     MARKDOWN = "markdown"
     TEXT = "text"
@@ -36,6 +65,7 @@ class DocumentType(str, Enum):
 @dataclass
 class DocumentNode:
     """A node in the document tree structure."""
+
     node_id: str
     doc_id: str
     parent_id: Optional[str] = None
@@ -80,6 +110,7 @@ class DocumentNode:
 @dataclass
 class DocumentInfo:
     """Document metadata and index information."""
+
     doc_id: str
     title: str
     doc_type: DocumentType
@@ -113,11 +144,11 @@ class DocumentInfo:
     def from_dict(cls, data: Dict[str, Any]) -> "DocumentInfo":
         indexed_at = None
         if data.get("indexed_at"):
-            indexed_at = datetime.fromisoformat(data["indexed_at"].replace("Z", "+00:00"))
+            indexed_at = parse_iso(data["indexed_at"])
 
         last_synced = None
         if data.get("last_synced"):
-            last_synced = datetime.fromisoformat(data["last_synced"].replace("Z", "+00:00"))
+            last_synced = parse_iso(data["last_synced"])
 
         return cls(
             doc_id=data["doc_id"],
@@ -138,6 +169,7 @@ class DocumentInfo:
 @dataclass
 class ChunkInfo:
     """Information about a text chunk for vectorization."""
+
     chunk_id: str
     doc_id: str
     node_id: str
@@ -152,20 +184,30 @@ class ChunkInfo:
 @dataclass
 class SearchResultWithContext:
     """Search result with document context."""
+
     chunk_id: str
     doc_id: str
     node_id: str
     text: str
     score: float
     page_num: Optional[int] = None
-    section_path: List[str] = field(default_factory=list)  # ["Chapter 1", "Introduction", "Overview"]
+    section_path: List[str] = field(
+        default_factory=list
+    )  # ["Chapter 1", "Introduction", "Overview"]
     document_title: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-# =============================================================================
-# Chunking Utilities
-# =============================================================================
+# ============================================================================
+# CHUNKING
+# ============================================================================
+#
+# INPUT   text, a chunk size and an overlap
+# OUTPUT  overlapping chunks, split at the separators, keeping heading context
+#         for Markdown
+#
+# A chunk that knows its heading is a chunk a model can place.
+
 
 def chunk_text(
     text: str,
@@ -196,19 +238,19 @@ def chunk_text(
         return list(text)
 
     def merge_chunks(splits: List[str], separator: str) -> List[str]:
+        # The length that matters is the length of the joined chunk. A running
+        # total that adds a separator per split counts one separator too many
+        # and, once an overlap is carried, drifts far enough to emit a chunk
+        # longer than chunk_size.
         chunks = []
-        current_chunk = []
-        current_size = 0
+        current_chunk: List[str] = []
 
         for split in splits:
-            split_size = len(split) + len(separator)
-
-            if current_size + split_size > chunk_size and current_chunk:
-                chunk_text = separator.join(current_chunk)
-                chunks.append(chunk_text)
+            if current_chunk and len(separator.join(current_chunk + [split])) > chunk_size:
+                chunks.append(separator.join(current_chunk))
 
                 overlap_size = 0
-                overlap_chunks = []
+                overlap_chunks: List[str] = []
                 for prev in reversed(current_chunk):
                     if overlap_size + len(prev) > chunk_overlap:
                         break
@@ -216,10 +258,12 @@ def chunk_text(
                     overlap_size += len(prev) + len(separator)
 
                 current_chunk = overlap_chunks
-                current_size = overlap_size
+                # The overlap is a convenience, not a promise: drop it rather
+                # than carry it into a chunk that would exceed the limit.
+                if current_chunk and len(separator.join(current_chunk + [split])) > chunk_size:
+                    current_chunk = []
 
             current_chunk.append(split)
-            current_size += split_size
 
         if current_chunk:
             chunks.append(separator.join(current_chunk))
@@ -233,7 +277,7 @@ def chunk_text(
 
     chunks = []
     for i in range(0, len(text), chunk_size - chunk_overlap):
-        chunks.append(text[i:i + chunk_size])
+        chunks.append(text[i : i + chunk_size])
     return chunks
 
 
@@ -255,7 +299,7 @@ def chunk_with_context(
     if not text:
         return []
 
-    heading_pattern = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
+    heading_pattern = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
     chunks = []
     current_heading = None
@@ -263,14 +307,16 @@ def chunk_with_context(
     last_pos = 0
 
     for match in heading_pattern.finditer(text):
-        content = text[last_pos:match.start()].strip()
+        content = text[last_pos : match.start()].strip()
         if content:
             for chunk in chunk_text(content, chunk_size, chunk_overlap):
-                chunks.append({
-                    "content": chunk,
-                    "heading": current_heading,
-                    "level": current_level,
-                })
+                chunks.append(
+                    {
+                        "content": chunk,
+                        "heading": current_heading,
+                        "level": current_level,
+                    }
+                )
 
         current_level = len(match.group(1))
         current_heading = match.group(2)
@@ -279,32 +325,41 @@ def chunk_with_context(
     content = text[last_pos:].strip()
     if content:
         for chunk in chunk_text(content, chunk_size, chunk_overlap):
-            chunks.append({
-                "content": chunk,
-                "heading": current_heading,
-                "level": current_level,
-            })
+            chunks.append(
+                {
+                    "content": chunk,
+                    "heading": current_heading,
+                    "level": current_level,
+                }
+            )
 
     return chunks
 
 
-# =============================================================================
-# Tree Building Utilities
-# =============================================================================
+# ============================================================================
+# BUILDING THE TREE
+# ============================================================================
+#
+# INPUT   Markdown, PDF text or plain text, and a document's id
+# OUTPUT  a tree from headings, pages or paragraphs; oversized nodes split
+#         into siblings; parents assigned; the path from the root to a node
+#
+# The tree is what the document index navigates by.
+
 
 def _generate_summary(text: str, max_length: int = 200) -> str:
     """Generate a simple summary (first sentence or truncated)."""
     if not text:
         return ""
 
-    sentence_end = re.search(r'[.!?]\s', text)
+    sentence_end = re.search(r"[.!?]\s", text)
     if sentence_end and sentence_end.end() <= max_length:
-        return text[:sentence_end.end()].strip()
+        return text[: sentence_end.end()].strip()
 
     if len(text) <= max_length:
         return text
 
-    return text[:max_length - 3].strip() + "..."
+    return text[: max_length - 3].strip() + "..."
 
 
 def build_tree_from_markdown(
@@ -324,7 +379,7 @@ def build_tree_from_markdown(
     Returns:
         List of DocumentNode objects (flat, with parent_id for hierarchy).
     """
-    heading_pattern = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
+    heading_pattern = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
     sections = []
     node_counter = [0]
@@ -337,16 +392,16 @@ def build_tree_from_markdown(
     matches = list(heading_pattern.finditer(text))
 
     for i, match in enumerate(matches):
-        content_before = text[last_pos:match.start()].strip()
+        content_before = text[last_pos : match.start()].strip()
 
         level = len(match.group(1))
         title = match.group(2).strip()
 
         # Get content after this heading (until next heading or end)
         if i + 1 < len(matches):
-            content = text[match.end():matches[i + 1].start()].strip()
+            content = text[match.end() : matches[i + 1].start()].strip()
         else:
-            content = text[match.end():].strip()
+            content = text[match.end() :].strip()
 
         node = DocumentNode(
             node_id=get_node_id(),
@@ -385,7 +440,7 @@ def build_tree_from_pdf(
     Returns:
         List of DocumentNode objects (one per page).
     """
-    page_pattern = re.compile(r'---\s*Page\s*(\d+)\s*---', re.IGNORECASE)
+    page_pattern = re.compile(r"---\s*Page\s*(\d+)\s*---", re.IGNORECASE)
     pages = page_pattern.split(text)
 
     nodes = []
@@ -406,6 +461,52 @@ def build_tree_from_pdf(
         nodes.append(node)
 
     return nodes
+
+
+def _split_oversized_nodes(
+    nodes: List[DocumentNode],
+    chunk_size: int,
+    chunk_overlap: int,
+) -> List[DocumentNode]:
+    """Split any node longer than ``chunk_size`` into siblings.
+
+    A split node keeps its parent, level, page and title, so the tree is the
+    same shape with finer leaves. Returns the list unchanged when nothing is
+    over the limit, which is the common case.
+    """
+    if chunk_size <= 0 or not any(len(n.text) > chunk_size for n in nodes):
+        return nodes
+
+    from ..ingest import chunk as chunk_text
+
+    out: List[DocumentNode] = []
+    for node in nodes:
+        if len(node.text) <= chunk_size:
+            out.append(node)
+            continue
+
+        pieces = chunk_text(
+            node.text,
+            strategy="recursive",
+            size=chunk_size,
+            overlap=max(0, min(chunk_overlap, chunk_size - 1)),
+        )
+        for part, piece in enumerate(pieces, start=1):
+            out.append(
+                DocumentNode(
+                    node_id=f"{node.node_id}#part{part}",
+                    doc_id=node.doc_id,
+                    parent_id=node.parent_id,
+                    level=node.level,
+                    title=node.title if part == 1 else f"{node.title} ({part})",
+                    text=piece.text,
+                    summary=node.summary if part == 1 else "",
+                    page_num=node.page_num,
+                    position=node.position,
+                    metadata={**node.metadata, "split_from": node.node_id, "part": part},
+                )
+            )
+    return out
 
 
 def build_tree_from_text(
@@ -489,9 +590,16 @@ def get_section_path(
     return path
 
 
-# =============================================================================
-# Document Index Class
-# =============================================================================
+# ============================================================================
+# THE DOCUMENT INDEX
+# ============================================================================
+#
+# INPUT   a document
+# OUTPUT  indexed with its tree and its chunks, so page and section navigation
+#         sit beside vector search
+#
+# The indexer, holding the trees and the chunk map.
+
 
 class DocumentIndex:
     """
@@ -581,6 +689,12 @@ class DocumentIndex:
         else:
             nodes = build_tree_from_text(content, doc_id)
 
+        # Structure chose the boundaries; chunk_size caps how long any one
+        # of them may be. Both arguments were accepted and never read, so a
+        # caller sizing chunks for their model's context got sections of
+        # whatever length the headings implied.
+        nodes = _split_oversized_nodes(nodes, chunk_size, chunk_overlap)
+
         # Count pages vs sections
         page_count = sum(1 for n in nodes if n.page_num is not None)
         section_count = len(nodes) - page_count
@@ -661,7 +775,9 @@ class DocumentIndex:
         file_metadata = {
             "source_path": str(path.absolute()),
             "file_size": path.stat().st_size,
-            "file_modified": datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat(),
+            "file_modified": datetime.fromtimestamp(
+                path.stat().st_mtime, tz=timezone.utc
+            ).isoformat(),
         }
         if metadata:
             file_metadata.update(metadata)

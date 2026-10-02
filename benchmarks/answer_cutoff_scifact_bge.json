@@ -1,0 +1,111 @@
+{
+  "dataset": "scifact",
+  "vectrixdb": "2.2.0",
+  "date": "2026-09-20",
+  "machine": "AMD64 Windows Python 3.13.14",
+  "measure": "similarity",
+  "by": "chunk",
+  "model": "vectrixdb/bge-small-en-v1.5",
+  "questions": 300,
+  "unanswerable": 0,
+  "answers": 177,
+  "near_misses": 123,
+  "unmeasured": 0,
+  "separation": 0.7448,
+  "cutoff": 0.8305,
+  "at_cutoff": {
+    "cutoff": 0.8305,
+    "precision": 0.8268,
+    "answered": 0.5932,
+    "declined": 0.8211
+  },
+  "table": [
+    {
+      "cutoff": 0.6253,
+      "precision": 0.59,
+      "answered": 1.0,
+      "declined": 0.0
+    },
+    {
+      "cutoff": 0.7264,
+      "precision": 0.6218,
+      "answered": 0.9661,
+      "declined": 0.1545
+    },
+    {
+      "cutoff": 0.7683,
+      "precision": 0.632,
+      "answered": 0.8927,
+      "declined": 0.252
+    },
+    {
+      "cutoff": 0.7846,
+      "precision": 0.6622,
+      "answered": 0.8418,
+      "declined": 0.3821
+    },
+    {
+      "cutoff": 0.7952,
+      "precision": 0.705,
+      "answered": 0.7966,
+      "declined": 0.5203
+    },
+    {
+      "cutoff": 0.8062,
+      "precision": 0.7371,
+      "answered": 0.7288,
+      "declined": 0.626
+    },
+    {
+      "cutoff": 0.8198,
+      "precision": 0.76,
+      "answered": 0.6441,
+      "declined": 0.7073
+    },
+    {
+      "cutoff": 0.8305,
+      "precision": 0.8268,
+      "answered": 0.5932,
+      "declined": 0.8211
+    },
+    {
+      "cutoff": 0.8318,
+      "precision": 0.824,
+      "answered": 0.5819,
+      "declined": 0.8211
+    },
+    {
+      "cutoff": 0.8402,
+      "precision": 0.86,
+      "answered": 0.4859,
+      "declined": 0.8862
+    },
+    {
+      "cutoff": 0.8536,
+      "precision": 0.8533,
+      "answered": 0.3616,
+      "declined": 0.9106
+    },
+    {
+      "cutoff": 0.8722,
+      "precision": 0.92,
+      "answered": 0.2599,
+      "declined": 0.9675
+    },
+    {
+      "cutoff": 0.8894,
+      "precision": 0.92,
+      "answered": 0.1299,
+      "declined": 0.9837
+    },
+    {
+      "cutoff": 0.9219,
+      "precision": 1.0,
+      "answered": 0.0056,
+      "declined": 1.0
+    }
+  ],
+  "search": {
+    "mode": "dense"
+  }
+}

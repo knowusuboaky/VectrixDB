@@ -13,6 +13,7 @@ from typing import List, Dict, Optional, Any, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .base import (
+    Confidence,
     BaseExtractor,
     Entity,
     Relationship,
@@ -24,6 +25,22 @@ from ..chunker import TextUnit
 from ..config import GraphRAGConfig, LLMProvider
 
 
+__all__ = [
+    "LLMExtractor",
+    "create_llm_extractor",
+]
+
+
+# ============================================================================
+# THE LLM EXTRACTOR
+# ============================================================================
+#
+# INPUT   text units, and a provider: OpenAI, Ollama, Bedrock or Azure OpenAI
+# OUTPUT  entities and relationships the model found; a factory
+#
+# The highest quality, at a cost a call.
+
+
 class LLMExtractor(BaseExtractor):
     """
     High-quality entity extraction using LLM.
@@ -31,7 +48,7 @@ class LLMExtractor(BaseExtractor):
     Supports multiple LLM providers:
     - OpenAI (gpt-4o-mini, gpt-4o, gpt-4-turbo)
     - Ollama (llama3.2, mistral, phi3)
-    - AWS Bedrock (claude-3, titan, llama)
+    - AWS Bedrock (titan, llama)
     - Azure OpenAI
 
     Example:
@@ -95,7 +112,11 @@ JSON:"""
             retry_delay: Delay between retries in seconds.
         """
         if config:
-            self.provider = config.llm_provider.value if isinstance(config.llm_provider, LLMProvider) else config.llm_provider
+            self.provider = (
+                config.llm_provider.value
+                if isinstance(config.llm_provider, LLMProvider)
+                else config.llm_provider
+            )
             self.model = config.llm_model
             self.api_key = config.llm_api_key
             self.endpoint = config.llm_endpoint
@@ -113,7 +134,7 @@ JSON:"""
         self.retry_delay = retry_delay
 
         # Initialize the appropriate client
-        self._client = None
+        self._client: Any = None
         self._init_client()
 
     def _init_client(self):
@@ -133,9 +154,15 @@ JSON:"""
         """Initialize OpenAI client."""
         try:
             from openai import OpenAI
-            api_key = self.api_key or os.environ.get("OPENAI_API_KEY")
+
+            # ``is not None``, for the same reason as _init_azure below: an
+            # explicit key means use that one. This endpoint is fixed, so
+            # nothing leaks here, but the two should not disagree.
+            api_key = self.api_key if self.api_key is not None else os.environ.get("OPENAI_API_KEY")
             if not api_key:
-                raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable or pass api_key.")
+                raise ValueError(
+                    "OpenAI API key not found. Set OPENAI_API_KEY environment variable or pass api_key."
+                )
             self._client = OpenAI(api_key=api_key)
             self._call_fn = self._call_openai
         except ImportError:
@@ -143,23 +170,24 @@ JSON:"""
 
     def _init_ollama(self):
         """Initialize Ollama client."""
+        self._endpoint = self.endpoint or "http://localhost:11434"
         try:
             import ollama
+
             self._client = ollama
-            self._endpoint = self.endpoint or "http://localhost:11434"
             self._call_fn = self._call_ollama
         except ImportError:
-            # Fallback to requests
-            import requests
-            self._client = requests
-            self._endpoint = self.endpoint or "http://localhost:11434"
-            self._call_fn = self._call_ollama_requests
+            # Without the ollama package, its HTTP API with the standard library.
+            # This used to fall back to requests, which the package never declared.
+            self._client = None
+            self._call_fn = self._call_ollama_http
 
     def _init_bedrock(self):
         """Initialize AWS Bedrock client."""
         try:
             import boto3
-            self._client = boto3.client('bedrock-runtime')
+
+            self._client = boto3.client("bedrock-runtime")
             self._call_fn = self._call_bedrock
         except ImportError:
             raise ImportError("boto3 package not installed. Run: pip install boto3")
@@ -168,15 +196,20 @@ JSON:"""
         """Initialize Azure OpenAI client."""
         try:
             from openai import AzureOpenAI
-            api_key = self.api_key or os.environ.get("AZURE_OPENAI_API_KEY")
+
+            # ``is not None``: an explicitly supplied key, empty included,
+            # must not fall back to the environment. azure_endpoint is the
+            # caller's, so the truthiness form sent AZURE_OPENAI_API_KEY to
+            # whatever host they named.
+            api_key = (
+                self.api_key if self.api_key is not None else os.environ.get("AZURE_OPENAI_API_KEY")
+            )
             if not api_key:
                 raise ValueError("Azure OpenAI API key not found.")
             if not self.endpoint:
                 raise ValueError("Azure OpenAI endpoint required.")
             self._client = AzureOpenAI(
-                api_key=api_key,
-                api_version="2024-02-15-preview",
-                azure_endpoint=self.endpoint
+                api_key=api_key, api_version="2024-02-15-preview", azure_endpoint=self.endpoint
             )
             self._call_fn = self._call_azure
         except ImportError:
@@ -187,8 +220,11 @@ JSON:"""
         response = self._client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": "You are an expert at extracting entities and relationships from text. Always respond with valid JSON."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "You are an expert at extracting entities and relationships from text. Always respond with valid JSON.",
+                },
+                {"role": "user", "content": prompt},
             ],
             temperature=self.temperature,
             max_tokens=self.max_tokens,
@@ -198,50 +234,41 @@ JSON:"""
     def _call_ollama(self, prompt: str) -> str:
         """Call Ollama API."""
         response = self._client.generate(
-            model=self.model,
-            prompt=prompt,
-            options={"temperature": self.temperature}
+            model=self.model, prompt=prompt, options={"temperature": self.temperature}
         )
-        return response['response']
+        return response["response"]
 
-    def _call_ollama_requests(self, prompt: str) -> str:
-        """Call Ollama API using requests."""
-        response = self._client.post(
+    def _call_ollama_http(self, prompt: str) -> str:
+        """Ollama's /api/generate over plain HTTP."""
+        from ...._net import post_json
+
+        reply = post_json(
             f"{self._endpoint}/api/generate",
-            json={
-                "model": self.model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": self.temperature}
-            }
+            {"model": self.model, "prompt": prompt, "stream": False, "options": {"temperature": self.temperature}},
         )
-        response.raise_for_status()
-        return response.json()['response']
+        return reply["response"]
 
     def _call_bedrock(self, prompt: str) -> str:
         """Call AWS Bedrock API."""
-        import json
-        body = json.dumps({
-            "prompt": prompt,
-            "max_tokens_to_sample": self.max_tokens,
-            "temperature": self.temperature,
-        })
-        response = self._client.invoke_model(
+        # Converse is the one request shape every Bedrock text model takes.
+        response = self._client.converse(
             modelId=self.model,
-            body=body,
-            contentType="application/json",
-            accept="application/json"
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            inferenceConfig={"maxTokens": self.max_tokens, "temperature": self.temperature},
         )
-        response_body = json.loads(response['body'].read())
-        return response_body.get('completion', '')
+        parts = ((response.get("output") or {}).get("message") or {}).get("content") or []
+        return "".join(str(part.get("text") or "") for part in parts)
 
     def _call_azure(self, prompt: str) -> str:
         """Call Azure OpenAI API."""
         response = self._client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": "You are an expert at extracting entities and relationships from text. Always respond with valid JSON."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "You are an expert at extracting entities and relationships from text. Always respond with valid JSON.",
+                },
+                {"role": "user", "content": prompt},
             ],
             temperature=self.temperature,
             max_tokens=self.max_tokens,
@@ -250,7 +277,7 @@ JSON:"""
 
     def _call_llm(self, prompt: str) -> str:
         """Call the LLM with retries."""
-        last_error = None
+        last_error: Optional[Exception] = None
         for attempt in range(self.max_retries):
             try:
                 return self._call_fn(prompt)
@@ -258,7 +285,9 @@ JSON:"""
                 last_error = e
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay * (attempt + 1))
-        raise last_error
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("LLM call failed with no captured error")
 
     def _parse_json_response(self, response: str) -> Dict[str, Any]:
         """Parse JSON from LLM response."""
@@ -272,11 +301,7 @@ JSON:"""
             pass
 
         # Try to extract JSON from markdown code blocks
-        json_patterns = [
-            r'```json\s*(.*?)\s*```',
-            r'```\s*(.*?)\s*```',
-            r'\{[\s\S]*\}'
-        ]
+        json_patterns = [r"```json\s*(.*?)\s*```", r"```\s*(.*?)\s*```", r"\{[\s\S]*\}"]
 
         for pattern in json_patterns:
             matches = re.findall(pattern, response, re.DOTALL)
@@ -289,11 +314,7 @@ JSON:"""
         # Return empty result if parsing fails
         return {"entities": [], "relationships": []}
 
-    def _convert_to_entities(
-        self,
-        raw_entities: List[Dict],
-        text_unit_id: str
-    ) -> List[Entity]:
+    def _convert_to_entities(self, raw_entities: List[Dict], text_unit_id: str) -> List[Entity]:
         """Convert raw entity dicts to Entity objects."""
         entities = []
         for raw in raw_entities:
@@ -309,17 +330,14 @@ JSON:"""
                 name=name,
                 entity_type=entity_type,
                 description=raw.get("description", ""),
-                source_unit_id=text_unit_id
+                source_unit_id=text_unit_id,
             )
             entities.append(entity)
 
         return entities
 
     def _convert_to_relationships(
-        self,
-        raw_relationships: List[Dict],
-        entities: List[Entity],
-        text_unit_id: str
+        self, raw_relationships: List[Dict], entities: List[Entity], text_unit_id: str
     ) -> List[Relationship]:
         """Convert raw relationship dicts to Relationship objects."""
         # Build entity name lookup
@@ -352,7 +370,8 @@ JSON:"""
                 rel_type=rel_type,
                 description=raw.get("description", ""),
                 strength=strength,
-                source_unit_id=text_unit_id
+                source_unit_id=text_unit_id,
+                confidence=Confidence.EXTRACTED,
             )
             relationships.append(relationship)
 
@@ -375,25 +394,20 @@ JSON:"""
                 entities=[],
                 relationships=[],
                 source_units=[text_unit_id],
-                metadata={"extractor": "llm", "error": str(e)}
+                metadata={"extractor": "llm", "error": str(e)},
             )
 
         # Convert to Entity and Relationship objects
-        entities = self._convert_to_entities(
-            parsed.get("entities", []),
-            text_unit_id
-        )
+        entities = self._convert_to_entities(parsed.get("entities", []), text_unit_id)
         relationships = self._convert_to_relationships(
-            parsed.get("relationships", []),
-            entities,
-            text_unit_id
+            parsed.get("relationships", []), entities, text_unit_id
         )
 
         return ExtractionResult(
             entities=entities,
             relationships=relationships,
             source_units=[text_unit_id],
-            metadata={"extractor": "llm", "provider": self.provider, "model": self.model}
+            metadata={"extractor": "llm", "provider": self.provider, "model": self.model},
         )
 
     def extract(self, text_units: List[TextUnit]) -> ExtractionResult:
@@ -411,20 +425,13 @@ JSON:"""
                 response = self._call_llm(prompt)
                 parsed = self._parse_json_response(response)
 
-                entities = self._convert_to_entities(
-                    parsed.get("entities", []),
-                    unit.id
-                )
+                entities = self._convert_to_entities(parsed.get("entities", []), unit.id)
                 relationships = self._convert_to_relationships(
-                    parsed.get("relationships", []),
-                    entities,
-                    unit.id
+                    parsed.get("relationships", []), entities, unit.id
                 )
 
                 unit_result = ExtractionResult(
-                    entities=entities,
-                    relationships=relationships,
-                    source_units=[unit.id]
+                    entities=entities, relationships=relationships, source_units=[unit.id]
                 )
 
                 combined_result = combined_result.merge_with(unit_result)
@@ -437,16 +444,13 @@ JSON:"""
         combined_result.metadata = {
             "extractor": "llm",
             "provider": self.provider,
-            "model": self.model
+            "model": self.model,
         }
 
         return combined_result
 
     def extract_batch(
-        self,
-        text_units: List[TextUnit],
-        batch_size: int = 10,
-        max_workers: int = 4
+        self, text_units: List[TextUnit], batch_size: int = 10, max_workers: int = 4
     ) -> ExtractionResult:
         """Extract from text units in parallel batches."""
         if not text_units:
@@ -454,11 +458,22 @@ JSON:"""
 
         combined_result = ExtractionResult()
 
-        # Process in parallel with ThreadPoolExecutor
+        # batch_size is honoured rather than accepted and ignored: every unit
+        # used to be submitted at once, which for an LLM-backed extractor
+        # means every unit in flight against the rate limit at the same time.
+        for start in range(0, len(text_units), max(1, batch_size)):
+            batch = text_units[start : start + max(1, batch_size)]
+            combined_result = self._extract_batch_chunk(batch, max_workers, combined_result)
+
+        return combined_result
+
+    def _extract_batch_chunk(
+        self, text_units: List[TextUnit], max_workers: int, combined_result: ExtractionResult
+    ) -> ExtractionResult:
+        """One batch, extracted in parallel."""
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-                executor.submit(self._extract_single_unit, unit): unit
-                for unit in text_units
+                executor.submit(self._extract_single_unit, unit): unit for unit in text_units
             }
 
             for future in as_completed(futures):
@@ -472,7 +487,7 @@ JSON:"""
         combined_result.metadata = {
             "extractor": "llm",
             "provider": self.provider,
-            "model": self.model
+            "model": self.model,
         }
 
         return combined_result
@@ -484,20 +499,13 @@ JSON:"""
         response = self._call_llm(prompt)
         parsed = self._parse_json_response(response)
 
-        entities = self._convert_to_entities(
-            parsed.get("entities", []),
-            unit.id
-        )
+        entities = self._convert_to_entities(parsed.get("entities", []), unit.id)
         relationships = self._convert_to_relationships(
-            parsed.get("relationships", []),
-            entities,
-            unit.id
+            parsed.get("relationships", []), entities, unit.id
         )
 
         return ExtractionResult(
-            entities=entities,
-            relationships=relationships,
-            source_units=[unit.id]
+            entities=entities, relationships=relationships, source_units=[unit.id]
         )
 
 

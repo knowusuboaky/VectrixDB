@@ -14,8 +14,10 @@ Example:
     >>> # Relations from mREBEL: Albert Einstein --country of birth--> Germany
 """
 
-from typing import Optional, List, Dict, Set
+import logging
+from typing import Optional, List, Dict, Set, Any
 from .base import (
+    Confidence,
     BaseExtractor,
     Entity,
     Relationship,
@@ -25,6 +27,33 @@ from .base import (
 )
 from ..config import GraphRAGConfig
 from ..chunker import TextUnit
+
+
+__all__ = [
+    "HybridExtractor",
+    "create_hybrid_extractor",
+]
+
+
+# ============================================================================
+# SETTINGS: the logger
+# ============================================================================
+#
+# One logger for the extractor's lines.
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# SPACY NER PLUS mREBEL RELATIONS
+# ============================================================================
+#
+# INPUT   text
+# OUTPUT  entities from spaCy's multilingual model, relations from mREBEL; a
+#         factory
+#
+# The recommended extractor: no LLM, eighteen languages, about 740 MB of
+# models.
 
 
 class HybridExtractor(BaseExtractor):
@@ -79,9 +108,9 @@ class HybridExtractor(BaseExtractor):
         self.spacy_sent_model = spacy_sent_model
         self.use_rebel = use_rebel
 
-        self._nlp_ner = None
-        self._nlp_sent = None
-        self._rebel = None
+        self._nlp_ner: Any = None
+        self._nlp_sent: Any = None
+        self._rebel: Any = None
 
     def _ensure_spacy_loaded(self):
         """Lazy load spaCy models."""
@@ -91,11 +120,18 @@ class HybridExtractor(BaseExtractor):
         try:
             import spacy
 
+            from vectrixdb._net import auto_download_allowed, refuse_implicit
+
             # Load NER model
             try:
                 self._nlp_ner = spacy.load(self.spacy_ner_model)
             except OSError:
-                print(f"Downloading spaCy model: {self.spacy_ner_model}")
+                if not auto_download_allowed():
+                    raise refuse_implicit(
+                        f"The spaCy model {self.spacy_ner_model}",
+                        f"python -m spacy download {self.spacy_ner_model}",
+                    )
+                logger.info("Downloading spaCy model %s, as allowed", self.spacy_ner_model)
                 spacy.cli.download(self.spacy_ner_model)
                 self._nlp_ner = spacy.load(self.spacy_ner_model)
 
@@ -103,16 +139,19 @@ class HybridExtractor(BaseExtractor):
             try:
                 self._nlp_sent = spacy.load(self.spacy_sent_model)
             except OSError:
-                print(f"Downloading spaCy model: {self.spacy_sent_model}")
-                try:
-                    spacy.cli.download(self.spacy_sent_model)
-                    self._nlp_sent = spacy.load(self.spacy_sent_model)
-                except Exception:
-                    # Sentence model is optional
-                    self._nlp_sent = None
+                self._nlp_sent = None
+                if auto_download_allowed():
+                    try:
+                        spacy.cli.download(self.spacy_sent_model)
+                        self._nlp_sent = spacy.load(self.spacy_sent_model)
+                    except Exception:
+                        pass  # the sentence model is optional
 
         except ImportError:
-            print("spaCy not installed. Install with: pip install spacy")
+            logger.warning(
+                "spaCy is not installed; the hybrid extractor needs it: "
+                'pip install "vectrixdb[nlp]"'
+            )
             raise
 
     def _ensure_rebel_loaded(self):
@@ -123,8 +162,10 @@ class HybridExtractor(BaseExtractor):
         from ....models.embedded import REBELExtractor, is_models_installed
 
         if not is_models_installed("rebel"):
-            print("mREBEL model not installed. Using spaCy-only extraction.")
-            print("To install: vectrixdb download-models --type rebel")
+            logger.info(
+                "mREBEL is not installed; extracting with spaCy alone. "
+                "Install it with: vectrixdb download-models --type rebel"
+            )
             self.use_rebel = False
             return
 
@@ -160,7 +201,9 @@ class HybridExtractor(BaseExtractor):
 
         return entities
 
-    def _extract_relations_rebel(self, text: str, text_unit_id: str, entities: List[Entity]) -> List[Relationship]:
+    def _extract_relations_rebel(
+        self, text: str, text_unit_id: str, entities: List[Entity]
+    ) -> List[Relationship]:
         """Extract relations using mREBEL."""
         if not self.use_rebel:
             return []
@@ -213,6 +256,7 @@ class HybridExtractor(BaseExtractor):
                 description=triplet.relation,
                 strength=1.0,
                 source_unit_id=text_unit_id,
+                confidence=Confidence.EXTRACTED,
             )
             relationship.attributes["extractor"] = "rebel"
             relationship.attributes["original_relation"] = triplet.relation
@@ -289,10 +333,14 @@ class HybridExtractor(BaseExtractor):
                 "extractor": "hybrid",
                 "spacy_model": self.spacy_ner_model,
                 "rebel_model": "mrebel-base-int8" if self.use_rebel else None,
-                "entities_from_spacy": sum(1 for e in entities if e.attributes.get("extractor") == "spacy"),
-                "entities_from_rebel": sum(1 for e in entities if e.attributes.get("extractor") == "rebel"),
+                "entities_from_spacy": sum(
+                    1 for e in entities if e.attributes.get("extractor") == "spacy"
+                ),
+                "entities_from_rebel": sum(
+                    1 for e in entities if e.attributes.get("extractor") == "rebel"
+                ),
                 "relationships_count": len(relationships),
-            }
+            },
         )
 
     def extract(self, text_units: List[TextUnit]) -> ExtractionResult:
@@ -305,10 +353,10 @@ class HybridExtractor(BaseExtractor):
 
         for text_unit in text_units:
             # Extract entities with spaCy
-            entities = self._extract_entities_spacy(text_unit.content, text_unit.id)
+            entities = self._extract_entities_spacy(text_unit.text, text_unit.id)
 
             # Extract relations with mREBEL
-            relationships = self._extract_relations_rebel(text_unit.content, text_unit.id, entities)
+            relationships = self._extract_relations_rebel(text_unit.text, text_unit.id, entities)
 
             # Merge entities
             for entity in entities:
@@ -329,7 +377,7 @@ class HybridExtractor(BaseExtractor):
                 "spacy_model": self.spacy_ner_model,
                 "rebel_model": "mrebel-base-int8" if self.use_rebel else None,
                 "text_units_processed": len(text_units),
-            }
+            },
         )
 
     def extract_batch(self, text_units: List[TextUnit], batch_size: int = 50) -> ExtractionResult:

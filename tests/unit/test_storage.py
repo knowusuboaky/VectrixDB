@@ -47,7 +47,7 @@ class TestStorageConfig:
             delta_workspace_url="https://adb-123.azuredatabricks.net",
             delta_token="dapi_test_token",
             delta_catalog="main",
-            delta_schema="vectrixdb"
+            delta_schema="vectrixdb",
         )
 
         assert config.backend == StorageBackend.DELTA_LAKE
@@ -62,7 +62,7 @@ class TestStorageConfig:
             backend=StorageBackend.LAKEBASE,
             lakebase_host="workspace.cloud.databricks.com",
             lakebase_database="vectrixdb",
-            lakebase_token="dapi_test"
+            lakebase_token="dapi_test",
         )
 
         assert config.backend == StorageBackend.LAKEBASE
@@ -138,10 +138,10 @@ class TestDeltaLakeStorage:
     def test_with_delta_lake_factory(self):
         """Test VectrixDB.with_delta_lake factory method exists."""
         # Just verify the method exists and has correct signature
-        assert hasattr(VectrixDB, 'with_delta_lake')
+        assert hasattr(VectrixDB, "with_delta_lake")
         assert callable(VectrixDB.with_delta_lake)
 
-    @patch('vectrixdb.core.storage.DeltaLakeStorage')
+    @patch("vectrixdb.core.storage.DeltaLakeStorage")
     def test_delta_lake_config_creation(self, mock_storage):
         """Test Delta Lake config is created correctly."""
         config = StorageConfig(
@@ -150,7 +150,7 @@ class TestDeltaLakeStorage:
             delta_token="dapi_test",
             delta_catalog="main",
             delta_schema="vectrixdb",
-            delta_warehouse_id="abc123"
+            delta_warehouse_id="abc123",
         )
 
         assert config.delta_workspace_url == "https://adb-123.azuredatabricks.net"
@@ -165,7 +165,7 @@ class TestLakebaseStorage:
 
     def test_with_lakebase_factory(self):
         """Test VectrixDB.with_lakebase factory method exists."""
-        assert hasattr(VectrixDB, 'with_lakebase')
+        assert hasattr(VectrixDB, "with_lakebase")
         assert callable(VectrixDB.with_lakebase)
 
     def test_lakebase_config_with_schema(self):
@@ -175,7 +175,7 @@ class TestLakebaseStorage:
             lakebase_host="workspace.cloud.databricks.com",
             lakebase_database="vectrixdb",
             lakebase_schema="custom_schema",
-            lakebase_token="dapi_test"
+            lakebase_token="dapi_test",
         )
 
         assert config.lakebase_schema == "custom_schema"
@@ -184,7 +184,7 @@ class TestLakebaseStorage:
 class TestLakebaseStorageMocked:
     """Test LakebaseStorage with mocked psycopg2."""
 
-    @patch('vectrixdb.core.storage.psycopg2', create=True)
+    @patch("vectrixdb.core.storage.psycopg2", create=True)
     def test_ensure_collection_table_filters_by_schema(self, mock_psycopg2):
         """Test that _ensure_collection_table queries with table_schema filter."""
         from vectrixdb.core.storage import LakebaseStorage, StorageConfig, StorageBackend
@@ -206,7 +206,7 @@ class TestLakebaseStorageMocked:
             lakebase_host="test.databricks.com",
             lakebase_database="testdb",
             lakebase_schema="public",
-            lakebase_token="test_token"
+            lakebase_token="test_token",
         )
 
         storage = LakebaseStorage(config)
@@ -224,7 +224,7 @@ class TestLakebaseStorageMocked:
 
         assert schema_query_found, "information_schema query not found in execute calls"
 
-    @patch('vectrixdb.core.storage.psycopg2', create=True)
+    @patch("vectrixdb.core.storage.psycopg2", create=True)
     def test_ensure_collection_table_drops_old_schema(self, mock_psycopg2):
         """Test that table is dropped when missing dense_embedding column."""
         from vectrixdb.core.storage import LakebaseStorage, StorageConfig, StorageBackend
@@ -249,7 +249,7 @@ class TestLakebaseStorageMocked:
             lakebase_host="test.databricks.com",
             lakebase_database="testdb",
             lakebase_schema="public",
-            lakebase_token="test_token"
+            lakebase_token="test_token",
         )
 
         storage = LakebaseStorage(config)
@@ -262,10 +262,12 @@ class TestLakebaseStorageMocked:
         assert drop_found, f"DROP TABLE not called. Calls: {calls}"
 
         # Verify CREATE TABLE was called with dense_embedding
-        create_found = any("CREATE TABLE" in str(call) and "dense_embedding" in str(call) for call in calls)
+        create_found = any(
+            "CREATE TABLE" in str(call) and "dense_embedding" in str(call) for call in calls
+        )
         assert create_found, f"CREATE TABLE with dense_embedding not called. Calls: {calls}"
 
-    @patch('vectrixdb.core.storage.psycopg2', create=True)
+    @patch("vectrixdb.core.storage.psycopg2", create=True)
     def test_insert_uses_schema_filter(self, mock_psycopg2):
         """Test that insert method queries columns with schema filter."""
         from vectrixdb.core.storage import LakebaseStorage, StorageConfig, StorageBackend
@@ -292,15 +294,12 @@ class TestLakebaseStorageMocked:
             lakebase_host="test.databricks.com",
             lakebase_database="testdb",
             lakebase_schema="myschema",  # Custom schema
-            lakebase_token="test_token"
+            lakebase_token="test_token",
         )
 
         storage = LakebaseStorage(config)
         storage._conn = mock_conn
-        storage.insert("test_coll", "id1", {
-            "_embedding": [0.1, 0.2, 0.3],
-            "text_content": "test"
-        })
+        storage.insert("test_coll", "id1", {"_embedding": [0.1, 0.2, 0.3], "text_content": "test"})
 
         # Verify schema filter in information_schema query
         calls = mock_cursor.execute.call_args_list

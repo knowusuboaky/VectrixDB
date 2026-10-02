@@ -11,12 +11,32 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import numpy as np
 
 
+__all__ = [
+    "SparseVector",
+    "SparseSearchResult",
+    "SparseSearch",
+    "BM25Scorer",
+    "QueryExpander",
+]
+
+
+# ============================================================================
+# SPARSE VECTORS, AND A RESULT
+# ============================================================================
+#
+# INPUT   term weights
+# OUTPUT  a sparse vector; one search result
+#
+# Indices and values, nothing else.
+
+
 @dataclass
 class SparseVector:
     """Sparse vector representation."""
+
     indices: np.ndarray  # Non-zero indices
-    values: np.ndarray   # Corresponding values
-    dimension: int = 0   # Maximum dimension (optional)
+    values: np.ndarray  # Corresponding values
+    dimension: int = 0  # Maximum dimension (optional)
 
     @classmethod
     def from_dict(cls, d: Dict[int, float], dimension: int = 0) -> "SparseVector":
@@ -70,10 +90,22 @@ class SparseVector:
 @dataclass
 class SparseSearchResult:
     """Sparse search result."""
+
     id: str
     score: float
     matched_terms: int = 0
     payload: Optional[Dict[str, Any]] = None
+
+
+# ============================================================================
+# THE SEARCH, BM25, AND QUERY EXPANSION
+# ============================================================================
+#
+# INPUT   sparse vectors and a query
+# OUTPUT  results from an inverted index; BM25 scores over text; a query
+#         widened for recall
+#
+# Expansion adds terms; BM25 weighs them.
 
 
 class SparseSearch:
@@ -158,11 +190,15 @@ class SparseSearch:
 
         # Remove from inverted index
         for idx in vector.indices:
-            self._inverted_index[int(idx)] = [
-                (doc_id, val)
-                for doc_id, val in self._inverted_index[int(idx)]
-                if doc_id != id
+            remaining = [
+                (doc_id, val) for doc_id, val in self._inverted_index[int(idx)] if doc_id != id
             ]
+            # Drop the posting list rather than leave an empty one behind,
+            # which get_stats counted as a live term.
+            if remaining:
+                self._inverted_index[int(idx)] = remaining
+            else:
+                self._inverted_index.pop(int(idx), None)
 
         del self._docs[id]
         del self._norms[id]
@@ -199,7 +235,9 @@ class SparseSearch:
                 continue
 
             for doc_id, doc_value in self._inverted_index[idx]:
-                if filter_ids and doc_id not in filter_ids:
+                # ``is not None``: an explicit empty set allows nothing,
+                # which is the opposite of no filter at all.
+                if filter_ids is not None and doc_id not in filter_ids:
                     continue
 
                 scores[doc_id] += query_value * doc_value
@@ -210,7 +248,7 @@ class SparseSearch:
             query_norm = query.norm()
             for doc_id in scores:
                 if self._norms[doc_id] > 0 and query_norm > 0:
-                    scores[doc_id] /= (self._norms[doc_id] * query_norm)
+                    scores[doc_id] /= self._norms[doc_id] * query_norm
 
         # Sort by score
         sorted_docs = sorted(scores.items(), key=lambda x: x[1], reverse=True)
@@ -218,11 +256,13 @@ class SparseSearch:
         # Return top k
         results = []
         for doc_id, score in sorted_docs[:k]:
-            results.append(SparseSearchResult(
-                id=doc_id,
-                score=score,
-                matched_terms=matches[doc_id],
-            ))
+            results.append(
+                SparseSearchResult(
+                    id=doc_id,
+                    score=score,
+                    matched_terms=matches[doc_id],
+                )
+            )
 
         return results
 
@@ -232,8 +272,8 @@ class SparseSearch:
             "num_documents": len(self._docs),
             "num_posting_lists": len(self._inverted_index),
             "avg_posting_list_length": (
-                sum(len(v) for v in self._inverted_index.values()) /
-                max(1, len(self._inverted_index))
+                sum(len(v) for v in self._inverted_index.values())
+                / max(1, len(self._inverted_index))
             ),
         }
 
@@ -360,7 +400,8 @@ class BM25Scorer:
                 idf[term] = math.log((self._total_docs - df + 0.5) / (df + 0.5) + 1)
 
         # Score each document
-        docs_to_score = filter_ids or set(self._doc_tf.keys())
+        # Same rule: an empty filter scores nothing.
+        docs_to_score = set(self._doc_tf.keys()) if filter_ids is None else filter_ids
 
         for doc_id in docs_to_score:
             if doc_id not in self._doc_tf:
@@ -389,11 +430,13 @@ class BM25Scorer:
 
         results = []
         for doc_id, score in sorted_docs[:k]:
-            results.append(SparseSearchResult(
-                id=doc_id,
-                score=score,
-                matched_terms=matched[doc_id],
-            ))
+            results.append(
+                SparseSearchResult(
+                    id=doc_id,
+                    score=score,
+                    matched_terms=matched[doc_id],
+                )
+            )
 
         return results
 

@@ -1,0 +1,20 @@
+/* The flows this app adds to the dashboard: the setup spinner, the files a
+   dialog holds, and what deleting removes. The policy editor's own rules are
+   the library's, in app.css.
+
+   Author: Kwadwo Daddy Nyame Owusu - Boakye */
+.setup-stage { min-height: calc(100vh - 160px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 24px; }
+.setup-stage h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -0.02em; text-wrap: balance; }
+.setup-stage p { margin: 0; max-width: 560px; min-height: 44px; font-size: 14px; line-height: 1.55; color: var(--t2); }
+.setup-stage .row { justify-content: center; }
+.done-mark { width: 52px; height: 52px; box-sizing: border-box; border: 4px solid var(--ok-bg); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--ok); }
+.t-files { grid-template-columns: minmax(0, 1fr) auto auto; }
+.del-list { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.del-list > div { display: flex; align-items: center; gap: 10px; }
+.del-list [data-icon] { color: var(--bad); display: flex; }
+.cc-modes { margin: 0; }
+
+/* The files that would not read, on Ingest: the reason wraps under the line a person acts on. */
+.t-poison { grid-template-columns: minmax(0, 22fr) minmax(0, 12fr) minmax(0, 40fr) 6fr 12fr auto; }
+.t-poison > .why { white-space: normal; }
+.t-poison .sub { display: block; font-size: 11.5px; color: var(--t3); }

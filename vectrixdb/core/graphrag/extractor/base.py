@@ -14,8 +14,32 @@ from enum import Enum
 from ..chunker import TextUnit
 
 
+__all__ = [
+    "EntityType",
+    "Confidence",
+    "RelationshipType",
+    "Entity",
+    "Relationship",
+    "ExtractionResult",
+    "BaseExtractor",
+]
+
+
+# ============================================================================
+# THE TYPES, AND HOW MUCH TO BELIEVE
+# ============================================================================
+#
+# INPUT   an extraction
+# OUTPUT  the standard entity and relationship types, and how a relationship
+#         came to be believed, in order
+#
+# Confidence is ordered, so a stated relationship outranks an inferred one
+# when they conflict.
+
+
 class EntityType(str, Enum):
     """Standard entity types for extraction."""
+
     PERSON = "PERSON"
     ORGANIZATION = "ORGANIZATION"
     LOCATION = "LOCATION"
@@ -29,8 +53,39 @@ class EntityType(str, Enum):
     OTHER = "OTHER"
 
 
+class Confidence(str, Enum):
+    """How a relationship came to be believed.
+
+    Extraction produces edges of very different quality from the same pipeline.
+    An LLM reading "Pierre worked with Marie" states a fact; the regex fallback
+    seeing two names in one sentence is guessing that they are connected at all.
+    Both used to arrive as an identical ``RELATED_TO`` edge with nothing to tell
+    them apart, so retrieval weighted a guess like a citation.
+
+    Following Graphify's three-level scheme, which exists for the same reason.
+    """
+
+    EXTRACTED = "EXTRACTED"
+    """Stated in the source: an explicit verb, a citation, a declared link."""
+
+    INFERRED = "INFERRED"
+    """Derived rather than read: a resolution pass, a second-hop deduction."""
+
+    AMBIGUOUS = "AMBIGUOUS"
+    """A guess, typically mere co-occurrence. Worth surfacing, not trusting."""
+
+
+#: Ranked best first, so merging can pick the stronger of two labels.
+_CONFIDENCE_ORDER: Dict[str, int] = {
+    Confidence.EXTRACTED: 0,
+    Confidence.INFERRED: 1,
+    Confidence.AMBIGUOUS: 2,
+}
+
+
 class RelationshipType(str, Enum):
     """Standard relationship types for extraction."""
+
     RELATED_TO = "RELATED_TO"
     WORKS_FOR = "WORKS_FOR"
     LOCATED_IN = "LOCATED_IN"
@@ -47,6 +102,17 @@ class RelationshipType(str, Enum):
     BELONGS_TO = "BELONGS_TO"
 
 
+# ============================================================================
+# ENTITIES, RELATIONSHIPS, AND THE RESULT
+# ============================================================================
+#
+# INPUT   text
+# OUTPUT  an entity with its aliases and sources; a relationship between two,
+#         with its confidence; everything one extraction found
+#
+# The shapes every extractor answers with.
+
+
 @dataclass
 class Entity:
     """
@@ -55,6 +121,7 @@ class Entity:
     Represents a named entity (person, organization, concept, etc.)
     found during the extraction process.
     """
+
     id: str
     """Unique identifier for this entity."""
 
@@ -123,12 +190,17 @@ class Entity:
             importance=max_importance,
             embedding=self.embedding or other.embedding,
             aliases=all_aliases,
-            attributes=merged_attrs
+            attributes=merged_attrs,
         )
 
     @classmethod
-    def create(cls, name: str, entity_type: str, description: str = "",
-               source_unit_id: Optional[str] = None) -> "Entity":
+    def create(
+        cls,
+        name: str,
+        entity_type: str,
+        description: str = "",
+        source_unit_id: Optional[str] = None,
+    ) -> "Entity":
         """Factory method to create an entity with a generated ID."""
         entity_id = f"entity_{uuid.uuid4().hex[:12]}"
         source_units = [source_unit_id] if source_unit_id else []
@@ -137,7 +209,7 @@ class Entity:
             name=name,
             type=entity_type,
             description=description,
-            source_units=source_units
+            source_units=source_units,
         )
 
 
@@ -149,6 +221,7 @@ class Relationship:
     Represents a directed edge in the knowledge graph,
     connecting a source entity to a target entity.
     """
+
     id: str
     """Unique identifier for this relationship."""
 
@@ -167,10 +240,28 @@ class Relationship:
     strength: float = 0.5
     """Relationship strength/weight (0-1). Higher = stronger connection."""
 
+    confidence: str = Confidence.INFERRED
+    """How this edge was arrived at. See :class:`Confidence`.
+
+    Defaults to INFERRED, the middle option: an extractor that says nothing has
+    not earned EXTRACTED, and calling everything AMBIGUOUS would bury the good
+    edges from the LLM and REBEL paths.
+    """
+
     source_units: List[str] = field(default_factory=list)
     """IDs of TextUnits where this relationship was found."""
 
     bidirectional: bool = False
+
+    valid_from: Optional[str] = None
+    """ISO timestamp from which this relationship holds, when known."""
+
+    valid_to: Optional[str] = None
+    """ISO timestamp at which it stopped holding; set when superseded."""
+
+    superseded_by: Optional[str] = None
+    """Id of the relationship that replaced this one. A superseded edge is
+    kept for the record and left out of search, traversal and communities."""
     """Whether this relationship goes both ways."""
 
     attributes: Dict[str, Any] = field(default_factory=dict)
@@ -202,7 +293,11 @@ class Relationship:
         count1 = len(self.source_units)
         count2 = len(other.source_units)
         total = count1 + count2
-        avg_strength = (self.strength * count1 + other.strength * count2) / total if total > 0 else self.strength
+        avg_strength = (
+            (self.strength * count1 + other.strength * count2) / total
+            if total > 0
+            else self.strength
+        )
 
         # Merge attributes
         merged_attrs = {**self.attributes, **other.attributes}
@@ -216,13 +311,26 @@ class Relationship:
             strength=min(1.0, avg_strength),  # Cap at 1.0
             source_units=list(all_sources),
             bidirectional=self.bidirectional or other.bidirectional,
-            attributes=merged_attrs
+            attributes=merged_attrs,
+            # Merging keeps the better-supported claim: two sightings of the same
+            # link, one stated and one guessed, is still a stated link.
+            confidence=min(
+                (self.confidence, other.confidence),
+                key=lambda c: _CONFIDENCE_ORDER.get(c, 1),
+            ),
         )
 
     @classmethod
-    def create(cls, source_id: str, target_id: str, rel_type: str,
-               description: str = "", strength: float = 0.5,
-               source_unit_id: Optional[str] = None) -> "Relationship":
+    def create(
+        cls,
+        source_id: str,
+        target_id: str,
+        rel_type: str,
+        description: str = "",
+        strength: float = 0.5,
+        source_unit_id: Optional[str] = None,
+        confidence: str = Confidence.INFERRED,
+    ) -> "Relationship":
         """Factory method to create a relationship with a generated ID."""
         rel_id = f"rel_{uuid.uuid4().hex[:12]}"
         source_units = [source_unit_id] if source_unit_id else []
@@ -233,7 +341,8 @@ class Relationship:
             type=rel_type,
             description=description,
             strength=strength,
-            source_units=source_units
+            source_units=source_units,
+            confidence=confidence,
         )
 
 
@@ -244,6 +353,7 @@ class ExtractionResult:
 
     Contains all entities and relationships extracted from a set of text units.
     """
+
     entities: List[Entity] = field(default_factory=list)
     """List of extracted entities."""
 
@@ -286,7 +396,8 @@ class ExtractionResult:
     def get_relationships_for_entity(self, entity_id: str) -> List[Relationship]:
         """Get all relationships involving an entity."""
         return [
-            rel for rel in self.relationships
+            rel
+            for rel in self.relationships
             if rel.source_id == entity_id or rel.target_id == entity_id
         ]
 
@@ -323,8 +434,8 @@ class ExtractionResult:
         # Build relationship lookup
         rel_lookup: Dict[tuple, Relationship] = {}
         for rel in self.relationships:
-            key = (rel.source_id, rel.target_id, rel.type)
-            rel_lookup[key] = rel
+            rel_key = (rel.source_id, rel.target_id, rel.type)
+            rel_lookup[rel_key] = rel
 
         # Merge relationships
         merged_relationships = list(self.relationships)
@@ -333,15 +444,15 @@ class ExtractionResult:
             source_id = entity_id_mapping.get(other_rel.source_id, other_rel.source_id)
             target_id = entity_id_mapping.get(other_rel.target_id, other_rel.target_id)
 
-            key = (source_id, target_id, other_rel.type)
-            if key in rel_lookup:
+            rel_key = (source_id, target_id, other_rel.type)
+            if rel_key in rel_lookup:
                 # Merge with existing relationship
-                existing = rel_lookup[key]
-                merged = existing.merge_with(other_rel)
+                existing_rel = rel_lookup[rel_key]
+                merged_rel = existing_rel.merge_with(other_rel)
                 # Replace in list
                 for i, r in enumerate(merged_relationships):
-                    if r.id == existing.id:
-                        merged_relationships[i] = merged
+                    if r.id == existing_rel.id:
+                        merged_relationships[i] = merged_rel
                         break
             else:
                 # Add new relationship with updated IDs
@@ -354,10 +465,17 @@ class ExtractionResult:
                     strength=other_rel.strength,
                     source_units=other_rel.source_units,
                     bidirectional=other_rel.bidirectional,
-                    attributes=other_rel.attributes
+                    attributes=other_rel.attributes,
+                    # Carried, not rebuilt from defaults: without these a
+                    # merge reset an extracted fact to inferred and undid
+                    # its supersession.
+                    confidence=other_rel.confidence,
+                    valid_from=other_rel.valid_from,
+                    valid_to=other_rel.valid_to,
+                    superseded_by=other_rel.superseded_by,
                 )
                 merged_relationships.append(new_rel)
-                rel_lookup[key] = new_rel
+                rel_lookup[rel_key] = new_rel
 
         # Merge source units
         all_source_units = list(set(self.source_units) | set(other.source_units))
@@ -369,8 +487,18 @@ class ExtractionResult:
             entities=merged_entities,
             relationships=merged_relationships,
             source_units=all_source_units,
-            metadata=merged_metadata
+            metadata=merged_metadata,
         )
+
+
+# ============================================================================
+# THE BASE EXTRACTOR
+# ============================================================================
+#
+# INPUT   text units
+# OUTPUT  what every extractor implements
+#
+# Abstract, so the pipeline does not know which it has.
 
 
 class BaseExtractor(ABC):
@@ -411,8 +539,10 @@ class BaseExtractor(ABC):
         """
         Extract from text units in batches.
 
-        Default implementation processes all at once.
-        Subclasses can override for batch processing.
+        The units are split into groups of ``batch_size`` and each group is
+        extracted in turn, so a long corpus does not have to be held in one
+        pass. This used to hand the whole list to ``extract`` and ignore
+        ``batch_size`` entirely.
 
         Args:
             text_units: List of TextUnit objects.
@@ -421,4 +551,18 @@ class BaseExtractor(ABC):
         Returns:
             Merged ExtractionResult from all batches.
         """
-        return self.extract(text_units)
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be at least 1, got {batch_size}")
+        if len(text_units) <= batch_size:
+            return self.extract(text_units)
+
+        merged: Optional[ExtractionResult] = None
+        for start in range(0, len(text_units), batch_size):
+            part = self.extract(text_units[start : start + batch_size])
+            if merged is None:
+                merged = part
+                continue
+            merged.entities.extend(part.entities)
+            merged.relationships.extend(part.relationships)
+        assert merged is not None  # text_units is non-empty above
+        return merged

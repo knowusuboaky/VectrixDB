@@ -1,0 +1,28 @@
+/* The demo abstracts the Learn page loads into a collection called demo. */
+const DEMO_DATA = [
+      { text: "ALDH1 expression is associated with better prognosis in breast cancer patients. ALDH1 is a detoxifying enzyme responsible for the oxidation of intracellular aldehydes and is thought to play a role in stem cell differentiation.", topic: "oncology" },
+      { text: "Metformin improves survival in cancer patients with type 2 diabetes. The biguanide metformin is the most widely used drug for treatment of type 2 diabetes. Recent studies suggest metformin has anticancer properties.", topic: "oncology" },
+      { text: "Vitamin D deficiency is associated with increased risk of cardiovascular disease. Vitamin D receptors are present in vascular smooth muscle, endothelium, and cardiomyocytes, suggesting direct cardiovascular effects.", topic: "cardiology" },
+      { text: "CRISPR-Cas9 can be used to correct genetic mutations in human embryos. The CRISPR-Cas9 system enables precise genome editing by creating double-strand breaks at specific genomic loci.", topic: "genetics" },
+      { text: "Sleep deprivation impairs cognitive function and memory consolidation. During sleep, the brain consolidates memories and clears metabolic waste products accumulated during waking hours.", topic: "neuroscience" },
+      { text: "The gut microbiome influences mental health through the gut-brain axis. Gut bacteria produce neurotransmitters including serotonin, dopamine, and GABA that can affect mood and behavior.", topic: "microbiology" },
+      { text: "Regular exercise reduces the risk of Alzheimer's disease. Physical activity increases blood flow to the brain and promotes neuroplasticity through the release of brain-derived neurotrophic factor.", topic: "neurology" },
+      { text: "Antibiotics can disrupt the gut microbiome for months after treatment. Broad-spectrum antibiotics reduce microbial diversity and can lead to overgrowth of pathogenic bacteria.", topic: "microbiology" },
+      { text: "mRNA vaccines induce robust immune responses against SARS-CoV-2. The mRNA is translated into spike protein which triggers both antibody and T cell responses.", topic: "immunology" },
+      { text: "Intermittent fasting promotes autophagy and cellular repair mechanisms. Periods of fasting activate AMPK and inhibit mTOR, triggering cellular cleanup processes.", topic: "metabolism" },
+      { text: "Telomere length is associated with biological aging and disease risk. Telomeres protect chromosome ends from degradation and shorten with each cell division.", topic: "cell-biology" },
+      { text: "The Mediterranean diet reduces inflammation and cardiovascular risk. This dietary pattern emphasizes olive oil, fish, nuts, and vegetables while limiting processed foods.", topic: "nutrition" },
+      { text: "Chronic stress alters brain structure and increases cortisol levels. Prolonged stress exposure can lead to hippocampal atrophy and prefrontal cortex dysfunction.", topic: "neuroscience" },
+      { text: "CAR-T cell therapy shows remarkable efficacy in blood cancers. Chimeric antigen receptor T cells are engineered to recognize and destroy cancer cells expressing specific antigens.", topic: "immunology" },
+      { text: "Air pollution exposure increases risk of respiratory and cardiovascular diseases. Particulate matter can cross the alveolar-capillary barrier and trigger systemic inflammation.", topic: "environmental-health" },
+      { text: "Epigenetic modifications can be inherited across generations. DNA methylation and histone modifications can alter gene expression without changing the DNA sequence.", topic: "genetics" },
+      { text: "The blood-brain barrier limits drug delivery to the central nervous system. Tight junctions between endothelial cells prevent most molecules from entering the brain parenchyma.", topic: "pharmacology" },
+      { text: "Inflammation plays a central role in atherosclerosis development. Macrophages accumulate lipids and form foam cells that contribute to plaque formation in arterial walls.", topic: "cardiology" },
+      { text: "Stem cells can differentiate into multiple cell types for regenerative medicine. Pluripotent stem cells have the potential to become any cell type in the body.", topic: "cell-biology" },
+      { text: "Mitochondrial dysfunction is implicated in neurodegenerative diseases. Mitochondria are essential for cellular energy production and their dysfunction leads to oxidative stress.", topic: "neurology" },
+      { text: "The circadian rhythm regulates metabolism and hormone secretion. The suprachiasmatic nucleus acts as the master clock, synchronizing peripheral clocks throughout the body.", topic: "physiology" },
+      { text: "Tumor suppressor genes prevent uncontrolled cell growth when functioning normally. Mutations in genes like p53 and BRCA1 increase cancer susceptibility.", topic: "oncology" },
+      { text: "Omega-3 fatty acids have anti-inflammatory properties. EPA and DHA are incorporated into cell membranes and serve as precursors for anti-inflammatory mediators.", topic: "nutrition" },
+      { text: "Neuroplasticity allows the brain to reorganize and form new connections. This capacity for change underlies learning, memory, and recovery from brain injury.", topic: "neuroscience" },
+      { text: "Insulin resistance is a key feature of type 2 diabetes and metabolic syndrome. Cells become less responsive to insulin signaling, leading to impaired glucose uptake.", topic: "endocrinology" }
+    ];

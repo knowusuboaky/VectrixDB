@@ -1,0 +1,18 @@
+# Everything under here is either somebody else's file or something a run
+# made, so none of it is committed. The TD reports are TD's to publish and the
+# media came from a course; sources.json says where each one comes from, and
+# 04_push_local_to_blob_cosmosdb.py fetches them into the right folders.
+blob/
+later/
+index/
+models/
+queue/
+# The local console's access log, written by a run
+console-access.jsonl
+# The one exception: each collection's record, where its policy is written.
+# Those are the walkthrough's own rules, so they stay in git; anything else a
+# run leaves under cosmosdb/ does not.
+cosmosdb/*
+!cosmosdb/data_db/
+cosmosdb/data_db/*
+!cosmosdb/data_db/collection_records/

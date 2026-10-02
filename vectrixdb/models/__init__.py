@@ -47,7 +47,10 @@ from .embedded import (
     MODEL_CONFIG,
 )
 
+from .openai_compat import OpenAIEmbedder
+
 __all__ = [
+    "OpenAIEmbedder",
     "DenseEmbedder",
     "SparseEmbedder",
     "RerankerEmbedder",

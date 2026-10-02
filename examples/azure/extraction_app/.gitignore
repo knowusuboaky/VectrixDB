@@ -1,0 +1,4 @@
+# The wheel step 05 copies in from dist/: a build, not source.
+*.whl
+.python_packages
+local.settings.json

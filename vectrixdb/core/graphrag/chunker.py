@@ -15,6 +15,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config import GraphRAGConfig
 
 
+__all__ = [
+    "TextUnit",
+    "DocumentChunker",
+    "create_chunker",
+]
+
+
+# ============================================================================
+# THE TEXT UNIT
+# ============================================================================
+#
+# INPUT   a document
+# OUTPUT  one chunk, carrying its source document's metadata
+#
+# What the extractors read.
+
+
 @dataclass
 class TextUnit:
     """
@@ -23,6 +40,7 @@ class TextUnit:
     Represents the atomic unit for entity extraction in GraphRAG.
     Each TextUnit maintains a reference back to its source document.
     """
+
     id: str
     """Unique identifier for this text unit."""
 
@@ -56,6 +74,17 @@ class TextUnit:
         return False
 
 
+# ============================================================================
+# THE CHUNKER, AND ITS FACTORY
+# ============================================================================
+#
+# INPUT   documents and a config
+# OUTPUT  overlapping chunks cut at sentence boundaries; a chunker from a
+#         config
+#
+# Sentence boundaries kept, so an entity is never split across two units.
+
+
 class DocumentChunker:
     """
     Split documents into overlapping chunks with metadata preservation.
@@ -71,7 +100,7 @@ class DocumentChunker:
     """
 
     # Simple sentence boundary pattern
-    SENTENCE_PATTERN = re.compile(r'(?<=[.!?])\s+(?=[A-Z])')
+    SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 
     # Approximate tokens per character (for English text)
     CHARS_PER_TOKEN = 4
@@ -81,7 +110,7 @@ class DocumentChunker:
         chunk_size: int = 1200,
         chunk_overlap: int = 100,
         chunk_by_sentence: bool = True,
-        config: Optional[GraphRAGConfig] = None
+        config: Optional[GraphRAGConfig] = None,
     ):
         """
         Initialize the document chunker.
@@ -124,15 +153,10 @@ class DocumentChunker:
     def _split_by_paragraphs(self, text: str) -> List[str]:
         """Split text by paragraph boundaries."""
         # Split on double newlines or multiple newlines
-        paragraphs = re.split(r'\n\s*\n', text)
+        paragraphs = re.split(r"\n\s*\n", text)
         return [p.strip() for p in paragraphs if p.strip()]
 
-    def chunk(
-        self,
-        text: str,
-        doc_id: str,
-        metadata: Optional[dict] = None
-    ) -> List[TextUnit]:
+    def chunk(self, text: str, doc_id: str, metadata: Optional[dict] = None) -> List[TextUnit]:
         """
         Split a document into overlapping text units.
 
@@ -152,28 +176,25 @@ class DocumentChunker:
 
         # Handle very short documents
         if len(text) <= self.target_chars:
-            return [TextUnit(
-                id=self._generate_unit_id(doc_id, 0, text),
-                text=text,
-                doc_id=doc_id,
-                position=0,
-                token_count=self._estimate_tokens(text),
-                char_start=0,
-                char_end=len(text),
-                metadata=metadata
-            )]
+            return [
+                TextUnit(
+                    id=self._generate_unit_id(doc_id, 0, text),
+                    text=text,
+                    doc_id=doc_id,
+                    position=0,
+                    token_count=self._estimate_tokens(text),
+                    char_start=0,
+                    char_end=len(text),
+                    metadata=metadata,
+                )
+            ]
 
         if self.chunk_by_sentence:
             return self._chunk_by_sentences(text, doc_id, metadata)
         else:
             return self._chunk_by_characters(text, doc_id, metadata)
 
-    def _chunk_by_sentences(
-        self,
-        text: str,
-        doc_id: str,
-        metadata: dict
-    ) -> List[TextUnit]:
+    def _chunk_by_sentences(self, text: str, doc_id: str, metadata: dict) -> List[TextUnit]:
         """Chunk text while preserving sentence boundaries."""
         sentences = self._split_into_sentences(text)
 
@@ -181,8 +202,8 @@ class DocumentChunker:
             # Fallback to character-based chunking
             return self._chunk_by_characters(text, doc_id, metadata)
 
-        chunks = []
-        current_chunk = []
+        chunks: List[TextUnit] = []
+        current_chunk: List[str] = []
         current_length = 0
         char_offset = 0
 
@@ -192,22 +213,24 @@ class DocumentChunker:
             # If adding this sentence exceeds target, save current chunk
             if current_length + sentence_length > self.target_chars and current_chunk:
                 # Save the current chunk
-                chunk_text = ' '.join(current_chunk)
+                chunk_text = " ".join(current_chunk)
                 chunk_start = char_offset - current_length
 
-                chunks.append(TextUnit(
-                    id=self._generate_unit_id(doc_id, len(chunks), chunk_text),
-                    text=chunk_text,
-                    doc_id=doc_id,
-                    position=len(chunks),
-                    token_count=self._estimate_tokens(chunk_text),
-                    char_start=max(0, chunk_start),
-                    char_end=char_offset,
-                    metadata=metadata
-                ))
+                chunks.append(
+                    TextUnit(
+                        id=self._generate_unit_id(doc_id, len(chunks), chunk_text),
+                        text=chunk_text,
+                        doc_id=doc_id,
+                        position=len(chunks),
+                        token_count=self._estimate_tokens(chunk_text),
+                        char_start=max(0, chunk_start),
+                        char_end=char_offset,
+                        metadata=metadata,
+                    )
+                )
 
                 # Calculate overlap: keep last N characters worth of sentences
-                overlap_sentences = []
+                overlap_sentences: List[str] = []
                 overlap_length = 0
                 for s in reversed(current_chunk):
                     if overlap_length + len(s) <= self.overlap_chars:
@@ -225,30 +248,27 @@ class DocumentChunker:
 
         # Don't forget the last chunk
         if current_chunk:
-            chunk_text = ' '.join(current_chunk)
+            chunk_text = " ".join(current_chunk)
             chunk_start = char_offset - current_length
 
-            chunks.append(TextUnit(
-                id=self._generate_unit_id(doc_id, len(chunks), chunk_text),
-                text=chunk_text,
-                doc_id=doc_id,
-                position=len(chunks),
-                token_count=self._estimate_tokens(chunk_text),
-                char_start=max(0, chunk_start),
-                char_end=len(text),
-                metadata=metadata
-            ))
+            chunks.append(
+                TextUnit(
+                    id=self._generate_unit_id(doc_id, len(chunks), chunk_text),
+                    text=chunk_text,
+                    doc_id=doc_id,
+                    position=len(chunks),
+                    token_count=self._estimate_tokens(chunk_text),
+                    char_start=max(0, chunk_start),
+                    char_end=len(text),
+                    metadata=metadata,
+                )
+            )
 
         return chunks
 
-    def _chunk_by_characters(
-        self,
-        text: str,
-        doc_id: str,
-        metadata: dict
-    ) -> List[TextUnit]:
+    def _chunk_by_characters(self, text: str, doc_id: str, metadata: dict) -> List[TextUnit]:
         """Simple character-based chunking with overlap."""
-        chunks = []
+        chunks: List[TextUnit] = []
         start = 0
 
         while start < len(text):
@@ -257,23 +277,25 @@ class DocumentChunker:
             # Try to end at a word boundary
             if end < len(text):
                 # Look for last space within the target range
-                last_space = text.rfind(' ', start, end)
+                last_space = text.rfind(" ", start, end)
                 if last_space > start:
                     end = last_space
 
             chunk_text = text[start:end].strip()
 
             if chunk_text:
-                chunks.append(TextUnit(
-                    id=self._generate_unit_id(doc_id, len(chunks), chunk_text),
-                    text=chunk_text,
-                    doc_id=doc_id,
-                    position=len(chunks),
-                    token_count=self._estimate_tokens(chunk_text),
-                    char_start=start,
-                    char_end=end,
-                    metadata=metadata
-                ))
+                chunks.append(
+                    TextUnit(
+                        id=self._generate_unit_id(doc_id, len(chunks), chunk_text),
+                        text=chunk_text,
+                        doc_id=doc_id,
+                        position=len(chunks),
+                        token_count=self._estimate_tokens(chunk_text),
+                        char_start=start,
+                        char_end=end,
+                        metadata=metadata,
+                    )
+                )
 
             # Move start forward, accounting for overlap
             start = end - self.overlap_chars
@@ -287,7 +309,7 @@ class DocumentChunker:
         texts: List[str],
         doc_ids: List[str],
         metadata_list: Optional[List[dict]] = None,
-        max_workers: int = 4
+        max_workers: int = 4,
     ) -> List[TextUnit]:
         """
         Chunk multiple documents in parallel.
@@ -325,28 +347,30 @@ class DocumentChunker:
             }
 
             # Collect results in order
-            results = [None] * len(texts)
+            results: List[Optional[List[TextUnit]]] = [None] * len(texts)
             for future in as_completed(futures):
                 idx = futures[future]
                 try:
                     results[idx] = future.result()
                 except Exception as e:
                     # On error, create a single chunk with the whole document
-                    results[idx] = [TextUnit(
-                        id=f"{doc_ids[idx]}_error",
-                        text=texts[idx][:self.target_chars],
-                        doc_id=doc_ids[idx],
-                        position=0,
-                        token_count=self._estimate_tokens(texts[idx]),
-                        char_start=0,
-                        char_end=len(texts[idx]),
-                        metadata={"error": str(e)}
-                    )]
+                    results[idx] = [
+                        TextUnit(
+                            id=f"{doc_ids[idx]}_error",
+                            text=texts[idx][: self.target_chars],
+                            doc_id=doc_ids[idx],
+                            position=0,
+                            token_count=self._estimate_tokens(texts[idx]),
+                            char_start=0,
+                            char_end=len(texts[idx]),
+                            metadata={"error": str(e)},
+                        )
+                    ]
 
             # Flatten results
-            for units in results:
-                if units:
-                    all_units.extend(units)
+            for unit_list in results:
+                if unit_list:
+                    all_units.extend(unit_list)
 
         return all_units
 
@@ -354,7 +378,7 @@ class DocumentChunker:
         self,
         texts: Iterator[str],
         doc_ids: Iterator[str],
-        metadata_iterator: Optional[Iterator[dict]] = None
+        metadata_iterator: Optional[Iterator[dict]] = None,
     ) -> Iterator[TextUnit]:
         """
         Streaming chunker for large document collections.

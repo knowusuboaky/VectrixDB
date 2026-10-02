@@ -15,8 +15,9 @@ Example:
     >>> # Returns relationships: Albert Einstein --country of birth--> Germany
 """
 
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from .base import (
+    Confidence,
     BaseExtractor,
     Entity,
     Relationship,
@@ -26,6 +27,23 @@ from .base import (
 )
 from ..config import GraphRAGConfig
 from ..chunker import TextUnit
+
+
+__all__ = [
+    "REBELExtractor",
+    "create_rebel_extractor",
+]
+
+
+# ============================================================================
+# THE mREBEL EXTRACTOR
+# ============================================================================
+#
+# INPUT   text
+# OUTPUT  (head, relation, tail) triplets from the bundled model, in eighteen
+#         languages; a factory
+#
+# Offline, with no LLM.
 
 
 class REBELExtractor(BaseExtractor):
@@ -51,7 +69,7 @@ class REBELExtractor(BaseExtractor):
             config: Optional GraphRAGConfig for settings.
         """
         self.config = config or GraphRAGConfig()
-        self._extractor = None
+        self._extractor: Any = None
 
     def _ensure_model_loaded(self):
         """Lazy load the mREBEL model."""
@@ -122,6 +140,7 @@ class REBELExtractor(BaseExtractor):
             description=triplet.relation,
             strength=1.0,
             source_unit_id=text_unit_id,
+            confidence=Confidence.EXTRACTED,
         )
         relationship.attributes["extractor"] = "rebel"
         relationship.attributes["original_relation"] = triplet.relation
@@ -214,13 +233,17 @@ class REBELExtractor(BaseExtractor):
             else:
                 # Merge source units
                 entities[head_entity.name].source_units.extend(head_entity.source_units)
-                entities[head_entity.name].source_units = list(set(entities[head_entity.name].source_units))
+                entities[head_entity.name].source_units = list(
+                    set(entities[head_entity.name].source_units)
+                )
 
             if tail_entity.name not in entities:
                 entities[tail_entity.name] = tail_entity
             else:
                 entities[tail_entity.name].source_units.extend(tail_entity.source_units)
-                entities[tail_entity.name].source_units = list(set(entities[tail_entity.name].source_units))
+                entities[tail_entity.name].source_units = list(
+                    set(entities[tail_entity.name].source_units)
+                )
 
             relationships.append(rel)
 
@@ -231,7 +254,7 @@ class REBELExtractor(BaseExtractor):
                 "extractor": "rebel",
                 "model": "mrebel-base-int8",
                 "triplets_found": len(triplets),
-            }
+            },
         )
 
     def extract(self, text_units: List[TextUnit]) -> ExtractionResult:
@@ -254,7 +277,7 @@ class REBELExtractor(BaseExtractor):
         total_triplets = 0
 
         for text_unit in text_units:
-            triplets = self._extractor.extract(text_unit.content)
+            triplets = self._extractor.extract(text_unit.text)
             total_triplets += len(triplets)
 
             for triplet in triplets:
@@ -267,13 +290,17 @@ class REBELExtractor(BaseExtractor):
                     all_entities[head_entity.name] = head_entity
                 else:
                     all_entities[head_entity.name].source_units.extend(head_entity.source_units)
-                    all_entities[head_entity.name].source_units = list(set(all_entities[head_entity.name].source_units))
+                    all_entities[head_entity.name].source_units = list(
+                        set(all_entities[head_entity.name].source_units)
+                    )
 
                 if tail_entity.name not in all_entities:
                     all_entities[tail_entity.name] = tail_entity
                 else:
                     all_entities[tail_entity.name].source_units.extend(tail_entity.source_units)
-                    all_entities[tail_entity.name].source_units = list(set(all_entities[tail_entity.name].source_units))
+                    all_entities[tail_entity.name].source_units = list(
+                        set(all_entities[tail_entity.name].source_units)
+                    )
 
                 all_relationships.append(rel)
 
@@ -285,7 +312,7 @@ class REBELExtractor(BaseExtractor):
                 "model": "mrebel-base-int8",
                 "text_units_processed": len(text_units),
                 "triplets_found": total_triplets,
-            }
+            },
         )
 
     def extract_batch(self, text_units: List[TextUnit], batch_size: int = 50) -> ExtractionResult:

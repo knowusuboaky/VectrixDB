@@ -1,0 +1,34 @@
+name: Feature request
+description: Something VectrixDB should do and does not
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        VectrixDB is a single-node, embeddable Python library. Server concerns (auth, tenancy, metrics, rate limits), sharding and GPU embedding are out of scope on purpose; see ROADMAP.md before filing.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem, in one paragraph
+      description: What are you trying to do, and what stops you today? A concrete situation beats a general wish.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like the API to look like
+      description: A few lines of code as you wish you could write them.
+      render: python
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This keeps VectrixDB a library, not a server
+          required: true
+        - label: I looked at ROADMAP.md and this is not already there
+          required: true

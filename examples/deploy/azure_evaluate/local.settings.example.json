@@ -1,0 +1,16 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "EVAL_COLLECTION": "handbook",
+    "EVAL_GOLDEN_URL": "https://youraccount.blob.core.windows.net/evals/handbook/golden.jsonl",
+    "EVAL_REPORTS": "",
+    "EVAL_DEBOUNCE_SECONDS": "60",
+    "AZURE_SEARCH_ENDPOINT": "https://yourservice.search.windows.net",
+    "AZURE_SEARCH_SEMANTIC": "true",
+    "AZURE_OPENAI_ENDPOINT": "https://yourresource.openai.azure.com",
+    "AZURE_OPENAI_DEPLOYMENT": "text-embedding-3-small",
+    "AZURE_OPENAI_DIMENSIONS": "1536"
+  }
+}

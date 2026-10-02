@@ -15,9 +15,26 @@ from ..extractor.base import Entity, Relationship
 from ..config import GraphRAGConfig
 
 
+__all__ = [
+    "GlobalSearchResult",
+    "GlobalSearcher",
+]
+
+
+# ============================================================================
+# GLOBAL SEARCH: by community
+# ============================================================================
+#
+# INPUT   a broad, open-ended query
+# OUTPUT  the result; themes and context from community summaries
+#
+# For questions about the whole corpus rather than one fact.
+
+
 @dataclass
 class GlobalSearchResult:
     """Result from global community-based search."""
+
     communities: List[Tuple[Community, float]]  # (community, score)
     context: str = ""
     entities: List[Entity] = field(default_factory=list)
@@ -72,7 +89,7 @@ class GlobalSearcher:
         graph: KnowledgeGraph,
         hierarchy: CommunityHierarchy,
         config: Optional[GraphRAGConfig] = None,
-        community_embeddings: Optional[Dict[str, np.ndarray]] = None
+        community_embeddings: Optional[Dict[str, np.ndarray]] = None,
     ):
         """
         Initialize global searcher.
@@ -87,6 +104,10 @@ class GlobalSearcher:
         self.hierarchy = hierarchy
         self.config = config or GraphRAGConfig()
         self.community_embeddings = community_embeddings or {}
+        # Per-search scratch space: community id -> level weight, populated by
+        # _get_candidate_communities and read back by _score_communities. Kept
+        # here instead of on the Community dataclass, which has no such field.
+        self._level_weights: Dict[str, float] = {}
 
     def search(
         self,
@@ -95,7 +116,7 @@ class GlobalSearcher:
         k: int = 5,
         level: Optional[int] = None,
         include_entities: bool = True,
-        max_entities_per_community: int = 5
+        max_entities_per_community: int = 5,
     ) -> GlobalSearchResult:
         """
         Search for relevant communities using global search.
@@ -121,9 +142,7 @@ class GlobalSearcher:
             return GlobalSearchResult(communities=[], context="")
 
         # Stage 2: Score communities by relevance
-        scored_communities = self._score_communities(
-            candidates, query, query_vector
-        )
+        scored_communities = self._score_communities(candidates, query, query_vector)
 
         # Stage 3: Get top k
         top_communities = sorted(scored_communities, key=lambda x: -x[1])[:k]
@@ -131,23 +150,14 @@ class GlobalSearcher:
         # Stage 4: Extract key entities from selected communities
         entities = []
         if include_entities:
-            entities = self._get_key_entities(
-                top_communities, max_entities_per_community
-            )
+            entities = self._get_key_entities(top_communities, max_entities_per_community)
 
         # Build context
         context = self._build_context(top_communities, entities)
 
-        return GlobalSearchResult(
-            communities=top_communities,
-            context=context,
-            entities=entities
-        )
+        return GlobalSearchResult(communities=top_communities, context=context, entities=entities)
 
-    def _get_candidate_communities(
-        self,
-        level: Optional[int]
-    ) -> List[Community]:
+    def _get_candidate_communities(self, level: Optional[int]) -> List[Community]:
         """Get candidate communities for scoring."""
         if level is not None:
             return self.hierarchy.get_level(level)
@@ -167,16 +177,13 @@ class GlobalSearcher:
                 level_weight = 1.0
 
             for c in communities:
-                c._level_weight = level_weight  # Temporary attribute for scoring
+                self._level_weights[c.id] = level_weight
                 all_communities.append(c)
 
         return all_communities
 
     def _score_communities(
-        self,
-        communities: List[Community],
-        query: str,
-        query_vector: Optional[np.ndarray]
+        self, communities: List[Community], query: str, query_vector: Optional[np.ndarray]
     ) -> List[Tuple[Community, float]]:
         """Score communities by relevance to query."""
         query_lower = query.lower()
@@ -209,14 +216,12 @@ class GlobalSearcher:
             score += size_factor * 0.1
 
             # Level weight (if computed)
-            level_weight = getattr(community, '_level_weight', 1.0)
+            level_weight = self._level_weights.get(community.id, 1.0)
             score *= level_weight
 
             # Embedding similarity
             if query_vector is not None and community.id in self.community_embeddings:
-                sim = self._cosine_similarity(
-                    query_vector, self.community_embeddings[community.id]
-                )
+                sim = self._cosine_similarity(query_vector, self.community_embeddings[community.id])
                 score += sim * 0.3
 
             scored.append((community, score))
@@ -224,9 +229,7 @@ class GlobalSearcher:
         return scored
 
     def _get_key_entities(
-        self,
-        communities: List[Tuple[Community, float]],
-        max_per_community: int
+        self, communities: List[Tuple[Community, float]], max_per_community: int
     ) -> List[Entity]:
         """Get key entities from selected communities."""
         entities = []
@@ -249,9 +252,7 @@ class GlobalSearcher:
         return entities
 
     def _build_context(
-        self,
-        communities: List[Tuple[Community, float]],
-        entities: List[Entity]
+        self, communities: List[Tuple[Community, float]], entities: List[Entity]
     ) -> str:
         """Build a context string from search results."""
         lines = []
@@ -259,7 +260,9 @@ class GlobalSearcher:
         # Community summaries
         for community, score in communities:
             if community.summary:
-                lines.append(f"[Community - {len(community.entity_ids)} entities]: {community.summary}")
+                lines.append(
+                    f"[Community - {len(community.entity_ids)} entities]: {community.summary}"
+                )
 
         # Key entities
         if entities:
@@ -301,10 +304,7 @@ class GlobalSearcher:
         return embeddings
 
     def search_by_level(
-        self,
-        query: str,
-        query_vector: Optional[np.ndarray] = None,
-        k_per_level: int = 2
+        self, query: str, query_vector: Optional[np.ndarray] = None, k_per_level: int = 2
     ) -> Dict[int, GlobalSearchResult]:
         """
         Search each hierarchy level separately.
@@ -326,6 +326,6 @@ class GlobalSearcher:
                 query_vector=query_vector,
                 k=k_per_level,
                 level=level,
-                include_entities=True
+                include_entities=True,
             )
         return results

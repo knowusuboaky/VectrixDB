@@ -1,0 +1,20 @@
+azure-functions
+
+# The library, with the extras this app uses:
+#   api          FastAPI, which serves the routes
+#   documents    pypdfium2, pypdf, python-docx, openpyxl, xlrd and olefile, for
+#                the documents
+#   ocr-azure    the Document Intelligence client, for pictures and scanned pages
+#   youtube      yt-dlp, for a YouTube video's sound
+#   jobs-azure   the blob and queue clients a long job is kept in
+#   ffmpeg       the ffmpeg binary, which takes the sound out of a video on a
+#                plan with no apt-get
+#
+# From the wheel beside this file, which step 05 copies in from dist/ and looks
+# inside before it publishes. Against PyPI instead, write:
+# vectrixdb[api,documents,ocr-azure,youtube,jobs-azure,ffmpeg]
+./vectrixdb-2.2.0-py3-none-any.whl[api,documents,ocr-azure,youtube,jobs-azure,ffmpeg]
+
+# Pillow, because pypdf needs it to hand back the pictures inside a PDF, which
+# Vision then describes.
+pillow

@@ -31,6 +31,7 @@ GraphRAG (auto-download from GitHub on first use):
 """
 
 from __future__ import annotations
+import logging
 
 import os
 import json
@@ -43,8 +44,36 @@ from collections import Counter
 from dataclasses import dataclass
 import numpy as np
 
+from ..exceptions import ModelNotFoundError
+
+
+__all__ = [
+    "MODEL_CONFIG",
+    "GITHUB_REPO",
+    "GITHUB_RELEASE_BASE",
+    "get_models_dir",
+    "is_models_installed",
+    "download_models",
+    "SimpleTokenizer",
+    "DenseEmbedder",
+    "SparseEmbedder",
+    "RerankerEmbedder",
+    "LateInteractionEmbedder",
+    "Triplet",
+    "GraphExtractor",
+    "REBELExtractor",
+]
+
+
+# ============================================================================
+# SETTINGS: the model registry, and the release they download from
+# ============================================================================
+#
+# Every model the library knows: its files, its directory, its dimension and
+# its pooling, and the GitHub release the ones not bundled are fetched from.
 # Model configuration
-MODEL_CONFIG = {
+
+MODEL_CONFIG: Dict[str, Dict[str, Any]] = {
     "dense": {
         "name": "multilingual-e5-small",
         "dimension": 384,
@@ -70,6 +99,8 @@ MODEL_CONFIG = {
         "github_release": "dense-en",
         "languages": "english",
         "quantization": "int8",
+        "pooling": "mean",
+        "description": "The English default before 2.2. Fetched once on first use so older collections keep working; not in the wheel since 2.2",
     },
     "bge_small_en": {
         "name": "bge-small-en-v1.5",
@@ -78,11 +109,13 @@ MODEL_CONFIG = {
         "onnx_file": "model.onnx",
         "tokenizer_file": "tokenizer.json",
         "config_file": "config.json",
-        "size_mb": 127,
+        "size_mb": 33,
         "huggingface_id": "BAAI/bge-small-en-v1.5",
         "github_release": "bge-small-en",
         "languages": "english",
-        "quantization": "fp32",
+        "quantization": "int8",
+        "pooling": "cls",
+        "description": "The English default from 2.2: SciFact nDCG@10 0.72 against 0.65 for e5-small-v2",
     },
     "bge_base_en": {
         "name": "bge-base-en-v1.5",
@@ -244,6 +277,18 @@ GITHUB_REPO = "knowusuboaky/VectrixDB"
 GITHUB_RELEASE_BASE = f"https://github.com/{GITHUB_REPO}/releases/download"
 
 
+# ============================================================================
+# WHERE THE MODELS ARE, AND WHETHER THEY ARE HERE
+# ============================================================================
+#
+# INPUT   a model type
+# OUTPUT  the models directory; the directory that holds this model; whether
+#         it is installed; the models downloaded and converted, when asked
+#
+# Core models are bundled with pip install; the rest are fetched once, and
+# only when asked.
+
+
 def get_models_dir() -> Path:
     """Get the models directory path."""
     # Check environment variable first
@@ -255,12 +300,48 @@ def get_models_dir() -> Path:
     return Path(__file__).parent / "data"
 
 
-def is_models_installed(model_type: str = "all") -> bool:
+# Three model types do not install into a directory named after themselves:
+# the multilingual late-interaction model is BGE-M3, and both the English
+# ColBERT and the "colbert" alias share one directory. Everything else uses
+# its own name. The downloader and this check read the same map.
+MODEL_DIRS = {
+    "late_interaction": "bge-m3",
+    "late_interaction_en": "colbert",
+    "colbert": "colbert",
+}
+
+#: Where a model may also live. The bundled cross-encoder ships as
+#: ``reranker_en`` while the downloader writes to ``reranker``, so a reranker
+#: is installed if either directory has it. Checking only the second answered
+#: False on a correct install, and the twelve tests gated on that skipped
+#: everywhere, CI included.
+MODEL_DIR_ALTERNATIVES = {
+    "reranker": ("reranker_en",),
+    "dense": ("bge_small_en", "dense_en"),
+}
+
+#: The model directories the wheel carries. Everything else is a download;
+#: pyproject.toml's wheel excludes are the other half of this list, and a
+#: test holds the two together.
+WHEEL_MODEL_DIRS = ("bge_small_en", "reranker_en", "colbert", "sparse")
+
+
+def model_dir_name(model_type: str) -> str:
+    """The directory under the models directory that holds this model."""
+    return MODEL_DIRS.get(model_type, model_type)
+
+
+def is_models_installed(model_type: str = "all", *, exact: bool = False) -> bool:
     """
     Check if models are installed.
 
     Args:
         model_type: "dense", "sparse", "reranker", "colbert", "rebel", or "all"
+        exact: Count only the type's own directory. Left off, a bundled English
+            model answers for its kind, so ``"reranker"`` is True on a fresh
+            install: a reranker is here. On, ``"reranker"`` means the
+            multilingual reranker itself, which is the question a download or
+            a list of models asks.
 
     Returns:
         True if models are installed
@@ -276,30 +357,25 @@ def is_models_installed(model_type: str = "all") -> bool:
         types_to_check = [model_type]
 
     for mt in types_to_check:
-        model_dir = models_dir / mt
         config = MODEL_CONFIG.get(mt, {})
 
         if mt == "sparse":
-            # Check BM25 files
-            if not (model_dir / config.get("vocab_file", "vocab.json")).exists():
-                return False
+            wanted = config.get("vocab_file", "vocab.json")
         elif mt == "rebel":
-            # Check REBEL encoder/decoder ONNX files
-            if not (model_dir / config.get("onnx_encoder_file", "encoder.onnx")).exists():
-                return False
+            wanted = config.get("onnx_encoder_file", "encoder.onnx")
         else:
-            # Check ONNX model
-            if not (model_dir / config.get("onnx_file", "model.onnx")).exists():
-                return False
+            wanted = config.get("onnx_file", "model.onnx")
+
+        candidates: Tuple[str, ...] = (model_dir_name(mt),)
+        if not exact:
+            candidates += MODEL_DIR_ALTERNATIVES.get(mt, ())
+        if not any((models_dir / name / wanted).exists() for name in candidates):
+            return False
 
     return True
 
 
-def download_models(
-    model_type: str = "all",
-    force: bool = False,
-    progress: bool = True
-) -> None:
+def download_models(model_type: str = "all", force: bool = False, progress: bool = True) -> None:
     """
     Download models from HuggingFace and convert to ONNX.
 
@@ -319,14 +395,26 @@ def download_models(
     else:
         types_to_download = [model_type]
 
+    # Only the type's own directory counts: the bundled English model is not
+    # the multilingual one, and counting it meant neither ever downloaded.
     for mt in types_to_download:
-        if force or not is_models_installed(mt):
+        if force or not is_models_installed(mt, exact=True):
             downloader.download(mt)
 
 
-# =============================================================================
-# Tokenizer (minimal implementation for offline use)
-# =============================================================================
+# ============================================================================
+# THE TOKENIZER: minimal, offline
+# ============================================================================
+#
+# INPUT   tokenizer.json in Hugging Face's format
+# OUTPUT  ids and attention masks for a batch of texts, with the model's own
+#         truncation
+#
+# Enough of a tokenizer to run the bundled models, with no dependency on the
+# tokenizers package.
+
+logger = logging.getLogger(__name__)
+
 
 class SimpleTokenizer:
     """
@@ -347,9 +435,8 @@ class SimpleTokenizer:
     def _load_tokenizer(self):
         """Load tokenizer configuration."""
         if not self.tokenizer_path.exists():
-            raise FileNotFoundError(
-                f"Tokenizer not found: {self.tokenizer_path}\n"
-                f"Run: vectrixdb download-models"
+            raise ModelNotFoundError(
+                f"Tokenizer not found: {self.tokenizer_path}\nRun: vectrixdb download-models"
             )
 
         with open(self.tokenizer_path, "r", encoding="utf-8") as f:
@@ -379,28 +466,28 @@ class SimpleTokenizer:
         # XLM-RoBERTa uses <s>, </s>, <pad>, <unk>
         # BERT uses [CLS], [SEP], [PAD], [UNK]
         self.pad_token_id = (
-            self._special_tokens.get("<pad>") or
-            self._special_tokens.get("[PAD]") or
-            self._vocab.get("<pad>") or
-            self._vocab.get("[PAD]", 1)
+            self._special_tokens.get("<pad>")
+            or self._special_tokens.get("[PAD]")
+            or self._vocab.get("<pad>")
+            or self._vocab.get("[PAD]", 1)
         )
         self.cls_token_id = (
-            self._special_tokens.get("<s>") or
-            self._special_tokens.get("[CLS]") or
-            self._vocab.get("<s>") or
-            self._vocab.get("[CLS]", 0)
+            self._special_tokens.get("<s>")
+            or self._special_tokens.get("[CLS]")
+            or self._vocab.get("<s>")
+            or self._vocab.get("[CLS]", 0)
         )
         self.sep_token_id = (
-            self._special_tokens.get("</s>") or
-            self._special_tokens.get("[SEP]") or
-            self._vocab.get("</s>") or
-            self._vocab.get("[SEP]", 2)
+            self._special_tokens.get("</s>")
+            or self._special_tokens.get("[SEP]")
+            or self._vocab.get("</s>")
+            or self._vocab.get("[SEP]", 2)
         )
         self.unk_token_id = (
-            self._special_tokens.get("<unk>") or
-            self._special_tokens.get("[UNK]") or
-            self._vocab.get("<unk>") or
-            self._vocab.get("[UNK]", 3)
+            self._special_tokens.get("<unk>")
+            or self._special_tokens.get("[UNK]")
+            or self._vocab.get("<unk>")
+            or self._vocab.get("[UNK]", 3)
         )
 
         # Try to get max_length from config
@@ -442,7 +529,7 @@ class SimpleTokenizer:
 
         # Truncate
         if truncation and len(token_ids) > max_length:
-            token_ids = token_ids[:max_length - 1] + [self.sep_token_id]
+            token_ids = token_ids[: max_length - 1] + [self.sep_token_id]
 
         # Create attention mask
         attention_mask = [1] * len(token_ids)
@@ -464,25 +551,48 @@ class SimpleTokenizer:
         self,
         texts: List[str],
         max_length: Optional[int] = None,
-        **kwargs
+        pad_to_longest: bool = False,
+        **kwargs,
     ) -> Dict[str, np.ndarray]:
-        """Encode multiple texts."""
+        """Encode multiple texts as one padded batch."""
         max_length = max_length or self._max_length
+        padding = kwargs.pop("padding", True)
 
-        all_input_ids = []
-        all_attention_masks = []
-        all_token_type_ids = []
+        encoded = [
+            self.encode(text, max_length=max_length, padding=False, **kwargs) for text in texts
+        ]
 
-        for text in texts:
-            encoded = self.encode(text, max_length=max_length, **kwargs)
-            all_input_ids.append(encoded["input_ids"][0])
-            all_attention_masks.append(encoded["attention_mask"][0])
-            all_token_type_ids.append(encoded["token_type_ids"][0])
+        # Pad to max_length by default. The bundled dense models are INT8 with
+        # dynamic quantisation, and their activation ranges were measured with
+        # 512-token padding: padding to the longest text instead cut the dense
+        # MRR on the fixture question set from 0.955 to 0.929 (0.945 at 128),
+        # and made new queries drift from vectors users have already stored.
+        # Every consumer masks padding, so ``pad_to_longest`` is correct for
+        # a model that is not padding-sensitive, and a fp32 or statically
+        # quantised re-export would let it become the default: 200 short
+        # texts take 0.65 s that way and 34 s at 512.
+        longest = max((int(e["input_ids"].shape[1]) for e in encoded), default=1)
+        if not padding:
+            width = longest
+        elif pad_to_longest:
+            width = min(max_length, -(-longest // _PAD_BUCKET) * _PAD_BUCKET)
+        else:
+            width = max_length
+
+        n = len(encoded)
+        input_ids = np.full((n, width), self.pad_token_id, dtype=np.int64)
+        attention_mask = np.zeros((n, width), dtype=np.int64)
+        token_type_ids = np.zeros((n, width), dtype=np.int64)
+        for row, e in enumerate(encoded):
+            ids = e["input_ids"][0][:width]
+            input_ids[row, : len(ids)] = ids
+            attention_mask[row, : len(ids)] = e["attention_mask"][0][: len(ids)]
+            token_type_ids[row, : len(ids)] = e["token_type_ids"][0][: len(ids)]
 
         return {
-            "input_ids": np.array(all_input_ids, dtype=np.int64),
-            "attention_mask": np.array(all_attention_masks, dtype=np.int64),
-            "token_type_ids": np.array(all_token_type_ids, dtype=np.int64),
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "token_type_ids": token_type_ids,
         }
 
     def encode_pair(
@@ -515,17 +625,17 @@ class SimpleTokenizer:
 
         # Build sequence
         input_ids = (
-            [self.cls_token_id] +
-            token_ids_a +
-            [self.sep_token_id] +
-            token_ids_b +
-            [self.sep_token_id]
+            [self.cls_token_id]
+            + token_ids_a
+            + [self.sep_token_id]
+            + token_ids_b
+            + [self.sep_token_id]
         )
 
         # Token type IDs: 0 for first segment, 1 for second
         token_type_ids = (
-            [0] * (len(token_ids_a) + 2) +  # [CLS] + tokens_a + [SEP]
-            [1] * (len(token_ids_b) + 1)    # tokens_b + [SEP]
+            [0] * (len(token_ids_a) + 2)  # [CLS] + tokens_a + [SEP]
+            + [1] * (len(token_ids_b) + 1)  # tokens_b + [SEP]
         )
 
         attention_mask = [1] * len(input_ids)
@@ -549,7 +659,7 @@ class SimpleTokenizer:
         text = text.strip()
 
         # Split on whitespace and punctuation
-        words = re.findall(r'\b\w+\b|[^\w\s]', text)
+        words = re.findall(r"\b\w+\b|[^\w\s]", text)
 
         tokens = []
         for word in words:
@@ -563,10 +673,23 @@ class SimpleTokenizer:
 
         return tokens
 
+    # A word longer than this is not a word. The greedy longest-match scan
+    # below is quadratic in the length of what it is given, and each step
+    # slices a fresh substring, so one unbroken token of a few thousand
+    # characters takes tens of seconds and one of fifty thousand never
+    # finishes. Real corpora are full of them: base64 blobs, minified
+    # JavaScript, long URLs, hashes, DNA. The reference WordPiece
+    # implementation caps the same way, at the same length, so nothing that
+    # is actually a word tokenizes differently.
+    MAX_CHARS_PER_WORD = 100
+
     def _wordpiece_tokenize(self, word: str) -> List[str]:
         """Tokenize a single word into wordpieces."""
         if not word:
             return []
+
+        if len(word) > self.MAX_CHARS_PER_WORD:
+            return ["[UNK]"]
 
         tokens = []
         start = 0
@@ -596,9 +719,17 @@ class SimpleTokenizer:
         return tokens
 
 
-# =============================================================================
-# Dense Embedder (all-MiniLM-L6-v2)
-# =============================================================================
+# ============================================================================
+# THE DENSE EMBEDDER
+# ============================================================================
+#
+# INPUT   texts, or a query with its prefix
+# OUTPUT  one normalised vector a text, from ONNX: bge-small-en-v1.5 in
+#         English, multilingual-e5-small otherwise
+#
+# Padded to the longest text in each batch, which is what embed() does by
+# default.
+
 
 class DenseEmbedder:
     """
@@ -666,6 +797,7 @@ class DenseEmbedder:
         tokenizer_file: str = "tokenizer.json",
         language: Optional[str] = None,
         model: Optional[str] = None,
+        pooling: Optional[str] = None,
     ):
         """
         Initialize dense embedder.
@@ -692,13 +824,12 @@ class DenseEmbedder:
             config_key = self.MODEL_ALIASES.get(model.lower(), model.lower())
             if config_key not in MODEL_CONFIG:
                 raise ValueError(
-                    f"Unknown model: {model}. Available models: "
-                    f"{list(self.MODEL_ALIASES.keys())}"
+                    f"Unknown model: {model}. Available models: {list(self.MODEL_ALIASES.keys())}"
                 )
             default_dir = get_models_dir() / config_key
         elif language in ("en", "english"):
-            config_key = "dense_en"
-            default_dir = get_models_dir() / "dense_en"
+            config_key = "bge_small_en"
+            default_dir = get_models_dir() / "bge_small_en"
         else:
             config_key = "dense"
             default_dir = get_models_dir() / "dense"
@@ -713,9 +844,17 @@ class DenseEmbedder:
         self.dimension = dimension or MODEL_CONFIG[config_key]["dimension"]
         self.max_length = max_length or MODEL_CONFIG[config_key]["max_length"]
 
-        self._session = None
-        self._tokenizer = None
+        self._session: Any = None
+        self._tokenizer: Any = None
         self._has_token_type_ids = True  # Default, will be detected
+        # Pooling is a property of the model: mean for e5 and MiniLM, the
+        # [CLS] vector for bge and arctic. The config knows; a caller may
+        # override for a custom model directory.
+        if pooling is None:
+            pooling = str(MODEL_CONFIG.get(config_key, {}).get("pooling", "mean"))
+        if pooling not in ("mean", "cls"):
+            raise ValueError(f"pooling must be 'mean' or 'cls', got {pooling!r}")
+        self.pooling = pooling
 
     @property
     def session(self):
@@ -739,31 +878,62 @@ class DenseEmbedder:
         tokenizer_path = self.model_dir / self.tokenizer_file
 
         # Models that should be available (bundled or cached from GitHub)
-        BUNDLED_MODELS = {"dense_en", "bge_small_en", "e5_small", "bge_base_en"}
+        BUNDLED_MODELS = {"bge_small_en", "e5_small", "bge_base_en"}
 
         if not model_path.exists():
+            # e5-small-v2 left the wheel in 2.2. A collection written before
+            # 2.2 was built with it, so it is fetched once on first use, or
+            # the collection is re-embedded with the current default; either
+            # is one command, and the message names both.
+            if getattr(self, "_config_key", None) == "dense_en":
+                from .._net import auto_download_allowed
+                from ..exceptions import ModelDownloadError
+
+                if not auto_download_allowed():
+                    raise ModelDownloadError(
+                        "The e5-small-v2 model is not on this machine. Collections written "
+                        "before VectrixDB 2.2 were built with it, and since 2.2 it is not in "
+                        "the wheel. Two ways forward, each one command:\n"
+                        "  fetch it once:  vectrixdb download-models --type dense_en\n"
+                        "  or move the collection to the current default:  "
+                        'Vectrix(name, path=..., dense_model="bge-small").reembed()\n'
+                        "Or set VECTRIXDB_AUTO_DOWNLOAD=1 to allow first-use downloads."
+                    )
+                logger.info("e5-small-v2 not found; downloading once, as allowed")
+                download_models(model_type="dense_en", progress=True)
             # Check if this is a bundled model
-            if hasattr(self, '_config_key') and self._config_key in BUNDLED_MODELS:
+            elif hasattr(self, "_config_key") and self._config_key in BUNDLED_MODELS:
                 # Check if it's a GitHub-hosted model vs truly bundled
                 github_models = {"bge_base_en"}
                 if self._config_key in github_models:
-                    raise FileNotFoundError(
+                    raise ModelNotFoundError(
                         f"Dense model not found: {model_path}\n\n"
                         f"This model must be downloaded from GitHub releases.\n"
                         f"For Databricks, cache models to a Volume first:\n"
                         f"  MODELS_VOLUME_PATH = '/Volumes/catalog/schema/vectrixdb_models/'\n"
                         f"  os.environ['VECTRIXDB_MODELS_DIR'] = MODELS_VOLUME_PATH\n\n"
-                        f"Download: https://github.com/knowusuboaky/VectrixDB/releases/tag/v1.9.0"
+                        # /releases/latest rather than a pinned tag: this named
+                        # v1.9.0 while the package shipped 2.2.0.
+                        f"Download: https://github.com/knowusuboaky/VectrixDB/releases/latest\n"
+                        f"Unpack it into: {model_path.parent}"
                     )
                 else:
-                    raise FileNotFoundError(
+                    raise ModelNotFoundError(
                         f"Dense model not found: {model_path}\n"
-                        f"This model should be bundled with the package.\n"
-                        f"Try reinstalling: pip install --force-reinstall vectrixdb"
+                        f"If this model is bundled, reinstalling restores it:\n"
+                        f"  pip install --force-reinstall vectrixdb\n"
+                        f"If it is not, fetch it from the releases page and\n"
+                        f"unpack it into: {model_path.parent}"
                     )
-            # Auto-download for multilingual models
+            # A first-use download, which happens only when asked for.
             else:
-                print(f"Multilingual dense model not found. Downloading...")
+                from .._net import auto_download_allowed, refuse_implicit
+
+                if not auto_download_allowed():
+                    raise refuse_implicit(
+                        "The multilingual dense model", "vectrixdb download-models --type dense"
+                    )
+                logger.info("Multilingual dense model not found; downloading, as allowed")
                 try:
                     download_models(model_type="dense", progress=True)
                 except Exception as e:
@@ -788,9 +958,7 @@ class DenseEmbedder:
         sess_options.intra_op_num_threads = 4
 
         self._session = ort.InferenceSession(
-            str(model_path),
-            sess_options=sess_options,
-            providers=providers
+            str(model_path), sess_options=sess_options, providers=providers
         )
 
         # Detect if model uses token_type_ids by checking input names
@@ -804,6 +972,7 @@ class DenseEmbedder:
         texts: Union[str, List[str]],
         normalize: bool = True,
         batch_size: int = 32,
+        pad_to_longest: bool = True,
     ) -> np.ndarray:
         """
         Generate embeddings for texts.
@@ -812,6 +981,12 @@ class DenseEmbedder:
             texts: Single text or list of texts
             normalize: L2 normalize embeddings
             batch_size: Batch size for processing
+            pad_to_longest: Pad each batch to its longest text instead of
+                to max_length. Roughly fifty times faster on short texts.
+                On the INT8 models the vectors differ slightly between the
+                two settings; measured on SciFact the difference is within
+                noise (0.645 against 0.647 nDCG@10), so this is the default.
+                Pass False to reproduce vectors from a 2.1 collection.
 
         Returns:
             Embeddings array, shape (n_texts, 384)
@@ -822,8 +997,8 @@ class DenseEmbedder:
         all_embeddings = []
 
         for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            embeddings = self._embed_batch(batch)
+            batch = texts[i : i + batch_size]
+            embeddings = self._embed_batch(batch, pad_to_longest=pad_to_longest)
             all_embeddings.append(embeddings)
 
         result = np.vstack(all_embeddings)
@@ -834,7 +1009,7 @@ class DenseEmbedder:
 
         return result.astype(np.float32)
 
-    def _embed_batch(self, texts: List[str]) -> np.ndarray:
+    def _embed_batch(self, texts: List[str], pad_to_longest: bool = False) -> np.ndarray:
         """Embed a batch of texts."""
         # Tokenize
         inputs = self.tokenizer.encode_batch(
@@ -842,6 +1017,7 @@ class DenseEmbedder:
             max_length=self.max_length,
             padding=True,
             truncation=True,
+            pad_to_longest=pad_to_longest,
         )
 
         # Build ONNX input dict based on model requirements
@@ -857,9 +1033,12 @@ class DenseEmbedder:
         # Run ONNX inference
         outputs = self.session.run(None, onnx_inputs)
 
-        # Mean pooling
+        # Pooling: mean over unmasked tokens (MiniLM, e5) or the [CLS] vector
+        # (bge, arctic-embed), whichever the model was trained with.
         token_embeddings = outputs[0]  # (batch, seq_len, hidden_dim)
         attention_mask = inputs["attention_mask"]
+        if getattr(self, "pooling", "mean") == "cls":
+            return token_embeddings[:, 0, :]
 
         # Expand mask for broadcasting
         mask_expanded = np.expand_dims(attention_mask, axis=-1)
@@ -878,9 +1057,16 @@ class DenseEmbedder:
         return self.embed(texts)
 
 
-# =============================================================================
-# Sparse Embedder (BM25 + SPLADE)
-# =============================================================================
+# ============================================================================
+# THE SPARSE EMBEDDER: BM25 and SPLADE
+# ============================================================================
+#
+# INPUT   texts
+# OUTPUT  one sparse vector a text, term weights by BM25 or by SPLADE's
+#         learned expansion
+#
+# The same shape either way, so the sparse index does not know which.
+
 
 class SparseEmbedder:
     """
@@ -956,8 +1142,8 @@ class SparseEmbedder:
             config = MODEL_CONFIG.get("splade_pp_en", {})
             self.max_length = config.get("max_length", 256)
             self.vocab_size = config.get("vocab_size", 30522)
-            self._session = None
-            self._tokenizer = None
+            self._session: Any = None
+            self._tokenizer: Any = None
             self._has_token_type_ids = True
         else:
             # BM25 vocabulary-based
@@ -983,7 +1169,7 @@ class SparseEmbedder:
         tokenizer_path = self.model_dir / "tokenizer.json"
 
         if not model_path.exists():
-            raise FileNotFoundError(
+            raise ModelNotFoundError(
                 f"SPLADE model not found: {model_path}\n"
                 f"This model should be bundled with the package.\n"
                 f"Try reinstalling: pip install --force-reinstall vectrixdb"
@@ -998,9 +1184,7 @@ class SparseEmbedder:
         sess_options.intra_op_num_threads = 4
 
         self._session = ort.InferenceSession(
-            str(model_path),
-            sess_options=sess_options,
-            providers=providers
+            str(model_path), sess_options=sess_options, providers=providers
         )
 
         input_names = [inp.name for inp in self._session.get_inputs()]
@@ -1039,7 +1223,7 @@ class SparseEmbedder:
     def _tokenize(self, text: str) -> List[str]:
         """Simple tokenization for BM25."""
         text = text.lower()
-        tokens = re.findall(r'\b\w+\b', text)
+        tokens = re.findall(r"\b\w+\b", text)
         tokens = [t for t in tokens if len(t) > 1]
         return tokens
 
@@ -1099,7 +1283,7 @@ class SparseEmbedder:
 
         all_results = []
         for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
+            batch = texts[i : i + batch_size]
 
             inputs = self._tokenizer.encode_batch(
                 batch,
@@ -1195,9 +1379,30 @@ class SparseEmbedder:
         return self.embed(texts)
 
 
-# =============================================================================
-# Reranker Embedder (Cross-Encoder)
-# =============================================================================
+# ============================================================================
+# THE RERANKER: a cross-encoder
+# ============================================================================
+#
+# INPUT   a query and candidate texts
+# OUTPUT  a score a pair, batched by padded width so a long text does not pad
+#         every short one
+#
+# Bucketed batches: the sequences grouped by width before they are padded.
+
+#: Sequences are padded to a multiple of this many tokens, so a document's
+#: score depends only on its own length, never on the batch it shares.
+_PAD_BUCKET = 32
+
+
+def _bucketed_batches(lengths):
+    """Group sequence indices by padded width. Yields (width, [indices])."""
+    groups: Dict[int, List[int]] = {}
+    for i, length in enumerate(lengths):
+        width = max(_PAD_BUCKET, ((length + _PAD_BUCKET - 1) // _PAD_BUCKET) * _PAD_BUCKET)
+        groups.setdefault(width, []).append(i)
+    for width in sorted(groups):
+        yield width, groups[width]
+
 
 class RerankerEmbedder:
     """
@@ -1280,8 +1485,7 @@ class RerankerEmbedder:
             config_key = self.MODEL_ALIASES.get(model, model.lower())
             if config_key not in MODEL_CONFIG:
                 raise ValueError(
-                    f"Unknown model: {model}. Available models: "
-                    f"{list(self.MODEL_ALIASES.keys())}"
+                    f"Unknown model: {model}. Available models: {list(self.MODEL_ALIASES.keys())}"
                 )
             default_dir = get_models_dir() / config_key
         elif language in ("en", "english"):
@@ -1298,8 +1502,8 @@ class RerankerEmbedder:
         self.onnx_file = onnx_file
         self.tokenizer_file = tokenizer_file
 
-        self._session = None
-        self._tokenizer = None
+        self._session: Any = None
+        self._tokenizer: Any = None
         self._has_token_type_ids = True  # Default, will be detected
 
     @property
@@ -1326,7 +1530,7 @@ class RerankerEmbedder:
         if not model_path.exists():
             # Auto-download for multilingual models
             if self.language not in ("en", "english"):
-                print(f"Multilingual reranker model not found. Downloading...")
+                logger.info("multilingual reranker not found; downloading")
                 try:
                     download_models(model_type="reranker", progress=True)
                 except Exception as e:
@@ -1341,7 +1545,7 @@ class RerankerEmbedder:
                     ) from e
             else:
                 # English reranker model - auto-download from GitHub
-                print(f"English reranker model not found. Downloading from GitHub...")
+                logger.info("English reranker not found; downloading from the releases page")
                 try:
                     download_models(model_type="reranker_en", progress=True)
                 except Exception as e:
@@ -1353,7 +1557,7 @@ class RerankerEmbedder:
 
             # Re-check model path after download
             if not model_path.exists():
-                raise FileNotFoundError(
+                raise ModelNotFoundError(
                     f"Model file not found after download: {model_path}\n"
                     f"The download may have failed or extracted to wrong location.\n"
                     f"Try manual download: vectrixdb download-models --type reranker_en"
@@ -1369,9 +1573,7 @@ class RerankerEmbedder:
         sess_options.intra_op_num_threads = 4
 
         self._session = ort.InferenceSession(
-            str(model_path),
-            sess_options=sess_options,
-            providers=providers
+            str(model_path), sess_options=sess_options, providers=providers
         )
 
         # Detect if model uses token_type_ids
@@ -1396,47 +1598,59 @@ class RerankerEmbedder:
         Returns:
             Scores array, shape (n_documents,)
         """
-        all_scores = []
-
-        for i in range(0, len(documents), batch_size):
-            batch_docs = documents[i:i + batch_size]
-            batch_scores = self._score_batch(query, batch_docs)
-            all_scores.extend(batch_scores)
+        all_scores = self._score_batch(query, list(documents), batch_size=batch_size)
 
         return np.array(all_scores, dtype=np.float32)
 
-    def _score_batch(self, query: str, documents: List[str]) -> List[float]:
-        """Score a batch of documents."""
-        scores = []
+    def _score_batch(self, query: str, documents: List[str], batch_size: int = 16) -> List[float]:
+        """Score documents in bucketed batches, one session call per bucket.
 
-        for doc in documents:
-            inputs = self.tokenizer.encode_pair(query, doc, max_length=self.max_length)
+        This ran the model once per document, each padded to max_length, so a
+        pair cost about 150 ms and thirty candidates five seconds. The INT8
+        export is padding-sensitive, so simply padding a batch to its longest
+        member would make a document's score depend on its neighbours; padding
+        to the document's own 32-token bucket keeps scores reproducible.
+        """
+        if not documents:
+            return []
+        encoded = [
+            self.tokenizer.encode_pair(query, doc, max_length=self.max_length) for doc in documents
+        ]
+        lengths = [int(e["attention_mask"].sum()) for e in encoded]
+        scores = [0.0] * len(documents)
+        pad = self.tokenizer.pad_token_id
 
-            # Build ONNX input dict based on model requirements
-            onnx_inputs = {
-                "input_ids": inputs["input_ids"],
-                "attention_mask": inputs["attention_mask"],
-            }
-            if self._has_token_type_ids:
-                onnx_inputs["token_type_ids"] = inputs["token_type_ids"]
+        # The INT8 model computes activation scales per batch, so a score
+        # moves slightly with its batch-mates. Batches are therefore formed
+        # from a canonical order (length, then text) rather than input order:
+        # the same candidate set always scores the same, however it arrived.
+        for width, indices in _bucketed_batches(lengths):
+            width = min(width, self.max_length)
+            indices = sorted(indices, key=lambda i: (lengths[i], documents[i]))
+            for start in range(0, len(indices), max(1, batch_size)):
+                chunk = indices[start : start + max(1, batch_size)]
+                n = len(chunk)
+                input_ids = np.full((n, width), pad, dtype=np.int64)
+                attention_mask = np.zeros((n, width), dtype=np.int64)
+                token_type_ids = np.zeros((n, width), dtype=np.int64)
+                for row, i in enumerate(chunk):
+                    length = min(lengths[i], width)
+                    input_ids[row, :length] = encoded[i]["input_ids"][0, :length]
+                    attention_mask[row, :length] = 1
+                    token_type_ids[row, :length] = encoded[i]["token_type_ids"][0, :length]
 
-            outputs = self.session.run(
-                None,
-                onnx_inputs
-            )
+                onnx_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
+                if self._has_token_type_ids:
+                    onnx_inputs["token_type_ids"] = token_type_ids
 
-            # Get logits (cross-encoder outputs a single score)
-            logits = outputs[0]
-
-            # Sigmoid for probability
-            if logits.shape[-1] == 1:
-                score = 1 / (1 + np.exp(-logits[0, 0]))
-            else:
-                # Softmax if multiple outputs
-                score = np.exp(logits[0, 1]) / np.sum(np.exp(logits[0]))
-
-            scores.append(float(score))
-
+                logits = self.session.run(None, onnx_inputs)[0]
+                if logits.shape[-1] == 1:
+                    probs = 1.0 / (1.0 + np.exp(-logits[:, 0]))
+                else:
+                    shifted = np.exp(logits - logits.max(axis=1, keepdims=True))
+                    probs = shifted[:, 1] / shifted.sum(axis=1)
+                for row, i in enumerate(chunk):
+                    scores[i] = float(probs[row])
         return scores
 
     def rerank(
@@ -1474,9 +1688,16 @@ class RerankerEmbedder:
         return self.score(query, documents)
 
 
-# =============================================================================
-# Late Interaction Embedder (ColBERT-style MaxSim)
-# =============================================================================
+# ============================================================================
+# LATE INTERACTION: ColBERT-style MaxSim
+# ============================================================================
+#
+# INPUT   queries and documents
+# OUTPUT  one vector a token, scored by the sum of each query token's best
+#         match
+#
+# What ultimate mode searches with.
+
 
 class LateInteractionEmbedder:
     """
@@ -1563,8 +1784,7 @@ class LateInteractionEmbedder:
             config_key = self.MODEL_ALIASES.get(model.lower(), model.lower())
             if config_key not in MODEL_CONFIG:
                 raise ValueError(
-                    f"Unknown model: {model}. Available models: "
-                    f"{list(self.MODEL_ALIASES.keys())}"
+                    f"Unknown model: {model}. Available models: {list(self.MODEL_ALIASES.keys())}"
                 )
             # Determine directory name based on config_key
             if config_key == "late_interaction_en":
@@ -1590,8 +1810,8 @@ class LateInteractionEmbedder:
         self.dimension = dimension or MODEL_CONFIG[config_key]["dimension"]
         self.max_length = max_length or MODEL_CONFIG[config_key]["max_length"]
 
-        self._session = None
-        self._tokenizer = None
+        self._session: Any = None
+        self._tokenizer: Any = None
         self._has_token_type_ids = True  # Default, will be detected
 
     @property
@@ -1618,7 +1838,7 @@ class LateInteractionEmbedder:
         if not model_path.exists():
             # Auto-download for multilingual models (BGE-M3)
             if self.language not in ("en", "english"):
-                print(f"Multilingual late interaction model (BGE-M3) not found. Downloading...")
+                logger.info("multilingual late-interaction model (BGE-M3) not found; downloading")
                 try:
                     download_models(model_type="late_interaction", progress=True)
                 except Exception as e:
@@ -1632,7 +1852,7 @@ class LateInteractionEmbedder:
                         f"Note: If downloads are blocked, use language='en' for bundled English ColBERT model."
                     ) from e
             else:
-                raise FileNotFoundError(
+                raise ModelNotFoundError(
                     f"ColBERT model not found: {model_path}\n"
                     f"English models should be bundled. Try reinstalling: pip install --force-reinstall vectrixdb"
                 )
@@ -1647,9 +1867,7 @@ class LateInteractionEmbedder:
         sess_options.intra_op_num_threads = 4
 
         self._session = ort.InferenceSession(
-            str(model_path),
-            sess_options=sess_options,
-            providers=providers
+            str(model_path), sess_options=sess_options, providers=providers
         )
 
         # Detect if model uses token_type_ids
@@ -1702,7 +1920,7 @@ class LateInteractionEmbedder:
 
         # Filter out padding tokens and reduce to ColBERT dimension
         valid_tokens = attention_mask == 1
-        embeddings = token_embeddings[valid_tokens][:, :self.dimension]
+        embeddings = token_embeddings[valid_tokens][:, : self.dimension]
 
         if normalize:
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -1744,7 +1962,7 @@ class LateInteractionEmbedder:
 
         # Filter out padding tokens and reduce to ColBERT dimension
         valid_tokens = attention_mask == 1
-        embeddings = token_embeddings[valid_tokens][:, :self.dimension]
+        embeddings = token_embeddings[valid_tokens][:, : self.dimension]
 
         if normalize:
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -1759,21 +1977,58 @@ class LateInteractionEmbedder:
         batch_size: int = 8,
     ) -> List[np.ndarray]:
         """
-        Encode multiple documents into token-level embeddings.
+        Encode multiple documents into token-level embeddings, batched.
+
+        One session call per length bucket instead of one per document (which
+        cost ~20 s for fifty candidates). Documents are padded to their own
+        32-token bucket, so an embedding never depends on its batch-mates.
 
         Args:
             documents: List of document texts
             normalize: L2 normalize embeddings
-            batch_size: Batch size for processing
+            batch_size: Upper bound on documents per session call
 
         Returns:
             List of arrays, each of shape (num_tokens, dimension)
         """
-        results = []
-        for doc in documents:
-            embeddings = self.encode_document(doc, normalize=normalize)
-            results.append(embeddings)
-        return results
+        if not documents:
+            return []
+        encoded = [
+            self.tokenizer.encode(doc, max_length=self.max_length, padding=True, truncation=True)
+            for doc in documents
+        ]
+        lengths = [int(e["attention_mask"][0].sum()) for e in encoded]
+        results: List[Optional[np.ndarray]] = [None] * len(documents)
+        pad = self.tokenizer.pad_token_id
+
+        for width, indices in _bucketed_batches(lengths):
+            width = min(width, self.max_length)
+            indices = sorted(indices, key=lambda i: (lengths[i], documents[i]))
+            for start in range(0, len(indices), max(1, batch_size)):
+                chunk = indices[start : start + max(1, batch_size)]
+                n = len(chunk)
+                input_ids = np.full((n, width), pad, dtype=np.int64)
+                attention_mask = np.zeros((n, width), dtype=np.int64)
+                token_type_ids = np.zeros((n, width), dtype=np.int64)
+                for row, i in enumerate(chunk):
+                    length = min(lengths[i], width)
+                    input_ids[row, :length] = encoded[i]["input_ids"][0, :length]
+                    attention_mask[row, :length] = 1
+                    if "token_type_ids" in encoded[i]:
+                        token_type_ids[row, :length] = encoded[i]["token_type_ids"][0, :length]
+                inputs = {
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask,
+                    "token_type_ids": token_type_ids,
+                }
+                outputs = self.session.run(None, self._build_onnx_inputs(inputs))[0]
+                for row, i in enumerate(chunk):
+                    length = min(lengths[i], width)
+                    emb = outputs[row, :length, : self.dimension]
+                    if normalize:
+                        emb = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-8)
+                    results[i] = emb.astype(np.float32)
+        return [r for r in results if r is not None]
 
     def max_sim(
         self,
@@ -1822,13 +2077,8 @@ class LateInteractionEmbedder:
             Scores array, shape (n_documents,)
         """
         query_emb = self.encode_query(query)
-        scores = []
-
-        for doc in documents:
-            doc_emb = self.encode_document(doc)
-            score = self.max_sim(query_emb, doc_emb)
-            scores.append(score)
-
+        doc_embs = self.encode_documents(documents)
+        scores = [self.max_sim(query_emb, doc_emb) for doc_emb in doc_embs]
         return np.array(scores, dtype=np.float32)
 
     def rerank(
@@ -1866,13 +2116,21 @@ class LateInteractionEmbedder:
         return self.score(query, documents)
 
 
-# =============================================================================
-# Graph Extractor (mREBEL Triplet Extraction for GraphRAG)
-# =============================================================================
+# ============================================================================
+# THE GRAPH EXTRACTOR: mREBEL triplets
+# ============================================================================
+#
+# INPUT   text
+# OUTPUT  head, relation and tail triplets for GraphRAG, through a
+#         SentencePiece tokenizer
+#
+# The multilingual REBEL model, wrapped so the extractor interface is one.
+
 
 @dataclass
 class Triplet:
     """A single extracted triplet (head, relation, tail)."""
+
     head: str
     head_type: str
     relation: str
@@ -1898,20 +2156,27 @@ class _SentencePieceWrapper:
 
     def __init__(self, spm_path: Path):
         import sentencepiece as spm
+
         self.sp = spm.SentencePieceProcessor()
         self.sp.Load(str(spm_path))
         self.pad_token_id = 0  # Standard pad token
         self.eos_token_id = 2  # Standard eos token
         self.bos_token_id = 1  # Standard bos token
 
-    def __call__(self, text: str, return_tensors: str = "np", max_length: int = 256,
-                 truncation: bool = True, padding: str = "max_length"):
+    def __call__(
+        self,
+        text: str,
+        return_tensors: str = "np",
+        max_length: int = 256,
+        truncation: bool = True,
+        padding: str = "max_length",
+    ):
         """Tokenize text and return input_ids and attention_mask."""
         ids = self.sp.EncodeAsIds(text)
 
         # Truncate if needed
         if truncation and len(ids) > max_length - 2:  # Leave room for special tokens
-            ids = ids[:max_length - 2]
+            ids = ids[: max_length - 2]
 
         # Add bos and eos tokens
         ids = [self.bos_token_id] + ids + [self.eos_token_id]
@@ -1942,7 +2207,11 @@ class _SentencePieceWrapper:
         # Filter out special tokens and out-of-range tokens
         valid_ids = []
         for i in ids:
-            if skip_special_tokens and i in (self.pad_token_id, self.bos_token_id, self.eos_token_id):
+            if skip_special_tokens and i in (
+                self.pad_token_id,
+                self.bos_token_id,
+                self.eos_token_id,
+            ):
                 continue
             if 0 <= i < vocab_size:
                 valid_ids.append(i)
@@ -1987,9 +2256,9 @@ class GraphExtractor:
         self.device = device
         self.max_length = max_length or MODEL_CONFIG["rebel"]["max_length"]
 
-        self._encoder_session = None
-        self._decoder_session = None
-        self._tokenizer = None
+        self._encoder_session: Any = None
+        self._decoder_session: Any = None
+        self._tokenizer: Any = None
         self._config = None
 
     def _load_model(self):
@@ -2006,7 +2275,7 @@ class GraphExtractor:
         config_path = self.model_dir / config["config_file"]
 
         if not encoder_path.exists():
-            print(f"GraphRAG extraction model (mREBEL) not found. Downloading...")
+            logger.info("GraphRAG extraction model (mREBEL) not found; downloading")
             try:
                 download_models(model_type="rebel", progress=True)
             except Exception as e:
@@ -2030,25 +2299,23 @@ class GraphExtractor:
         sess_options.intra_op_num_threads = 4
 
         self._encoder_session = ort.InferenceSession(
-            str(encoder_path),
-            sess_options=sess_options,
-            providers=providers
+            str(encoder_path), sess_options=sess_options, providers=providers
         )
 
         self._decoder_session = ort.InferenceSession(
-            str(decoder_path),
-            sess_options=sess_options,
-            providers=providers
+            str(decoder_path), sess_options=sess_options, providers=providers
         )
 
         # Load tokenizer - try transformers first, then fall back to direct sentencepiece
         try:
             from transformers import AutoTokenizer
+
             self._tokenizer = AutoTokenizer.from_pretrained(str(self.model_dir))
         except Exception as e:
             # AutoTokenizer failed, try direct SentencePiece
             try:
                 import sentencepiece as spm
+
                 self._tokenizer = _SentencePieceWrapper(tokenizer_path)
             except ImportError:
                 raise ImportError(
@@ -2096,7 +2363,7 @@ class GraphExtractor:
             {
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
-            }
+            },
         )
         encoder_hidden_states = encoder_outputs[0]
 
@@ -2108,7 +2375,7 @@ class GraphExtractor:
         )
 
         # Decode tokens to text
-        if hasattr(self._tokenizer, 'decode'):
+        if hasattr(self._tokenizer, "decode"):
             output_text = self._tokenizer.decode(generated_ids[0], skip_special_tokens=False)
         else:
             output_text = self._simple_decode(generated_ids[0])
@@ -2145,7 +2412,7 @@ class GraphExtractor:
                         "input_ids": generated,
                         "encoder_hidden_states": encoder_hidden_states,
                         "encoder_attention_mask": encoder_attention_mask,
-                    }
+                    },
                 )
             except Exception:
                 # Some models have different input names
@@ -2156,7 +2423,7 @@ class GraphExtractor:
                             "decoder_input_ids": generated,
                             "encoder_hidden_states": encoder_hidden_states,
                             "encoder_attention_mask": encoder_attention_mask,
-                        }
+                        },
                     )
                 except Exception:
                     break
@@ -2178,7 +2445,7 @@ class GraphExtractor:
 
     def _simple_decode(self, token_ids: np.ndarray) -> str:
         """Simple decoding using vocabulary."""
-        if hasattr(self._tokenizer, '_vocab_inv'):
+        if hasattr(self._tokenizer, "_vocab_inv"):
             tokens = [self._tokenizer._vocab_inv.get(int(t), "") for t in token_ids]
             return " ".join(tokens)
         return ""
@@ -2202,15 +2469,15 @@ class GraphExtractor:
         text = text.replace("<s>", "").replace("</s>", "").replace("<pad>", "").strip()
 
         # Relation type markers (all end a triplet)
-        RELATION_MARKERS = r'__tn__|__zu__|__wo__|__xh__|__yo__'
+        RELATION_MARKERS = r"__tn__|__zu__|__wo__|__xh__|__yo__"
         # Separator markers (between head and tail)
-        SEPARATOR_MARKERS = r'__uk__|__tn__|__yo__'
+        SEPARATOR_MARKERS = r"__uk__|__tn__|__yo__"
 
         # Try Format 2 (ONNX mREBEL)
         if "__sv__" in text:
             # Split by __sv__ to find individual triplet blocks
             # Format: <type> __sv__ content __sv__ content ...
-            sv_pattern = r'(?:<(\w+)>)?\s*__sv__\s*'
+            sv_pattern = r"(?:<(\w+)>)?\s*__sv__\s*"
             parts = re.split(sv_pattern, text)
 
             # parts: ['', type1, content1, type2, content2, ...]
@@ -2225,13 +2492,15 @@ class GraphExtractor:
                     # Pattern: HEAD [...] TAIL RELATION_MARKER RELATION
 
                     # Find all relation markers and their positions
-                    all_markers = list(re.finditer(f'({RELATION_MARKERS})\\s*([^_<]+?)(?=__|<|$)', content))
+                    all_markers = list(
+                        re.finditer(f"({RELATION_MARKERS})\\s*([^_<]+?)(?=__|<|$)", content)
+                    )
 
                     if all_markers:
                         # Use the last marker as the relation
                         last_match = all_markers[-1]
                         relation = last_match.group(2).strip()
-                        head_tail_part = content[:last_match.start()].strip()
+                        head_tail_part = content[: last_match.start()].strip()
 
                         # Parse head and tail from head_tail_part
                         # Priority: __uk__ > __yo__ > __tn__ (as separator)
@@ -2257,17 +2526,19 @@ class GraphExtractor:
                             tail = ""
 
                         # Clean up intermediate markers (__vi__, __uk__, etc.) from head/tail
-                        head = re.sub(r'\s*__\w+__\s*', ', ', head).strip(', ')
-                        tail = re.sub(r'\s*__\w+__\s*', ', ', tail).strip(', ')
+                        head = re.sub(r"\s*__\w+__\s*", ", ", head).strip(", ")
+                        tail = re.sub(r"\s*__\w+__\s*", ", ", tail).strip(", ")
 
                         if head and tail and relation:
-                            triplets.append(Triplet(
-                                head=head,
-                                head_type=entity_type.lower(),
-                                relation=relation,
-                                tail=tail,
-                                tail_type="entity",
-                            ))
+                            triplets.append(
+                                Triplet(
+                                    head=head,
+                                    head_type=entity_type.lower(),
+                                    relation=relation,
+                                    tail=tail,
+                                    tail_type="entity",
+                                )
+                            )
 
                 i += 2
 
@@ -2301,13 +2572,15 @@ class GraphExtractor:
                             tail = tail.split("<")[0].strip()
 
                             if head and relation and tail:
-                                triplets.append(Triplet(
-                                    head=head,
-                                    head_type="entity",
-                                    relation=relation,
-                                    tail=tail,
-                                    tail_type="entity",
-                                ))
+                                triplets.append(
+                                    Triplet(
+                                        head=head,
+                                        head_type="entity",
+                                        relation=relation,
+                                        tail=tail,
+                                        tail_type="entity",
+                                    )
+                                )
             except Exception:
                 continue
 

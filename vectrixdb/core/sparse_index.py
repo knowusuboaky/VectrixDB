@@ -10,7 +10,7 @@ Features:
 - Efficient top-k retrieval using heap
 - Memory-efficient storage
 
-Author: Daddy Nyame Owusu - Boakye
+Author: Kwadwo Daddy Nyame Owusu - Boakye
 """
 
 import heapq
@@ -28,9 +28,28 @@ import numpy as np
 from .types import SparseVector
 
 
+__all__ = [
+    "SparseSearchResult",
+    "SparseIndex",
+    "HybridSparseIndex",
+]
+
+
+# ============================================================================
+# THE RESULT, THE INDEX, AND THE HYBRID
+# ============================================================================
+#
+# INPUT   sparse vectors, and a query
+# OUTPUT  results from an inverted index; dense and sparse combined, Qdrant-
+#         style
+#
+# An inverted index, so a sparse search touches only the terms the query has.
+
+
 @dataclass
 class SparseSearchResult:
     """Result from sparse vector search."""
+
     id: str
     score: float
 
@@ -232,10 +251,7 @@ class SparseIndex:
             else:
                 top_k = heapq.nlargest(limit, scores.items(), key=lambda x: x[1])
 
-            return [
-                SparseSearchResult(id=doc_id, score=score)
-                for doc_id, score in top_k
-            ]
+            return [SparseSearchResult(id=doc_id, score=score) for doc_id, score in top_k]
 
     def search_cosine(
         self,
@@ -261,8 +277,12 @@ class SparseIndex:
         if query_norm == 0:
             return []
 
-        # Get dot products
-        dot_results = self.search(query, limit=limit * 2, doc_ids=doc_ids)
+        # Every document the query touches, not a truncated prefetch.
+        # Ranking the top 2k dot products by cosine can miss the true top
+        # cosine: a short document scores a small dot product and a large
+        # cosine, so it never reached the rerank. The accumulation pass is
+        # the same either way; only the heap is bigger.
+        dot_results = self.search(query, limit=max(len(self._norms), 1), doc_ids=doc_ids)
 
         # Normalize by document norms
         cosine_results = []
@@ -333,6 +353,9 @@ class SparseIndex:
 
     def _load(self) -> None:
         """Load index from disk."""
+        if not self.path:
+            return
+
         pkl_path = self.path / "sparse_index.pkl"
         if not pkl_path.exists():
             return
@@ -448,13 +471,15 @@ class HybridSparseIndex:
             sparse_score = sparse_results.get(doc_id, 0.0)
 
             # RRF fusion
-            dense_rank = self._get_rank(doc_id, dense_results) if dense_score > 0 else float('inf')
-            sparse_rank = self._get_rank(doc_id, sparse_results) if sparse_score > 0 else float('inf')
+            dense_rank = self._get_rank(doc_id, dense_results) if dense_score > 0 else float("inf")
+            sparse_rank = (
+                self._get_rank(doc_id, sparse_results) if sparse_score > 0 else float("inf")
+            )
 
             rrf_score = 0.0
-            if dense_rank < float('inf'):
+            if dense_rank < float("inf"):
                 rrf_score += dense_weight / (self.rrf_k + dense_rank)
-            if sparse_rank < float('inf'):
+            if sparse_rank < float("inf"):
                 rrf_score += sparse_weight / (self.rrf_k + sparse_rank)
 
             combined.append((doc_id, rrf_score, dense_score, sparse_score))
@@ -473,10 +498,10 @@ class HybridSparseIndex:
         # This is a placeholder - actual implementation depends on dense index type
         return []
 
-    def _get_rank(self, doc_id: str, scores: Dict[str, float]) -> int:
+    def _get_rank(self, doc_id: str, scores: Dict[str, float]) -> float:
         """Get rank of document in sorted scores."""
         sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
         try:
             return sorted_ids.index(doc_id) + 1
         except ValueError:
-            return float('inf')
+            return float("inf")

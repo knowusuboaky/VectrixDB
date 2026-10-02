@@ -1,0 +1,30 @@
+{
+  "document": "td-annual-report-2025.pdf",
+  "about": "Facts printed on pages laid out to be looked at, each a number and what it measures. A fact is read when both are in one paragraph of the page's text. Pages 42, 79 and 146 are read well by the rules already, and are here so a reading by sight is seen not to break them.",
+  "facts": [
+    {"page": 2, "number": "37%", "label": "Canadian Personal & Commercial Banking"},
+    {"page": 2, "number": "26%", "label": "Wealth Management"},
+    {"page": 2, "number": "22%", "label": "U.S. Retail"},
+    {"page": 2, "number": "15%", "label": "Wholesale Banking"},
+    {"page": 2, "number": "68 billion", "label": "revenue"},
+    {"page": 2, "number": "100,000+", "label": "colleagues"},
+    {"page": 2, "number": "28+ million", "label": "clients"},
+    {"page": 2, "number": "13+ million", "label": "mobile users"},
+    {"page": 2, "number": "2,151", "label": "retail locations"},
+    {"page": 2, "number": "178+ million", "label": "communities"},
+    {"page": 8, "number": "169-year", "label": "dividend history"},
+    {"page": 8, "number": "4.6%", "label": "dividend yield"},
+    {"page": 8, "number": "25.9%", "label": "shareholder return"},
+    {"page": 8, "number": "2.1 trillion", "label": "assets"},
+    {"page": 8, "number": "1.3 trillion", "label": "deposits"},
+    {"page": 8, "number": "14.7%", "label": "CET1"},
+    {"page": 8, "number": "4.20", "label": "dividend"},
+    {"page": 8, "number": "11.56", "label": "earnings per share"},
+    {"page": 42, "number": "14,500", "label": "Personal banking"},
+    {"page": 42, "number": "6,186", "label": "Business banking"},
+    {"page": 79, "number": "486,419", "label": "Credit Risk"},
+    {"page": 79, "number": "129,602", "label": "Operational Risk"},
+    {"page": 146, "number": "157", "label": "Nature of Operations"},
+    {"page": 146, "number": "152", "label": "Consolidated Balance Sheet"}
+  ]
+}

@@ -1,0 +1,7 @@
+# The whole service: a web framework, an http client, a server, and pytest for
+# the tests. No part of the library is installed here on purpose: this Backend
+# knows the retrieval service by its address, not by importing it.
+fastapi>=0.115
+httpx>=0.27
+uvicorn[standard]>=0.30
+pytest>=8.0

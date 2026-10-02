@@ -1,0 +1,5944 @@
+{
+  "components": {
+    "schemas": {
+      "ACLSearchRequest": {
+        "description": "Search with ACL/security filtering.",
+        "example": {
+          "limit": 10,
+          "query": [
+            0.1,
+            0.2,
+            0.3
+          ],
+          "user_principals": [
+            "user:alice",
+            "group:engineering"
+          ]
+        },
+        "properties": {
+          "acl_field": {
+            "default": "_acl",
+            "description": "Metadata field containing ACL",
+            "title": "Acl Field",
+            "type": "string"
+          },
+          "default_allow": {
+            "default": false,
+            "description": "Allow if no ACL defined",
+            "title": "Default Allow",
+            "type": "boolean"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Query",
+            "type": "array"
+          },
+          "user_principals": {
+            "description": "User's principals e.g. ['user:alice', 'group:eng']",
+            "items": {
+              "type": "string"
+            },
+            "title": "User Principals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query",
+          "user_principals"
+        ],
+        "title": "ACLSearchRequest",
+        "type": "object"
+      },
+      "AccessCheckRequest": {
+        "properties": {
+          "collection": {
+            "title": "Collection",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The address to try, as their sign-in would carry it",
+            "title": "Email"
+          },
+          "groups": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The security group ids to try them with, standing in for the token. A store policy reads the address alone",
+            "title": "Groups"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Their subject at the identity provider, when there is no address",
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "collection"
+        ],
+        "title": "AccessCheckRequest",
+        "type": "object"
+      },
+      "AddPointsRequest": {
+        "description": "Request to add points.",
+        "example": {
+          "points": [
+            {
+              "id": "doc1",
+              "metadata": {
+                "title": "Document 1"
+              },
+              "vector": [
+                0.1,
+                0.2,
+                0.3
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/PointData"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "title": "AddPointsRequest",
+        "type": "object"
+      },
+      "AddPointsRequestV2": {
+        "description": "Enhanced request to add points with text for hybrid search.",
+        "example": {
+          "points": [
+            {
+              "id": "doc1",
+              "metadata": {
+                "title": "Document 1"
+              },
+              "text": "Full text content for hybrid search",
+              "vector": [
+                0.1,
+                0.2,
+                0.3
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "points": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "title": "AddPointsRequestV2",
+        "type": "object"
+      },
+      "AddPointsWithSparseRequest": {
+        "description": "Request to add points with sparse vectors.",
+        "example": {
+          "points": [
+            {
+              "id": "doc1",
+              "metadata": {
+                "title": "Document 1"
+              },
+              "sparse_vector": {
+                "indices": [
+                  0,
+                  42
+                ],
+                "values": [
+                  0.5,
+                  1.2
+                ]
+              },
+              "vector": [
+                0.1,
+                0.2,
+                0.3
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "points": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "title": "AddPointsWithSparseRequest",
+        "type": "object"
+      },
+      "BeginRequest": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "BeginRequest",
+        "type": "object"
+      },
+      "CodeRequest": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "CodeRequest",
+        "type": "object"
+      },
+      "ConfirmRequest": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "ticket": {
+            "title": "Ticket",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "code"
+        ],
+        "title": "ConfirmRequest",
+        "type": "object"
+      },
+      "CreateCollectionRequest": {
+        "description": "Request to create a collection.",
+        "example": {
+          "dimension": 384,
+          "metric": "cosine",
+          "name": "documents",
+          "tags": [
+            "Dense",
+            "Hybrid"
+          ]
+        },
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "dimension": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 65536.0,
+            "title": "Dimension",
+            "type": "integer"
+          },
+          "metric": {
+            "default": "cosine",
+            "title": "Metric",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Capability tags: Dense, Sparse, Hybrid, Ultimate, Graph",
+            "title": "Tags"
+          }
+        },
+        "required": [
+          "name",
+          "dimension"
+        ],
+        "title": "CreateCollectionRequest",
+        "type": "object"
+      },
+      "CreateCollectionRequestV2": {
+        "description": "Enhanced request to create a collection with advanced options.",
+        "example": {
+          "dimension": 384,
+          "enable_text_index": true,
+          "metric": "cosine",
+          "name": "documents",
+          "tags": [
+            "Dense",
+            "Hybrid"
+          ]
+        },
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "dimension": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 65536.0,
+            "title": "Dimension",
+            "type": "integer"
+          },
+          "enable_text_index": {
+            "default": true,
+            "description": "Enable hybrid search",
+            "title": "Enable Text Index",
+            "type": "boolean"
+          },
+          "hnsw_ef_construction": {
+            "default": 200,
+            "description": "HNSW construction parameter",
+            "title": "Hnsw Ef Construction",
+            "type": "integer"
+          },
+          "hnsw_m": {
+            "default": 16,
+            "description": "HNSW M parameter",
+            "title": "Hnsw M",
+            "type": "integer"
+          },
+          "metric": {
+            "default": "cosine",
+            "title": "Metric",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Capability tags: Dense, Sparse, Hybrid, Ultimate, Graph",
+            "title": "Tags"
+          }
+        },
+        "required": [
+          "name",
+          "dimension"
+        ],
+        "title": "CreateCollectionRequestV2",
+        "type": "object"
+      },
+      "CredentialRequest": {
+        "properties": {
+          "credential": {
+            "additionalProperties": true,
+            "title": "Credential",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "ticket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket"
+          }
+        },
+        "required": [
+          "credential"
+        ],
+        "title": "CredentialRequest",
+        "type": "object"
+      },
+      "DeletePointsRequest": {
+        "description": "Request to delete points.",
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "DeletePointsRequest",
+        "type": "object"
+      },
+      "DenseSparseSearchRequest": {
+        "description": "Dense + Sparse hybrid search request (Qdrant-style).",
+        "example": {
+          "dense_query": [
+            0.1,
+            0.2,
+            0.3
+          ],
+          "dense_weight": 0.6,
+          "limit": 10,
+          "sparse_query": {
+            "indices": [
+              0,
+              42
+            ],
+            "values": [
+              0.5,
+              1.2
+            ]
+          },
+          "sparse_weight": 0.4
+        },
+        "properties": {
+          "dense_query": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Dense Query",
+            "type": "array"
+          },
+          "dense_weight": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Dense Weight",
+            "type": "number"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "include_vectors": {
+            "default": false,
+            "title": "Include Vectors",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "sparse_query": {
+            "$ref": "#/components/schemas/SparseVectorData"
+          },
+          "sparse_weight": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Sparse Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "dense_query",
+          "sparse_query"
+        ],
+        "title": "DenseSparseSearchRequest",
+        "type": "object"
+      },
+      "EnterpriseSearchRequest": {
+        "description": "Full enterprise search with all features.",
+        "example": {
+          "facets": [
+            "category",
+            "author"
+          ],
+          "limit": 10,
+          "query": [
+            0.1,
+            0.2,
+            0.3
+          ],
+          "rerank": true,
+          "rerank_method": "mmr",
+          "user_principals": [
+            "user:alice",
+            "group:engineering"
+          ]
+        },
+        "properties": {
+          "default_allow": {
+            "default": false,
+            "description": "Allow if no ACL defined",
+            "title": "Default Allow",
+            "type": "boolean"
+          },
+          "facets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Facets"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Query",
+            "type": "array"
+          },
+          "query_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Text"
+          },
+          "rerank": {
+            "default": false,
+            "title": "Rerank",
+            "type": "boolean"
+          },
+          "rerank_limit": {
+            "default": 100,
+            "title": "Rerank Limit",
+            "type": "integer"
+          },
+          "rerank_method": {
+            "default": "mmr",
+            "title": "Rerank Method",
+            "type": "string"
+          },
+          "user_principals": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Principals"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "EnterpriseSearchRequest",
+        "type": "object"
+      },
+      "FacetedSearchRequest": {
+        "description": "Search with faceted aggregations.",
+        "example": {
+          "facets": [
+            "category",
+            "author",
+            "year"
+          ],
+          "limit": 10,
+          "query": [
+            0.1,
+            0.2,
+            0.3
+          ]
+        },
+        "properties": {
+          "facet_limit": {
+            "default": 10,
+            "description": "Max values per facet",
+            "title": "Facet Limit",
+            "type": "integer"
+          },
+          "facets": {
+            "description": "Fields to aggregate",
+            "items": {
+              "type": "string"
+            },
+            "title": "Facets",
+            "type": "array"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Query",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "FacetedSearchRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HybridSearchRequest": {
+        "description": "Hybrid search request (vector + keyword).",
+        "example": {
+          "limit": 10,
+          "query": [
+            0.1,
+            0.2,
+            0.3
+          ],
+          "query_text": "machine learning",
+          "text_weight": 0.3,
+          "vector_weight": 0.7
+        },
+        "properties": {
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "include_highlights": {
+            "default": true,
+            "title": "Include Highlights",
+            "type": "boolean"
+          },
+          "include_vectors": {
+            "default": false,
+            "title": "Include Vectors",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Query",
+            "type": "array"
+          },
+          "query_text": {
+            "title": "Query Text",
+            "type": "string"
+          },
+          "text_weight": {
+            "default": 0.3,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Text Weight",
+            "type": "number"
+          },
+          "vector_weight": {
+            "default": 0.7,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Vector Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "query",
+          "query_text"
+        ],
+        "title": "HybridSearchRequest",
+        "type": "object"
+      },
+      "IndexDocumentRequest": {
+        "description": "Request to index a document.",
+        "properties": {
+          "doc_type": {
+            "default": "text",
+            "description": "Document type: text, markdown, pdf",
+            "title": "Doc Type",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "IndexDocumentRequest",
+        "type": "object"
+      },
+      "KeyRequest": {
+        "properties": {
+          "collections": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The collections this key may reach. Left out, every collection its role allows.",
+            "title": "Collections"
+          },
+          "expires_in_days": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 3650.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How long the key works for. Left out, until it is revoked.",
+            "title": "Expires In Days"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "requests_per_minute": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 100000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many requests a minute the key may make. Left out, the server's VECTRIXDB_KEY_REQUESTS_PER_MINUTE, and with that unset, no limit.",
+            "title": "Requests Per Minute"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "role"
+        ],
+        "title": "KeyRequest",
+        "type": "object"
+      },
+      "KeywordSearchRequest": {
+        "description": "Keyword search request (full-text).",
+        "example": {
+          "limit": 10,
+          "query_text": "machine learning AI"
+        },
+        "properties": {
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "include_highlights": {
+            "default": true,
+            "title": "Include Highlights",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query_text": {
+            "title": "Query Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query_text"
+        ],
+        "title": "KeywordSearchRequest",
+        "type": "object"
+      },
+      "PasswordRequest": {
+        "properties": {
+          "password": {
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "PasswordRequest",
+        "type": "object"
+      },
+      "PersonRequest": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "grants": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grants"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Principal"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "role"
+        ],
+        "title": "PersonRequest",
+        "type": "object"
+      },
+      "PointData": {
+        "description": "A single point.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "vector": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Vector",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "vector"
+        ],
+        "title": "PointData",
+        "type": "object"
+      },
+      "PolicyRequest": {
+        "properties": {
+          "policy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who may retrieve from the collection: {\"method\": \"token\", \"allow\": [{\"id\": ..., \"name\": ...}], \"people\": [{\"email\": ...}]} for security groups by object id from the sign-in token, narrowed to the people on the list, who must be in a group and on it; or {\"method\": \"store\", \"allow\": [{\"email\": ...} | {\"domain\": ...}]} for a list of people kept with the collection. null is nobody",
+            "title": "Policy"
+          }
+        },
+        "title": "PolicyRequest",
+        "type": "object"
+      },
+      "RerankSearchRequest": {
+        "description": "Search with re-ranking (two-stage retrieval).",
+        "example": {
+          "diversity_lambda": 0.7,
+          "limit": 10,
+          "query": [
+            0.1,
+            0.2,
+            0.3
+          ],
+          "rerank_limit": 100,
+          "rerank_method": "mmr"
+        },
+        "properties": {
+          "diversity_lambda": {
+            "default": 0.5,
+            "description": "MMR diversity (0=diverse, 1=relevant)",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Diversity Lambda",
+            "type": "number"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Query",
+            "type": "array"
+          },
+          "query_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For cross-encoder re-ranking",
+            "title": "Query Text"
+          },
+          "rerank_limit": {
+            "default": 100,
+            "description": "Candidates for re-ranking",
+            "exclusiveMinimum": 0.0,
+            "maximum": 10000.0,
+            "title": "Rerank Limit",
+            "type": "integer"
+          },
+          "rerank_method": {
+            "default": "exact",
+            "description": "exact, mmr, cross_encoder, weighted",
+            "title": "Rerank Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "RerankSearchRequest",
+        "type": "object"
+      },
+      "ResetRequest": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "code",
+          "password"
+        ],
+        "title": "ResetRequest",
+        "type": "object"
+      },
+      "SearchRequest": {
+        "description": "Search request.",
+        "example": {
+          "filter": {
+            "category": "tech"
+          },
+          "limit": 10,
+          "query": [
+            0.1,
+            0.2,
+            0.3
+          ]
+        },
+        "properties": {
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "include_vectors": {
+            "default": false,
+            "title": "Include Vectors",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Query",
+            "type": "array"
+          },
+          "score_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Threshold"
+          },
+          "use_cache": {
+            "default": true,
+            "title": "Use Cache",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SearchRequest",
+        "type": "object"
+      },
+      "SparseSearchRequest": {
+        "description": "Sparse vector search request.",
+        "example": {
+          "limit": 10,
+          "query": {
+            "indices": [
+              0,
+              42,
+              100
+            ],
+            "values": [
+              0.5,
+              1.2,
+              0.8
+            ]
+          }
+        },
+        "properties": {
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "$ref": "#/components/schemas/SparseVectorData"
+          },
+          "score_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Threshold"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SparseSearchRequest",
+        "type": "object"
+      },
+      "SparseVectorData": {
+        "description": "Sparse vector representation.",
+        "example": {
+          "indices": [
+            0,
+            42,
+            100
+          ],
+          "values": [
+            0.5,
+            1.2,
+            0.8
+          ]
+        },
+        "properties": {
+          "indices": {
+            "description": "Non-zero dimension indices",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Indices",
+            "type": "array"
+          },
+          "values": {
+            "description": "Corresponding values",
+            "items": {
+              "type": "number"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "indices",
+          "values"
+        ],
+        "title": "SparseVectorData",
+        "type": "object"
+      },
+      "StepUpRequest": {
+        "properties": {
+          "code": {
+            "default": "",
+            "maxLength": 40,
+            "title": "Code",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          }
+        },
+        "title": "StepUpRequest",
+        "type": "object"
+      },
+      "TextSearchRequest": {
+        "description": "Text-based semantic search request.\n\nThe server embeds the text with the model the library writes vectors\nwith by default, bge-small-en-v1.5, so no vectors need computing.",
+        "example": {
+          "filter": {
+            "category": "tech"
+          },
+          "limit": 10,
+          "query_text": "what is machine learning?"
+        },
+        "properties": {
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "include_vectors": {
+            "default": false,
+            "title": "Include Vectors",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query_text": {
+            "description": "Search query text (auto-embedded)",
+            "title": "Query Text",
+            "type": "string"
+          },
+          "rerank": {
+            "default": false,
+            "description": "Re-rank the top candidates with the bundled cross-encoder. The dashboard used to send this and the server ignored it, so its Rerank mode was dense search.",
+            "title": "Rerank",
+            "type": "boolean"
+          },
+          "score_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Threshold"
+          },
+          "use_cache": {
+            "default": true,
+            "title": "Use Cache",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query_text"
+        ],
+        "title": "TextSearchRequest",
+        "type": "object"
+      },
+      "TextUpsertPoint": {
+        "description": "Point with text for auto-embedding.",
+        "properties": {
+          "id": {
+            "description": "Point ID",
+            "title": "Id",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Additional metadata",
+            "title": "Payload"
+          },
+          "text": {
+            "description": "Text to embed and store",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "title": "TextUpsertPoint",
+        "type": "object"
+      },
+      "TextUpsertRequest": {
+        "description": "Request for text upsert endpoint.",
+        "properties": {
+          "points": {
+            "description": "Points with text to embed",
+            "items": {
+              "$ref": "#/components/schemas/TextUpsertPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "title": "TextUpsertRequest",
+        "type": "object"
+      },
+      "TokenRequest": {
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "TokenRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VerifyRequest": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          }
+        },
+        "required": [
+          "email",
+          "code"
+        ],
+        "title": "VerifyRequest",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Where vectors come alive - A modern, visual-first vector database",
+    "title": "VectrixDB",
+    "version": "2.2.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "description": "Root endpoint. With sign-in on, the version is said only to somebody signed in.",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Root",
+        "tags": [
+          "info"
+        ]
+      }
+    },
+    "/api/v1": {
+      "get": {
+        "description": "API v1 root - list available endpoints.",
+        "operationId": "api_v1_root_api_v1_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api V1 Root",
+        "tags": [
+          "info"
+        ]
+      }
+    },
+    "/api/v1/": {
+      "get": {
+        "description": "API v1 root - list available endpoints.",
+        "operationId": "api_v1_root_api_v1__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api V1 Root",
+        "tags": [
+          "info"
+        ]
+      }
+    },
+    "/api/v1/about": {
+      "get": {
+        "description": "Which VectrixDB this is, its licence, and the NOTICE that travels with it. For admins: About in the account menu.",
+        "operationId": "about_this_server_api_v1_about_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "About This Server",
+        "tags": [
+          "info"
+        ]
+      }
+    },
+    "/api/v1/about/licence": {
+      "get": {
+        "description": "The Apache License, Version 2.0, as the package carries it, in plain text.",
+        "operationId": "about_licence_api_v1_about_licence_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "About Licence",
+        "tags": [
+          "info"
+        ]
+      }
+    },
+    "/api/v1/access": {
+      "get": {
+        "description": "The access log, newest first, a page at a time: ``q`` finds in anything a line says, ``total`` is how many match.",
+        "operationId": "access_log_api_v1_access_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event"
+            }
+          },
+          {
+            "in": "query",
+            "name": "who",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Who"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Access Log Api V1 Access Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Access Log",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/access/check": {
+      "post": {
+        "description": "Whether somebody may retrieve from a collection, and why. Nothing is searched.\n\nThe same decision the server makes before a search, given an address and\nthe groups to try, so a policy is tested before anybody signs in. The\ngroups stand in for the token; a store policy reads the address alone.\nEvery check is written to the access log.",
+        "operationId": "access_check_api_v1_access_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Access Check Api V1 Access Check Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Access Check",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/access/daily": {
+      "get": {
+        "description": "Searches a day and how long they took, for everyone; sign-ins, refusals and policy denials too, for whoever may read the access log.\n\nCounts only: no names, no collections. Searches and their times say how\nthe server is used, and a guest's overview draws them; who signed in and\nwho was turned away is about people, so those three counts are left out\nunless the caller holds ``access.read``.",
+        "operationId": "access_daily_api_v1_access_daily_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 14,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Access Daily Api V1 Access Daily Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Access Daily",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/access/readers": {
+      "get": {
+        "description": "Who searched and read most in the last days, the busiest first, a page at a time.\n\n``top`` is the page, ``offset`` where it starts, ``q`` a find on the\nname, and ``total`` how many read at all. Names and counts, as the log\nitself holds.",
+        "operationId": "access_readers_api_v1_access_readers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 14,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "top",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "title": "Top",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Access Readers Api V1 Access Readers Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Access Readers",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/audit": {
+      "get": {
+        "description": "The most recent audit records, newest first, a page at a time, from where the server records them.\n\n``limit`` and ``offset`` cut the page and ``q`` finds within the records;\n``total`` is how many match. The counts, the days and the collections are\nalways counted from every record in the window, whatever page is listed.\n\nServed only when an API key is configured and presented, or to a person\nwhose role reads the audit, and only when an operator has set\n``VECTRIXDB_AUDIT_STORE``, or ``VECTRIXDB_AUDIT_JSONL`` for a file. A\nfile, a Blob log and S3 are read back; a PostgreSQL table is written\nwith INSERT only, so it is read where it is kept. On any other server\nthis answers that the trail is not available here, and says why, so the\nfix is not a guess.",
+        "operationId": "audit_trail_api_v1_audit_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "exclusiveMinimum": 0,
+              "maximum": 1000,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "A find: records that hold this in their collection, principal, outcome or id.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A find: records that hold this in their collection, principal, outcome or id.",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "collection",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Collection"
+            }
+          },
+          {
+            "description": "How many days the counts a day and by collection go back.",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 14,
+              "description": "How many days the counts a day and by collection go back.",
+              "exclusiveMinimum": 0,
+              "maximum": 90,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Trail",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/cache": {
+      "delete": {
+        "description": "Clear all cached data.",
+        "operationId": "clear_cache_api_v1_cache_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Clear Cache",
+        "tags": [
+          "cache"
+        ]
+      }
+    },
+    "/api/v1/cache/stats": {
+      "get": {
+        "description": "Get cache statistics.",
+        "operationId": "get_cache_stats_api_v1_cache_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Cache Stats",
+        "tags": [
+          "cache"
+        ]
+      }
+    },
+    "/api/v1/chunking": {
+      "get": {
+        "description": "Every saved chunking run, newest first: when, which golden file, which collections it cut, and each technique's count.\n\nKept beside the retrieval runs, as ``chunking/runs/<id>/report.json`` in\nthe same store, and made where the golden questions live, by\n``compare_chunking`` or a function that runs it. The full report of one\nis ``/api/v1/chunking/{run}``, with ``latest`` for the newest.",
+        "operationId": "list_chunking_api_v1_chunking_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Chunking Api V1 Chunking Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Chunking",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
+    "/api/v1/chunking/{run}": {
+      "get": {
+        "description": "One chunking run: every build, each technique at its best, the head to head between them, and the pick.\n\n``golden_download`` says whether the caller can download the golden\nquestions the run used, as for an evaluation run.",
+        "operationId": "get_chunking_api_v1_chunking__run__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run",
+            "required": true,
+            "schema": {
+              "title": "Run",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Chunking Api V1 Chunking  Run  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Chunking",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
+    "/api/v1/chunking/{run}/golden": {
+      "get": {
+        "description": "The golden file a chunking run used, exactly as it was read. A signed-in admin only, as a person.",
+        "operationId": "download_chunking_golden_api_v1_chunking__run__golden_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run",
+            "required": true,
+            "schema": {
+              "title": "Run",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Chunking Golden",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
+    "/api/v1/collections": {
+      "get": {
+        "description": "List all collections, with the policied ones named and no more.\n\nThat a collection exists, its name and its size, is for everyone who\nreaches the server, guests included; what is in it is for the people its\npolicy names. How much is in a policied collection is withheld: a size\ngrows when documents are written, and this API cannot say which of those\ndocuments the person reading is allowed to know about, because it\nresolves no principals.",
+        "operationId": "list_collections_api_v1_collections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Collections",
+        "tags": [
+          "collections"
+        ]
+      },
+      "post": {
+        "description": "Create a new collection.",
+        "operationId": "create_collection_api_v1_collections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCollectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Collection",
+        "tags": [
+          "collections"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}": {
+      "delete": {
+        "description": "Delete a collection.",
+        "operationId": "delete_collection_api_v1_collections__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Collection",
+        "tags": [
+          "collections"
+        ]
+      },
+      "get": {
+        "description": "Get collection details.",
+        "operationId": "get_collection_api_v1_collections__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Collection",
+        "tags": [
+          "collections"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/builds": {
+      "get": {
+        "description": "Every index build that still has chunks in the collection.\n\nRead off the ``_vx_build`` stamp on each chunk, so a build whose chunks\nwere all deleted since is no longer listed: this is what is here, not a\nhistory. The audit trail is the history.",
+        "operationId": "collection_builds_api_v1_collections__name__builds_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Collection Builds",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/dense-sparse-search": {
+      "post": {
+        "description": "Hybrid search combining dense and sparse vectors (Qdrant-style).\n\nThis is the most powerful search mode, combining:\n- Dense vectors (e.g., sentence-transformers embeddings)\n- Sparse vectors (e.g., SPLADE, learned sparse embeddings)\n\nUses Reciprocal Rank Fusion (RRF) to combine results.",
+        "operationId": "dense_sparse_search_api_v1_collections__name__dense_sparse_search_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DenseSparseSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dense Sparse Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/documents": {
+      "get": {
+        "operationId": "list_documents_api_v1_collections__name__documents_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Documents",
+        "tags": [
+          "documents"
+        ]
+      },
+      "post": {
+        "description": "Read a file, cut it, embed it and write it, as ``add_document`` does.\n\nSending the same id again replaces the document. The reply says how many\nchunks were written, how the extraction scored, and each chunk's citation.",
+        "operationId": "add_document_api_v1_collections__name__documents_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The document's id. The file's name when left out.",
+            "in": "query",
+            "name": "doc_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The document's id. The file's name when left out.",
+              "title": "Doc Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "chunk",
+            "required": false,
+            "schema": {
+              "default": "markdown",
+              "title": "Chunk",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "chunk_size",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 20000,
+              "minimum": 50,
+              "title": "Chunk Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overlap",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "minimum": 0,
+              "title": "Overlap",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "embed_heading",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Embed Heading",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "A JSON object put on every chunk.",
+            "in": "query",
+            "name": "metadata",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A JSON object put on every chunk.",
+              "title": "Metadata"
+            }
+          },
+          {
+            "in": "query",
+            "name": "on_low_quality",
+            "required": false,
+            "schema": {
+              "default": "warn",
+              "pattern": "^(warn|reject|allow)$",
+              "title": "On Low Quality",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Document",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/documents/{doc_id}": {
+      "delete": {
+        "operationId": "delete_document_api_v1_collections__name__documents__doc_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Document",
+        "tags": [
+          "documents"
+        ]
+      },
+      "get": {
+        "description": "The Markdown a document was indexed from, as text.",
+        "operationId": "get_document_api_v1_collections__name__documents__doc_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "With the front matter.",
+            "in": "query",
+            "name": "raw",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "With the front matter.",
+              "title": "Raw",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/graph": {
+      "get": {
+        "description": "Get knowledge graph data for visualization.\n\nReturns nodes (entities) and edges (relationships) in Cytoscape.js format.\nOnly for a collection made for graph search; the health route's\n``capabilities.graph`` says which those are.",
+        "operationId": "get_collection_graph_api_v1_collections__name__graph_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Collection Graph",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/graph/extract": {
+      "post": {
+        "description": "Extract entities and relationships from collection documents.\n\nRuns the GraphRAG pipeline to extract entities using mREBEL model\nand build a knowledge graph for visualization.",
+        "operationId": "extract_graph_entities_api_v1_collections__name__graph_extract_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Extract Graph Entities",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/growth": {
+      "get": {
+        "description": "Chunks written on each of the last days, today last, counted from the chunks that are here.\n\nEvery chunk keeps the time it was first written, so this needs no log\nand no audit trail. It is what is here, not a history: a chunk written\nand since deleted is not counted, and one written again under the same\nid counts on the day it was first written. Days are UTC.",
+        "operationId": "collection_growth_api_v1_collections__name__growth_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Collection Growth",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/health": {
+      "get": {
+        "description": "What state a collection is in, as the collections page shows it.\n\nA policied collection answers with its configuration only.",
+        "operationId": "collection_health_api_v1_collections__name__health_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Collection Health",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/hybrid-search": {
+      "post": {
+        "description": "Hybrid search combining vector similarity and keyword matching.\n\nUses Reciprocal Rank Fusion (RRF) to combine results from vector\nsearch and BM25 keyword search for improved relevance.",
+        "operationId": "hybrid_search_api_v1_collections__name__hybrid_search_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HybridSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hybrid Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/keyword-search": {
+      "post": {
+        "description": "Full-text keyword search using BM25 ranking.\n\nSearches through text content indexed with the vectors.",
+        "operationId": "keyword_search_api_v1_collections__name__keyword_search_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeywordSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Keyword Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/points": {
+      "delete": {
+        "description": "Delete points from a collection.",
+        "operationId": "delete_points_api_v1_collections__name__points_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletePointsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Points",
+        "tags": [
+          "points"
+        ]
+      },
+      "get": {
+        "description": "List points in a collection, a page at a time.\n\nWith ``index=true`` each id comes with where the chunk came from and how\nclean its text is, and never the text. That is what a table of chunks\nneeds, and it means a page can list a collection without having been sent\na word of it. The text is one request per chunk, asked for and recorded.\n``q`` finds by id, and by source where the chunks are kept; ``total`` is\nthen how many match.",
+        "operationId": "list_points_api_v1_collections__name__points_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "exclusiveMinimum": 0,
+              "maximum": 1000,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "index",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Index",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "A find: points whose id, or source when the chunks are kept, holds this.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A find: points whose id, or source when the chunks are kept, holds this.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Points",
+        "tags": [
+          "points"
+        ]
+      },
+      "post": {
+        "description": "Add points to a collection.",
+        "operationId": "add_points_api_v1_collections__name__points_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddPointsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Points",
+        "tags": [
+          "points"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/points/{point_id}": {
+      "get": {
+        "description": "Get a point by ID.",
+        "operationId": "get_point_api_v1_collections__name__points__point_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "point_id",
+            "required": true,
+            "schema": {
+              "title": "Point Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Point",
+        "tags": [
+          "points"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/policy": {
+      "get": {
+        "description": "The entitlement policy as data: rules, kinds and the fingerprint.\n\nConfiguration, not contents, so a policied collection answers. It is\nstill the shape of who may see what, so on a server with a key it needs\nthat key.",
+        "operationId": "collection_policy_api_v1_collections__name__policy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Collection Policy",
+        "tags": [
+          "inspect"
+        ]
+      },
+      "put": {
+        "description": "Who may search a collection, in the record every server reads. Nobody, until it is set.",
+        "operationId": "set_policy_api_v1_collections__name__policy_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Policy",
+        "tags": [
+          "collections"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/provenance/{point_id}": {
+      "get": {
+        "description": "Where one chunk came from, as its metadata records it.\n\n``text=false`` leaves the excerpt out. Where a chunk came from and what it\nsays are different questions, and the dashboard asks only the first.",
+        "operationId": "chunk_provenance_api_v1_collections__name__provenance__point_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "point_id",
+            "required": true,
+            "schema": {
+              "title": "Point Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "text",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Text",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chunk Provenance",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/quality": {
+      "get": {
+        "description": "Extraction quality across the collection, from the ``_vx_quality`` stamps.\n\nTwenty bins, the count below the line, and the lowest few chunks. Each\ncomes with ``reasons``: which of the scorer's signals it fails, in words,\nwhich is how a reader tells OCR noise from a table of numbers without\nreading either. ``below_line`` says whether it is actually under the\nthreshold, because the lowest five of a clean collection are not bad.\n``offset`` skips that many of the lowest, for the next page of them.\n``text=false`` leaves the excerpt out, and the dashboard asks for that.",
+        "operationId": "collection_quality_api_v1_collections__name__quality_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "threshold",
+            "required": false,
+            "schema": {
+              "default": 0.78,
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Threshold",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "worst",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 50,
+              "minimum": 0,
+              "title": "Worst",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "text",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Text",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Collection Quality",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/rebuild": {
+      "post": {
+        "description": "Rebuild the ANN index from the live vectors, dropping tombstones.",
+        "operationId": "rebuild_collection_api_v1_collections__name__rebuild_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rebuild Collection",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/search": {
+      "post": {
+        "description": "Search for similar vectors.",
+        "operationId": "search_api_v1_collections__name__search_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/search/acl": {
+      "post": {
+        "description": "Search with ACL-based security filtering.\n\nOnly returns results the user is authorized to see based on their principals.\n\nDocuments should have ACL metadata like:\n{\"_acl\": [\"user:alice\", \"group:engineering\"]}",
+        "operationId": "search_with_acl_api_v1_collections__name__search_acl_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ACLSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search With Acl",
+        "tags": [
+          "enterprise-search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/search/enterprise": {
+      "post": {
+        "description": "Full enterprise search combining all advanced features:\n- Vector similarity search\n- ACL-based security filtering\n- Faceted aggregations\n- Re-ranking for higher precision\n\nThis is the most feature-complete search endpoint.",
+        "operationId": "enterprise_search_api_v1_collections__name__search_enterprise_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnterpriseSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enterprise Search",
+        "tags": [
+          "enterprise-search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/search/facets": {
+      "post": {
+        "description": "Search with faceted aggregations.\n\nReturns search results plus counts/aggregations for specified fields.\nUseful for building filter UIs, category browsers, etc.",
+        "operationId": "search_with_facets_api_v1_collections__name__search_facets_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FacetedSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search With Facets",
+        "tags": [
+          "enterprise-search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/search/rerank": {
+      "post": {
+        "description": "Two-stage retrieval: fast ANN search followed by precise re-ranking.\n\nMethods:\n- exact: Recalculate exact distances\n- mmr: Maximal Marginal Relevance (balances relevance + diversity)\n- cross_encoder: Neural re-ranking (requires query_text)\n- weighted: Weighted combination of scores",
+        "operationId": "search_with_rerank_api_v1_collections__name__search_rerank_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RerankSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search With Rerank",
+        "tags": [
+          "enterprise-search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/sparse-search": {
+      "post": {
+        "description": "Search using sparse vectors only.\n\nUse this for SPLADE, learned sparse embeddings, or custom sparse representations.",
+        "operationId": "sparse_search_api_v1_collections__name__sparse_search_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SparseSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sparse Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/text-hybrid-search": {
+      "post": {
+        "description": "Hybrid search with automatic text embedding.\n\nAutomatically embeds the query text and performs hybrid search\ncombining vector similarity and keyword matching (RRF fusion).",
+        "operationId": "text_hybrid_search_api_v1_collections__name__text_hybrid_search_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Text Hybrid Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/text-search": {
+      "post": {
+        "description": "Semantic search using text query.\n\nThe server embeds the query with the model the library writes vectors\nwith by default, bge-small-en-v1.5, the English model in the wheel, so the\nquery and the documents are in the same space.\n\nThis is the recommended search endpoint for the dashboard and most use cases.",
+        "operationId": "text_search_api_v1_collections__name__text_search_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Text Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/text-upsert": {
+      "post": {
+        "description": "Insert points with automatic text embedding.\n\nThe server embeds each text with the model the library writes vectors\nwith by default, bge-small-en-v1.5, and stores the vector and the text,\nso keyword and hybrid search work on it too.",
+        "operationId": "text_upsert_api_v1_collections__name__text_upsert_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Text Upsert",
+        "tags": [
+          "points"
+        ]
+      }
+    },
+    "/api/v1/documents": {
+      "get": {
+        "description": "The document index, or a page of it: ``q`` finds by title, id or type; ``limit`` 0 is every document; ``total`` is how many match.",
+        "operationId": "list_documents_api_v1_documents_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Documents",
+        "tags": [
+          "documents"
+        ]
+      },
+      "post": {
+        "description": "Index a new document.",
+        "operationId": "index_document_api_v1_documents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IndexDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Document",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{doc_id}": {
+      "delete": {
+        "description": "Delete an indexed document.",
+        "operationId": "delete_document_api_v1_documents__doc_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Document",
+        "tags": [
+          "documents"
+        ]
+      },
+      "get": {
+        "description": "Get a document with its tree structure.",
+        "operationId": "get_document_api_v1_documents__doc_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{doc_id}/chunks": {
+      "get": {
+        "description": "Get chunks from a document for embedding.",
+        "operationId": "get_document_chunks_api_v1_documents__doc_id__chunks_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "chunk_size",
+            "required": false,
+            "schema": {
+              "default": 512,
+              "maximum": 2000,
+              "minimum": 100,
+              "title": "Chunk Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document Chunks",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/evaluations": {
+      "get": {
+        "description": "Every saved run, newest first: when, which golden file, which collections it searched, and each setup's top 10 count.\n\n``offset`` skips that many of the newest, for the next page. The full\nreport of one run is ``/api/v1/evaluations/{run}``, with ``latest`` for\nthe newest.",
+        "operationId": "list_evaluations_api_v1_evaluations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Evaluations Api V1 Evaluations Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Evaluations",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{run}": {
+      "get": {
+        "description": "One run's report: every setup's numbers, the three picks and the rules they were chosen by.\n\n``golden_download`` says whether the caller can download the golden\nquestions this run used: a signed-in admin, when the file was kept.\n``missing_notes`` says in words what ``missing`` holds, each expected\ndocument an index does not hold, the way the command line says it.",
+        "operationId": "get_evaluation_api_v1_evaluations__run__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run",
+            "required": true,
+            "schema": {
+              "title": "Run",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Evaluation Api V1 Evaluations  Run  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Evaluation",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
+    "/api/v1/evaluations/{run}/golden": {
+      "get": {
+        "description": "The golden file a run used, exactly as it was read: every question, reference answer and expected id.\n\nA signed-in admin only, as a person. The file is the one whose\nfingerprint the run names, so an old run gives its own questions after\nthe file has changed. A run saved before files were kept, or made from\nquestions in memory, has none.",
+        "operationId": "download_golden_api_v1_evaluations__run__golden_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run",
+            "required": true,
+            "schema": {
+              "title": "Run",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Golden",
+        "tags": [
+          "evaluations"
+        ]
+      }
+    },
+    "/api/v1/extractors": {
+      "get": {
+        "description": "Which file types this server reads, and who reads them. The Ingest\npage asks, so its drop zone takes what the server takes.",
+        "operationId": "extractors_api_v1_extractors_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Extractors",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/growth": {
+      "get": {
+        "description": "Chunks written on each of the last days across every collection, today last, with how many of them read badly.\n\nThe same count as a collection's own growth, summed over every\ncollection that is here, and beside it ``low``: the chunks of each day\nwhose quality stamp is under the line, which is where a bad ingest\nshows on the overview. Counts alone, no names. A collection whose\nchunks cannot be read is left out and counted in ``skipped``.",
+        "operationId": "growth_api_v1_growth_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 14,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Growth",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/info": {
+      "get": {
+        "description": "Get database information.",
+        "operationId": "database_info_api_v1_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Database Info",
+        "tags": [
+          "info"
+        ]
+      }
+    },
+    "/api/v1/info/extended": {
+      "get": {
+        "description": "Get extended database information including storage, cache, and scaling stats.",
+        "operationId": "get_extended_info_api_v1_info_extended_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Extended Info",
+        "tags": [
+          "info"
+        ]
+      }
+    },
+    "/api/v1/keys": {
+      "get": {
+        "operationId": "list_keys_api_v1_keys_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response List Keys Api V1 Keys Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Keys",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "operationId": "create_key_api_v1_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Create Key Api V1 Keys Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Key",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}": {
+      "delete": {
+        "operationId": "revoke_key_api_v1_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Revoke Key Api V1 Keys  Key Id  Delete"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Key",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "description": "Every model the library knows, and whether it is here.\n\nNothing downloads because of this call.",
+        "operationId": "models_on_this_machine_api_v1_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Models On This Machine",
+        "tags": [
+          "inspect"
+        ]
+      }
+    },
+    "/api/v1/policies": {
+      "get": {
+        "description": "Who may search each collection: its policy, as a count for everyone and as the list for people signed in.",
+        "operationId": "policies_api_v1_policies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Policies",
+        "tags": [
+          "collections"
+        ]
+      }
+    },
+    "/api/v1/resources": {
+      "get": {
+        "description": "Get current resource utilization stats.",
+        "operationId": "get_resource_stats_api_v1_resources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Resource Stats",
+        "tags": [
+          "monitoring"
+        ]
+      }
+    },
+    "/api/v1/ws/status": {
+      "get": {
+        "description": "Get WebSocket connection status.",
+        "operationId": "websocket_status_api_v1_ws_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Websocket Status",
+        "tags": [
+          "info"
+        ]
+      }
+    },
+    "/api/v2/collections": {
+      "post": {
+        "description": "Create a collection with advanced options (v2 API).\n\nTier system (each tier includes features from previous tiers):\n- dense: Vector search only\n- hybrid: + BM25 text search + Rerank\n- ultimate: + Late Interaction (ColBERT)\n- graph: + Knowledge Graph (GraphRAG)",
+        "operationId": "create_collection_v2_api_v2_collections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCollectionRequestV2"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Collection V2",
+        "tags": [
+          "collections"
+        ]
+      }
+    },
+    "/api/v2/collections/{name}/points": {
+      "post": {
+        "description": "Add points with text for hybrid search (v2 API).",
+        "operationId": "add_points_v2_api_v2_collections__name__points_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddPointsRequestV2"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Points V2",
+        "tags": [
+          "points"
+        ]
+      }
+    },
+    "/api/v2/collections/{name}/points/sparse": {
+      "post": {
+        "description": "Add points with sparse vectors for hybrid dense+sparse search.",
+        "operationId": "add_points_with_sparse_api_v2_collections__name__points_sparse_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddPointsWithSparseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Points With Sparse",
+        "tags": [
+          "points"
+        ]
+      }
+    },
+    "/auth/email/begin": {
+      "post": {
+        "operationId": "email_begin_auth_email_begin_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BeginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Email Begin Auth Email Begin Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Email Begin",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/email/enrol/begin": {
+      "post": {
+        "description": "Spend the emailed link, and hand back what either way of signing in needs.\n\nA POST from a button on the page, not the link itself: mail scanners open\nevery link in a message, and a link that worked by being opened would be\nspent before the person saw it. The reply carries an authenticator secret\nto scan and a ticket that finishes either an authenticator or a passkey.",
+        "operationId": "enrol_begin_auth_email_enrol_begin_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Enrol Begin Auth Email Enrol Begin Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enrol Begin",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/email/enrol/confirm": {
+      "post": {
+        "operationId": "enrol_confirm_auth_email_enrol_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Enrol Confirm Auth Email Enrol Confirm Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enrol Confirm",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/email/verify": {
+      "post": {
+        "operationId": "email_verify_auth_email_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Email Verify Auth Email Verify Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Email Verify",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "description": "Who is signed in, and what they may do. The dashboard asks this first.",
+        "operationId": "me_auth_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Me Auth Me Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/authenticator": {
+      "delete": {
+        "description": "Remove your authenticator app. Not your only way in, unless single sign-on still lets you in.",
+        "operationId": "remove_my_authenticator_auth_me_authenticator_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Remove My Authenticator Auth Me Authenticator Delete"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Remove My Authenticator",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/authenticator/begin": {
+      "post": {
+        "operationId": "replace_authenticator_begin_auth_me_authenticator_begin_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Replace Authenticator Begin Auth Me Authenticator Begin Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Replace Authenticator Begin",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/authenticator/confirm": {
+      "post": {
+        "operationId": "replace_authenticator_confirm_auth_me_authenticator_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Replace Authenticator Confirm Auth Me Authenticator Confirm Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replace Authenticator Confirm",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/passkeys/begin": {
+      "post": {
+        "operationId": "add_passkey_begin_auth_me_passkeys_begin_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Add Passkey Begin Auth Me Passkeys Begin Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Add Passkey Begin",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/passkeys/finish": {
+      "post": {
+        "operationId": "add_passkey_finish_auth_me_passkeys_finish_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Add Passkey Finish Auth Me Passkeys Finish Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Passkey Finish",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/passkeys/{credential_id}": {
+      "delete": {
+        "operationId": "remove_my_passkey_auth_me_passkeys__credential_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credential_id",
+            "required": true,
+            "schema": {
+              "title": "Credential Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Remove My Passkey Auth Me Passkeys  Credential Id  Delete"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove My Passkey",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/password": {
+      "post": {
+        "operationId": "set_my_password_auth_me_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Set My Password Auth Me Password Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set My Password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/recovery-codes": {
+      "post": {
+        "operationId": "make_recovery_codes_auth_me_recovery_codes_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Make Recovery Codes Auth Me Recovery Codes Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Make Recovery Codes",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/sessions": {
+      "get": {
+        "operationId": "my_sessions_auth_me_sessions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response My Sessions Auth Me Sessions Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Sessions",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/sessions/end-others": {
+      "post": {
+        "operationId": "end_my_other_sessions_auth_me_sessions_end_others_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response End My Other Sessions Auth Me Sessions End Others Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "End My Other Sessions",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/sessions/{session_id}": {
+      "delete": {
+        "operationId": "end_my_session_auth_me_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response End My Session Auth Me Sessions  Session Id  Delete"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "End My Session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me/ways": {
+      "get": {
+        "operationId": "my_ways_auth_me_ways_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response My Ways Auth Me Ways Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Ways",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/passkey/begin": {
+      "post": {
+        "description": "Sign in with a passkey. No address is asked for: the device offers what it holds for this site.",
+        "operationId": "passkey_begin_auth_passkey_begin_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Passkey Begin Auth Passkey Begin Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Passkey Begin",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/passkey/enrol/begin": {
+      "post": {
+        "description": "The first way in, as a passkey: options for the browser, against the ticket the emailed link gave.",
+        "operationId": "passkey_enrol_begin_auth_passkey_enrol_begin_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Passkey Enrol Begin Auth Passkey Enrol Begin Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Passkey Enrol Begin",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/passkey/enrol/finish": {
+      "post": {
+        "operationId": "passkey_enrol_finish_auth_passkey_enrol_finish_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Passkey Enrol Finish Auth Passkey Enrol Finish Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Passkey Enrol Finish",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/passkey/finish": {
+      "post": {
+        "operationId": "passkey_finish_auth_passkey_finish_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Passkey Finish Auth Passkey Finish Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Passkey Finish",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/password/forgot": {
+      "post": {
+        "description": "A link to choose a new password. The same answer for everybody, and the link alone opens nothing.",
+        "operationId": "password_forgot_auth_password_forgot_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BeginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Password Forgot Auth Password Forgot Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Password Forgot",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/password/reset": {
+      "post": {
+        "operationId": "password_reset_auth_password_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Password Reset Auth Password Reset Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Password Reset",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/people": {
+      "get": {
+        "description": "Everybody on the server's own list, or a page of them: ``q`` finds by address or role, ``limit`` 0 is everybody.",
+        "operationId": "people_auth_people_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response People Auth People Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "operationId": "put_person_auth_people_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Put Person Auth People Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Person",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/people/{email}": {
+      "delete": {
+        "operationId": "remove_person_auth_people__email__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "email",
+            "required": true,
+            "schema": {
+              "title": "Email",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Remove Person Auth People  Email  Delete"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Person",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/people/{email}/reset": {
+      "post": {
+        "description": "Forget every way somebody signs in. Their next sign-in starts with a new link by email.",
+        "operationId": "reset_person_auth_people__email__reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "email",
+            "required": true,
+            "schema": {
+              "title": "Email",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Reset Person Auth People  Email  Reset Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Person",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/signout": {
+      "post": {
+        "operationId": "signout_auth_signout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Signout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/status": {
+      "get": {
+        "description": "Check if authentication is enabled.",
+        "operationId": "auth_status_auth_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Status",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/step-up": {
+      "post": {
+        "description": "Prove it is still you, with the authenticator code, before a change that matters.",
+        "operationId": "step_up_auth_step_up_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepUpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Step Up Auth Step Up Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Step Up",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/step-up/passkey/begin": {
+      "post": {
+        "operationId": "step_up_passkey_begin_auth_step_up_passkey_begin_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Step Up Passkey Begin Auth Step Up Passkey Begin Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Step Up Passkey Begin",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/step-up/passkey/finish": {
+      "post": {
+        "operationId": "step_up_passkey_finish_auth_step_up_passkey_finish_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Step Up Passkey Finish Auth Step Up Passkey Finish Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Step Up Passkey Finish",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Health check.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "info"
+        ]
+      }
+    }
+  }
+}
