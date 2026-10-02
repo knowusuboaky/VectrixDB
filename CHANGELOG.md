@@ -410,6 +410,10 @@ may change at any time.
   the relative links rewritten to addresses on main at build time, through
   `hatch-fancy-pypi-readme`, a build dependency only.
 
+- **`mypy vectrixdb` failed in CI with numpy 2.4's stubs.** Two assignments
+  changed dtype under the newer stubs, one in the golden writer and one in
+  the collection's exact search. Typing only; nothing behaves differently.
+
 - **The docs no longer describe what left with visibility.** The dashboard
   page gave a collection six tabs and showed its Settings tab, the sign-in
   page had an admin share a collection from there, the gateway and
