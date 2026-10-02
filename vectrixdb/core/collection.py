@@ -2153,6 +2153,7 @@ class Collection:
         if not kept:
             return []
         matrix = np.vstack(vectors)
+        distances: np.ndarray
         if self.metric == DistanceMetric.COSINE:
             norms = np.linalg.norm(matrix, axis=1) * (np.linalg.norm(q) or 1.0)
             distances = 1.0 - (matrix @ q) / np.where(norms == 0, 1.0, norms)
