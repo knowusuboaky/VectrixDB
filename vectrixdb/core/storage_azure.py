@@ -44,7 +44,12 @@ import threading
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from .._time import utcnow_iso
-from ..exceptions import ConfigurationError, DependencyError, StorageConnectionError, StorageOperationError
+from ..exceptions import (
+    ConfigurationError,
+    DependencyError,
+    StorageConnectionError,
+    StorageOperationError,
+)
 from .storage import BaseStorage, StorageConfig
 
 __all__ = ["AzureSearchStorage"]
@@ -84,8 +89,8 @@ VECTORIZER = "vx-azure-openai"
 # question, which the service's vectorizer needs. Set by the caller around
 # one search; a context variable so two threads searching one store do not
 # see each other's choice.
-_SELECTION: "contextvars.ContextVar[Optional[Tuple[Optional[str], Optional[str]]]]" = contextvars.ContextVar(
-    "vectrixdb_azure_vectors", default=None
+_SELECTION: "contextvars.ContextVar[Optional[Tuple[Optional[str], Optional[str]]]]" = (
+    contextvars.ContextVar("vectrixdb_azure_vectors", default=None)
 )
 _SEPARATORS = (",", "|", ";", "#", "~")
 
@@ -189,7 +194,9 @@ class AzureSearchStorage(BaseStorage):
                     f"embeddings={mode!r} needs azure_embedding with the deployment's dimensions, "
                     "for example {'endpoint': ..., 'deployment': 'text-embedding-3-large', 'dimensions': 3072}"
                 )
-            if self._azure_embedder is None and not (spec.get("endpoint") and spec.get("deployment")):
+            if self._azure_embedder is None and not (
+                spec.get("endpoint") and spec.get("deployment")
+            ):
                 raise ConfigurationError(
                     f"embeddings={mode!r} needs azure_embedding's endpoint and deployment, or an embed_fn"
                 )
@@ -206,13 +213,19 @@ class AzureSearchStorage(BaseStorage):
         weights = config.azure_search_vector_weights or {}
         unknown = sorted(set(weights) - {"vectrixdb", "azure"})
         if unknown or any(not isinstance(w, (int, float)) or w <= 0 for w in weights.values()):
-            raise ConfigurationError("vector_weights maps 'vectrixdb' and 'azure' to positive numbers")
+            raise ConfigurationError(
+                "vector_weights maps 'vectrixdb' and 'azure' to positive numbers"
+            )
 
     # ------------------------------------------------------------ connection
 
     def connect(self) -> None:
+        # The catalog index is not made here. Opening the store used to
+        # create it on the spot, so a handle opened with the wrong prefix,
+        # or an empty one, left an empty "vectrix-collections" in the
+        # service that nothing ever used. It is made with the first
+        # collection, and a missing one reads as no collections.
         if self._index_client is not None:
-            self._ensure_collections_index()
             return
         try:
             from azure.search.documents import SearchClient
@@ -230,7 +243,6 @@ class AzureSearchStorage(BaseStorage):
         self._client_factory = lambda name: SearchClient(
             endpoint=endpoint, index_name=name, credential=credential
         )
-        self._ensure_collections_index()
 
     def _credential(self) -> Any:
         if self.config.azure_search_key:
@@ -267,7 +279,10 @@ class AzureSearchStorage(BaseStorage):
         with a dash would give ``-financial``, and Azure refuses an index
         name that does not start with a letter or a digit.
         """
-        safe = "".join(ch if ch.isalnum() else "-" for ch in collection.lower()).strip("-") or "default"
+        safe = (
+            "".join(ch if ch.isalnum() else "-" for ch in collection.lower()).strip("-")
+            or "default"
+        )
         prefix = str(self.config.azure_search_index_prefix or "").strip("-")
         return f"{prefix}-{safe}" if prefix else safe
 
@@ -294,6 +309,7 @@ class AzureSearchStorage(BaseStorage):
     # --------------------------------------------------------------- schema
 
     def _ensure_collections_index(self) -> None:
+        """The catalog index, made the first time a collection is created."""
         from azure.search.documents.indexes.models import (
             SearchField,
             SearchFieldDataType,
@@ -347,7 +363,9 @@ class AzureSearchStorage(BaseStorage):
         for path, kind in self._promoted().items():
             fields.append(SearchField(name=_field_name(path), type=kinds[kind], filterable=True))
         mode = self.config.azure_search_embeddings
-        profiles = [VectorSearchProfile(name=VECTOR_PROFILE, algorithm_configuration_name=VECTOR_ALGORITHM)]
+        profiles = [
+            VectorSearchProfile(name=VECTOR_PROFILE, algorithm_configuration_name=VECTOR_ALGORITHM)
+        ]
         vectorizers: List[Any] = []
         if mode != "vectrixdb":
             vectorizer = self._vectorizer()
@@ -372,7 +390,9 @@ class AzureSearchStorage(BaseStorage):
                     name=F_VECTOR_AZURE,
                     type="Collection(Edm.Single)",
                     searchable=True,
-                    vector_search_dimensions=int((self.config.azure_search_vectorizer or {})["dimensions"]),
+                    vector_search_dimensions=int(
+                        (self.config.azure_search_vectorizer or {})["dimensions"]
+                    ),
                     vector_search_profile_name=AZURE_PROFILE,
                 )
             )
@@ -409,7 +429,9 @@ class AzureSearchStorage(BaseStorage):
     def _semantic_config_name(index: Any) -> Optional[str]:
         """The semantic configuration a query should name, or None when the index has none."""
         semantic = getattr(index, "semantic_search", None)
-        configurations = list(getattr(semantic, "configurations", None) or []) if semantic is not None else []
+        configurations = (
+            list(getattr(semantic, "configurations", None) or []) if semantic is not None else []
+        )
         names = [str(getattr(c, "name", "")) for c in configurations if getattr(c, "name", None)]
         if not names:
             return None
@@ -448,6 +470,7 @@ class AzureSearchStorage(BaseStorage):
             if existing is not None and self._semantic_config_name(existing) is not None:
                 index.semantic_search = existing.semantic_search
             self._index_client.create_or_update_index(index)
+            self._ensure_collections_index()
             self._collections_client().upload_documents(
                 [{F_KEY: _key(name), F_DOC_ID: name, F_PAYLOAD: json.dumps(config)}]
             )
@@ -463,7 +486,9 @@ class AzureSearchStorage(BaseStorage):
                 existing = self._existing_index(collection)
             except Exception:  # a question about the index is not worth failing a search over
                 existing = None
-            self._semantic[collection] = self._semantic_config_name(existing) if existing is not None else None
+            self._semantic[collection] = (
+                self._semantic_config_name(existing) if existing is not None else None
+            )
         return self._semantic[collection]
 
     def _use_semantic(self, collection: str, semantic: Optional[bool]) -> Optional[str]:
@@ -499,6 +524,8 @@ class AzureSearchStorage(BaseStorage):
             rows = self._collections_client().search(search_text="*", select=[F_DOC_ID], top=1000)
             return [row[F_DOC_ID] for row in rows]
         except Exception as exc:
+            if _is_not_found(exc):
+                return []  # no catalog index yet: nothing has been created here
             raise StorageOperationError("list_collections", BACKEND, str(exc)) from exc
 
     def get_collection_config(self, name: str) -> Optional[Dict[str, Any]]:
@@ -528,14 +555,20 @@ class AzureSearchStorage(BaseStorage):
             return None
         if kind == "strings":
             items = value if isinstance(value, (list, tuple, set)) else [value]
-            return [str(x) for x in items if isinstance(x, (str, int, float)) and not isinstance(x, bool)]
+            return [
+                str(x)
+                for x in items
+                if isinstance(x, (str, int, float)) and not isinstance(x, bool)
+            ]
         if kind == "string":
             return str(value) if isinstance(value, (str, int, float)) else None
         if kind == "number":
             return float(value) if isinstance(value, (int, float)) else None
         return value if isinstance(value, bool) else None
 
-    def _to_row(self, doc_id: str, data: Dict[str, Any], created: Optional[str] = None) -> Dict[str, Any]:
+    def _to_row(
+        self, doc_id: str, data: Dict[str, Any], created: Optional[str] = None
+    ) -> Dict[str, Any]:
         data = dict(data)
         named = data.pop("named_vectors", None) or {}
         row = self._base_row(doc_id, data, created)
@@ -548,7 +581,9 @@ class AzureSearchStorage(BaseStorage):
         return row
 
     @staticmethod
-    def _base_row(doc_id: str, data: Dict[str, Any], created: Optional[str] = None) -> Dict[str, Any]:
+    def _base_row(
+        doc_id: str, data: Dict[str, Any], created: Optional[str] = None
+    ) -> Dict[str, Any]:
         data = dict(data)
         vector = data.pop("dense_embedding", None)
         if vector is None:
@@ -619,7 +654,10 @@ class AzureSearchStorage(BaseStorage):
         if not (spec.get("endpoint") and spec.get("deployment")):
             return None
         try:
-            from azure.search.documents.indexes.models import AzureOpenAIVectorizer, AzureOpenAIVectorizerParameters
+            from azure.search.documents.indexes.models import (
+                AzureOpenAIVectorizer,
+                AzureOpenAIVectorizerParameters,
+            )
         except ImportError:  # pragma: no cover - older SDKs
             return None
         parameters = AzureOpenAIVectorizerParameters(
@@ -677,7 +715,9 @@ class AzureSearchStorage(BaseStorage):
             for name, by_id in vectors.items():
                 self._staged.setdefault(name, {}).update(by_id)
 
-    def _with_azure_vectors(self, documents: List[Tuple[str, Dict[str, Any]]]) -> List[Tuple[str, Dict[str, Any]]]:
+    def _with_azure_vectors(
+        self, documents: List[Tuple[str, Dict[str, Any]]]
+    ) -> List[Tuple[str, Dict[str, Any]]]:
         if self.config.azure_search_embeddings != "both":
             return documents
         with self._lock:
@@ -967,7 +1007,9 @@ class AzureSearchStorage(BaseStorage):
         if op == "exists":
             return guard if value else f"{name} eq null"
         if op in ("eq", "ne", "gt", "gte", "lt", "lte"):
-            odata_op = {"eq": "eq", "ne": "ne", "gt": "gt", "gte": "ge", "lt": "lt", "lte": "le"}[op]
+            odata_op = {"eq": "eq", "ne": "ne", "gt": "gt", "gte": "ge", "lt": "lt", "lte": "le"}[
+                op
+            ]
             return f"({guard} and {name} {odata_op} {cls._literal(value, kind)})"
         if op in ("in", "nin"):
             if kind == "string":
@@ -976,7 +1018,9 @@ class AzureSearchStorage(BaseStorage):
                 values = value if isinstance(value, (list, tuple, set)) else [value]
                 if not values:
                     raise _Unsupported
-                inner = "(" + " or ".join(f"{name} eq {cls._literal(v, kind)}" for v in values) + ")"
+                inner = (
+                    "(" + " or ".join(f"{name} eq {cls._literal(v, kind)}" for v in values) + ")"
+                )
             return f"({guard} and {inner})" if op == "in" else f"({guard} and not {inner})"
         raise _Unsupported
 
@@ -988,7 +1032,11 @@ class AzureSearchStorage(BaseStorage):
         )
 
     def _vector_queries(
-        self, query_vector: List[float], k: int, only: Optional[str] = None, text: Optional[str] = None
+        self,
+        query_vector: List[float],
+        k: int,
+        only: Optional[str] = None,
+        text: Optional[str] = None,
     ) -> List[Any]:
         """One query per vector that answers this search. The collection's
         own vector goes up as numbers. The deployment's goes up as the
@@ -1006,26 +1054,51 @@ class AzureSearchStorage(BaseStorage):
         for name in names:
             weight = {"weight": float(weights[name])} if name in weights and len(names) > 1 else {}
             if name == "vectrixdb":
-                queries.append(self._build(VectorizedQuery, weight, vector=[float(x) for x in query_vector], k_nearest_neighbors=k, fields=F_VECTOR))
+                queries.append(
+                    self._build(
+                        VectorizedQuery,
+                        weight,
+                        vector=[float(x) for x in query_vector],
+                        k_nearest_neighbors=k,
+                        fields=F_VECTOR,
+                    )
+                )
                 continue
             field = F_VECTOR if mode == "azure" else F_VECTOR_AZURE
             if mode == "azure" and not query_text:
                 # The collection's embedder is the deployment, so the vector
                 # handed in already is the deployment's.
-                queries.append(self._build(VectorizedQuery, weight, vector=[float(x) for x in query_vector], k_nearest_neighbors=k, fields=field))
+                queries.append(
+                    self._build(
+                        VectorizedQuery,
+                        weight,
+                        vector=[float(x) for x in query_vector],
+                        k_nearest_neighbors=k,
+                        fields=field,
+                    )
+                )
                 continue
             if not query_text:
                 raise StorageOperationError(
-                    "vector_search", BACKEND,
+                    "vector_search",
+                    BACKEND,
                     "the Azure vector is searched with the question's words, and this search gave only a vector; "
                     "search through Vectrix, or pass vectors='vectrixdb'",
                 )
             text_query = self._text_query()
             if text_query is not None and self._vectorizer() is not None:
-                queries.append(self._build(text_query, weight, text=query_text, k_nearest_neighbors=k, fields=field))
+                queries.append(
+                    self._build(
+                        text_query, weight, text=query_text, k_nearest_neighbors=k, fields=field
+                    )
+                )
             else:
                 vector = self.embed_azure([query_text])[0]
-                queries.append(self._build(VectorizedQuery, weight, vector=vector, k_nearest_neighbors=k, fields=field))
+                queries.append(
+                    self._build(
+                        VectorizedQuery, weight, vector=vector, k_nearest_neighbors=k, fields=field
+                    )
+                )
         return queries
 
     @staticmethod
@@ -1044,7 +1117,11 @@ class AzureSearchStorage(BaseStorage):
             return kind(**kwargs)
 
     def vector_ranks(
-        self, collection: str, query_vector: List[float], limit: int = 50, filter: Optional[str] = None
+        self,
+        collection: str,
+        query_vector: List[float],
+        limit: int = 50,
+        filter: Optional[str] = None,
     ) -> Dict[str, Dict[str, int]]:
         """``{doc_id: {"vectrixdb": rank, "azure": rank}}``, one request per
         vector. The service fuses and does not say who ranked what, so an
@@ -1063,7 +1140,9 @@ class AzureSearchStorage(BaseStorage):
                 ranks.setdefault(row[F_DOC_ID], {})[name] = rank
         return ranks
 
-    def _similar(self, collection: str, query_vector: List[float], limit: int, filter: Optional[str]) -> Dict[str, float]:
+    def _similar(
+        self, collection: str, query_vector: List[float], limit: int, filter: Optional[str]
+    ) -> Dict[str, float]:
         """How similar the nearest documents are, from one vector on its own.
 
         A hybrid search and a search over two vectors come back as fused
@@ -1099,11 +1178,15 @@ class AzureSearchStorage(BaseStorage):
             return {}
 
     @staticmethod
-    def _judged(data: Dict[str, Any], similar: Dict[str, float], doc_id: str, *, fused: bool) -> Dict[str, Any]:
+    def _judged(
+        data: Dict[str, Any], similar: Dict[str, float], doc_id: str, *, fused: bool
+    ) -> Dict[str, Any]:
         """The hit, with how relevant it is. The semantic ranker's verdict when
         there is one, from 0 to 4 as Microsoft documents it; the similarity otherwise."""
         if data.get("_semantic_score") is not None:
-            data["_vx_relevance"] = round(min(1.0, max(0.0, float(data["_semantic_score"]) / 4.0)), 6)
+            data["_vx_relevance"] = round(
+                min(1.0, max(0.0, float(data["_semantic_score"]) / 4.0)), 6
+            )
             data["_vx_relevance_kind"] = "reranker"
         elif doc_id in similar:
             data["_vx_relevance"] = similar[doc_id]
@@ -1137,7 +1220,9 @@ class AzureSearchStorage(BaseStorage):
             )
             # One vector: the score is a transform of the cosine. Two: it is
             # a fused rank, and the similarity has to be asked for.
-            similar = self._similar(collection, query_vector, limit, filter) if len(queries) > 1 else {}
+            similar = (
+                self._similar(collection, query_vector, limit, filter) if len(queries) > 1 else {}
+            )
             out = []
             for row in rows:
                 data = self._from_row(row, include_vector=False)
@@ -1176,7 +1261,11 @@ class AzureSearchStorage(BaseStorage):
                 search_text=query_text, top=limit, select=[F_DOC_ID, F_TEXT, F_PAYLOAD], **kwargs
             )
             return [
-                (row[F_DOC_ID], self._judged(self._hit(row), {}, row[F_DOC_ID], fused=False), self._ranked_score(row))
+                (
+                    row[F_DOC_ID],
+                    self._judged(self._hit(row), {}, row[F_DOC_ID], fused=False),
+                    self._ranked_score(row),
+                )
                 for row in rows
             ]
         except Exception as exc:
@@ -1210,7 +1299,14 @@ class AzureSearchStorage(BaseStorage):
         """
         if isinstance(query_text, dict):
             return self._hybrid_with_sparse(
-                collection, query_vector, query_text, limit, dense_weight, sparse_weight, rrf_k, filter
+                collection,
+                query_vector,
+                query_text,
+                limit,
+                dense_weight,
+                sparse_weight,
+                rrf_k,
+                filter,
             )
         kwargs: Dict[str, Any] = {"filter": filter} if filter else {}
         config_name = self._use_semantic(collection, semantic)
@@ -1222,16 +1318,26 @@ class AzureSearchStorage(BaseStorage):
             rows = list(
                 self._client(collection).search(
                     search_text=query_text,
-                    vector_queries=self._vector_queries(query_vector, max(limit, 50), text=query_text),
+                    vector_queries=self._vector_queries(
+                        query_vector, max(limit, 50), text=query_text
+                    ),
                     top=limit,
                     select=[F_DOC_ID, F_TEXT, F_PAYLOAD],
                     **kwargs,
                 )
             )
             # The semantic ranker's verdict needs no second question. Without it, one is asked.
-            similar = {} if config_name else self._similar(collection, query_vector, max(limit, 50), filter)
+            similar = (
+                {}
+                if config_name
+                else self._similar(collection, query_vector, max(limit, 50), filter)
+            )
             return [
-                (row[F_DOC_ID], self._judged(self._hit(row), similar, row[F_DOC_ID], fused=True), self._ranked_score(row))
+                (
+                    row[F_DOC_ID],
+                    self._judged(self._hit(row), similar, row[F_DOC_ID], fused=True),
+                    self._ranked_score(row),
+                )
                 for row in rows
             ]
         except Exception as exc:

@@ -103,7 +103,12 @@ def _lines(items: Sequence[_Item]) -> List[_Item]:
     out: List[_Item] = []
     for row in rows:
         row.sort(key=lambda it: it[0][0])
-        rect = (min(r[0] for r, _ in row), min(r[1] for r, _ in row), max(r[2] for r, _ in row), max(r[3] for r, _ in row))
+        rect = (
+            min(r[0] for r, _ in row),
+            min(r[1] for r, _ in row),
+            max(r[2] for r, _ in row),
+            max(r[3] for r, _ in row),
+        )
         out.append((rect, " ".join(t.strip() for _, t in row if t.strip())))
     return [line for line in out if line[1]]
 
@@ -127,7 +132,10 @@ def _gutter(items: Sequence[_Item], left: float, right: float, height: float) ->
     for start, end in spans[1:]:
         if start > reach:
             gap, middle = start - reach, (start + reach) / 2
-            if gap >= max(0.02 * width, 0.8 * height) and left + 0.2 * width <= middle <= right - 0.2 * width:
+            if (
+                gap >= max(0.02 * width, 0.8 * height)
+                and left + 0.2 * width <= middle <= right - 0.2 * width
+            ):
                 if best is None or gap > best[0]:
                     best = (gap, middle)
         reach = max(reach, end)
@@ -169,7 +177,12 @@ def _read(items: Sequence[_Item], depth: int) -> List[str]:
         band = [it for it in rest if edges[n] < (it[0][1] + it[0][3]) / 2 <= edges[n + 1]]
         one = [it for it in band if it[0][2] <= middle]
         two = [it for it in band if it[0][0] >= middle]
-        if one and two and _prose(_lines(one), middle - left) and _prose(_lines(two), right - middle):
+        if (
+            one
+            and two
+            and _prose(_lines(one), middle - left)
+            and _prose(_lines(two), right - middle)
+        ):
             out += _read(one, depth + 1) + _read(two, depth + 1)
         else:
             out += [text for _, text in _lines(band)]
@@ -222,6 +235,62 @@ def mend_sentence_breaks(line: str) -> str:
 # A blank page read is a page of noise indexed.
 
 
+#: What opens a list item on a page read by an engine: a bullet, or a short number with its dot or bracket.
+_ITEM = re.compile(r"^(?:[•◦▪▫‣⁃●○■□·*–—-]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s+\S")
+_ENDS_SENTENCE = re.compile(r"[.!?:;”\"')\]]$")
+
+
+def paragraphs_of(lines: Sequence[str], full: float = 0.8) -> str:
+    """The lines an engine read, joined into the paragraphs they were printed as.
+
+    An OCR engine gives a line of print a line of text, and a page read that
+    way is a paragraph cut at every line: a chunk ends mid-sentence, and a
+    word the printer broke stays broken. A line that filled its measure, at
+    least ``full`` of the longest lines on the page, runs on into the next;
+    one that stopped short ended its paragraph. A word broken by a hyphen at
+    the end of a line is joined to its other half, and a list item or a
+    heading starts a block of its own. A page of short lines, an invoice or
+    a form, has no line that fills a measure, and is left a line a line.
+    """
+    kept = [str(line).strip() for line in lines]
+    kept = [line for line in kept if line]
+    if len(kept) < 3:
+        return "\n".join(kept)
+    lengths = sorted(len(line) for line in kept)
+    measure = statistics.median(lengths[len(lengths) // 2 :])
+    if measure < 30:
+        return "\n".join(kept)
+    blocks: List[str] = []
+    paragraph = ""
+    runs_on = False
+    for line in kept:
+        opens = _ITEM.match(line) is not None or line.startswith("#")
+        if paragraph and (not runs_on or opens):
+            blocks.append(paragraph)
+            paragraph = ""
+        if paragraph:
+            if (
+                paragraph.endswith("-")
+                and len(paragraph) > 1
+                and paragraph[-2].isalpha()
+                and line[:1].islower()
+            ):
+                paragraph = paragraph[:-1] + line
+            else:
+                paragraph += " " + line
+        else:
+            paragraph = line
+        ends = _ENDS_SENTENCE.search(line) is not None
+        # A line that filled its measure runs on, unless it ended a sentence
+        # a little short of it; an item that ended a sentence is complete.
+        runs_on = len(line) >= full * measure and not (
+            ends and (opens or len(line) < 0.9 * measure)
+        )
+    if paragraph:
+        blocks.append(paragraph)
+    return "\n\n".join(blocks)
+
+
 def looks_blank(image: bytes, ink: float = 0.002) -> bool:
     """Whether a page image has next to nothing on it.
 
@@ -240,7 +309,10 @@ def looks_blank(image: bytes, ink: float = 0.002) -> bool:
         with Image.open(io.BytesIO(image)) as opened:
             grey = opened.convert("L")
             grey.thumbnail((256, 256), Image.Resampling.BOX)
-            pixels = list(grey.getdata())
+            # The bytes of an 8-bit grey image are its pixels. Not getdata(),
+            # which Pillow 12 deprecates, and a deprecation raised as an error
+            # read every page as not blank.
+            pixels = grey.tobytes()
     except Exception:
         return False
     if not pixels:
@@ -448,7 +520,9 @@ def _numbered(
                 votes.setdefault(number - index, set()).add(index)
 
     def best(tally: Dict[int, Set[int]]) -> Optional[int]:
-        found = max(tally, key=lambda o: (len(tally[o]), len(whole.get(o, ())), -abs(o)), default=None)
+        found = max(
+            tally, key=lambda o: (len(tally[o]), len(whole.get(o, ())), -abs(o)), default=None
+        )
         return found if found is not None and len(tally[found]) >= needed else None
 
     offset = best(whole)
@@ -490,7 +564,9 @@ def _numbered(
     return cut, first
 
 
-def drop_running_lines(pages: Sequence[str], share: float = 0.6, longest: int = 90) -> Tuple[List[str], List[str]]:
+def drop_running_lines(
+    pages: Sequence[str], share: float = 0.6, longest: int = 90
+) -> Tuple[List[str], List[str]]:
     """Page texts without the lines that repeat at the top or bottom of most pages.
 
     A line counts when, numbers aside, it is the first or the last line of at
@@ -510,7 +586,9 @@ def drop_running_lines(pages: Sequence[str], share: float = 0.6, longest: int = 
         return texts, []
     needed = max(3, int(share * written + 0.999))
     dropped: List[str] = []
-    for look in range(3):  # a header of two lines is two running lines, so look again, and not for ever
+    for look in range(
+        3
+    ):  # a header of two lines is two running lines, so look again, and not for ever
         cut, numbered = _numbered(split, needed, longest)
         seen: Dict[str, Dict[int, List[int]]] = {}
         first: Dict[str, str] = {}

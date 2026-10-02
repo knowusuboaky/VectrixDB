@@ -24,10 +24,12 @@ from vectrixdb.ingest import (
 
 class TestJoinPages:
     def test_a_running_sentence_is_joined_with_a_space(self):
-        text, pages = join_pages(["The covenant was tested at the end of the", "quarter and it held. Next topic."])
+        text, pages = join_pages(
+            ["The covenant was tested at the end of the", "quarter and it held. Next topic."]
+        )
         assert "end of the quarter and it held." in text
         assert pages == [(0, 1), (len("The covenant was tested at the end of the") + 1, 2)]
-        assert text[pages[1][0]:].startswith("quarter")
+        assert text[pages[1][0] :].startswith("quarter")
 
     def test_a_finished_sentence_keeps_the_paragraph_break(self):
         text, pages = join_pages(["First page about basalt.", "Second page about sourdough."])
@@ -54,7 +56,10 @@ class TestJoinPages:
 class TestChunksAcrossPages:
     def test_a_sentence_across_pages_lands_in_one_chunk_with_both_pages(self):
         text, pages = join_pages(
-            ["Basalt forms when lava cools. The covenant was tested at the end of the", "quarter and it held. Granite cools slowly."]
+            [
+                "Basalt forms when lava cools. The covenant was tested at the end of the",
+                "quarter and it held. Granite cools slowly.",
+            ]
         )
         doc = LoadedDocument(text=text, pages=pages)
         chunks = chunk(doc, "sentence", size=70, overlap=0)
@@ -71,7 +76,9 @@ class TestChunksAcrossPages:
 
 class TestFigures:
     def test_markdown_images_become_figure_lines(self):
-        text = normalise_figures("Revenue grew.\n![Revenue by region](q3.png)\nCosts were flat. ![](chart-2.png)")
+        text = normalise_figures(
+            "Revenue grew.\n![Revenue by region](q3.png)\nCosts were flat. ![](chart-2.png)"
+        )
         assert "[Figure: Revenue by region]" in text
         assert "[Figure: chart-2.png]" in text
         assert FIGURE_LINE.match("[Figure: Revenue by region]").group(1) == "Revenue by region"
@@ -106,8 +113,13 @@ class TestFigures:
         assert [h[1] for h in doc.headings] == ["Results"]
 
     def test_a_figure_is_cited_by_page_and_caption(self):
-        assert citation_for("report.pdf", "d", page=3, figure="Revenue by region") == "report.pdf#page=3(Revenue by region)"
-        assert citation_for("guide", "d", heading="Results", figure="(a) [b]") == "guide#Results(a b)"
+        assert (
+            citation_for("report.pdf", "d", page=3, figure="Revenue by region")
+            == "report.pdf#page=3(Revenue by region)"
+        )
+        assert (
+            citation_for("guide", "d", heading="Results", figure="(a) [b]") == "guide#Results(a b)"
+        )
         assert citation_for("guide", "d", figure="") == "guide"
 
 

@@ -44,10 +44,18 @@ class TestEveryWriteReachesTheStore:
     def test_an_add_is_a_row_a_chunk_with_its_text_metadata_and_time(self):
         store = MemoryChunks()
         docs = collection(store)
-        docs.add(ids=["a", "b"], vectors=AXES[:2], metadata=[{"_vx_doc": "x.pdf", "_vx_quality": 0.9}, {}], texts=["alpha", None])
+        docs.add(
+            ids=["a", "b"],
+            vectors=AXES[:2],
+            metadata=[{"_vx_doc": "x.pdf", "_vx_quality": 0.9}, {}],
+            texts=["alpha", None],
+        )
         rows = store.of("docs")
         assert set(rows) == {"a", "b"}
-        assert rows["a"]["text"] == "alpha" and rows["a"]["metadata"] == {"_vx_doc": "x.pdf", "_vx_quality": 0.9}
+        assert rows["a"]["text"] == "alpha" and rows["a"]["metadata"] == {
+            "_vx_doc": "x.pdf",
+            "_vx_quality": 0.9,
+        }
         assert rows["b"]["text"] == ""
         # One write, one time, and one a page can read as a day in UTC.
         assert rows["a"]["written"] == rows["b"]["written"]
@@ -80,7 +88,9 @@ class TestEveryWriteReachesTheStore:
     def test_replacing_metadata_replaces_it_there_too(self):
         store = MemoryChunks()
         docs = collection(store)
-        docs.add(ids=["a"], vectors=AXES[:1], metadata=[{"k": 1, "client_id": "td"}], texts=["alpha"])
+        docs.add(
+            ids=["a"], vectors=AXES[:1], metadata=[{"k": 1, "client_id": "td"}], texts=["alpha"]
+        )
         docs.update_metadata("a", {"client_id": "rbc"}, merge=False)
         assert store.of("docs")["a"]["metadata"] == {"client_id": "rbc"}
 
@@ -108,7 +118,9 @@ class TestTheDatabaseGivesEachCollectionItsView:
     def test_two_databases_on_two_paths_share_one_store(self, tmp_path):
         store = MemoryChunks()
         writer = VectrixDB(tmp_path / "writer", chunk_store=store)
-        writer.create_collection("docs", DIM).add(ids=["a", "b"], vectors=AXES[:2], texts=["alpha", "beta"])
+        writer.create_collection("docs", DIM).add(
+            ids=["a", "b"], vectors=AXES[:2], texts=["alpha", "beta"]
+        )
         reader = VectrixDB(tmp_path / "reader", chunk_store=store)
         docs = reader.create_collection("docs", DIM)
         # The table beside the reader is empty. What the pages count is not.
@@ -206,8 +218,15 @@ class TestOpening:
 
     def test_a_cosmos_address_opens_cosmos_with_its_key(self, monkeypatch):
         opened = []
-        monkeypatch.setattr(CosmosChunks, "open", classmethod(lambda cls, url, key=None: opened.append((url, key)) or "opened"))
-        assert open_chunk_store("cosmos://acct.documents.azure.com/vectrixdb/chunks", key="k") == "opened"
+        monkeypatch.setattr(
+            CosmosChunks,
+            "open",
+            classmethod(lambda cls, url, key=None: opened.append((url, key)) or "opened"),
+        )
+        assert (
+            open_chunk_store("cosmos://acct.documents.azure.com/vectrixdb/chunks", key="k")
+            == "opened"
+        )
         assert opened == [("cosmos://acct.documents.azure.com/vectrixdb/chunks", "k")]
 
     def test_an_address_it_does_not_know_is_refused_without_repeating_it(self):
@@ -225,44 +244,93 @@ class TestTheServerReadsItFromTheEnvironment:
 
         store = MemoryChunks()
         assert chunk_store_from_env(env={}) is None
-        assert chunk_store_from_env(store, env={"VECTRIXDB_CHUNK_STORE": "cosmos://a.documents.azure.com/d/c"}) is store
+        assert (
+            chunk_store_from_env(
+                store, env={"VECTRIXDB_CHUNK_STORE": "cosmos://a.documents.azure.com/d/c"}
+            )
+            is store
+        )
 
-    def test_the_address_is_opened_with_its_key_or_the_file_that_holds_it(self, monkeypatch, tmp_path):
+    def test_the_address_is_opened_with_its_key_or_the_file_that_holds_it(
+        self, monkeypatch, tmp_path
+    ):
         from vectrixdb.api.server import chunk_store_from_env
 
         opened = []
-        monkeypatch.setattr(CosmosChunks, "open", classmethod(lambda cls, url, key=None: opened.append((url, key)) or "opened"))
+        monkeypatch.setattr(
+            CosmosChunks,
+            "open",
+            classmethod(lambda cls, url, key=None: opened.append((url, key)) or "opened"),
+        )
         where = "cosmos://a.documents.azure.com/vectrixdb/chunks"
-        assert chunk_store_from_env(env={"VECTRIXDB_CHUNK_STORE": where, "VECTRIXDB_CHUNK_STORE_KEY": "inline"}) == "opened"
+        assert (
+            chunk_store_from_env(
+                env={"VECTRIXDB_CHUNK_STORE": where, "VECTRIXDB_CHUNK_STORE_KEY": "inline"}
+            )
+            == "opened"
+        )
         (tmp_path / "key").write_text("from-a-file\n", encoding="utf-8")
-        chunk_store_from_env(env={"VECTRIXDB_CHUNK_STORE": where, "VECTRIXDB_CHUNK_STORE_KEY_FILE": str(tmp_path / "key")})
+        chunk_store_from_env(
+            env={
+                "VECTRIXDB_CHUNK_STORE": where,
+                "VECTRIXDB_CHUNK_STORE_KEY_FILE": str(tmp_path / "key"),
+            }
+        )
         chunk_store_from_env(env={"VECTRIXDB_CHUNK_STORE": where})
         assert opened == [(where, "inline"), (where, "from-a-file"), (where, None)]
         with pytest.raises(ConfigurationError):
-            chunk_store_from_env(env={"VECTRIXDB_CHUNK_STORE": where, "VECTRIXDB_CHUNK_STORE_KEY": "a", "VECTRIXDB_CHUNK_STORE_KEY_FILE": str(tmp_path / "key")})
+            chunk_store_from_env(
+                env={
+                    "VECTRIXDB_CHUNK_STORE": where,
+                    "VECTRIXDB_CHUNK_STORE_KEY": "a",
+                    "VECTRIXDB_CHUNK_STORE_KEY_FILE": str(tmp_path / "key"),
+                }
+            )
 
 
 class TestCheck:
     def _storage(self, tmp_path, where):
         from vectrixdb.check import run
 
-        return [f for f in run(path=str(tmp_path), env={"VECTRIXDB_CHUNK_STORE": where, "VECTRIXDB_OFFLINE": "1"}) if "CHUNK_STORE" in f.text or "every chunk" in f.text]
+        return [
+            f
+            for f in run(
+                path=str(tmp_path), env={"VECTRIXDB_CHUNK_STORE": where, "VECTRIXDB_OFFLINE": "1"}
+            )
+            if "CHUNK_STORE" in f.text or "every chunk" in f.text
+        ]
 
     def test_a_cosmos_address_is_named(self, tmp_path, monkeypatch):
         import importlib.util
 
         found = importlib.util.find_spec
-        monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: object() if name == "azure.cosmos" else found(name, *a))
+        monkeypatch.setattr(
+            importlib.util,
+            "find_spec",
+            lambda name, *a: object() if name == "azure.cosmos" else found(name, *a),
+        )
         (finding,) = self._storage(tmp_path, "cosmos://acct.documents.azure.com/vectrixdb/chunks")
-        assert finding.level == "ok" and "Cosmos DB acct.documents.azure.com/vectrixdb/chunks" in finding.text
+        assert (
+            finding.level == "ok"
+            and "Cosmos DB acct.documents.azure.com/vectrixdb/chunks" in finding.text
+        )
 
     def test_anything_else_is_an_error(self, tmp_path, monkeypatch):
         import importlib.util
 
         # The SDK is there, so the address alone decides.
         found = importlib.util.find_spec
-        monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: object() if name == "azure.cosmos" else found(name, *a))
-        for wrong in ("./chunks", "cosmos://acct.documents.azure.com/only-a-database", "cosmos://acct.documents.azure.com/a/b/c", "s3://bucket/chunks"):
+        monkeypatch.setattr(
+            importlib.util,
+            "find_spec",
+            lambda name, *a: object() if name == "azure.cosmos" else found(name, *a),
+        )
+        for wrong in (
+            "./chunks",
+            "cosmos://acct.documents.azure.com/only-a-database",
+            "cosmos://acct.documents.azure.com/a/b/c",
+            "s3://bucket/chunks",
+        ):
             (finding,) = self._storage(tmp_path, wrong)
             assert finding.level == "error" and "is not cosmos://" in finding.text, wrong
 
@@ -270,6 +338,10 @@ class TestCheck:
         import importlib.util
 
         found = importlib.util.find_spec
-        monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None if name == "azure.cosmos" else found(name, *a))
+        monkeypatch.setattr(
+            importlib.util,
+            "find_spec",
+            lambda name, *a: None if name == "azure.cosmos" else found(name, *a),
+        )
         (finding,) = self._storage(tmp_path, "cosmos://acct.documents.azure.com/vectrixdb/chunks")
         assert finding.level == "error" and "azure-cosmos" in finding.text

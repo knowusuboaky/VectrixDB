@@ -104,6 +104,19 @@ from _common import (
 INTO = {"start": RAW_FILES, "later": LATER}
 #: Who a record says wrote it last.
 BY = "04_push_local_to_blob_cosmosdb.py"
+#: How the committed sources.json writes a path it cannot know: yours.
+PLACEHOLDER = "<your folder>"
+
+
+def placeholder(path: str) -> bool:
+    """Whether a source's path is the placeholder the committed file carries, rather than a path on this machine.
+
+    The file in git cannot name anybody's own folder, so it says
+    ``<your folder>/office.png`` and leaves the rest to you. A path that
+    still says so is reported as never named, not as missing: a missing
+    file is one you pointed at and is not there.
+    """
+    return str(path or "").strip().startswith(PLACEHOLDER) or "<" in str(path or "")
 
 
 # ============================================================================
@@ -130,7 +143,10 @@ def gather(listed: Dict[str, Any], check: bool) -> List[str]:
     a ``url`` to download or a ``path`` on this machine, and the collection
     folder it belongs in::
 
-        {"name": "male.wav", "path": "~/Downloads/.../male.wav", "collection": "media", "what": "speech"}
+        {"name": "male.wav", "path": "<your folder>/male.wav", "collection": "media", "what": "speech"}
+
+    A ``path`` that still says ``<your folder>`` is the committed placeholder,
+    and is said to be one rather than reported missing.
 
     OUTPUT
     ------
@@ -151,7 +167,12 @@ def gather(listed: Dict[str, Any], check: bool) -> List[str]:
                 skipped(f"{shown}, {size(target.stat().st_size)}")
                 continue
             if check:
-                print(f"  need {entry['name']}: {entry.get('url') or entry.get('path')}")
+                how = (
+                    "a placeholder, put your own path in .local/sources.json"
+                    if placeholder(entry.get("path", ""))
+                    else (entry.get("url") or entry.get("path"))
+                )
+                print(f"  need {entry['name']}: {how}")
                 missing.append(entry["name"])
                 continue
             if entry.get("url"):
@@ -163,6 +184,16 @@ def gather(listed: Dict[str, Any], check: bool) -> List[str]:
                     missing.append(entry["name"])
                     continue
                 done(f"{shown}, {size(count)}")
+            elif placeholder(entry.get("path", "")):
+                # Not missing: never named. The committed sources.json cannot
+                # carry anybody's own folder, so it says <your folder> and
+                # waits for you to put a path there.
+                print(
+                    f"  ..   {entry['name']}: its path in .local/sources.json is still the placeholder {entry['path']}"
+                )
+                print(f"       put your own file's path there, or the file itself at {shown}")
+                missing.append(entry["name"])
+                continue
             else:
                 source = Path(entry["path"]).expanduser()
                 if not source.is_file():
@@ -207,7 +238,9 @@ def records(az: Az, config: Dict[str, str], again: bool) -> int:
     A policy that differs from the file's is replaced by it: the file is
     the rule, and the dashboard edits the same record.
     """
-    step(f"{len(local_files(RECORD_FILES)) or 'the'} records to Cosmos DB, data_db/collection_records")
+    step(
+        f"{len(local_files(RECORD_FILES)) or 'the'} records to Cosmos DB, data_db/collection_records"
+    )
     return push_records(az, config, by=BY, again=again)
 
 
@@ -233,11 +266,17 @@ def files(az: Az, config: Dict[str, str], again: bool) -> int:
     """
     sent_files = local_files(RAW_FILES)
     if not sent_files:
-        stop(f"There is nothing in {RAW_FILES}. Put a file in a collection folder there, or list it in .local/sources.json.")
+        stop(
+            f"There is nothing in {RAW_FILES}. Put a file in a collection folder there, or list it in .local/sources.json."
+        )
     step(f"{len(sent_files)} files to {INGESTION}/raw")
     sent = push_raw(az, config, again=again)
     if az.pretend:
-        note(f"{sent} would go up, each an event on the {INGESTION} queue" if sent else "nothing new: the container already holds this drop")
+        note(
+            f"{sent} would go up, each an event on the {INGESTION} queue"
+            if sent
+            else "nothing new: the container already holds this drop"
+        )
     elif not sent:
         note("nothing new, so the container already holds this drop")
     else:
@@ -252,8 +291,14 @@ def files(az: Az, config: Dict[str, str], again: bool) -> int:
 
 
 def options(parser) -> None:
-    parser.add_argument("--check", action="store_true", help="say what is missing, fetch nothing, send nothing")
-    parser.add_argument("--again", action="store_true", help="send even what is already there, and each record as its file says")
+    parser.add_argument(
+        "--check", action="store_true", help="say what is missing, fetch nothing, send nothing"
+    )
+    parser.add_argument(
+        "--again",
+        action="store_true",
+        help="send even what is already there, and each record as its file says",
+    )
 
 
 def main() -> int:
@@ -261,7 +306,11 @@ def main() -> int:
     config = settings()
     az = Az(args.dry_run)
     account = config["VX_STORAGE"]
-    begin("04", "The first drop", f"What .local is missing is fetched, the records go to Cosmos DB, then the files to the {INGESTION} container.")
+    begin(
+        "04",
+        "The first drop",
+        f"What .local is missing is fetched, the records go to Cosmos DB, then the files to the {INGESTION} container.",
+    )
 
     if not SOURCES.exists():
         stop(f"There is no {SOURCES}. It lists what goes in each batch.")
@@ -283,11 +332,19 @@ def main() -> int:
         ("the mirror on this machine", folder_link(LOCAL)),
         (f"the {INGESTION} container", portal("storage", account, config, page="containersList")),
         ("the queue, filling", portal("storage", account, config, page="queuesList")),
-        ("the records, in Data Explorer", portal("cosmos", config["VX_COSMOS_NAME"], config, page="dataExplorer") if wants(config, "VX_COSMOS") else ""),
+        (
+            "the records, in Data Explorer",
+            portal("cosmos", config["VX_COSMOS_NAME"], config, page="dataExplorer")
+            if wants(config, "VX_COSMOS")
+            else "",
+        ),
     )
     finish(
-        (f"a dry run, so nothing was sent: {written} records would be written, {sent} files would go up, "
-         if args.dry_run else f"{written} records written, {sent} files uploaded, ")
+        (
+            f"a dry run, so nothing was sent: {written} records would be written, {sent} files would go up, "
+            if args.dry_run
+            else f"{written} records written, {sent} files uploaded, "
+        )
         + f"{len(local_files(RAW_FILES))} in the mirror, "
         f"{len(local_files(LATER))} waiting on the shelf",
         "05_create_extraction_function_app.py",

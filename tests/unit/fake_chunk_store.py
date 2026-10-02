@@ -42,7 +42,11 @@ class _MemoryCollection:
         self.name = name
 
     def _mine(self) -> List[Tuple[str, Dict[str, Any]]]:
-        return sorted((point, row) for (collection, point), row in self.store.rows.items() if collection == self.name)
+        return sorted(
+            (point, row)
+            for (collection, point), row in self.store.rows.items()
+            if collection == self.name
+        )
 
     def put(self, ids, texts, metadata, written) -> None:
         for point, text, meta in zip(ids, texts, metadata):
@@ -85,7 +89,10 @@ class _MemoryCollection:
     def written(self):
         for _, row in self._mine():
             meta = row["metadata"]
-            yield row["written"], {k: meta[k] for k in ("_vx_build", "_vx_quality") if meta.get(k) is not None}
+            yield (
+                row["written"],
+                {k: meta[k] for k in ("_vx_build", "_vx_quality") if meta.get(k) is not None},
+            )
 
     def scores(self):
         for point, row in self._mine():
@@ -96,7 +103,13 @@ class _MemoryCollection:
         row = self.store.rows.get((self.name, id))
         if row is None:
             return None
-        return Point(id=id, vector=[], metadata=dict(row["metadata"]), text=row["text"], created_at=parse_iso(row["written"]) or utcnow())
+        return Point(
+            id=id,
+            vector=[],
+            metadata=dict(row["metadata"]),
+            text=row["text"],
+            created_at=parse_iso(row["written"]) or utcnow(),
+        )
 
     def ids(self, limit, offset) -> List[str]:
         return [point for point, _ in self._mine()][offset : offset + limit]

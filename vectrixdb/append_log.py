@@ -118,14 +118,18 @@ class FileLog:
         if not self.path.exists():
             return []
         with self._lock:
-            return [line for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            return [
+                line for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip()
+            ]
 
     def describe(self) -> str:
         return str(self.path)
 
 
 def _status(exc: BaseException) -> Optional[int]:
-    return getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+    return getattr(exc, "status_code", None) or getattr(
+        getattr(exc, "response", None), "status_code", None
+    )
 
 
 def _code(exc: BaseException) -> str:
@@ -136,12 +140,20 @@ def _locked(properties: Any) -> Dict[str, bool]:
     """What in a container's properties keeps a blob from being changed: empty when nothing does."""
 
     def read(name: str) -> bool:
-        value = properties.get(name) if isinstance(properties, dict) else getattr(properties, name, None)
+        value = (
+            properties.get(name)
+            if isinstance(properties, dict)
+            else getattr(properties, name, None)
+        )
         return bool(value)
 
     found = {
         name: read(name)
-        for name in ("has_immutability_policy", "immutable_storage_with_versioning_enabled", "has_legal_hold")
+        for name in (
+            "has_immutability_policy",
+            "immutable_storage_with_versioning_enabled",
+            "has_legal_hold",
+        )
     }
     return {name: on for name, on in found.items() if on}
 
@@ -166,7 +178,9 @@ class BlobDayLog:
     ) -> None:
         self._container = container
         self._prefix = prefix.strip("/") + "/" if prefix.strip("/") else ""
-        self._where = where or f"Blob {getattr(container, 'container_name', 'container')}/{self._prefix}"
+        self._where = (
+            where or f"Blob {getattr(container, 'container_name', 'container')}/{self._prefix}"
+        )
         self._clock = clock
         self._parts: Dict[str, int] = {}
         self._lock = threading.Lock()
@@ -181,7 +195,9 @@ class BlobDayLog:
     # ------------------------------------------------------------ writing ---
 
     def _name(self, day: str, part: int) -> str:
-        return f"{self._prefix}{day}.jsonl" if part == 0 else f"{self._prefix}{day}.p{part:03d}.jsonl"
+        return (
+            f"{self._prefix}{day}.jsonl" if part == 0 else f"{self._prefix}{day}.p{part:03d}.jsonl"
+        )
 
     def _create(self, blob: Any) -> None:
         """The day's blob, made only if nobody made it first: making it over one would empty it."""
@@ -233,11 +249,13 @@ class BlobDayLog:
     # ------------------------------------------------------------ reading ---
 
     def _names(self, since: Optional[float]) -> List[str]:
-        first: Optional[date] = datetime.fromtimestamp(since, tz=timezone.utc).date() if since is not None else None
+        first: Optional[date] = (
+            datetime.fromtimestamp(since, tz=timezone.utc).date() if since is not None else None
+        )
         found = []
         for item in self._container.list_blobs(name_starts_with=self._prefix):
             name = str(item["name"] if isinstance(item, dict) else item.name)
-            matched = _NAME.match(name[len(self._prefix):])
+            matched = _NAME.match(name[len(self._prefix) :])
             if matched is None:
                 continue
             day = date(int(matched.group(1)), int(matched.group(2)), int(matched.group(3)))
@@ -285,7 +303,12 @@ def open_append_log(where: Any, *, setting: str, require_lock: bool = True) -> A
             raise ConfigurationError(f"{setting} is a Blob address with no container in it: {text}")
         account = f"{parsed.scheme}://{parsed.netloc}"
         client = _blob_client(account).get_container_client(container)
-        return BlobDayLog(client, prefix, where=f"Blob {parsed.netloc}/{container}/{prefix.strip('/')}".rstrip("/"), require_lock=require_lock)
+        return BlobDayLog(
+            client,
+            prefix,
+            where=f"Blob {parsed.netloc}/{container}/{prefix.strip('/')}".rstrip("/"),
+            require_lock=require_lock,
+        )
     if "://" in text:
         raise ConfigurationError(
             f"{setting} is a path or https://<account>.blob.core.windows.net/<container>/<prefix>, not {text.split('://', 1)[0]}://"

@@ -303,7 +303,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         }
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(
-            json.dumps({"dataset": args.dataset, "fast": args.fast, **provenance, "results": results}, indent=2),
+            json.dumps(
+                {"dataset": args.dataset, "fast": args.fast, **provenance, "results": results},
+                indent=2,
+            ),
             encoding="utf-8",
         )
     return 0

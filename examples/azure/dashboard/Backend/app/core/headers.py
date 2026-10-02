@@ -22,7 +22,8 @@ Author: Kwadwo Daddy Nyame Owusu - Boakye
 
 from __future__ import annotations
 
-from typing import Iterable, List, Tuple
+from typing import Any, Iterable, List, Tuple
+from urllib.parse import urlsplit
 
 #: Headers that describe one connection and mean nothing to the next one.
 HOP_BY_HOP = frozenset(
@@ -44,7 +45,9 @@ HOP_BY_HOP = frozenset(
 NOT_UPWARD = HOP_BY_HOP | {b"host", b"content-length"}
 
 
-def upward(raw: Iterable[Tuple[bytes, bytes]], *, key: str = "", key_header: str = "api-key") -> List[Tuple[bytes, bytes]]:
+def upward(
+    raw: Iterable[Tuple[bytes, bytes]], *, key: str = "", key_header: str = "api-key"
+) -> List[Tuple[bytes, bytes]]:
     """The caller's headers as the retrieval service should see them, with our key when it has one."""
     sent = [(name, value) for name, value in raw if name.lower() not in NOT_UPWARD]
     header = key_header.encode("latin-1").lower()
@@ -60,3 +63,23 @@ def downward(raw: Iterable[Tuple[bytes, bytes]]) -> List[Tuple[bytes, bytes]]:
     and a mapping keeps one of them.
     """
     return [(name, value) for name, value in raw if name.lower() not in HOP_BY_HOP]
+
+
+def from_another_site(headers: Any) -> bool:
+    """Whether a browser says the call came from a page on another site.
+
+    ``UPSTREAM_KEY`` goes on every call that carries no key of its own, so a
+    page on any site the operator has open could post here and act with it:
+    a form or a fetch with no preflight is enough. A browser names the page's
+    origin on such a call; one that is not this host's is not forwarded. A
+    call with no Origin, from curl or a script, is not a browser's and passes.
+    """
+    origin = headers.get("origin")
+    if not origin:
+        return False
+    if origin == "null":
+        return True
+    ours = {headers.get("host", "")} | {
+        h.strip() for h in headers.get("x-forwarded-host", "").split(",") if h.strip()
+    }
+    return urlsplit(origin).netloc not in ours

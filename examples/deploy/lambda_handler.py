@@ -21,7 +21,15 @@ import os
 
 import boto3
 
-from vectrixdb import DocumentStore, IngestWorker, S3Fetcher, S3Files, Vectrix, VectrixDB, events_from_s3
+from vectrixdb import (
+    DocumentStore,
+    IngestWorker,
+    S3Fetcher,
+    S3Files,
+    Vectrix,
+    VectrixDB,
+    events_from_s3,
+)
 from vectrixdb.extract.engines import Textract
 from vectrixdb.models.bedrock import BedrockEmbedder
 from vectrixdb.policy import Overlap, Policy
@@ -41,7 +49,9 @@ def worker() -> IngestWorker:
             filter_fields={"client_id": "string"},
             knn_engine="faiss",
             embeddings="bedrock",
-            embed_fn=BedrockEmbedder(boto3.client("bedrock-runtime", region_name=REGION), dimensions=1024),
+            embed_fn=BedrockEmbedder(
+                boto3.client("bedrock-runtime", region_name=REGION), dimensions=1024
+            ),
         )
         textract = Textract(boto3.client("textract", region_name=REGION))
         db = Vectrix(
@@ -50,9 +60,17 @@ def worker() -> IngestWorker:
             path="/tmp/vectrixdb",
             mode="hybrid",
             policy=Policy([Overlap("client_id", "clients", scope=True)], require_pushdown=True),
-            extractors={".pdf": textract, ".png": textract, ".jpg": textract, ".jpeg": textract, ".tif": textract},
+            extractors={
+                ".pdf": textract,
+                ".png": textract,
+                ".jpg": textract,
+                ".jpeg": textract,
+                ".tif": textract,
+            },
             # A bucket of its own. Never the one the events come from.
-            keep_source=DocumentStore(S3Files(S3, os.environ["EXTRACTED_BUCKET"], prefix="markdown")),
+            keep_source=DocumentStore(
+                S3Files(S3, os.environ["EXTRACTED_BUCKET"], prefix="markdown")
+            ),
         )
         _worker = IngestWorker(
             db,
@@ -73,10 +91,21 @@ def handler(event, context):
         try:
             outcomes = worker().handle_all(events_from_s3(json.loads(record["body"])))
             for outcome in outcomes:
-                print(json.dumps({"action": outcome.action, "uri": outcome.uri, "chunks": outcome.chunks, "error": outcome.error}))
+                print(
+                    json.dumps(
+                        {
+                            "action": outcome.action,
+                            "uri": outcome.uri,
+                            "chunks": outcome.chunks,
+                            "error": outcome.error,
+                        }
+                    )
+                )
                 if outcome.action == "failed":
                     raise RuntimeError(outcome.error)
-        except Exception as exc:  # the record goes back to the queue, and in time to the dead letter queue
+        except (
+            Exception
+        ) as exc:  # the record goes back to the queue, and in time to the dead letter queue
             print(json.dumps({"failed": record.get("messageId"), "why": str(exc)}))
             failures.append({"itemIdentifier": record["messageId"]})
     return {"batchItemFailures": failures}

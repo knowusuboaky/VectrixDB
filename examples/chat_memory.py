@@ -40,7 +40,7 @@ def summarize(turns):
             "Customer asked for the quarterly report with blue charts",
             "A copy of the report goes to finance",
         ]
-        if "finance" in text
+        if "report" in text
         else []
     )
 

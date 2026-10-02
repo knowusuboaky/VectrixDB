@@ -91,11 +91,19 @@ def main() -> int:
     # inside the resource group, which is new.
     free = True
     taken = az(
-        "storage", "account", "check-name", "--name", config["VX_STORAGE"], reads=True, allow_fail=True
+        "storage",
+        "account",
+        "check-name",
+        "--name",
+        config["VX_STORAGE"],
+        reads=True,
+        allow_fail=True,
     )
     if taken is not None and not taken.get("nameAvailable", True):
         free = False
-        print(f"  no   the storage account {config['VX_STORAGE']} is taken: {taken.get('message', '')}")
+        print(
+            f"  no   the storage account {config['VX_STORAGE']} is taken: {taken.get('message', '')}"
+        )
     else:
         done(f"storage account {config['VX_STORAGE']}")
 
@@ -121,31 +129,46 @@ def main() -> int:
     for label, value in (
         ("resource group", config["VX_RESOURCE_GROUP"]),
         ("region", config["VX_LOCATION"]),
-        ("if it has no room", ", then ".join(regions(config["VX_LOCATION"], config["VX_ELSEWHERE"])[1:]) or "nowhere else"),
+        (
+            "if it has no room",
+            ", then ".join(regions(config["VX_LOCATION"], config["VX_ELSEWHERE"])[1:])
+            or "nowhere else",
+        ),
         ("storage account", config["VX_STORAGE"]),
         ("search service", f"{config['VX_SEARCH']} ({config['VX_SEARCH_TIER']} tier)"),
         ("function app", config["VX_FUNCTION_APP"]),
         ("document intelligence", config["VX_DOCINTEL"]),
         ("speech", config["VX_SPEECH"]),
-        ("azure openai", config["VX_OPENAI_NAME"] if config["VX_OPENAI"] == "yes" else "not asked for"),
+        (
+            "azure openai",
+            config["VX_OPENAI_NAME"] if config["VX_OPENAI"] == "yes" else "not asked for",
+        ),
     ):
         print(f"       {label:<22} {value}")
 
     step("Resource providers")
     off = []
     for namespace in PROVIDERS:
-        found = az("provider", "show", "--namespace", namespace, reads=True, quiet=True, allow_fail=True)
+        found = az(
+            "provider", "show", "--namespace", namespace, reads=True, quiet=True, allow_fail=True
+        )
         if (found or {}).get("registrationState") != "Registered":
             off.append(namespace)
     if off and not args.dry_run:
         note(f"{len(off)} of {len(PROVIDERS)} are off, which is normal on a new subscription")
-        note("01_create_resources.py switches them on and waits; it takes a minute or two, once ever")
+        note(
+            "01_create_resources.py switches them on and waits; it takes a minute or two, once ever"
+        )
     elif not args.dry_run:
         done(f"all {len(PROVIDERS)} are on")
 
-    note("everything goes in that one resource group, so 99_delete_everything.py can remove all of it")
+    note(
+        "everything goes in that one resource group, so 99_delete_everything.py can remove all of it"
+    )
     if config["VX_SEARCH_TIER"] == "basic":
-        note("the search service is the only part billed by the hour, about 3 to 4 CAD a day while it exists")
+        note(
+            "the search service is the only part billed by the hour, about 3 to 4 CAD a day while it exists"
+        )
 
     kept = state()
     links(

@@ -24,12 +24,21 @@ sys.path.insert(0, os.path.dirname(__file__))
 from fake_records import CosmosError, DynamoError, FakeContainer, FakePostgres, FakeTable  # noqa: E402
 
 from vectrixdb.exceptions import ConfigurationError, DependencyError  # noqa: E402
-from vectrixdb.signin.records import CosmosRecords, DynamoRecords, Record, SqlRecords, describe_where, open_records  # noqa: E402
+from vectrixdb.signin.records import (
+    CosmosRecords,
+    DynamoRecords,
+    Record,
+    SqlRecords,
+    describe_where,
+    open_records,
+)  # noqa: E402
 
 BACKENDS = {
     "sqlite-file": lambda tmp: SqlRecords.sqlite(tmp / "auth" / "signin.db"),
     "sqlite-memory": lambda tmp: SqlRecords.sqlite(":memory:"),
-    "postgresql": lambda tmp: SqlRecords.postgres("postgresql://vx@db.example.test/signin", connect=FakePostgres().connect),
+    "postgresql": lambda tmp: SqlRecords.postgres(
+        "postgresql://vx@db.example.test/signin", connect=FakePostgres().connect
+    ),
     "cosmos": lambda tmp: CosmosRecords(FakeContainer()),
     "dynamodb": lambda tmp: DynamoRecords(FakeTable()),
 }
@@ -54,7 +63,9 @@ class TestTheContract:
 
     def test_a_key_past_its_time_is_free_again(self, records):
         assert records.create(Record("link", "t1", {"used": False}, expires=time.time() - 1))
-        assert records.get("link", "t1") is None, "gone the moment its time is up, whether or not anything has cleared it"
+        assert records.get("link", "t1") is None, (
+            "gone the moment its time is up, whether or not anything has cleared it"
+        )
         assert records.create(Record("link", "t1", {"used": True}, expires=time.time() + 60))
         assert records.get("link", "t1").data == {"used": True}
 
@@ -68,8 +79,12 @@ class TestTheContract:
         assert records.get("attempt", "code:ada").data == {"count": 1}
         again = records.get("attempt", "code:ada")
         again.data["count"] = 2
-        assert records.replace(again) and records.replace(again), "a write carries the version it made"
-        assert not records.replace(Record("attempt", "nobody", {}, version=again.version)), "and there is nothing to write back to"
+        assert records.replace(again) and records.replace(again), (
+            "a write carries the version it made"
+        )
+        assert not records.replace(Record("attempt", "nobody", {}, version=again.version)), (
+            "and there is nothing to write back to"
+        )
 
     def test_a_delete_with_a_stale_version_does_nothing_and_one_without_always_goes(self, records):
         made = Record("challenge", "h1", {"purpose": "a"})
@@ -93,20 +108,42 @@ class TestTheContract:
         now = time.time()
         for n in range(5):
             owner = "ada@example.com" if n < 3 else "sam@example.com"
-            records.create(Record("session", f"s{n}", {"n": n}, expires=now + 60, ix1=owner, ix2="ada" if n % 2 == 0 else "sam"))
-        records.create(Record("session", "old", {"n": 9}, expires=now - 1, ix1="ada@example.com", ix2="ada"))
+            records.create(
+                Record(
+                    "session",
+                    f"s{n}",
+                    {"n": n},
+                    expires=now + 60,
+                    ix1=owner,
+                    ix2="ada" if n % 2 == 0 else "sam",
+                )
+            )
+        records.create(
+            Record("session", "old", {"n": 9}, expires=now - 1, ix1="ada@example.com", ix2="ada")
+        )
         records.create(Record("person", "ada@example.com", {}))
         assert sorted(r.key for r in records.query("session")) == ["s0", "s1", "s2", "s3", "s4"]
-        assert sorted(r.key for r in records.query("session", ix1="ada@example.com")) == ["s0", "s1", "s2"]
+        assert sorted(r.key for r in records.query("session", ix1="ada@example.com")) == [
+            "s0",
+            "s1",
+            "s2",
+        ]
         assert sorted(r.key for r in records.query("session", ix2="ada")) == ["s0", "s2", "s4"]
-        assert sorted(r.key for r in records.query("session", ix1="ada@example.com", ix2="ada")) == ["s0", "s2"]
+        assert sorted(
+            r.key for r in records.query("session", ix1="ada@example.com", ix2="ada")
+        ) == ["s0", "s2"]
         assert [r.key for r in records.query("person")] == ["ada@example.com"]
         found = records.query("session", ix1="sam@example.com")[0]
         found.data["n"] = 99
         assert records.replace(found), "what a query found can be written back"
 
     def test_what_a_record_holds_comes_back_as_it_went_in(self, records):
-        data = {"text": "Ünïcode · 中文", "nested": {"list": [1, 2.5, None, True], "empty": {}}, "big": 2**53, "at": 1_800_000_000.123456}
+        data = {
+            "text": "Ünïcode · 中文",
+            "nested": {"list": [1, 2.5, None, True], "empty": {}},
+            "big": 2**53,
+            "at": 1_800_000_000.123456,
+        }
         key = "odd/key?with#chars\\and|bars"
         records.create(Record("person", key, data, ix1="a|b"))
         assert records.get("person", key).data == data
@@ -147,28 +184,53 @@ class TestChoosingWhere:
             open_records("mongodb://db.example.test/signin")
 
     def test_what_is_said_of_where_never_shows_a_password(self):
-        said = describe_where("postgresql://vx:hunter2@db.example.test:5432/signin?sslmode=require&password=hunter2")
+        said = describe_where(
+            "postgresql://vx:hunter2@db.example.test:5432/signin?sslmode=require&password=hunter2"
+        )
         assert said == "PostgreSQL db.example.test:5432/signin" and "hunter2" not in said
-        assert describe_where("cosmos://acct.documents.azure.com/vectrixdb/signin") == "Cosmos DB acct.documents.azure.com/vectrixdb/signin"
-        assert describe_where("dynamodb://vx-signin?region=ca-central-1") == "DynamoDB table vx-signin in ca-central-1"
-        assert describe_where(Path("data") / "auth" / "signin.db") == f"SQLite file {Path('data') / 'auth' / 'signin.db'}"
+        assert (
+            describe_where("cosmos://acct.documents.azure.com/vectrixdb/signin")
+            == "Cosmos DB acct.documents.azure.com/vectrixdb/signin"
+        )
+        assert (
+            describe_where("dynamodb://vx-signin?region=ca-central-1")
+            == "DynamoDB table vx-signin in ca-central-1"
+        )
+        assert (
+            describe_where(Path("data") / "auth" / "signin.db")
+            == f"SQLite file {Path('data') / 'auth' / 'signin.db'}"
+        )
         assert describe_where(":memory:") == "SQLite in memory"
 
 
 class TestPostgreSQL:
     def test_the_table_and_the_password_stay_out_of_the_address_it_connects_with(self):
         server = FakePostgres()
-        made = SqlRecords.postgres("postgresql://vx@db.example.test/signin?sslmode=require&table=team_signin", password="pw", connect=server.connect)
-        assert server.opened == [("postgresql://vx@db.example.test/signin?sslmode=require", {"password": "pw"})]
-        assert any(s.startswith("CREATE TABLE IF NOT EXISTS team_signin ") for s in server.connections[0].statements)
-        assert made.describe() == "PostgreSQL db.example.test/signin" and made.sqlite_connection is None
+        made = SqlRecords.postgres(
+            "postgresql://vx@db.example.test/signin?sslmode=require&table=team_signin",
+            password="pw",
+            connect=server.connect,
+        )
+        assert server.opened == [
+            ("postgresql://vx@db.example.test/signin?sslmode=require", {"password": "pw"})
+        ]
+        assert any(
+            s.startswith("CREATE TABLE IF NOT EXISTS team_signin ")
+            for s in server.connections[0].statements
+        )
+        assert (
+            made.describe() == "PostgreSQL db.example.test/signin"
+            and made.sqlite_connection is None
+        )
 
     def test_a_dropped_connection_is_opened_again_once(self):
         server = FakePostgres()
         made = SqlRecords.postgres("postgresql://vx@db.example.test/signin", connect=server.connect)
         made.create(Record("person", "ada@example.com", {"role": "admin"}))
         server.fail_next = 1
-        assert made.get("person", "ada@example.com").data == {"role": "admin"}, "a restarted database costs nothing"
+        assert made.get("person", "ada@example.com").data == {"role": "admin"}, (
+            "a restarted database costs nothing"
+        )
         assert len(server.connections) == 2 and server.connections[0].closed
         server.fail_next = 2
         with pytest.raises(Exception, match="closed the connection"):
@@ -176,9 +238,15 @@ class TestPostgreSQL:
 
     def test_a_table_that_is_there_is_used_without_being_made_again(self):
         server = FakePostgres()
-        SqlRecords.postgres("postgresql://vx@db.example.test/signin", connect=server.connect).close()
-        again = SqlRecords.postgres("postgresql://vx@db.example.test/signin", connect=server.connect)
-        assert not any(s.startswith("CREATE") for s in server.connections[-1].statements), "a user who may only read and write it is enough"
+        SqlRecords.postgres(
+            "postgresql://vx@db.example.test/signin", connect=server.connect
+        ).close()
+        again = SqlRecords.postgres(
+            "postgresql://vx@db.example.test/signin", connect=server.connect
+        )
+        assert not any(s.startswith("CREATE") for s in server.connections[-1].statements), (
+            "a user who may only read and write it is enough"
+        )
         again.close()
 
     def test_a_table_this_user_may_not_make_is_described_exactly(self):
@@ -204,12 +272,18 @@ class TestPostgreSQL:
             connection.cursor = Cursor
             return connection
 
-        with pytest.raises(ConfigurationError, match=r"permission denied for schema public.*CREATE TABLE IF NOT EXISTS vectrixdb_signin"):
+        with pytest.raises(
+            ConfigurationError,
+            match=r"permission denied for schema public.*CREATE TABLE IF NOT EXISTS vectrixdb_signin",
+        ):
             SqlRecords.postgres("postgresql://vx@db.example.test/signin", connect=refusing)
 
     def test_a_table_name_that_could_be_anything_else_is_refused(self):
         with pytest.raises(ConfigurationError, match="table"):
-            SqlRecords.postgres("postgresql://vx@db.example.test/signin?table=x;drop", connect=FakePostgres().connect)
+            SqlRecords.postgres(
+                "postgresql://vx@db.example.test/signin?table=x;drop",
+                connect=FakePostgres().connect,
+            )
 
 
 def _package(monkeypatch, name: str) -> None:
@@ -262,19 +336,28 @@ class TestCosmosDB:
     def test_an_account_key_or_else_the_machine_signs_in(self, monkeypatch):
         seen = self.sdk(monkeypatch)
         made = open_records("cosmos://acct.documents.azure.com/vectrixdb/signin", key="account-key")
-        assert seen == {"endpoint": "https://acct.documents.azure.com:443/", "credential": "account-key", "database": "vectrixdb", "container": "signin"}
+        assert seen == {
+            "endpoint": "https://acct.documents.azure.com:443/",
+            "credential": "account-key",
+            "database": "vectrixdb",
+            "container": "signin",
+        }
         assert made.describe() == "Cosmos DB acct.documents.azure.com/vectrixdb/signin"
         open_records("cosmos://acct.documents.azure.com/vectrixdb/signin")
         assert seen["credential"] == "the machine's own identity"
 
-    def test_a_container_that_is_not_there_is_made_partitioned_by_kind_with_time_to_live(self, monkeypatch):
+    def test_a_container_that_is_not_there_is_made_partitioned_by_kind_with_time_to_live(
+        self, monkeypatch
+    ):
         seen = self.sdk(monkeypatch, there=False)
         open_records("cosmos://acct.documents.azure.com/vectrixdb/signin", key="k")
         assert seen["made"] == ("signin", "/kind", -1)
 
     def test_one_this_server_may_not_make_is_described_exactly(self, monkeypatch):
         self.sdk(monkeypatch, there=False, may_make=False)
-        with pytest.raises(ConfigurationError, match=r"vectrixdb/signin .*partition key /kind and time to live on"):
+        with pytest.raises(
+            ConfigurationError, match=r"vectrixdb/signin .*partition key /kind and time to live on"
+        ):
             open_records("cosmos://acct.documents.azure.com/vectrixdb/signin", key="k")
 
     def test_an_address_without_a_database_and_a_container_is_refused(self, monkeypatch):
@@ -293,8 +376,15 @@ class TestCosmosItemsReadAsWhatTheyAre:
         made.put(Record("collection", "raw/2026 #1?", {}))
         made.put(Record("collection", "raw%2F2026 #1?", {}))
         ids = sorted(item_id for _, item_id in container.items)
-        assert ids == ["collection.raw%252F2026 %231%3F", "collection.raw%2F2026 %231%3F", "person.ama@bank.example"]
-        assert made.get("collection", "raw/2026 #1?") is not None and made.get("collection", "raw%2F2026 #1?") is not None
+        assert ids == [
+            "collection.raw%252F2026 %231%3F",
+            "collection.raw%2F2026 %231%3F",
+            "person.ama@bank.example",
+        ]
+        assert (
+            made.get("collection", "raw/2026 #1?") is not None
+            and made.get("collection", "raw%2F2026 #1?") is not None
+        )
 
     def test_a_key_too_long_for_an_id_becomes_its_hash_and_never_meets_an_escaped_one(self):
         container = FakeContainer()
@@ -304,7 +394,9 @@ class TestCosmosItemsReadAsWhatTheyAre:
         ((_, item_id),) = container.items
         assert item_id.startswith("person.%sha256-") and len(item_id) <= 255
         assert made.get("person", long_key).data == {"n": 1}
-        assert [r.key for r in made.query("person")] == [long_key], "the key itself is kept whole beside the id"
+        assert [r.key for r in made.query("person")] == [long_key], (
+            "the key itself is kept whole beside the id"
+        )
 
     def test_times_are_written_as_dates_beside_the_numbers_the_code_compares(self):
         container = FakeContainer()
@@ -312,7 +404,10 @@ class TestCosmosItemsReadAsWhatTheyAre:
         made.put(Record("session", "s1", {}, expires=1_800_000_000.25))
         made.put(Record("person", "ada@example.com", {}))
         session = container.items[("session", "session.s1")]
-        assert session["expires"] == "2027-01-15T08:00:00.250000Z" and session["expires_at"] == 1_800_000_000.25
+        assert (
+            session["expires"] == "2027-01-15T08:00:00.250000Z"
+            and session["expires_at"] == 1_800_000_000.25
+        )
         assert session["updated_at"].endswith("Z") and isinstance(session["ttl"], int)
         person = container.items[("person", "person.ada@example.com")]
         assert person["expires"] is None and person["expires_at"] is None and "ttl" not in person
@@ -321,9 +416,23 @@ class TestCosmosItemsReadAsWhatTheyAre:
         container = FakeContainer()
         made = CosmosRecords(container)
         soon = time.time() + 600
-        container.items[("session", "session.old")] = {"id": "session.old", "kind": "session", "key": "old", "data": {"n": 1}, "expires": soon, "ttl": 600, "_etag": "e1"}
+        container.items[("session", "session.old")] = {
+            "id": "session.old",
+            "kind": "session",
+            "key": "old",
+            "data": {"n": 1},
+            "expires": soon,
+            "ttl": 600,
+            "_etag": "e1",
+        }
         container.items[("session", "session.dated")] = {
-            "id": "session.dated", "kind": "session", "key": "dated", "data": {"n": 2}, "expires": "2099-01-01T00:00:00Z", "ttl": 600, "_etag": "e2",
+            "id": "session.dated",
+            "kind": "session",
+            "key": "dated",
+            "data": {"n": 2},
+            "expires": "2099-01-01T00:00:00Z",
+            "ttl": 600,
+            "_etag": "e2",
         }
         assert made.get("session", "old").expires == soon
         assert made.get("session", "dated").expires == 4070908800.0
@@ -370,8 +479,15 @@ class TestDynamoDB:
 
     def test_the_table_region_and_a_local_endpoint_come_from_the_address(self, monkeypatch):
         seen = self.sdk(monkeypatch)
-        made = open_records("dynamodb://vx-signin?region=ca-central-1&endpoint=http://localhost:8000")
-        assert (seen["service"], seen["table"], seen["region"], seen["endpoint"]) == ("dynamodb", "vx-signin", "ca-central-1", "http://localhost:8000")
+        made = open_records(
+            "dynamodb://vx-signin?region=ca-central-1&endpoint=http://localhost:8000"
+        )
+        assert (seen["service"], seen["table"], seen["region"], seen["endpoint"]) == (
+            "dynamodb",
+            "vx-signin",
+            "ca-central-1",
+            "http://localhost:8000",
+        )
         assert made.describe() == "DynamoDB table vx-signin in ca-central-1"
 
     def test_a_table_that_is_not_there_is_made_with_its_indexes_and_time_to_live(self, monkeypatch):
@@ -379,9 +495,18 @@ class TestDynamoDB:
         open_records("dynamodb://vx-signin?region=ca-central-1")
         spec = seen["spec"]
         assert spec["TableName"] == "vx-signin" and spec["BillingMode"] == "PAY_PER_REQUEST"
-        assert spec["KeySchema"] == [{"AttributeName": "kind", "KeyType": "HASH"}, {"AttributeName": "key", "KeyType": "RANGE"}]
-        assert [(i["IndexName"], i["KeySchema"][0]["AttributeName"]) for i in spec["GlobalSecondaryIndexes"]] == [("ix1", "g1"), ("ix2", "g2")]
-        assert seen["waited"] and seen["ttl"] == ("vx-signin", {"Enabled": True, "AttributeName": "expires_at"})
+        assert spec["KeySchema"] == [
+            {"AttributeName": "kind", "KeyType": "HASH"},
+            {"AttributeName": "key", "KeyType": "RANGE"},
+        ]
+        assert [
+            (i["IndexName"], i["KeySchema"][0]["AttributeName"])
+            for i in spec["GlobalSecondaryIndexes"]
+        ] == [("ix1", "g1"), ("ix2", "g2")]
+        assert seen["waited"] and seen["ttl"] == (
+            "vx-signin",
+            {"Enabled": True, "AttributeName": "expires_at"},
+        )
 
     def test_one_this_server_may_not_make_is_described_exactly(self, monkeypatch):
         self.sdk(monkeypatch, there=False, may_make=False)

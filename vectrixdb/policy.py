@@ -440,6 +440,10 @@ class Policy:
         }
         if self.on_incomplete_document != "reject":
             data["on_incomplete_document"] = self.on_incomplete_document
+        # Written when set, for the same reason, and kept out of the
+        # fingerprint: which role a search runs as is not a rule.
+        if self.db_role_key is not None:
+            data["db_role_key"] = self.db_role_key
         return data
 
     @classmethod
@@ -461,7 +465,12 @@ class Policy:
                     scope=bool(entry.get("scope", False)),
                 )
             )
-        return cls(rules, version=data.get("label"), on_incomplete_document=str(data.get("on_incomplete_document") or "reject"))
+        return cls(
+            rules,
+            version=data.get("label"),
+            on_incomplete_document=str(data.get("on_incomplete_document") or "reject"),
+            db_role_key=data.get("db_role_key"),
+        )
 
     @property
     def fingerprint(self) -> str:
@@ -472,7 +481,7 @@ class Policy:
         point. Without it, a past decision that no longer reproduces gives no
         way to tell a policy change from a data change.
         """
-        rules_only = {k: v for k, v in self.to_dict().items() if k != "label"}
+        rules_only = {k: v for k, v in self.to_dict().items() if k not in ("label", "db_role_key")}
         canonical = json.dumps(rules_only, sort_keys=True, separators=(",", ":"))
         return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 

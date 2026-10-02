@@ -101,8 +101,6 @@ def _suffix_key(raw: str) -> str:
     return _suffix_of(text)
 
 
-
-
 def _positions(raw: Any, width: int, what: str, length: int) -> List[tuple]:
     out: List[tuple] = []
     last = -1
@@ -138,7 +136,9 @@ def coerce(result: Any, name: str = "") -> LoadedDocument:
         text = result.get("text")
         if not isinstance(text, str):
             raise ExtractionError(f"the reply for {name or 'a document'} has no text")
-        pages = [(int(o), int(n)) for o, n in _positions(result.get("pages"), 2, "pages", len(text))]
+        pages = [
+            (int(o), int(n)) for o, n in _positions(result.get("pages"), 2, "pages", len(text))
+        ]
         headings = [
             (int(o), str(h), int(level))
             for o, h, level in _positions(result.get("headings"), 3, "headings", len(text))
@@ -157,7 +157,9 @@ def coerce(result: Any, name: str = "") -> LoadedDocument:
             for o, info in _positions(result.get("figures"), 2, "figures", len(text))
             if isinstance(info, Mapping)
         ]
-        doc = markdown_document(text, pages=pages, headings=headings or None, metadata=dict(metadata), figures=figures)
+        doc = markdown_document(
+            text, pages=pages, headings=headings or None, metadata=dict(metadata), figures=figures
+        )
         doc.segments = segments
         # A PDF's printed page numbers, from a service that sends them.
         doc.page_labels = _labels_from(result.get("page_labels"))
@@ -200,7 +202,9 @@ class ExtractorRegistry:
         for suffix, fn in (extractors or {}).items():
             self.register(suffix, fn)
 
-    def register(self, suffixes: Union[str, Iterable[str]], extractor: Extractor) -> "ExtractorRegistry":
+    def register(
+        self, suffixes: Union[str, Iterable[str]], extractor: Extractor
+    ) -> "ExtractorRegistry":
         if not callable(extractor):
             raise TypeError(f"an extractor is callable, got {type(extractor).__name__}")
         for raw in [suffixes] if isinstance(suffixes, str) else list(suffixes):
@@ -239,7 +243,9 @@ class ExtractorRegistry:
     def __contains__(self, name: object) -> bool:
         return isinstance(name, str) and self.get(name) is not None
 
-    def extract(self, data: bytes, name: str, source: Optional[str] = None) -> Optional[LoadedDocument]:
+    def extract(
+        self, data: bytes, name: str, source: Optional[str] = None
+    ) -> Optional[LoadedDocument]:
         """Run the extractor for ``name``, or return None when there is none."""
         fn = self.get(name)
         if fn is None:
@@ -349,7 +355,10 @@ def _multipart(field: str, name: str, data: bytes) -> Tuple[bytes, str]:
         f'Content-Disposition: form-data; name="{field}"; filename="{safe}"\r\n'
         f"Content-Type: application/octet-stream\r\n\r\n"
     ).encode()
-    return head + data + f"\r\n--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}"
+    return (
+        head + data + f"\r\n--{boundary}--\r\n".encode(),
+        f"multipart/form-data; boundary={boundary}",
+    )
 
 
 class HttpExtractor:
@@ -456,9 +465,13 @@ class HttpExtractor:
             except ValueError as exc:
                 raise ConfigurationError(f"VECTRIXDB_EXTRACTOR_ROUTES is not JSON: {exc}") from exc
             if not isinstance(routes, Mapping):
-                raise ConfigurationError('VECTRIXDB_EXTRACTOR_ROUTES is a mapping of suffix to route: {".pdf": "/extract/pdf"}')
+                raise ConfigurationError(
+                    'VECTRIXDB_EXTRACTOR_ROUTES is a mapping of suffix to route: {".pdf": "/extract/pdf"}'
+                )
         if not routes:
-            raise ConfigurationError(f"VECTRIXDB_EXTRACTOR_URL is {url} and nothing says which route reads what")
+            raise ConfigurationError(
+                f"VECTRIXDB_EXTRACTOR_URL is {url} and nothing says which route reads what"
+            )
         key = str(found.get("VECTRIXDB_EXTRACTOR_KEY") or "").strip()
         header = str(found.get("VECTRIXDB_EXTRACTOR_KEY_HEADER") or "").strip() or "x-api-key"
         try:
@@ -489,7 +502,11 @@ class HttpExtractor:
                     asked = float(str(value).strip())
                 except ValueError:
                     asked = None
-        wait = min(60.0, asked) if asked is not None and asked >= 0 else min(60.0, self.backoff * (2 ** attempt)) * (0.5 + random.random())
+        wait = (
+            min(60.0, asked)
+            if asked is not None and asked >= 0
+            else min(60.0, self.backoff * (2**attempt)) * (0.5 + random.random())
+        )
         if wait > 0:
             self._sleep(wait)
 
@@ -520,7 +537,9 @@ class HttpExtractor:
         attempt = 0
         while True:
             try:
-                status, reply_headers, reply = self._transport("POST", url, headers, payload, self.timeout)
+                status, reply_headers, reply = self._transport(
+                    "POST", url, headers, payload, self.timeout
+                )
             except ExtractionError:
                 raise
             except _TRANSIENT_ERRORS as exc:
@@ -528,7 +547,9 @@ class HttpExtractor:
                     self._wait(attempt, None)
                     attempt += 1
                     continue
-                raise ExtractionError(f"{route} could not be reached after {attempt + 1} tries: {exc}", route=route) from exc
+                raise ExtractionError(
+                    f"{route} could not be reached after {attempt + 1} tries: {exc}", route=route
+                ) from exc
             except Exception as exc:
                 raise ExtractionError(f"{route} could not be reached: {exc}", route=route) from exc
             if int(status) in _TRANSIENT_STATUSES and attempt < self.retries:
@@ -539,7 +560,9 @@ class HttpExtractor:
         if not 200 <= int(status) < 300:
             detail = bytes(reply or b"")[:300].decode("utf-8", errors="replace").strip()
             raise ExtractionError(
-                f"{route} answered {status} for {name}" + (f": {detail}" if detail else "") + (f" ({attempt + 1} tries)" if attempt else ""),
+                f"{route} answered {status} for {name}"
+                + (f": {detail}" if detail else "")
+                + (f" ({attempt + 1} tries)" if attempt else ""),
                 route=route,
                 status=int(status),
             )
@@ -558,14 +581,23 @@ class HttpExtractor:
             try:
                 parsed: Any = json.loads(text)
             except ValueError as exc:
-                raise ExtractionError(f"{route} said JSON and sent something else", route=route) from exc
+                raise ExtractionError(
+                    f"{route} said JSON and sent something else", route=route
+                ) from exc
             # A service that wraps plain text in a JSON string is still plain text.
             doc = coerce(parsed if isinstance(parsed, (Mapping, str)) else {"text": None}, name)
             if isinstance(parsed, Mapping) and isinstance(parsed.get("masking"), Mapping):
                 doc.metadata["masking"] = _masking_summary(parsed["masking"])
         else:
             doc = coerce(text, name)
-            said = next((str(value) for key, value in (reply_headers or {}).items() if str(key).lower() == "x-masking"), "")
+            said = next(
+                (
+                    str(value)
+                    for key, value in (reply_headers or {}).items()
+                    if str(key).lower() == "x-masking"
+                ),
+                "",
+            )
             if said:
                 try:
                     doc.metadata["masking"] = _masking_summary(json.loads(said))
@@ -594,7 +626,11 @@ def _mask_query(mask: Union[bool, str, Sequence[str], None]) -> str:
 
 def _masking_summary(said: Mapping[str, Any]) -> Dict[str, Any]:
     """What the service reported, without the text it already handed back, and without the offsets nobody keeps."""
-    return {key: value for key, value in said.items() if key in ("counts", "score", "engine", "language", "regex_only")}
+    return {
+        key: value
+        for key, value in said.items()
+        if key in ("counts", "score", "engine", "language", "regex_only")
+    }
 
 
 class HttpDescriber:
@@ -640,7 +676,9 @@ class HttpDescriber:
         from urllib.parse import quote
 
         name = str(context.get("name") or "figure") + ".png"
-        packed = json.dumps({k: v for k, v in context.items() if v not in (None, "")}, ensure_ascii=False)
+        packed = json.dumps(
+            {k: v for k, v in context.items() if v not in (None, "")}, ensure_ascii=False
+        )
         headers = dict(self.headers)
         if self.body == "raw":
             payload = bytes(image)
@@ -651,7 +689,13 @@ class HttpDescriber:
             boundary = "vx" + uuid.uuid4().hex
             crlf = chr(13) + chr(10)
             context_part = crlf.join(
-                [f"--{boundary}", 'Content-Disposition: form-data; name="context"', "Content-Type: application/json", "", packed]
+                [
+                    f"--{boundary}",
+                    'Content-Disposition: form-data; name="context"',
+                    "Content-Type: application/json",
+                    "",
+                    packed,
+                ]
             )
             file_head = crlf.join(
                 [
@@ -669,12 +713,20 @@ class HttpDescriber:
             )
             headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
         try:
-            status, reply_headers, reply = self._transport("POST", self.url, headers, payload, self.timeout)
+            status, reply_headers, reply = self._transport(
+                "POST", self.url, headers, payload, self.timeout
+            )
         except Exception as exc:
-            raise ExtractionError(f"the figure describer could not be reached: {exc}", route=self.url) from exc
+            raise ExtractionError(
+                f"the figure describer could not be reached: {exc}", route=self.url
+            ) from exc
         if not 200 <= int(status) < 300:
             detail = bytes(reply or b"")[:300].decode("utf-8", errors="replace").strip()
-            raise ExtractionError(f"the figure describer answered {status}: {detail}", route=self.url, status=int(status))
+            raise ExtractionError(
+                f"the figure describer answered {status}: {detail}",
+                route=self.url,
+                status=int(status),
+            )
         kind = ""
         for key, value in (reply_headers or {}).items():
             if str(key).lower() == "content-type":
@@ -684,7 +736,9 @@ class HttpDescriber:
             try:
                 parsed_reply = json.loads(text)
             except ValueError as exc:
-                raise ExtractionError("the figure describer said JSON and sent something else", route=self.url) from exc
+                raise ExtractionError(
+                    "the figure describer said JSON and sent something else", route=self.url
+                ) from exc
             return parsed_reply if isinstance(parsed_reply, (Mapping, str)) else None
         return text.strip() or None
 
@@ -714,7 +768,9 @@ def load_url(
     send = dict(headers or {})
     send.setdefault("Accept", "text/html, application/pdf;q=0.9, */*;q=0.5")
     try:
-        status, reply_headers, body = (transport or _urllib_transport)("GET", url, send, b"", float(timeout))
+        status, reply_headers, body = (transport or _urllib_transport)(
+            "GET", url, send, b"", float(timeout)
+        )
     except Exception as exc:
         raise ExtractionError(f"{url} could not be reached: {exc}") from exc
     if not 200 <= int(status) < 300:
@@ -725,7 +781,9 @@ def load_url(
         if str(key).lower() == "content-type":
             content_type = str(value).lower()
     if not PurePosixPath(name).suffix:
-        name = (name or parsed.netloc) + (".html" if "html" in content_type or not content_type else ".txt")
+        name = (name or parsed.netloc) + (
+            ".html" if "html" in content_type or not content_type else ".txt"
+        )
     return load_bytes(bytes(body), name, extractors=extractors, source=url, images=images)
 
 

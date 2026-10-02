@@ -13,6 +13,7 @@ Features that match/exceed Qdrant:
 Author: Kwadwo Daddy Nyame Owusu - Boakye
 """
 
+import copy
 import logging
 import json
 import os
@@ -90,11 +91,21 @@ def _build_threads() -> dict:
     try:
         threads = int(given)
     except ValueError:
-        raise ConfigurationError(f"VECTRIXDB_BUILD_THREADS is a whole number of threads, and 1 makes every build the same. It is {given!r}") from None
+        raise ConfigurationError(
+            f"VECTRIXDB_BUILD_THREADS is a whole number of threads, and 1 makes every build the same. It is {given!r}"
+        ) from None
     if threads < 0:
-        raise ConfigurationError(f"VECTRIXDB_BUILD_THREADS is a whole number of threads, 0 or more. It is {given!r}")
+        raise ConfigurationError(
+            f"VECTRIXDB_BUILD_THREADS is a whole number of threads, 0 or more. It is {given!r}"
+        )
     return {"threads": threads} if threads else {}
 
+
+#: An index holding at most this many vectors is searched exactly rather than
+#: through its graph. Measured with usearch at 384 dimensions: exact search of
+#: 1,000 vectors took 0.17 ms against 0.25 ms for HNSW, and the two met near
+#: 4,000. Exact is also exact, which HNSW on a small graph is not.
+EXACT_SEARCH_BELOW = 4096
 
 # Try to import usearch, fall back to hnswlib
 try:
@@ -765,6 +776,18 @@ class TextIndex:
 # One class, and everything a caller does to vectors goes through it.
 
 
+#: The columns a storage backend keeps beside the metadata, which are not metadata.
+_STORE_COLUMNS = frozenset(
+    {
+        "text_content",
+        "_embedding",
+        "dense_embedding",
+        "sparse_embedding",
+        "late_interaction_embedding",
+    }
+)
+
+
 class Collection:
     """
     A collection of vectors with metadata.
@@ -894,7 +917,14 @@ class Collection:
         # Sparse vector index for dense+sparse hybrid search
         sparse_path = self.path / "sparse" if self.path else None
         self._sparse_index: SparseIndex = SparseIndex(path=sparse_path)
-        self._has_sparse_vectors: bool = False
+        # Read back from what was saved: this started False on every open, so
+        # a reopened collection's sparse_search answered nothing.
+        self._has_sparse_vectors: bool = self._sparse_index.count() > 0
+        self._sparse_dirty = False
+        # Set while rebuild_index builds its new index; see there.
+        self._rebuild_touched: Optional[set] = None
+        self._rebuild_deleted: Optional[set] = None
+        self._rebuild_lock = threading.Lock()
 
         # Cache (injected by VectrixDB)
         self._cache: Any = None
@@ -1085,7 +1115,9 @@ class Collection:
         # When it was last written to is on the rows, and a reopened collection
         # said "never" until its next write.
         if self._updated_at is None and self._count:
-            row = self._db.execute("SELECT MAX(COALESCE(updated_at, created_at)) AS at FROM points").fetchone()
+            row = self._db.execute(
+                "SELECT MAX(COALESCE(updated_at, created_at)) AS at FROM points"
+            ).fetchone()
             if row is not None and row["at"]:
                 try:
                     self._updated_at = parse_iso(row["at"])
@@ -1095,7 +1127,9 @@ class Collection:
         # And when it was made: that was the moment this process opened it, so
         # a collection could be "created" after its last write. Kept with the
         # collection, and for one made before this, the oldest row stands in.
-        kept = self._db.execute("SELECT value FROM collection_meta WHERE key = 'created_at'").fetchone()
+        kept = self._db.execute(
+            "SELECT value FROM collection_meta WHERE key = 'created_at'"
+        ).fetchone()
         if kept is None and self._count:
             oldest = self._db.execute("SELECT MIN(created_at) AS at FROM points").fetchone()
             if oldest is not None and oldest["at"]:
@@ -1105,6 +1139,8 @@ class Collection:
                 self._created_at = parse_iso(kept["value"]) or self._created_at
         except ValueError:  # pragma: no cover
             pass
+        if self.readonly:
+            return  # a read-only open writes nothing
         self._db.execute(
             "INSERT OR IGNORE INTO collection_meta (key, value) VALUES ('created_at', ?)",
             (self._created_at.isoformat(),),
@@ -1181,12 +1217,13 @@ class Collection:
                 f"late_interaction_embeddings ({len(late_interaction_embeddings)}) must match ids ({len(ids)})"
             )
 
-        vectors = np.array(vectors, dtype=np.float32)
+        # Nothing to add is not an error: shape[1] of an empty array was an
+        # IndexError.
+        if not len(ids):
+            return 0
 
-        if vectors.shape[1] != self.dimension:
-            raise ValueError(
-                f"Vector dimension {vectors.shape[1]} != collection dimension {self.dimension}"
-            )
+        vectors = np.array(vectors, dtype=np.float32)
+        self._check_vector_shape(vectors, len(ids))
 
         metadata = metadata or [{} for _ in ids]
         text_list: list[Optional[str]] = list(texts) if texts else [None for _ in ids]
@@ -1227,6 +1264,16 @@ class Collection:
 
         return total_added
 
+    def _check_vector_shape(self, vectors: np.ndarray, count: int) -> None:
+        """Refuse anything but ``count`` vectors of this collection's dimension."""
+        if vectors.ndim != 2 or vectors.shape[1] != self.dimension:
+            got = vectors.shape[1] if vectors.ndim == 2 else f"shape {vectors.shape}"
+            raise ValueError(f"Vector dimension {got} != collection dimension {self.dimension}")
+        if vectors.shape[0] != count:
+            raise ValueError(
+                f"ids ({count}) and vectors ({vectors.shape[0]}) must have same length"
+            )
+
     def _add_batch(
         self,
         ids: list[str],
@@ -1238,6 +1285,10 @@ class Collection:
         late_interaction_embeddings: Optional[list] = None,
     ) -> int:
         """Add a batch of vectors with optional sparse vectors and storage backend embeddings."""
+        # Before anything is written: a wrong dimension used to commit the
+        # rows and fail only at the index, leaving points with no vector.
+        vectors = np.asarray(vectors, dtype=np.float32)
+        self._check_vector_shape(vectors, len(ids))
         sparse_vectors = sparse_vectors or [None] * len(ids)
         sparse_embeddings = sparse_embeddings or [None] * len(ids)
         late_interaction_embeddings = late_interaction_embeddings or [None] * len(ids)
@@ -1270,6 +1321,7 @@ class Collection:
                         sparse = SparseVector.from_dict(sparse)
                     self._sparse_index.add(id_, sparse)
                     self._has_sparse_vectors = True
+                    self._sparse_dirty = True
 
                 if id_ in self._id_to_idx:
                     # Update existing
@@ -1369,6 +1421,8 @@ class Collection:
                         pass
 
                 self._index.add(keys, vectors, **_build_threads())
+                if self._rebuild_touched is not None:
+                    self._rebuild_touched.update(int(k) for k in keys.tolist())
             else:  # hnswlib
                 # Resize if needed
                 current_count = self._index.get_current_count()
@@ -1502,7 +1556,11 @@ class Collection:
         cosine = self.metric == DistanceMetric.COSINE
         for r in results:
             if r.relevance is None:
-                r.relevance = rel.from_cosine(r.score) if cosine else round(min(1.0, max(0.0, float(r.score))), 6)
+                r.relevance = (
+                    rel.from_cosine(r.score)
+                    if cosine
+                    else round(min(1.0, max(0.0, float(r.score))), 6)
+                )
                 r.relevance_kind = rel.SIMILARITY if cosine else rel.DISTANCE
             if not r.matched_by and (r.relevance is None or r.relevance > 0.0):
                 # A chunk with no likeness at all is on the list because the
@@ -1782,11 +1840,20 @@ class Collection:
 
         # Check cache first
         use_cache_result = use_cache and self._cache and not include_vectors
+        # Everything else that changes the answer is part of the key too.
+        cache_options = {"score_threshold": score_threshold, "ef": ef}
         if use_cache_result:
             cached = self._cache.get_search_results(
-                collection=self.name, query=query.flatten().tolist(), filter=filter, limit=limit
+                collection=self.name,
+                query=query.flatten().tolist(),
+                filter=filter,
+                limit=limit,
+                options=cache_options,
             )
             if cached:
+                # A copy, so a caller that edits its results cannot change
+                # what the next caller is served.
+                cached = copy.deepcopy(cached)
                 cached.query_time_ms = (time.perf_counter() - start_time) * 1000
                 return cached
 
@@ -1877,7 +1944,16 @@ class Collection:
                 reachable = max(1, min(held, search_limit + (held - self._count)))
 
                 if self._backend == "usearch":
-                    matches = self._index.search(query, reachable)
+                    if held <= EXACT_SEARCH_BELOW and isinstance(self._index, UsearchIndex):
+                        # A small index is searched exactly: below a few
+                        # thousand vectors brute force costs what the graph
+                        # walk costs, and HNSW, built on several threads,
+                        # misses a true neighbour now and then even at forty
+                        # vectors. A sharded index already asks each small
+                        # shard for everything it holds.
+                        matches = self._index.search(query, reachable, exact=True)
+                    else:
+                        matches = self._index.search(query, reachable)
                     if hasattr(matches, "keys"):
                         indices = matches.keys.flatten().tolist()
                         # usearch reports a distance; SearchResult.score is a
@@ -2026,9 +2102,10 @@ class Collection:
                 self._cache.set_search_results(
                     collection=self.name,
                     query=query.flatten().tolist(),
-                    results=search_results,
+                    results=copy.deepcopy(search_results),
                     filter=filter,
                     limit=limit,
+                    options=cache_options,
                 )
 
             return search_results
@@ -2153,6 +2230,7 @@ class Collection:
         if not kept:
             return []
         matrix = np.vstack(vectors)
+        distances: Any
         if self.metric == DistanceMetric.COSINE:
             norms = np.linalg.norm(matrix, axis=1) * (np.linalg.norm(q) or 1.0)
             distances = 1.0 - (matrix @ q) / np.where(norms == 0, 1.0, norms)
@@ -2224,63 +2302,103 @@ class Collection:
         # disclosed anyway.
         engine_filter = self._engine_filter(filter, policy, principal)
         extra = {"filter": engine_filter} if engine_filter is not None else {}
-        backend_results = self._storage_backend.vector_search(
-            collection=self.name,
-            query_vector=query_list,
-            limit=limit * 2 if (filter or policy is not None) else limit,
-            **extra,
-        )
-
-        # Build results
-        results = []
         filter_obj = Filter.from_dict(filter) if filter else None
+        narrowed = filter_obj is not None or policy is not None
+        # The window the store is asked for. A filter is applied to what the
+        # store already chose, so the window has to be wider than the limit
+        # or a selective filter finds nothing in it. This was a flat limit *
+        # 2, which at a one percent pass rate came back short while plenty of
+        # documents matched. The window now grows, as the local path's does,
+        # until the limit is filled or the store has nothing more to give.
+        window = limit * 2 if narrowed else limit
+        results: list = []
         examined = 0
         disclosable = 0
         undisclosable = 0
 
-        for id_, data, distance in backend_results:
-            # Convert distance to similarity score (cosine distance: 1 - distance)
-            score = 1 - distance if distance >= 0 else distance
+        while True:
+            backend_results = self._storage_backend.vector_search(
+                collection=self.name,
+                query_vector=query_list,
+                limit=window,
+                **extra,
+            )
 
-            # Apply score threshold
-            if score_threshold is not None and score < score_threshold:
-                continue
+            # Build results. The counters start again with the results: a
+            # wider window looks at the candidates of the narrower one too.
+            results = []
+            examined = 0
+            disclosable = 0
+            undisclosable = 0
 
-            # Extract metadata (remove internal fields)
-            metadata = {k: v for k, v in data.items() if not k.startswith("_")}
+            for id_, data, distance in backend_results:
+                # A distance to a score the way the local index's distances
+                # are converted, so a euclidean or dot collection scores the
+                # same from the store as from its own index. A negative
+                # cosine distance is not a distance and is passed through as
+                # it was.
+                if distance < 0 and self.metric == DistanceMetric.COSINE:
+                    score = distance
+                else:
+                    score = self._distances_to_scores([distance])[0]
 
-            # Apply filter
-            if filter_obj and not filter_obj.matches(metadata):
-                continue
-
-            if policy is not None:
-                examined += 1
-                decision = policy.decide(principal, metadata)
-                if not decision.allowed:
-                    if decision.in_scope:
-                        disclosable += 1
-                    else:
-                        undisclosable += 1
+                # Apply score threshold
+                if score_threshold is not None and score < score_threshold:
                     continue
 
-            result = SearchResult(
-                id=id_,
-                score=float(score),
-                metadata=metadata,
-            )
-            # What the store worked out from its own engine's scoring. A
-            # store that does not know says nothing, and neither does this.
-            if data.get("_vx_relevance") is not None:
-                result.relevance = float(data["_vx_relevance"])
-                result.relevance_kind = str(data.get("_vx_relevance_kind") or "similarity")
-            if data.get("_vx_relevances"):
-                result.relevances = dict(data["_vx_relevances"])
-            result.matched_by = list(data.get("_vx_matched_by") or ["meaning"])
+                # The metadata as it was given, without the store's own
+                # columns: the text, the embeddings, and what its engine
+                # reported about the match. A caller's own key starting
+                # with an underscore is theirs and stays, as it does on the
+                # local path.
+                metadata = {
+                    k: v
+                    for k, v in data.items()
+                    if k not in _STORE_COLUMNS
+                    and not k.startswith("_vx_relevance")
+                    and k != "_vx_matched_by"
+                }
 
-            results.append(result)
+                # Apply filter
+                if filter_obj and not filter_obj.matches(metadata):
+                    continue
 
-            if len(results) >= limit:
+                if policy is not None:
+                    examined += 1
+                    decision = policy.decide(principal, metadata)
+                    if not decision.allowed:
+                        if decision.in_scope:
+                            disclosable += 1
+                        else:
+                            undisclosable += 1
+                        continue
+
+                result = SearchResult(
+                    id=id_,
+                    score=float(score),
+                    metadata=metadata,
+                )
+                # What the store worked out from its own engine's scoring. A
+                # store that does not know says nothing, and neither does this.
+                if data.get("_vx_relevance") is not None:
+                    result.relevance = float(data["_vx_relevance"])
+                    result.relevance_kind = str(data.get("_vx_relevance_kind") or "similarity")
+                if data.get("_vx_relevances"):
+                    result.relevances = dict(data["_vx_relevances"])
+                result.matched_by = list(data.get("_vx_matched_by") or ["meaning"])
+                if data.get("text_content") is not None:
+                    result.text = data["text_content"]
+
+                results.append(result)
+
+                if len(results) >= limit:
+                    break
+
+            # Only a narrowed search can come up short for want of a wider
+            # window; fewer rows than asked for means the store is exhausted.
+            if not narrowed or len(results) >= limit or len(backend_results) < window:
                 break
+            window *= 4
 
         query_time = (time.perf_counter() - start_time) * 1000
 
@@ -2307,8 +2425,12 @@ class Collection:
             return int(seen[1])
         try:
             with self._lock:
-                row = self._db.execute("SELECT COUNT(DISTINCT json_extract(metadata, '$._vx_doc')) FROM points").fetchone()
-        except sqlite3.Error:  # an SQLite built without JSON support counts nothing rather than failing a page
+                row = self._db.execute(
+                    "SELECT COUNT(DISTINCT json_extract(metadata, '$._vx_doc')) FROM points"
+                ).fetchone()
+        except (
+            sqlite3.Error
+        ):  # an SQLite built without JSON support counts nothing rather than failing a page
             return 0
         count = int(row[0] or 0) if row else 0
         self._documents_seen = (key, count)
@@ -2333,7 +2455,9 @@ class Collection:
             return results
         marks = ",".join("?" * len(wanted))
         with self._lock:
-            rows = self._db.execute(f"SELECT idx, text_content FROM points WHERE idx IN ({marks})", tuple(wanted)).fetchall()
+            rows = self._db.execute(
+                f"SELECT idx, text_content FROM points WHERE idx IN ({marks})", tuple(wanted)
+            ).fetchall()
         for row in rows:
             wanted[row["idx"]].text = row["text_content"]
         return results
@@ -2507,11 +2631,19 @@ class Collection:
         with self._lock:
             # Get vector search results (get more for fusion)
             vector_results = self.search(query, prefetch_limit, filter, include_vectors=False)
-            similar = {r.id: (r.relevance, r.relevance_kind) for r in vector_results.results if r.relevance is not None}
+            similar = {
+                r.id: (r.relevance, r.relevance_kind)
+                for r in vector_results.results
+                if r.relevance is not None
+            }
             # "Found by meaning" is being among the nearest, with some
             # likeness at all. The prefetch is wide, and on a small collection
             # it is everything, which is not the same as having been found.
-            near = {r.id for r in vector_results.results[:limit] if (r.relevance or 0.0) > 0.0 or r.relevance is None}
+            near = {
+                r.id
+                for r in vector_results.results[:limit]
+                if (r.relevance or 0.0) > 0.0 or r.relevance is None
+            }
 
             # Get text search results (search all, not just vector results)
             # This allows BM25 to find documents that dense search might miss
@@ -2605,10 +2737,15 @@ class Collection:
                 # for a chunk only the keywords found, the exact one.
                 known = similar.get(id_)
                 result.relevance = known[0] if known else self._similarity_of(query, id_)
-                result.relevance_kind = (known[1] if known else "similarity") if result.relevance is not None else None
+                result.relevance_kind = (
+                    (known[1] if known else "similarity") if result.relevance is not None else None
+                )
                 result.matched_by = [
                     name
-                    for name, found in (("meaning", id_ in near), ("keywords", score_data["rrf_text"] > 0))
+                    for name, found in (
+                        ("meaning", id_ in near),
+                        ("keywords", score_data["rrf_text"] > 0),
+                    )
                     if found
                 ]
 
@@ -2666,21 +2803,26 @@ class Collection:
                 search_mode=SearchMode.SPARSE,
             )
 
+        policy = self.policy
         with self._lock:
-            # Get IDs matching filter
+            # Which documents may be scored at all. The policy decides here,
+            # as in text_search: it was never applied, so a principal saw
+            # withheld documents, and deciding after the search would let
+            # them use up the limit.
             filtered_ids = None
-            if filter:
-                filter_obj = Filter.from_dict(filter)
+            filter_obj = Filter.from_dict(filter) if filter else None
+            if filter_obj is not None or policy is not None:
+                live = self._id_to_idx
                 filtered_ids = set()
-                for id_ in self._id_to_idx:
-                    idx: Optional[int] = self._id_to_idx[id_]
-                    row = self._db.execute(
-                        "SELECT metadata, text_content FROM points WHERE idx = ?", (idx,)
-                    ).fetchone()
-                    if row:
-                        metadata = json.loads(row["metadata"]) if row["metadata"] else {}
-                        if filter_obj.matches(metadata):
-                            filtered_ids.add(id_)
+                for row in self._db.execute("SELECT id, metadata FROM points"):
+                    if row["id"] not in live:
+                        continue
+                    metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+                    if filter_obj is not None and not filter_obj.matches(metadata):
+                        continue
+                    if policy is not None and not policy.decide(principal or {}, metadata).allowed:
+                        continue
+                    filtered_ids.add(row["id"])
 
             # Search sparse index
             sparse_results = self._sparse_index.search(
@@ -3041,10 +3183,17 @@ class Collection:
             for result in results:
                 before = first.get(result.id)
                 if before is not None:
-                    result.relevance, result.relevance_kind = before.relevance, before.relevance_kind
+                    result.relevance, result.relevance_kind = (
+                        before.relevance,
+                        before.relevance_kind,
+                    )
         for result in results:
             before = first.get(result.id)
-            result.matched_by = list(before.matched_by) if before is not None and before.matched_by else [rel.MATCHED_MEANING]
+            result.matched_by = (
+                list(before.matched_by)
+                if before is not None and before.matched_by
+                else [rel.MATCHED_MEANING]
+            )
 
         total_time = (time.perf_counter() - start_time) * 1000
 
@@ -3455,10 +3604,17 @@ class Collection:
                 # Remove from text index
                 if self._text_index:
                     self._text_index.remove(id_)
+                # And from the sparse index, where it stayed searchable.
+                if self._sparse_index.remove(id_):
+                    self._sparse_dirty = True
 
                 # Remove from mappings
                 del self._id_to_idx[id_]
                 del self._idx_to_id[idx]
+                # A rebuild under way may have copied this key into its new
+                # index already; told here, it takes the key out at the swap.
+                if self._rebuild_deleted is not None:
+                    self._rebuild_deleted.add(int(idx))
 
                 # Note: Most HNSW implementations don't support deletion
                 # The vector remains in index but won't be returned
@@ -3499,7 +3655,9 @@ class Collection:
                         self._invalidate_cache()
                     self._share("update", lambda store: store.update(id, given, merge=merge))
                     return updated
-                return bool(self._share("update", lambda store: store.update(id, given, merge=merge)))
+                return bool(
+                    self._share("update", lambda store: store.update(id, given, merge=merge))
+                )
 
             idx = self._id_to_idx[id]
             removed: List[str] = []
@@ -3512,7 +3670,9 @@ class Collection:
                 existing.update(metadata)
                 metadata = existing
             else:
-                row = self._db.execute("SELECT metadata FROM points WHERE idx = ?", (idx,)).fetchone()
+                row = self._db.execute(
+                    "SELECT metadata FROM points WHERE idx = ?", (idx,)
+                ).fetchone()
                 before = json.loads(row["metadata"]) if row and row["metadata"] else {}
                 removed = [k for k in before if k not in metadata]
 
@@ -3522,7 +3682,9 @@ class Collection:
             # store-served search returns. A key that was replaced away goes
             # as null, which every rule reads as a refusal.
             if self._use_backend_for_vectors:
-                self._storage_backend.update(self.name, id, {**metadata, **{k: None for k in removed}})
+                self._storage_backend.update(
+                    self.name, id, {**metadata, **{k: None for k in removed}}
+                )
 
             now = utcnow().isoformat()
             self._db.execute(
@@ -3804,15 +3966,24 @@ class Collection:
         Deletions leave tombstones in an HNSW graph and recall drifts as the
         graph is edited in place. The new index is built outside the lock, so
         searches keep running against the old one; only the swap is locked.
-        Returns the number of vectors in the rebuilt index.
+        Vectors written meanwhile go to the old index and are carried over at
+        the swap. Returns the number of vectors in the rebuilt index.
         """
         self._writable()
         if self._backend != "usearch":
             raise NotImplementedError("rebuild_index is implemented for the usearch backend")
+        with self._rebuild_lock:
+            return self._rebuild_index()
 
+    def _rebuild_index(self) -> int:
         with self._lock:
             keys = np.array(sorted(self._idx_to_id.keys()), dtype=np.uint64)
             old = self._index
+            # Keys written while the new index is built. They go to the old
+            # index, and the swap used to drop them with it. Keys deleted
+            # meanwhile: one already copied into the new index came back.
+            self._rebuild_touched = set()
+            self._rebuild_deleted = set()
 
         # Vectors come from the index where it has them, and from the document
         # store for any it does not. Collections written by 2.1.x never saved
@@ -3855,10 +4026,35 @@ class Collection:
                 fresh.add(keys, vectors, **_build_threads())
 
         with self._lock:
+            touched, self._rebuild_touched = self._rebuild_touched, None
+            deleted, self._rebuild_deleted = self._rebuild_deleted, None
+            held = set(keys.tolist())
+            for key in sorted(deleted or ()):
+                if key in self._idx_to_id:
+                    continue  # written again since: carried over below
+                held.discard(key)
+                try:
+                    if fresh.contains(key):
+                        fresh.remove(key)
+                except Exception:  # pragma: no cover - backend specific
+                    pass
+            for key in sorted(touched or ()):
+                if key not in self._idx_to_id:
+                    continue
+                vector = old.get(key)
+                if vector is None:
+                    continue
+                if fresh.contains(key):
+                    fresh.remove(key)
+                fresh.add(
+                    np.array([key], dtype=np.uint64),
+                    np.asarray(vector, dtype=np.float32).reshape(1, -1),
+                )
+                held.add(key)
             self._index = fresh
             self._dirty = True
             self.save()
-        return int(len(keys))
+            return len(held)
 
     def save(self) -> None:
         """Save index to disk."""
@@ -3869,6 +4065,11 @@ class Collection:
             return
         with self._lock:
             self._db.commit()
+            # The sparse index lives beside the dense one and was never
+            # written, so sparse vectors were gone after a reopen.
+            if self._sparse_dirty:
+                self._sparse_index.save()
+                self._sparse_dirty = False
             if not self._dirty:
                 return
             # Write beside the target and rename over it. A reader that opens

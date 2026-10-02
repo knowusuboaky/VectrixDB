@@ -535,6 +535,47 @@ class TestFilterConditionOperators:
         assert cond("exists", False, field="a.b.x").matches(data)
 
 
+class TestContainsOnAList:
+    """contains ran a substring test over str(list), so "an" matched ["banana"] and "," matched any
+    list of two. Against a list it now asks whether an element equals the value; against a string
+    it is the substring test it always was. Documented in FilterCondition.matches."""
+
+    def test_an_element_that_equals_the_value_matches_and_a_substring_of_one_does_not(self):
+        assert FilterCondition(field="tags", operator="contains", value="banana").matches(
+            {"tags": ["apple", "banana"]}
+        )
+        assert not FilterCondition(field="tags", operator="contains", value="an").matches(
+            {"tags": ["banana"]}
+        )
+        assert not FilterCondition(field="tags", operator="contains", value=",").matches(
+            {"tags": ["a", "b"]}
+        )
+        assert FilterCondition(field="tags", operator="contains", value=3).matches({"tags": [1, 3]})
+        assert FilterCondition(field="tags", operator="contains", value="3").matches(
+            {"tags": [1, 3]}
+        )
+
+    def test_icontains_compares_elements_without_case_and_strings_as_substrings(self):
+        assert FilterCondition(field="tags", operator="icontains", value="BANANA").matches(
+            {"tags": ["banana"]}
+        )
+        assert not FilterCondition(field="tags", operator="icontains", value="an").matches(
+            {"tags": ["Banana"]}
+        )
+        assert FilterCondition(field="title", operator="icontains", value="AN").matches(
+            {"title": "banana"}
+        )
+        assert FilterCondition(field="title", operator="contains", value="an").matches(
+            {"title": "banana"}
+        )
+
+    def test_ne_and_nin_do_not_match_an_absent_field_as_the_reference_says(self):
+        assert not FilterCondition(field="cat", operator="ne", value="office").matches({})
+        assert not FilterCondition(field="cat", operator="nin", value=["office"]).matches({})
+        assert FilterCondition(field="cat", operator="ne", value="office").matches({"cat": None})
+        assert FilterCondition(field="cat", operator="nin", value=["office"]).matches({"cat": None})
+
+
 class TestFilterComposition:
     def test_empty_filter_matches_everything(self):
         assert Filter().matches({"anything": 1})
@@ -638,3 +679,41 @@ class TestFilterComposition:
             Filter._parse_qdrant_condition("k")
         with pytest.raises(TypeError):
             Filter.from_dict({"must": ["not a dict"]})
+
+
+class TestFilterParsingRegressions:
+    """Filter.from_dict shapes that parsed to the wrong filter."""
+
+    def test_a_qdrant_range_applies_every_bound(self):
+        f = Filter.from_dict({"must": [{"key": "p", "range": {"gte": 10, "lte": 20}}]})
+        assert f.matches({"p": 15})
+        assert not f.matches({"p": 50})
+        assert not f.matches({"p": 5})
+
+    def test_must_not_excludes_a_match_on_any_one_condition(self):
+        f = Filter.from_dict(
+            {"must_not": [{"key": "a", "match": {"value": 1}}, {"key": "b", "match": {"value": 2}}]}
+        )
+        assert not f.matches({"a": 1, "b": 0})
+        assert not f.matches({"a": 0, "b": 2})
+        assert f.matches({"a": 0, "b": 0})
+
+    def test_keys_beside_a_combinator_still_apply(self):
+        assert not Filter.from_dict({"$and": [{"x": 1}], "cat": "t"}).matches({"x": 1, "cat": "z"})
+        assert Filter.from_dict({"$and": [{"x": 1}], "cat": "t"}).matches({"x": 1, "cat": "t"})
+        assert not Filter.from_dict(
+            {"must": [{"key": "a", "match": {"value": 1}}], "cat": "t"}
+        ).matches({"a": 1, "cat": "z"})
+
+    def test_a_double_not_is_the_filter_itself(self):
+        f = Filter.from_dict({"$not": {"$not": {"x": 1}}})
+        assert f.matches({"x": 1})
+        assert not f.matches({"x": 2})
+
+    def test_date_range_takes_datetime_bounds(self):
+        from datetime import datetime
+
+        f = Filter.from_dict({"d": {"$date_range": [datetime(2020, 1, 1), datetime(2021, 1, 1)]}})
+        assert f.matches({"d": "2020-06-01T00:00:00Z"})
+        assert f.matches({"d": datetime(2020, 6, 1)})
+        assert not f.matches({"d": "2022-01-01"})

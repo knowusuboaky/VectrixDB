@@ -16,7 +16,12 @@ C = "Gamma memo about both of them."
 QUESTION = "which memo"
 
 OURS = {A: [1, 0, 0, 0], B: [0, 0, 1, 0], C: [0.8, 0.6, 0, 0], QUESTION: [1, 0, 0, 0]}
-OTHER = {A: [0, 0, 1, 0, 0, 0], B: [0, 1, 0, 0, 0, 0], C: [0, 0.8, 0.6, 0, 0, 0], QUESTION: [0, 1, 0, 0, 0, 0]}
+OTHER = {
+    A: [0, 0, 1, 0, 0, 0],
+    B: [0, 1, 0, 0, 0, 0],
+    C: [0, 0.8, 0.6, 0, 0, 0],
+    QUESTION: [0, 1, 0, 0, 0, 0],
+}
 
 
 def ours(texts):
@@ -74,7 +79,10 @@ def test_the_list_is_part_of_the_collection(tmp_path):
     db.close()
     from vectrixdb import Vectrix
 
-    with pytest.raises(ConfigurationError, match="was built with named dense vectors \\['large'\\]; open it with the same"):
+    with pytest.raises(
+        ConfigurationError,
+        match="was built with named dense vectors \\['large'\\]; open it with the same",
+    ):
         Vectrix("memos", path=str(tmp_path / "db"), embed_fn=ours, dimension=4)
     with pytest.raises(ConfigurationError, match="was opened with \\['huge'\\]"):
         open_db(tmp_path, dense_model=[None, ("huge", other, 6)])
@@ -83,7 +91,9 @@ def test_the_list_is_part_of_the_collection(tmp_path):
 def test_a_budget_and_a_filter_still_apply(tmp_path):
     db = open_db(tmp_path)
     try:
-        db.add([A, B, C], ids=["a", "b", "c"], metadata=[{"team": "x"}, {"team": "y"}, {"team": "x"}])
+        db.add(
+            [A, B, C], ids=["a", "b", "c"], metadata=[{"team": "x"}, {"team": "y"}, {"team": "x"}]
+        )
         assert {h.id for h in db.search(QUESTION, limit=3, filter={"team": "x"})} == {"a", "c"}
         tight = db.search(QUESTION, limit=3, token_budget=12)
         assert tight.truncated and len(tight) < 3
@@ -95,7 +105,9 @@ def test_what_is_refused(tmp_path):
     from vectrixdb import Vectrix
     from vectrixdb.policy import Overlap, Policy
 
-    with pytest.raises(ConfigurationError, match="not one of this collection's dense vectors: own, large"):
+    with pytest.raises(
+        ConfigurationError, match="not one of this collection's dense vectors: own, large"
+    ):
         db = open_db(tmp_path)
         try:
             db.add([A], ids=["a"])
@@ -107,7 +119,19 @@ def test_what_is_refused(tmp_path):
     with pytest.raises(ConfigurationError, match="model name, or \\(label, embed_fn, dimension\\)"):
         Vectrix("y", path=str(tmp_path / "y"), embed_fn=ours, dimension=4, dense_model=[None, 42])
     with pytest.raises(ConfigurationError, match="cannot name a dense vector here"):
-        Vectrix("z", path=str(tmp_path / "z"), embed_fn=ours, dimension=4, dense_model=[None, ("both", other, 6)])
+        Vectrix(
+            "z",
+            path=str(tmp_path / "z"),
+            embed_fn=ours,
+            dimension=4,
+            dense_model=[None, ("both", other, 6)],
+        )
     with pytest.raises(ConfigurationError, match="named dense vectors are not offered under one"):
-        Vectrix("w", path=str(tmp_path / "w"), embed_fn=ours, dimension=4, dense_model=[None, ("large", other, 6)],
-                policy=Policy([Overlap("client_id", "clients")]))
+        Vectrix(
+            "w",
+            path=str(tmp_path / "w"),
+            embed_fn=ours,
+            dimension=4,
+            dense_model=[None, ("large", other, 6)],
+            policy=Policy([Overlap("client_id", "clients")]),
+        )

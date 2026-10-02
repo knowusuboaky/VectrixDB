@@ -33,7 +33,9 @@ def _b64(raw: bytes) -> str:
 
 
 class FakeIdp:
-    def __init__(self, client_id: str = "vectrixdb", client_secret: Optional[str] = "s3cret") -> None:
+    def __init__(
+        self, client_id: str = "vectrixdb", client_secret: Optional[str] = "s3cret"
+    ) -> None:
         self.client_id = client_id
         self.client_secret = client_secret
         self.key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -41,7 +43,12 @@ class FakeIdp:
         self.kid = "key-1"
         self.codes: dict[str, dict] = {}
         self.calls: list[tuple[str, str]] = []
-        self.person: dict[str, Any] = {"sub": "u-1", "email": "ada@example.com", "name": "Ada Lovelace", "groups": ["g-admins"]}
+        self.person: dict[str, Any] = {
+            "sub": "u-1",
+            "email": "ada@example.com",
+            "name": "Ada Lovelace",
+            "groups": ["g-admins"],
+        }
         # ways to be wrong
         self.token_issuer = ISSUER
         self.token_audience: Any = client_id
@@ -70,7 +77,10 @@ class FakeIdp:
         """
         now = int(time.time()) - self.issued_ago
         body: dict[str, Any] = {
-            "iss": self.token_issuer, "aud": audience, "iat": now, "exp": now + self.expires_in,
+            "iss": self.token_issuer,
+            "aud": audience,
+            "iat": now,
+            "exp": now + self.expires_in,
             **{k: v for k, v in self.person.items() if k != "groups"},
         }
         if self.overflow:
@@ -95,7 +105,11 @@ class FakeIdp:
         assert query["code_challenge_method"] == "S256" and query["code_challenge"]
         assert "openid" in query["scope"].split()
         code = secrets.token_urlsafe(16)
-        self.codes[code] = {"challenge": query["code_challenge"], "nonce": query.get("nonce"), "redirect_uri": query["redirect_uri"]}
+        self.codes[code] = {
+            "challenge": query["code_challenge"],
+            "nonce": query.get("nonce"),
+            "redirect_uri": query["redirect_uri"],
+        }
         return code, query["state"]
 
     # ---------------------------------------------------------- transport ---
@@ -115,7 +129,9 @@ class FakeIdp:
             )
         if url == ISSUER + "/keys":
             public = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(self.key.public_key()))
-            return self._reply({"keys": [{**public, "kid": self.kid, "use": "sig", "alg": "RS256"}]})
+            return self._reply(
+                {"keys": [{**public, "kid": self.kid, "use": "sig", "alg": "RS256"}]}
+            )
         if url == ISSUER + "/token":
             return self._token(body)
         if url.startswith("https://graph.example.test/groups"):
@@ -137,13 +153,19 @@ class FakeIdp:
         """What a provider checks of a client that signs a JWT instead of sending a secret (RFC 7523)."""
         if "client_secret" in form:
             return "a secret and an assertion"
-        if form.get("client_assertion_type") != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer":
+        if (
+            form.get("client_assertion_type")
+            != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+        ):
             return "assertion type"
         assertion = form.get("client_assertion", "")
         try:
             header = jwt.get_unverified_header(assertion)
             claims = jwt.decode(
-                assertion, self.client_public_key, algorithms=["RS256", "PS256", "ES256", "ES384"], audience=ISSUER + "/token",
+                assertion,
+                self.client_public_key,
+                algorithms=["RS256", "PS256", "ES256", "ES384"],
+                audience=ISSUER + "/token",
                 options={"require": ["exp", "iat", "jti", "iss", "sub", "aud"]},
             )
         except jwt.PyJWTError as exc:
@@ -163,14 +185,19 @@ class FakeIdp:
         held = self.codes.pop(form.get("code", ""), None)  # a code works once
         if held is None or form.get("grant_type") != "authorization_code":
             return self._reply({"error": "invalid_grant"}, 400)
-        if form.get("redirect_uri") != held["redirect_uri"] or form.get("client_id") != self.client_id:
+        if (
+            form.get("redirect_uri") != held["redirect_uri"]
+            or form.get("client_id") != self.client_id
+        ):
             return self._reply({"error": "invalid_grant"}, 400)
         if self.client_public_key is not None:
             refused = self._check_assertion(form)
             if refused:
                 return self._reply({"error": "invalid_client", "error_description": refused}, 401)
         elif "client_assertion" in form:
-            return self._reply({"error": "invalid_client", "error_description": "no key registered"}, 401)
+            return self._reply(
+                {"error": "invalid_client", "error_description": "no key registered"}, 401
+            )
         elif self.client_secret is not None and form.get("client_secret") != self.client_secret:
             return self._reply({"error": "invalid_client"}, 401)
         verifier = form.get("code_verifier", "")
@@ -198,4 +225,10 @@ class FakeIdp:
         else:
             key = self.other_key if self.sign_with_unpublished_key else self.key
             id_token = jwt.encode(claims, key, algorithm="RS256", headers={"kid": self.kid})
-        return self._reply({"id_token": id_token, "access_token": "at-" + secrets.token_urlsafe(8), "token_type": "Bearer"})
+        return self._reply(
+            {
+                "id_token": id_token,
+                "access_token": "at-" + secrets.token_urlsafe(8),
+                "token_type": "Bearer",
+            }
+        )

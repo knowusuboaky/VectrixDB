@@ -64,7 +64,10 @@ def paged(texts=PAGES, labels=None, name="report.pdf") -> LoadedDocument:
         offsets.append((offset, n))
         offset += len(text) + 2
     return LoadedDocument(
-        text="\n\n".join(texts), pages=offsets, metadata={"filename": name, "source": name}, page_labels=dict(labels or {})
+        text="\n\n".join(texts),
+        pages=offsets,
+        metadata={"filename": name, "source": name},
+        page_labels=dict(labels or {}),
     )
 
 
@@ -73,9 +76,16 @@ def reply(data: bytes, name: str, source=None):
     import pypdf
 
     count = len(pypdf.PdfReader(io.BytesIO(data)).pages)
-    texts = PAGES[:count] if count <= len(PAGES) else [f"Page {n} text." for n in range(1, count + 1)]
+    texts = (
+        PAGES[:count] if count <= len(PAGES) else [f"Page {n} text." for n in range(1, count + 1)]
+    )
     doc = paged(texts, name=name)
-    return {"text": doc.text, "pages": [list(p) for p in doc.pages], "headings": [], "metadata": {"source": name, "kind": "pdf"}}
+    return {
+        "text": doc.text,
+        "pages": [list(p) for p in doc.pages],
+        "headings": [],
+        "metadata": {"source": name, "kind": "pdf"},
+    }
 
 
 def cut(doc, size=40):
@@ -112,8 +122,13 @@ class TestTheFrontMatter:
         assert "page_labels" not in paged().to_markdown()
 
     def test_a_value_that_is_not_a_table_is_left_out(self):
-        kept = paged(labels=LABELS).to_markdown().replace(
-            'page_labels: {"1": "C1", "2": "C2", "3": "1", "4": "2", "5": "3"}', "page_labels: [1, 2]"
+        kept = (
+            paged(labels=LABELS)
+            .to_markdown()
+            .replace(
+                'page_labels: {"1": "C1", "2": "C2", "3": "1", "4": "2", "5": "3"}',
+                "page_labels: [1, 2]",
+            )
         )
         assert LoadedDocument.from_markdown(kept).page_labels == {}
 
@@ -121,10 +136,21 @@ class TestTheFrontMatter:
         from vectrixdb.ingest import describe_figures
 
         doc = paged(["Revenue by region.\n\n[Figure: p1-fig1.png]"], labels={1: "39"})
-        doc.figures = [(doc.text.index("[Figure"), {"caption": "p1-fig1.png", "src": "p1-fig1.png", "described": False})]
+        doc.figures = [
+            (
+                doc.text.index("[Figure"),
+                {"caption": "p1-fig1.png", "src": "p1-fig1.png", "described": False},
+            )
+        ]
         doc.images = {"p1-fig1.png": b"\x89PNG" + bytes(range(256)) * 40}
-        described = describe_figures(doc, lambda data, context: {"caption": "Revenue by region", "description": "A bar chart."}, skip_decorative=False)
-        assert "[Figure: Revenue by region]" in described.text and described.page_labels == {1: "39"}
+        described = describe_figures(
+            doc,
+            lambda data, context: {"caption": "Revenue by region", "description": "A bar chart."},
+            skip_decorative=False,
+        )
+        assert "[Figure: Revenue by region]" in described.text and described.page_labels == {
+            1: "39"
+        }
 
 
 # ================================================================ the chunks ===
@@ -135,13 +161,20 @@ class TestEveryChunkSaysWhatItsPageSays:
         prepared = cut(paged(labels=LABELS))
         on_page_3 = next(m for m in prepared.metadata if m["page"] == 3)
         assert on_page_3["page_label"] == "1"
-        assert on_page_3["_vx_citation"] == "report.pdf#page=3", "the link opens the right page in any viewer"
+        assert on_page_3["_vx_citation"] == "report.pdf#page=3", (
+            "the link opens the right page in any viewer"
+        )
         assert on_page_3["_vx_readable_citation"] == "report.pdf, p. 1"
 
     def test_a_chunk_that_runs_onto_the_next_page_names_both(self):
         prepared = cut(paged(labels=LABELS), size=1000)
         whole = prepared.metadata[0]
-        assert (whole["page"], whole["page_end"], whole["page_label"], whole["page_label_end"]) == (1, 5, "C1", "3")
+        assert (whole["page"], whole["page_end"], whole["page_label"], whole["page_label_end"]) == (
+            1,
+            5,
+            "C1",
+            "3",
+        )
         assert whole["_vx_readable_citation"] == "report.pdf, pp. C1-3"
         assert whole["_vx_citation"] == "report.pdf#page=1"
 
@@ -152,14 +185,27 @@ class TestEveryChunkSaysWhatItsPageSays:
         assert cut(paged()).metadata[2]["_vx_readable_citation"] == "report.pdf, p. 3"
 
     def test_printed_numbers_at_both_ends_or_at_neither(self):
-        assert readable_citation_for("r.pdf", "x", page=3, page_end=4, page_label="1", page_label_end=None) == "r.pdf, pp. 3-4"
+        assert (
+            readable_citation_for(
+                "r.pdf", "x", page=3, page_end=4, page_label="1", page_label_end=None
+            )
+            == "r.pdf, pp. 3-4"
+        )
 
     def test_the_chunk_file_carries_them(self, tmp_path):
         from vectrixdb import Vectrix
 
-        db = Vectrix("docs", path=str(tmp_path / "db"), embed_fn=embed, dimension=8, keep_chunks=True)
+        db = Vectrix(
+            "docs", path=str(tmp_path / "db"), embed_fn=embed, dimension=8, keep_chunks=True
+        )
         try:
-            db.add_document(paged(labels=LABELS), doc_id="td/report.pdf", chunk="recursive", chunk_size=40, overlap=0)
+            db.add_document(
+                paged(labels=LABELS),
+                doc_id="td/report.pdf",
+                chunk="recursive",
+                chunk_size=40,
+                overlap=0,
+            )
             lines = db.kept_chunks.get("td/report.pdf")
             assert [c["metadata"]["page_label"] for c in lines] == ["C1", "C2", "1", "2", "3"]
             assert lines[2]["metadata"]["_vx_readable_citation"] == "report.pdf, p. 1"
@@ -184,19 +230,30 @@ class TestARecordingIsCitedByTheSecond:
         from vectrixdb.extract.engines import segments_to_document
 
         doc = segments_to_document(
-            [(0.0, 4.0, "Welcome to the call."), (61.2, 65.0, "The covenant is tested quarterly."), (665.4, 670.2, "Revenue is up.")]
+            [
+                (0.0, 4.0, "Welcome to the call."),
+                (61.2, 65.0, "The covenant is tested quarterly."),
+                (665.4, 670.2, "Revenue is up."),
+            ]
         )
         doc.metadata["filename"] = "call.wav"
         return doc
 
     def test_each_chunk_says_when_it_was_said(self):
-        prepared = prepare_document(self.call(), "call.wav", chunk="recursive", chunk_size=34, overlap=0)
+        prepared = prepare_document(
+            self.call(), "call.wav", chunk="recursive", chunk_size=34, overlap=0
+        )
         revenue = next(m for t, m in zip(prepared.texts, prepared.metadata) if "Revenue" in t)
         assert (revenue["start_seconds"], revenue["end_seconds"]) == (665.4, 670.2)
-        assert revenue["_vx_citation"] == "call.wav#t=665", "how a media player is told where to start"
+        assert revenue["_vx_citation"] == "call.wav#t=665", (
+            "how a media player is told where to start"
+        )
         assert revenue["_vx_readable_citation"] == "call.wav, 11:05"
         first = prepared.metadata[0]
-        assert first["_vx_citation"] == "call.wav#t=0" and first["_vx_readable_citation"] == "call.wav, 0:00"
+        assert (
+            first["_vx_citation"] == "call.wav#t=0"
+            and first["_vx_readable_citation"] == "call.wav, 0:00"
+        )
 
     def test_the_second_wins_over_the_minute(self):
         """A recording's pages are its minutes, and page 12 of a WAV file is not somewhere a player can go."""
@@ -210,14 +267,18 @@ class TestARecordingIsCitedByTheSecond:
         again = LoadedDocument.from_markdown(doc.to_markdown())
         one = prepare_document(doc, "call.wav", chunk="recursive", chunk_size=34, overlap=0)
         two = prepare_document(again, "call.wav", chunk="recursive", chunk_size=34, overlap=0)
-        assert [m["_vx_citation"] for m in one.metadata] == [m["_vx_citation"] for m in two.metadata]
+        assert [m["_vx_citation"] for m in one.metadata] == [
+            m["_vx_citation"] for m in two.metadata
+        ]
 
 
 class TestADeckIsCitedBySlide:
     def test_the_link_and_the_readable_form(self):
         assert citation_for("deck.pptx", "x", page=3) == "deck.pptx#slide=3"
         assert readable_citation_for("deck.pptx", "x", page=3) == "deck.pptx, slide 3"
-        assert readable_citation_for("deck.pptx", "x", page=3, page_end=4) == "deck.pptx, slides 3-4"
+        assert (
+            readable_citation_for("deck.pptx", "x", page=3, page_end=4) == "deck.pptx, slides 3-4"
+        )
 
     def test_a_pdf_is_still_cited_by_page(self):
         assert citation_for("report.pdf", "x", page=3) == "report.pdf#page=3"
@@ -225,23 +286,40 @@ class TestADeckIsCitedBySlide:
 
 class TestTheReadableForm:
     def test_a_heading_where_there_are_no_pages(self):
-        assert readable_citation_for("guide.md", "x", heading="Offline [beta]") == "guide.md, Offline beta"
+        assert (
+            readable_citation_for("guide.md", "x", heading="Offline [beta]")
+            == "guide.md, Offline beta"
+        )
 
     def test_the_bare_name_where_there_is_nothing_else(self):
         assert readable_citation_for("notes.txt", "x") == "notes.txt"
 
     def test_a_figure_names_its_caption(self):
         assert (
-            readable_citation_for("r.pdf", "x", page=41, page_label="39", figure="Figure 3: Revenue (FY2025)")
+            readable_citation_for(
+                "r.pdf", "x", page=41, page_label="39", figure="Figure 3: Revenue (FY2025)"
+            )
             == "r.pdf, p. 39 (Figure 3: Revenue FY2025)"
         )
 
     def test_what_was_stamped_wins_and_a_result_reads_it(self):
         from vectrixdb.easy import Result
 
-        stamped = {"_vx_readable_citation": "report.pdf, p. 39", "page": 41, "filename": "report.pdf"}
+        stamped = {
+            "_vx_readable_citation": "report.pdf, p. 39",
+            "page": 41,
+            "filename": "report.pdf",
+        }
         assert readable_citation_of(stamped, "x") == "report.pdf, p. 39"
-        assert Result(id="a", text="t", score=1.0, metadata={"page": 41, "page_label": "39", "filename": "report.pdf"}).readable_citation == "report.pdf, p. 39"
+        assert (
+            Result(
+                id="a",
+                text="t",
+                score=1.0,
+                metadata={"page": 41, "page_label": "39", "filename": "report.pdf"},
+            ).readable_citation
+            == "report.pdf, p. 39"
+        )
 
 
 # ================================================================ the main app's path ===
@@ -278,9 +356,13 @@ class TestThroughTheExtractionApp:
         doc = load_bytes(labelled_pdf(5), "report.pdf", extractors={".pdf": reader}, source=BLOB)
         assert doc.metadata["pieces"] == 3
         assert (doc.metadata["source"], doc.metadata["filename"]) == (BLOB, "report.pdf")
-        assert doc.page_labels == LABELS, "read from the original: the pieces have no table of their own"
+        assert doc.page_labels == LABELS, (
+            "read from the original: the pieces have no table of their own"
+        )
         joined = reader(labelled_pdf(5), "report.pdf", source=BLOB)
-        assert joined.metadata["source"] == BLOB, "the join names the whole file, not its first piece"
+        assert joined.metadata["source"] == BLOB, (
+            "the join names the whole file, not its first piece"
+        )
 
     def test_the_kept_markdown_and_the_chunks_carry_them(self, tmp_path):
         from vectrixdb import Vectrix
@@ -291,19 +373,38 @@ class TestThroughTheExtractionApp:
         original.parent.mkdir()
         original.write_bytes(labelled_pdf())
         db = Vectrix(
-            "financial", path=str(tmp_path / "db"), embed_fn=embed, dimension=8, extractors={".pdf": reply},
+            "financial",
+            path=str(tmp_path / "db"),
+            embed_fn=embed,
+            dimension=8,
+            extractors={".pdf": reply},
             keep_source=DocumentStore(LocalFiles(tmp_path / "markdown"), keep_deleted=False),
-            keep_chunks=tmp_path / "chunks", markdown_first=True,
+            keep_chunks=tmp_path / "chunks",
+            markdown_first=True,
         )
-        worker = IngestWorker(db, LocalFetcher(), doc_id_of=lambda uri: "td/report.pdf", chunk="recursive", chunk_size=40, overlap=0)
+        worker = IngestWorker(
+            db,
+            LocalFetcher(),
+            doc_id_of=lambda uri: "td/report.pdf",
+            chunk="recursive",
+            chunk_size=40,
+            overlap=0,
+        )
         try:
             assert worker.handle(IngestEvent("created", original.as_uri())).action == "created"
             kept = (tmp_path / "markdown" / "td" / "report.pdf.md").read_text(encoding="utf-8")
             assert 'page_labels: {"1": "C1", "2": "C2", "3": "1", "4": "2", "5": "3"}' in kept
             assert db.documents.entry("td/report.pdf")["source"] == original.as_uri()
             lines = db.kept_chunks.get("td/report.pdf")
-            assert [c["metadata"]["_vx_readable_citation"] for c in lines][2:] == ["report.pdf, p. 1", "report.pdf, p. 2", "report.pdf, p. 3"]
+            assert [c["metadata"]["_vx_readable_citation"] for c in lines][2:] == [
+                "report.pdf, p. 1",
+                "report.pdf, p. 2",
+                "report.pdf, p. 3",
+            ]
             db.rechunk("td/report.pdf", chunk_size=1000)
-            assert db.kept_chunks.get("td/report.pdf")[0]["metadata"]["_vx_readable_citation"] == "report.pdf, pp. C1-3"
+            assert (
+                db.kept_chunks.get("td/report.pdf")[0]["metadata"]["_vx_readable_citation"]
+                == "report.pdf, pp. C1-3"
+            )
         finally:
             db.close()

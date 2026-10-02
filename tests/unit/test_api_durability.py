@@ -31,12 +31,26 @@ def test_a_killed_server_keeps_what_it_was_sent(tmp_path):
     with TestClient(server.create_app(db_path=str(data), enable_dashboard=False)) as client:
         created = client.post(
             "/api/v2/collections",
-            json={"name": "notes", "dimension": 384, "metric": "cosine", "enable_text_index": True, "tags": ["hybrid"]},
+            json={
+                "name": "notes",
+                "dimension": 384,
+                "metric": "cosine",
+                "enable_text_index": True,
+                "tags": ["hybrid"],
+            },
         )
         assert created.status_code in (200, 201), created.text
         sent = client.post(
             "/api/collections/notes/text-upsert",
-            json={"points": [{"id": "a", "text": "Basalt is a fine-grained volcanic rock.", "payload": {"kind": "rock"}}]},
+            json={
+                "points": [
+                    {
+                        "id": "a",
+                        "text": "Basalt is a fine-grained volcanic rock.",
+                        "payload": {"kind": "rock"},
+                    }
+                ]
+            },
         )
         assert sent.status_code == 200, sent.text
 

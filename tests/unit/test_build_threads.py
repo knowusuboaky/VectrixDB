@@ -17,7 +17,9 @@ from vectrixdb import Vectrix
 from vectrixdb.core import collection as collection_module
 from vectrixdb.exceptions import ConfigurationError
 
-pytestmark = pytest.mark.skipif(not collection_module.USEARCH_AVAILABLE, reason="usearch is not installed")
+pytestmark = pytest.mark.skipif(
+    not collection_module.USEARCH_AVAILABLE, reason="usearch is not installed"
+)
 
 
 def build(root, vectors):
@@ -27,11 +29,16 @@ def build(root, vectors):
 
 
 def answers(db, queries):
-    return [[hit.id for hit in db._collection.search(q.tolist(), limit=10).results] for q in queries]
+    return [
+        [hit.id for hit in db._collection.search(q.tolist(), limit=10).results] for q in queries
+    ]
 
 
 class TestTheSetting:
-    @pytest.mark.parametrize("given, expected", [("", {}), ("  ", {}), ("0", {}), ("1", {"threads": 1}), (" 4 ", {"threads": 4})])
+    @pytest.mark.parametrize(
+        "given, expected",
+        [("", {}), ("  ", {}), ("0", {}), ("1", {"threads": 1}), (" 4 ", {"threads": 4})],
+    )
     def test_what_it_asks_usearch_for(self, monkeypatch, given, expected):
         monkeypatch.setenv("VECTRIXDB_BUILD_THREADS", given)
         assert collection_module._build_threads() == expected

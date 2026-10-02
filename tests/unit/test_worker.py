@@ -26,7 +26,9 @@ from vectrixdb.worker import (
 )
 
 TEXT_A = "Basalt forms when lava cools quickly.\n\nSourdough is leavened by wild yeast and a long ferment."
-TEXT_B = "Basalt forms when lava cools quickly.\n\nGranite cools slowly, underground, and is coarse."
+TEXT_B = (
+    "Basalt forms when lava cools quickly.\n\nGranite cools slowly, underground, and is coarse."
+)
 
 
 class FakeS3:
@@ -69,9 +71,21 @@ class TestEventParsing:
     def test_s3_records_direct_and_through_sqs(self):
         direct = {
             "Records": [
-                {"eventName": "ObjectCreated:Put", "s3": {"bucket": {"name": "memos"}, "object": {"key": "2026/q3+notes.pdf", "eTag": "abc"}}},
-                {"eventName": "ObjectRemoved:Delete", "s3": {"bucket": {"name": "memos"}, "object": {"key": "old.md"}}},
-                {"eventName": "ObjectRestore:Completed", "s3": {"bucket": {"name": "memos"}, "object": {"key": "x"}}},
+                {
+                    "eventName": "ObjectCreated:Put",
+                    "s3": {
+                        "bucket": {"name": "memos"},
+                        "object": {"key": "2026/q3+notes.pdf", "eTag": "abc"},
+                    },
+                },
+                {
+                    "eventName": "ObjectRemoved:Delete",
+                    "s3": {"bucket": {"name": "memos"}, "object": {"key": "old.md"}},
+                },
+                {
+                    "eventName": "ObjectRestore:Completed",
+                    "s3": {"bucket": {"name": "memos"}, "object": {"key": "x"}},
+                },
             ]
         }
         events = events_from_s3(direct)
@@ -79,14 +93,33 @@ class TestEventParsing:
             ("created", "s3://memos/2026/q3 notes.pdf", "abc"),
             ("deleted", "s3://memos/old.md", None),
         ]
-        via_sqs = {"Records": [{"body": json.dumps(direct)}, {"body": "not json"}, {"body": json.dumps({"other": 1})}]}
+        via_sqs = {
+            "Records": [
+                {"body": json.dumps(direct)},
+                {"body": "not json"},
+                {"body": json.dumps({"other": 1})},
+            ]
+        }
         assert [e.uri for e in events_from_s3(via_sqs)] == [e.uri for e in events]
 
     def test_event_grid_and_cloudevents_shapes(self):
         grid = [
-            {"eventType": "Microsoft.Storage.BlobCreated", "data": {"url": "https://acct.blob.core.windows.net/memos/q3.pdf", "eTag": "0x1", "api": "PutBlob"}},
-            {"eventType": "Microsoft.EventGrid.SubscriptionValidationEvent", "data": {"validationCode": "x"}},
-            {"type": "Microsoft.Storage.BlobDeleted", "data": {"url": "https://acct.blob.core.windows.net/memos/old.md"}},
+            {
+                "eventType": "Microsoft.Storage.BlobCreated",
+                "data": {
+                    "url": "https://acct.blob.core.windows.net/memos/q3.pdf",
+                    "eTag": "0x1",
+                    "api": "PutBlob",
+                },
+            },
+            {
+                "eventType": "Microsoft.EventGrid.SubscriptionValidationEvent",
+                "data": {"validationCode": "x"},
+            },
+            {
+                "type": "Microsoft.Storage.BlobDeleted",
+                "data": {"url": "https://acct.blob.core.windows.net/memos/old.md"},
+            },
         ]
         events = events_from_event_grid(grid)
         assert [(e.kind, e.uri, e.version) for e in events] == [
@@ -110,7 +143,10 @@ class TestFetchers:
 
     def test_blob_fetcher_reads_container_and_name(self):
         svc = FakeBlobService({("memos", "2026/q3.pdf"): b"blob"})
-        assert BlobFetcher(svc).fetch("https://acct.blob.core.windows.net/memos/2026/q3.pdf") == b"blob"
+        assert (
+            BlobFetcher(svc).fetch("https://acct.blob.core.windows.net/memos/2026/q3.pdf")
+            == b"blob"
+        )
         with pytest.raises(ValueError):
             BlobFetcher(svc).fetch("https://acct.blob.core.windows.net/memos")
 
@@ -134,7 +170,9 @@ def db(tmp_path):
 
 
 def _chunks_of(db, doc_id):
-    return [(i, m) for i, _, m in db._collection._iter_documents_raw() if m.get("_vx_doc") == doc_id]
+    return [
+        (i, m) for i, _, m in db._collection._iter_documents_raw() if m.get("_vx_doc") == doc_id
+    ]
 
 
 class TestWorker:
@@ -147,7 +185,9 @@ class TestWorker:
         assert first.action == "created" and first.chunks >= 2 and first.build_id
         assert first.doc_id == "s3://memos/notes.md"
         chunks = _chunks_of(db, first.doc_id)
-        assert chunks and all(m["source"] == "s3://memos/notes.md" and m["filename"] == "notes.md" for _, m in chunks)
+        assert chunks and all(
+            m["source"] == "s3://memos/notes.md" and m["filename"] == "notes.md" for _, m in chunks
+        )
         assert all(m["object_version"] == "v1" for _, m in chunks)
         assert chunks[0][1]["_vx_citation"].startswith("notes.md")
 
@@ -195,14 +235,22 @@ class TestWorker:
         from vectrixdb.exceptions import MetadataContractError
         from vectrixdb.policy import Overlap, Policy
 
-        db = Vectrix("walled", path=str(tmp_path / "w"), mode="dense", policy=Policy([Overlap("client_id", "clients")]))
+        db = Vectrix(
+            "walled",
+            path=str(tmp_path / "w"),
+            mode="dense",
+            policy=Policy([Overlap("client_id", "clients")]),
+        )
         try:
             s3 = FakeS3({("memos", "q3.md"): TEXT_A.encode()})
             bare = IngestWorker(db, S3Fetcher(s3))
             with pytest.raises(MetadataContractError):
                 bare.handle(IngestEvent(kind="created", uri="s3://memos/q3.md"))
             stamped = IngestWorker(db, S3Fetcher(s3), metadata_of=lambda e: {"client_id": "acme"})
-            assert stamped.handle(IngestEvent(kind="created", uri="s3://memos/q3.md")).action == "created"
+            assert (
+                stamped.handle(IngestEvent(kind="created", uri="s3://memos/q3.md")).action
+                == "created"
+            )
         finally:
             db.close()
 
@@ -212,9 +260,13 @@ class TestWorker:
         sink = MemorySink(query_key=b"k", on_failure=DENY)
         db.on_retrieval = sink
         s3 = FakeS3({("memos", "notes.md"): TEXT_A.encode()})
-        IngestWorker(db, S3Fetcher(s3)).handle(IngestEvent(kind="created", uri="s3://memos/notes.md"))
+        IngestWorker(db, S3Fetcher(s3)).handle(
+            IngestEvent(kind="created", uri="s3://memos/notes.md")
+        )
         record = [r for r in sink.records if getattr(r, "ingestion_id", None)][-1]
-        assert record.source == "s3://memos/notes.md" and record.document_id == "s3://memos/notes.md"
+        assert (
+            record.source == "s3://memos/notes.md" and record.document_id == "s3://memos/notes.md"
+        )
         assert record.documents_written >= 1
 
 
@@ -248,7 +300,9 @@ class TestBursts:
         paths = []
         for i in range(n):
             path = tmp_path / f"memo-{i}.txt"
-            path.write_text(f"Memo number {i} is about basalt and how lava cools into it.", encoding="utf-8")
+            path.write_text(
+                f"Memo number {i} is about basalt and how lava cools into it.", encoding="utf-8"
+            )
             paths.append(str(path))
         return paths
 
@@ -257,7 +311,9 @@ class TestBursts:
         original = db._collection.save
         monkeypatch.setattr(db._collection, "save", lambda: (saves.append(1), original())[1])
         worker = IngestWorker(db, LocalFetcher())
-        outcomes = worker.handle_all([IngestEvent("created", uri) for uri in self._files(tmp_path, 5)])
+        outcomes = worker.handle_all(
+            [IngestEvent("created", uri) for uri in self._files(tmp_path, 5)]
+        )
         assert [o.action for o in outcomes] == ["created"] * 5
         assert len(saves) == 1, "five documents, one write of the index file"
         assert len({o.build_id for o in outcomes}) == 5, "and still one ingestion each"
@@ -274,7 +330,12 @@ class TestBursts:
 
         worker = IngestWorker(db, Counting())
         outcomes = worker.handle_all(
-            [IngestEvent("created", a), IngestEvent("created", a), IngestEvent("created", b), IngestEvent("deleted", b)]
+            [
+                IngestEvent("created", a),
+                IngestEvent("created", a),
+                IngestEvent("created", b),
+                IngestEvent("deleted", b),
+            ]
         )
         assert [o.action for o in outcomes] == ["superseded", "created", "superseded", "absent"]
         assert Counting.fetched == [a], "b was created and then deleted: it was never read"

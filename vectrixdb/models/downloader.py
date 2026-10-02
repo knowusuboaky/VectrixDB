@@ -38,7 +38,7 @@ import shutil
 import zipfile
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
@@ -51,7 +51,84 @@ from ..exceptions import ModelDownloadError
 __all__ = [
     "ModelDownloader",
     "download_models_cli",
+    "RELEASE_ASSETS",
+    "release_asset_url",
+    "publish_commands",
 ]
+
+
+# ============================================================================
+# SETTINGS: the release asset each downloadable model is fetched as
+# ============================================================================
+#
+# ``download(model_type)`` asks GitHub for ``<asset>.zip`` under the tag in
+# MODEL_CONFIG and unpacks it into ``<folder>``. Two names are not the type's
+# own: the English ColBERT (``late_interaction_en``, alias ``colbert``) is
+# fetched as ``colbert.zip`` into ``colbert/``, and BGE-M3
+# (``late_interaction``) lands in ``bge-m3/``. scripts/publish_models.py and
+# scripts/check_model_releases.py read this so the zip a maintainer uploads
+# is the zip the downloader asks for.
+
+#: model type -> (release asset name without ".zip", directory under the models dir)
+RELEASE_ASSETS: Dict[str, Tuple[str, str]] = {
+    "dense": ("dense", "dense"),
+    "dense_en": ("dense_en", "dense_en"),
+    "reranker": ("reranker", "reranker"),
+    "reranker_en": ("reranker_en", "reranker_en"),
+    "late_interaction_en": ("colbert", "colbert"),
+    "colbert": ("colbert", "colbert"),
+    "bge_base_en": ("bge_base_en", "bge_base_en"),
+    "bge_reranker_base": ("bge_reranker_base", "bge_reranker_base"),
+    "colbert_v2": ("colbert_v2", "colbert_v2"),
+    "late_interaction": ("late_interaction", "bge-m3"),
+    "rebel": ("rebel", "rebel"),
+}
+
+
+def _config_key(model_type: str) -> str:
+    """The MODEL_CONFIG entry a download type reads; ``colbert`` is an alias."""
+    return "late_interaction_en" if model_type == "colbert" else model_type
+
+
+def release_asset_url(model_type: str) -> Optional[str]:
+    """The GitHub release URL ``download(model_type)`` fetches, or None for a type with no release."""
+    if model_type not in RELEASE_ASSETS:
+        return None
+    tag = MODEL_CONFIG.get(_config_key(model_type), {}).get("github_release")
+    if not tag:
+        return None
+    asset, _folder = RELEASE_ASSETS[model_type]
+    return f"{GITHUB_RELEASE_BASE}/{tag}/{asset}.zip"
+
+
+def publish_commands(model_type: str, tag: Optional[str] = None) -> List[str]:
+    """The commands that publish this model's release asset, for the maintainer.
+
+    Named in every download failure, because the GitHub fallback is only as
+    real as the release behind it: a tag nobody has created yet answers 404
+    to everyone, and the message is where that is found out. ``tag`` is the
+    registry's unless a ``github:<tag>`` model name chose another.
+    """
+    tag = tag or MODEL_CONFIG.get(_config_key(model_type), {}).get("github_release", "<tag>")
+    asset, _folder = RELEASE_ASSETS.get(model_type, (model_type, model_type))
+    return [
+        f"python scripts/publish_models.py {model_type}",
+        f'gh release create {tag} dist/models/{asset}.zip --title "{asset} model" --notes "ONNX INT8 {asset} for vectrixdb download-models"',
+    ]
+
+
+def _inside(base: Path, name: str) -> Path:
+    """``base / name``, refused when the name would land outside ``base``.
+
+    A zip entry named ``../../x`` or ``/etc/x`` is how a substituted release
+    asset writes anywhere the process can; nothing it holds belongs there.
+    """
+    target = base / name
+    try:
+        target.resolve().relative_to(base.resolve())
+    except ValueError:
+        raise ModelDownloadError(f"refusing zip entry {name!r}: it would extract outside {base}")
+    return target
 
 
 # ============================================================================
@@ -76,6 +153,64 @@ class ModelDownloader:
         """
         self.progress = progress
         self.models_dir = get_models_dir()
+        #: asset name -> (url, what went wrong, whether the release is missing)
+        self._github_attempts: Dict[str, Tuple[str, str, bool]] = {}
+
+    def _failed(
+        self, model_type: str, config: dict, huggingface: Optional[str] = None, hint: str = ""
+    ) -> ModelDownloadError:
+        """The error for a model no source could supply.
+
+        It names every source tried and what each answered, says when the
+        GitHub release does not exist yet and how a maintainer publishes it,
+        and ends with what the person can do now. A bare "check your
+        connection" was the old message, and it was wrong whenever the
+        release had never been made.
+        """
+        asset, _folder = RELEASE_ASSETS.get(model_type, (model_type, model_type))
+        url, reason, missing = self._github_attempts.get(
+            asset, (release_asset_url(model_type) or "(no release tag)", "not tried", False)
+        )
+        lines = [
+            f"Could not fetch the {config.get('name', model_type)} model ({model_type}). Sources tried, in order:",
+            f"  1. GitHub release {config.get('github_release', '(none)')}, asset {asset}.zip",
+            f"     {url}",
+            f"     {reason}",
+        ]
+        if huggingface is not None:
+            hf_id = config.get("huggingface_id", "(no HuggingFace id)")
+            lines += [
+                f"  2. HuggingFace {hf_id}, exported to ONNX on this machine",
+                f"     {huggingface}",
+            ]
+        else:
+            lines.append("  There is no HuggingFace fallback for this model.")
+        if missing:
+            lines.append(
+                "The GitHub release for this model has not been published yet, so the fallback "
+                "cannot work for anyone. A maintainer publishes it with:"
+            )
+            lines += [f"  {command}" for command in publish_commands(model_type)]
+            lines.append(
+                "(scripts/publish_models.py zips the model and prints that command; it runs nothing.)"
+            )
+        else:
+            lines.append(
+                "Check the network or the proxy, or copy the model from a machine that has it "
+                "and point VECTRIXDB_MODELS_DIR at the copy."
+            )
+        if huggingface is not None:
+            lines.append(
+                f'Until then: pip install "vectrixdb[setup-models]" && vectrixdb download-models --type {model_type}'
+            )
+        else:
+            lines.append(
+                "Until then: this model ships in the wheel, so pip install --force-reinstall vectrixdb "
+                "restores it, or copy it from a machine that has it and point VECTRIXDB_MODELS_DIR at the copy."
+            )
+        if hint:
+            lines.append(hint)
+        return ModelDownloadError("\n".join(lines))
 
     def _download_from_github(self, model_type: str, model_dir: Path, config: dict) -> bool:
         """
@@ -150,16 +285,14 @@ class ModelDownloader:
                     assert root_folder is not None
                     # Extract with flattening - remove the root folder prefix
                     print(f"  Flattening nested folder: {root_folder}/")
-                    for member in namelist:
-                        # Skip the root folder itself
-                        if member == root_folder + "/":
-                            continue
-                        # Remove the root folder prefix
-                        relative_path = member[len(root_folder) + 1 :]
-                        if not relative_path:
-                            continue
-                        # Extract to the correct location
-                        target_path = model_dir / relative_path
+                    # Every target checked before any is written, so a bad
+                    # entry leaves no half-extracted model behind.
+                    targets = [
+                        (member, _inside(model_dir, member[len(root_folder) + 1 :]))
+                        for member in namelist
+                        if member[len(root_folder) + 1 :]
+                    ]
+                    for member, target_path in targets:
                         if member.endswith("/"):
                             target_path.mkdir(parents=True, exist_ok=True)
                         else:
@@ -168,6 +301,8 @@ class ModelDownloader:
                                 shutil.copyfileobj(src, dst)
                 else:
                     # Normal extraction
+                    for member in namelist:
+                        _inside(model_dir, member)
                     zip_ref.extractall(model_dir)
 
             # A corrupt or substituted asset must not pass as a model.
@@ -178,17 +313,25 @@ class ModelDownloader:
 
         except HTTPError as e:
             if e.code == 404:
-                print(f"  GitHub release not found (404). Model may not be uploaded yet.")
+                print("  GitHub release not found (404). Model may not be uploaded yet.")
+                self._github_attempts[model_type] = (
+                    zip_url,
+                    "HTTP 404: this release, or its asset, does not exist",
+                    True,
+                )
             else:
                 print(f"  GitHub download failed: HTTP {e.code}")
+                self._github_attempts[model_type] = (zip_url, f"HTTP {e.code}", False)
             return False
         except URLError as e:
             print(f"  GitHub download failed: {e.reason}")
+            self._github_attempts[model_type] = (zip_url, f"unreachable: {e.reason}", False)
             return False
         except ModelDownloadError:
             raise  # a checksum failure is not a reason to try another source
         except Exception as e:
             print(f"  GitHub download failed: {e}")
+            self._github_attempts[model_type] = (zip_url, f"failed: {e}", False)
             return False
         finally:
             # The zip is a temporary file with delete=False, so a download that
@@ -291,6 +434,7 @@ class ModelDownloader:
         # Fallback to HuggingFace if GitHub failed
         print("  GitHub download failed, falling back to HuggingFace...")
         hf_success = False
+        hf_error = ""
         try:
             from optimum.onnxruntime import ORTModelForFeatureExtraction
             from transformers import AutoTokenizer
@@ -323,15 +467,14 @@ class ModelDownloader:
                 hf_success = True
             except Exception as e:
                 print(f"  Manual export failed: {e}")
+                hf_error = f"manual export failed: {e}"
 
         except Exception as e:
             print(f"  HuggingFace download failed: {e}")
+            hf_error = str(e)
 
         if not hf_success:
-            raise RuntimeError(
-                f"Failed to download dense model from both GitHub and HuggingFace.\n"
-                f"Please check your internet connection or try again later."
-            )
+            raise self._failed("dense", config, huggingface=hf_error)
 
         return model_dir
 
@@ -1016,10 +1159,7 @@ class ModelDownloader:
         if self._download_from_github("reranker_en", model_dir, config):
             return model_dir
 
-        raise RuntimeError(
-            f"Failed to download English reranker model from GitHub.\n"
-            f"Please check your internet connection or try again later."
-        )
+        raise self._failed("reranker_en", config)
 
     def _download_late_interaction_en(self) -> Path:
         """Download English ColBERT model from GitHub."""
@@ -1033,10 +1173,7 @@ class ModelDownloader:
         if self._download_from_github("colbert", model_dir, config):
             return model_dir
 
-        raise RuntimeError(
-            f"Failed to download English ColBERT model from GitHub.\n"
-            f"Please check your internet connection or try again later."
-        )
+        raise self._failed("late_interaction_en", config)
 
     def _download_dense_en(self) -> Path:
         """Fetch e5-small-v2, the English default before 2.2.
@@ -1058,11 +1195,12 @@ class ModelDownloader:
             self._manual_dense_export(model_dir, config)
             return model_dir
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to download e5-small-v2.\nError: {e}\n\n"
-                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type dense_en\n"
-                f"Or move the collection to the current default: "
-                f'Vectrix(name, path=..., dense_model="bge-small").reembed()'
+            raise self._failed(
+                "dense_en",
+                config,
+                huggingface=str(e),
+                hint="Or move the collection to the current default: "
+                'Vectrix(name, path=..., dense_model="bge-small").reembed()',
             )
 
     def _download_bge_base_en(self) -> Path:
@@ -1084,11 +1222,7 @@ class ModelDownloader:
             self._manual_dense_export(model_dir, config)
             return model_dir
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to download BGE-base model.\n"
-                f"Error: {e}\n\n"
-                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type bge_base_en"
-            )
+            raise self._failed("bge_base_en", config, huggingface=str(e))
 
     def _download_bge_reranker_base(self) -> Path:
         """Download BGE-reranker-base model (higher quality reranker)."""
@@ -1109,11 +1243,7 @@ class ModelDownloader:
             self._manual_reranker_export(model_dir, config)
             return model_dir
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to download BGE reranker model.\n"
-                f"Error: {e}\n\n"
-                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type bge_reranker_base"
-            )
+            raise self._failed("bge_reranker_base", config, huggingface=str(e))
 
     def _download_colbert_v2(self) -> Path:
         """Download ColBERT v2 model (higher quality late interaction)."""
@@ -1134,11 +1264,7 @@ class ModelDownloader:
             self._manual_colbert_export(model_dir, config)
             return model_dir
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to download ColBERT v2 model.\n"
-                f"Error: {e}\n\n"
-                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type colbert_v2"
-            )
+            raise self._failed("colbert_v2", config, huggingface=str(e))
 
     def _download_reranker(self) -> Path:
         """Download and convert reranker model to ONNX."""
@@ -1155,6 +1281,7 @@ class ModelDownloader:
         # Fallback to HuggingFace if GitHub failed
         print("  GitHub download failed, falling back to HuggingFace...")
         hf_success = False
+        hf_error = ""
         try:
             from optimum.onnxruntime import ORTModelForSequenceClassification
             from transformers import AutoTokenizer
@@ -1187,15 +1314,14 @@ class ModelDownloader:
                 hf_success = True
             except Exception as e:
                 print(f"  Manual export failed: {e}")
+                hf_error = f"manual export failed: {e}"
 
         except Exception as e:
             print(f"  HuggingFace download failed: {e}")
+            hf_error = str(e)
 
         if not hf_success:
-            raise RuntimeError(
-                f"Failed to download reranker model from both GitHub and HuggingFace.\n"
-                f"Please check your internet connection or try again later."
-            )
+            raise self._failed("reranker", config, huggingface=hf_error)
 
         return model_dir
 
@@ -1302,6 +1428,7 @@ class ModelDownloader:
         # Fallback to HuggingFace if GitHub failed
         print("  GitHub download failed, falling back to HuggingFace...")
         hf_success = False
+        hf_error = ""
         try:
             from optimum.onnxruntime import ORTModelForFeatureExtraction
             from transformers import AutoTokenizer
@@ -1334,15 +1461,14 @@ class ModelDownloader:
                 hf_success = True
             except Exception as e:
                 print(f"  Manual export failed: {e}")
+                hf_error = f"manual export failed: {e}"
 
         except Exception as e:
             print(f"  HuggingFace download failed: {e}")
+            hf_error = str(e)
 
         if not hf_success:
-            raise RuntimeError(
-                f"Failed to download ColBERT model from both GitHub and HuggingFace.\n"
-                f"Please check your internet connection or try again later."
-            )
+            raise self._failed("colbert", config, huggingface=hf_error)
 
         return model_dir
 
@@ -1444,6 +1570,7 @@ class ModelDownloader:
         # Fallback to HuggingFace if GitHub failed
         print("  GitHub download failed, falling back to HuggingFace...")
         hf_success = False
+        hf_error = ""
         try:
             from optimum.onnxruntime import ORTModelForFeatureExtraction
             from transformers import AutoTokenizer
@@ -1476,15 +1603,14 @@ class ModelDownloader:
                 hf_success = True
             except Exception as e:
                 print(f"  Manual export failed: {e}")
+                hf_error = f"manual export failed: {e}"
 
         except Exception as e:
             print(f"  HuggingFace download failed: {e}")
+            hf_error = str(e)
 
         if not hf_success:
-            raise RuntimeError(
-                f"Failed to download BGE-M3 model from both GitHub and HuggingFace.\n"
-                f"Please check your internet connection or try again later."
-            )
+            raise self._failed("late_interaction", config, huggingface=hf_error)
 
         return model_dir
 
@@ -1586,6 +1712,7 @@ class ModelDownloader:
         # Fallback to HuggingFace if GitHub failed
         print("  GitHub download failed, falling back to HuggingFace...")
         hf_success = False
+        hf_error = ""
         try:
             from optimum.onnxruntime import ORTModelForSeq2SeqLM
             from transformers import AutoTokenizer
@@ -1628,15 +1755,14 @@ class ModelDownloader:
                 hf_success = True
             except Exception as e:
                 print(f"  Manual export failed: {e}")
+                hf_error = f"manual export failed: {e}"
 
         except Exception as e:
             print(f"  HuggingFace download failed: {e}")
+            hf_error = str(e)
 
         if not hf_success:
-            raise RuntimeError(
-                f"Failed to download mREBEL model from both GitHub and HuggingFace.\n"
-                f"Please check your internet connection or try again later."
-            )
+            raise self._failed("rebel", config, huggingface=hf_error)
 
         return model_dir
 

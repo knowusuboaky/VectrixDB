@@ -74,7 +74,9 @@ def _config(root: Path, **over) -> SignInConfig:
         "store_path": root / "auth" / "signin.db",
         "access_log": root / "auth" / "access.jsonl",
         "sender": Mail(),
-        "oidc": OidcConfig(issuer=ISSUER, client_id="vectrixdb", client_secret="s3cret", role_map=ROLES),
+        "oidc": OidcConfig(
+            issuer=ISSUER, client_id="vectrixdb", client_secret="s3cret", role_map=ROLES
+        ),
     }
     base.update(over)
     return SignInConfig(**base)
@@ -91,7 +93,9 @@ def serve(tmp_path, monkeypatch):
         idp = FakeIdp()
         root = tmp_path / f"db{len(built)}"
         config = _config(root, **over)
-        app = create_app(db_path=str(root), enable_dashboard=False, signin=config, oidc_transport=idp.transport)
+        app = create_app(
+            db_path=str(root), enable_dashboard=False, signin=config, oidc_transport=idp.transport
+        )
         client = TestClient(app, base_url=PUBLIC, follow_redirects=False)
         client.__enter__()  # the database opens with the app, as it does when the server starts
         built.append(client)
@@ -109,7 +113,9 @@ def sso(client: TestClient, idp: FakeIdp):
 
 
 def refused(reply) -> str:
-    assert reply.status_code == 302 and "#/signin?error=" in reply.headers["location"], reply.headers.get("location")
+    assert reply.status_code == 302 and "#/signin?error=" in reply.headers["location"], (
+        reply.headers.get("location")
+    )
     return reply.headers["location"].split("error=")[1]
 
 
@@ -137,13 +143,20 @@ def add_authenticator(client: TestClient) -> str:
     begun = client.post("/auth/me/authenticator/begin", headers=csrf(client))
     assert begun.status_code == 200, begun.text
     secret = begun.json()["data"]["secret"]
-    confirmed = client.post("/auth/me/authenticator/confirm", json={"code": totp.code_at(secret, totp.step_now())}, headers=csrf(client))
+    confirmed = client.post(
+        "/auth/me/authenticator/confirm",
+        json={"code": totp.code_at(secret, totp.step_now())},
+        headers=csrf(client),
+    )
     assert confirmed.status_code == 200, confirmed.text
     return secret
 
 
 def code_sign_in(client: TestClient, email: str, secret: str, step_offset: int = 1):
-    return client.post("/auth/email/verify", json={"email": email, "code": totp.code_at(secret, totp.step_now() + step_offset)})
+    return client.post(
+        "/auth/email/verify",
+        json={"email": email, "code": totp.code_at(secret, totp.step_now() + step_offset)},
+    )
 
 
 def events(client: TestClient, event: str) -> list:
@@ -183,12 +196,20 @@ class TestOneListForBothWays:
         assert refused(sso(client, idp)) == "not_listed"
 
     def test_the_settings_list_lets_in_beside_it_with_the_groups_role(self, serve):
-        oidc = OidcConfig(issuer=ISSUER, client_id="vectrixdb", client_secret="s3cret", role_map=ROLES, allowed_emails=("@partner.example",))
+        oidc = OidcConfig(
+            issuer=ISSUER,
+            client_id="vectrixdb",
+            client_secret="s3cret",
+            role_map=ROLES,
+            allowed_emails=("@partner.example",),
+        )
         client, idp, _ = serve(oidc=oidc)
         idp.person.update(sub="u-5", email="bo@partner.example", groups=["g-ops"])
         sso(client, idp)
         assert me(client)["role"] == "operator"
-        assert client.get("/auth/me/ways").json()["data"]["listed"] is False, "nothing of their own is kept here"
+        assert client.get("/auth/me/ways").json()["data"]["listed"] is False, (
+            "nothing of their own is kept here"
+        )
 
 
 class TestTheirSessionFollowsTheirRecord:
@@ -209,7 +230,13 @@ class TestTheirSessionFollowsTheirRecord:
         assert refused(sso(client, idp)) == "not_listed"
 
     def test_a_session_from_the_settings_list_holds_whatever_the_people_list_says(self, serve):
-        oidc = OidcConfig(issuer=ISSUER, client_id="vectrixdb", client_secret="s3cret", role_map=ROLES, allowed_emails=("@partner.example",))
+        oidc = OidcConfig(
+            issuer=ISSUER,
+            client_id="vectrixdb",
+            client_secret="s3cret",
+            role_map=ROLES,
+            allowed_emails=("@partner.example",),
+        )
         client, idp, _ = serve(oidc=oidc)
         idp.person.update(sub="u-5", email="bo@partner.example", groups=["g-ops"])
         sso(client, idp)
@@ -255,8 +282,16 @@ class TestTheirOwnWays:
         client, _, config = serve()
         own = browser(client)
         assert own.post("/auth/email/begin", json={"email": OLU}).status_code == 200
-        begun = own.post("/auth/email/enrol/begin", json={"token": config.sender.token()}).json()["data"]
-        done = own.post("/auth/email/enrol/confirm", json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())})
+        begun = own.post("/auth/email/enrol/begin", json={"token": config.sender.token()}).json()[
+            "data"
+        ]
+        done = own.post(
+            "/auth/email/enrol/confirm",
+            json={
+                "ticket": begun["ticket"],
+                "code": totp.code_at(begun["secret"], totp.step_now()),
+            },
+        )
         assert done.status_code == 200, done.text
         kept = own.delete("/auth/me/authenticator", headers=csrf(own))
         assert kept.status_code == 409 and "only way in" in kept.json()["message"]
@@ -266,24 +301,44 @@ class TestTheirOwnWays:
         sso(client, idp)
         assert client.delete("/auth/me/authenticator", headers=csrf(client)).status_code == 404
 
-    def test_they_confirm_a_change_with_their_own_code_as_well_as_single_sign_on(self, serve, monkeypatch):
+    def test_they_confirm_a_change_with_their_own_code_as_well_as_single_sign_on(
+        self, serve, monkeypatch
+    ):
         client, idp, _ = serve()
         sso(client, idp)
         secret = add_authenticator(client)
         later(monkeypatch, ELEVEN_MINUTES)
-        stale = client.post("/api/v1/keys", json={"name": "nightly", "role": "reader"}, headers=csrf(client))
+        stale = client.post(
+            "/api/v1/keys", json={"name": "nightly", "role": "reader"}, headers=csrf(client)
+        )
         assert stale.status_code == 403 and stale.json()["data"]["ways"] == ["sso", "code"]
-        confirmed = client.post("/auth/step-up", json={"code": totp.code_at(secret, totp.step_now() + 1)}, headers=csrf(client))
+        confirmed = client.post(
+            "/auth/step-up",
+            json={"code": totp.code_at(secret, totp.step_now() + 1)},
+            headers=csrf(client),
+        )
         assert confirmed.status_code == 200, confirmed.text
-        assert client.post("/api/v1/keys", json={"name": "nightly", "role": "reader"}, headers=csrf(client)).status_code == 200
+        assert (
+            client.post(
+                "/api/v1/keys", json={"name": "nightly", "role": "reader"}, headers=csrf(client)
+            ).status_code
+            == 200
+        )
 
     def test_with_nothing_of_their_own_they_confirm_with_single_sign_on(self, serve, monkeypatch):
         client, idp, _ = serve()
         sso(client, idp)
         later(monkeypatch, ELEVEN_MINUTES)
-        stale = client.post("/api/v1/keys", json={"name": "nightly", "role": "reader"}, headers=csrf(client))
+        stale = client.post(
+            "/api/v1/keys", json={"name": "nightly", "role": "reader"}, headers=csrf(client)
+        )
         assert stale.json()["data"]["ways"] == ["sso"]
-        assert client.post("/auth/step-up", json={"code": "123456"}, headers=csrf(client)).json()["data"]["sso"] is True
+        assert (
+            client.post("/auth/step-up", json={"code": "123456"}, headers=csrf(client)).json()[
+                "data"
+            ]["sso"]
+            is True
+        )
 
 
 # ------------------------------------------------------------ the recheck
@@ -292,15 +347,29 @@ class TestTheirOwnWays:
 class TestAskingTheProviderAgain:
     def test_the_setting_is_for_a_server_with_both_ways(self, tmp_path):
         base = {
-            "VECTRIXDB_SIGNIN_SECRET": SECRET, "VECTRIXDB_PUBLIC_URL": PUBLIC, "VECTRIXDB_OIDC_ISSUER": ISSUER,
-            "VECTRIXDB_OIDC_CLIENT_ID": "vectrixdb", "VECTRIXDB_OIDC_ROLE_MAP": '{"g-admins": "admin"}',
+            "VECTRIXDB_SIGNIN_SECRET": SECRET,
+            "VECTRIXDB_PUBLIC_URL": PUBLIC,
+            "VECTRIXDB_OIDC_ISSUER": ISSUER,
+            "VECTRIXDB_OIDC_CLIENT_ID": "vectrixdb",
+            "VECTRIXDB_OIDC_ROLE_MAP": '{"g-admins": "admin"}',
         }
-        assert SignInConfig.from_env(tmp_path, {**base, "VECTRIXDB_SIGNIN": "oidc,email", "VECTRIXDB_SSO_RECHECK_DAYS": "30"}).sso_recheck_days == 30
+        assert (
+            SignInConfig.from_env(
+                tmp_path,
+                {**base, "VECTRIXDB_SIGNIN": "oidc,email", "VECTRIXDB_SSO_RECHECK_DAYS": "30"},
+            ).sso_recheck_days
+            == 30
+        )
         with pytest.raises(ConfigurationError, match="oidc,email"):
-            SignInConfig.from_env(tmp_path, {**base, "VECTRIXDB_SIGNIN": "email", "VECTRIXDB_SSO_RECHECK_DAYS": "30"})
+            SignInConfig.from_env(
+                tmp_path, {**base, "VECTRIXDB_SIGNIN": "email", "VECTRIXDB_SSO_RECHECK_DAYS": "30"}
+            )
         for wrong in ("0", "-3", "a month"):
             with pytest.raises(ConfigurationError, match="1 or more"):
-                SignInConfig.from_env(tmp_path, {**base, "VECTRIXDB_SIGNIN": "oidc,email", "VECTRIXDB_SSO_RECHECK_DAYS": wrong})
+                SignInConfig.from_env(
+                    tmp_path,
+                    {**base, "VECTRIXDB_SIGNIN": "oidc,email", "VECTRIXDB_SSO_RECHECK_DAYS": wrong},
+                )
 
     def test_within_the_days_their_code_works(self, serve):
         client, idp, _ = serve(sso_recheck_days=30)
@@ -317,12 +386,18 @@ class TestAskingTheProviderAgain:
         client.app.state.signin.store.stamp_sso(ADA, now=time.time() - 31 * DAY)
         elsewhere = browser(client)
         asked = code_sign_in(elsewhere, ADA, secret)
-        assert asked.status_code == 403 and asked.json()["data"]["code"] == "sso_recheck" and asked.json()["data"]["sso"] is True
+        assert (
+            asked.status_code == 403
+            and asked.json()["data"]["code"] == "sso_recheck"
+            and asked.json()["data"]["sso"] is True
+        )
         assert "more than 30 days" in asked.json()["message"] and me(elsewhere) is None
         assert events(client, "signin_failed")[0]["reason"] == "sso_recheck"
         sso(elsewhere, idp)
         later(monkeypatch, 90)  # the next code, since the one above was spent
-        assert code_sign_in(browser(client), ADA, secret, step_offset=0).status_code == 200, "a new sign-in with it starts the days again"
+        assert code_sign_in(browser(client), ADA, secret, step_offset=0).status_code == 200, (
+            "a new sign-in with it starts the days again"
+        )
 
     def test_somebody_it_has_never_let_in_is_asked_to_use_it_before_anything_is_set_up(self, serve):
         client, _, config = serve(sso_recheck_days=30)
@@ -331,7 +406,9 @@ class TestAskingTheProviderAgain:
         asked = own.post("/auth/email/enrol/begin", json={"token": config.sender.token()})
         assert asked.status_code == 403 and asked.json()["data"]["code"] == "sso_recheck"
         assert "Sign in with single sign-on first" in asked.json()["message"]
-        assert client.app.state.signin.store.person(OLU).enrolled is False, "nothing was made, so no recovery code was lost"
+        assert client.app.state.signin.store.person(OLU).enrolled is False, (
+            "nothing was made, so no recovery code was lost"
+        )
 
 
 # ----------------------------------------------------------------- tokens
@@ -341,15 +418,29 @@ class TestAnAppsToken:
     AUDIENCE = "api://vectrixdb"
 
     def serve_tokens(self, serve, **oidc_over):
-        oidc = OidcConfig(**{"issuer": ISSUER, "client_id": "vectrixdb", "client_secret": "s3cret", "role_map": ROLES, "api_audience": self.AUDIENCE, **oidc_over})
+        oidc = OidcConfig(
+            **{
+                "issuer": ISSUER,
+                "client_id": "vectrixdb",
+                "client_secret": "s3cret",
+                "role_map": ROLES,
+                "api_audience": self.AUDIENCE,
+                **oidc_over,
+            }
+        )
         return serve(oidc=oidc, users=((OLU, "admin"),))
 
     def test_it_needs_no_place_on_the_platforms_list(self, serve):
         client, idp, _ = self.serve_tokens(serve)
         idp.person.update(sub="u-7", email="kojo@example.com", groups=["g-ops"])
-        reply = client.get("/api/v1/collections", headers={"Authorization": f"Bearer {idp.access_token(self.AUDIENCE)}"})
+        reply = client.get(
+            "/api/v1/collections",
+            headers={"Authorization": f"Bearer {idp.access_token(self.AUDIENCE)}"},
+        )
         assert reply.status_code == 200, reply.text
-        assert refused(sso(client, idp)) == "not_listed", "while the same person may not sign in to the platform"
+        assert refused(sso(client, idp)) == "not_listed", (
+            "while the same person may not sign in to the platform"
+        )
 
     def test_the_token_role_is_given_whoever_it_is_for(self, serve):
         client, idp, _ = self.serve_tokens(serve, token_role="searcher")
@@ -357,12 +448,21 @@ class TestAnAppsToken:
         head = {"Authorization": f"Bearer {token}"}
         assert client.get("/api/v1/collections", headers=head).status_code == 200
         refused_delete = client.delete("/api/v1/collections/anything", headers=head)
-        assert refused_delete.status_code == 403 and refused_delete.json()["data"]["role"] == "searcher"
+        assert (
+            refused_delete.status_code == 403
+            and refused_delete.json()["data"]["role"] == "searcher"
+        )
 
     def test_the_token_role_needs_no_group_at_all(self, serve):
         client, idp, _ = self.serve_tokens(serve, token_role="reader")
         idp.person.update(sub="u-8", email="kojo@example.com", groups=[])
-        assert client.get("/api/v1/collections", headers={"Authorization": f"Bearer {idp.access_token(self.AUDIENCE)}"}).status_code == 200
+        assert (
+            client.get(
+                "/api/v1/collections",
+                headers={"Authorization": f"Bearer {idp.access_token(self.AUDIENCE)}"},
+            ).status_code
+            == 200
+        )
 
     @pytest.mark.parametrize("role", ["admin", "guest", "owner"])
     def test_a_token_is_never_an_admin(self, role):
@@ -371,8 +471,13 @@ class TestAnAppsToken:
 
     def test_it_is_read_from_the_environment(self, tmp_path):
         env = {
-            "VECTRIXDB_SIGNIN": "oidc", "VECTRIXDB_SIGNIN_SECRET": SECRET, "VECTRIXDB_PUBLIC_URL": PUBLIC, "VECTRIXDB_OIDC_ISSUER": ISSUER,
-            "VECTRIXDB_OIDC_CLIENT_ID": "vectrixdb", "VECTRIXDB_OIDC_ROLE_MAP": '{"g-admins": "admin"}', "VECTRIXDB_OIDC_TOKEN_ROLE": " Searcher ",
+            "VECTRIXDB_SIGNIN": "oidc",
+            "VECTRIXDB_SIGNIN_SECRET": SECRET,
+            "VECTRIXDB_PUBLIC_URL": PUBLIC,
+            "VECTRIXDB_OIDC_ISSUER": ISSUER,
+            "VECTRIXDB_OIDC_CLIENT_ID": "vectrixdb",
+            "VECTRIXDB_OIDC_ROLE_MAP": '{"g-admins": "admin"}',
+            "VECTRIXDB_OIDC_TOKEN_ROLE": " Searcher ",
         }
         assert SignInConfig.from_env(tmp_path, env).oidc.token_role == "searcher"
 
@@ -386,10 +491,18 @@ class TestThePeopleListWithSingleSignOnAlone:
         sso(client, idp)
         assert client.get("/auth/me").json()["data"]["people"] is True
         listed = client.get("/auth/people")
-        assert listed.status_code == 200 and {p["email"] for p in listed.json()["data"]["people"]} == {ADA, OLU}
-        added = client.post("/auth/people", json={"email": "sam@example.com", "role": "viewer"}, headers=csrf(client))
+        assert listed.status_code == 200 and {
+            p["email"] for p in listed.json()["data"]["people"]
+        } == {ADA, OLU}
+        added = client.post(
+            "/auth/people",
+            json={"email": "sam@example.com", "role": "viewer"},
+            headers=csrf(client),
+        )
         assert added.status_code == 200, added.text
-        assert client.post(f"/auth/people/{OLU}/reset", headers=csrf(client)).status_code == 404, "nothing of their own is kept here to reset"
+        assert client.post(f"/auth/people/{OLU}/reset", headers=csrf(client)).status_code == 404, (
+            "nothing of their own is kept here to reset"
+        )
 
     def test_the_list_says_when_somebody_last_came_in_with_single_sign_on(self, serve):
         client, idp, _ = serve(methods=("oidc",))

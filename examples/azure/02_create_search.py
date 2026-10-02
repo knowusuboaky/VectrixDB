@@ -18,7 +18,24 @@ fields a policy reads, and whether a second vector is coming.
 
 from __future__ import annotations
 
-from _common import Az, _no_region, arguments, begin, done, finish, links, note, portal, regions, remember, settings, skipped, somewhere, step, stop
+from _common import (
+    Az,
+    _no_region,
+    arguments,
+    begin,
+    done,
+    finish,
+    links,
+    note,
+    portal,
+    regions,
+    remember,
+    settings,
+    skipped,
+    somewhere,
+    step,
+    stop,
+)
 
 
 # ============================================================================
@@ -32,7 +49,12 @@ from _common import Az, _no_region, arguments, begin, done, finish, links, note,
 
 
 def options(parser) -> None:
-    parser.add_argument("--tier", choices=("free", "basic"), default=None, help="overrides VX_SEARCH_TIER for this run")
+    parser.add_argument(
+        "--tier",
+        choices=("free", "basic"),
+        default=None,
+        help="overrides VX_SEARCH_TIER for this run",
+    )
 
 
 # ============================================================================
@@ -53,7 +75,11 @@ def main() -> int:
     az = Az(args.dry_run)
     group, name = config["VX_RESOURCE_GROUP"], config["VX_SEARCH"]
     tier = args.tier or config["VX_SEARCH_TIER"]
-    begin("02", "Azure AI Search", f"One service, {tier} tier. The index is made later, by the first write.")
+    begin(
+        "02",
+        "Azure AI Search",
+        f"One service, {tier} tier. The index is made later, by the first write.",
+    )
 
     if not args.dry_run and not az.exists("group", "show", "--name", group):
         stop(f"There is no resource group {group} yet. Run 01_create_resources.py first.")
@@ -71,22 +97,48 @@ def main() -> int:
 
         def create(where: str) -> None:
             az(
-                "search", "service", "create",
-                "--name", name,
-                "--resource-group", group,
-                "--location", where,
-                "--sku", tier,
-                "--replica-count", "1",
-                "--partition-count", "1",
-                "--output", "none",
+                "search",
+                "service",
+                "create",
+                "--name",
+                name,
+                "--resource-group",
+                group,
+                "--location",
+                where,
+                "--sku",
+                tier,
+                "--replica-count",
+                "1",
+                "--partition-count",
+                "1",
+                "--output",
+                "none",
                 allow_fail=True,
             )
 
         def clear() -> None:
             if az.exists(*shown):
-                az("search", "service", "delete", "--name", name, "--resource-group", group, "--yes", allow_fail=True)
+                az(
+                    "search",
+                    "service",
+                    "delete",
+                    "--name",
+                    name,
+                    "--resource-group",
+                    group,
+                    "--yes",
+                    allow_fail=True,
+                )
 
-        went = somewhere(az, tries, create, lambda: az.state_of(*shown).lower() == "succeeded", f"the search service {name}", clear)
+        went = somewhere(
+            az,
+            tries,
+            create,
+            lambda: az.state_of(*shown).lower() == "succeeded",
+            f"the search service {name}",
+            clear,
+        )
         if not went:
             stop(_no_region(name, tries))
         done(f"{name}, {tier} tier, in {went}")
@@ -96,11 +148,17 @@ def main() -> int:
         # Free for the first thousand requests a month, which this test will
         # not come near. It has to be turned on before a search can ask for it.
         az(
-            "search", "service", "update",
-            "--name", name,
-            "--resource-group", group,
-            "--semantic-search", "free",
-            "--output", "none",
+            "search",
+            "service",
+            "update",
+            "--name",
+            name,
+            "--resource-group",
+            group,
+            "--semantic-search",
+            "free",
+            "--output",
+            "none",
             allow_fail=True,
         )
         done("turned on, free plan, a thousand requests a month")

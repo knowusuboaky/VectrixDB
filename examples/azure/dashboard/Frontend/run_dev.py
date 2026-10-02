@@ -47,16 +47,24 @@ def installed(tool: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--upstream", default=os.environ.get("VITE_DEV_UPSTREAM", DEFAULT_UPSTREAM), help="where /api and /auth are forwarded")
+    parser.add_argument(
+        "--upstream",
+        default=os.environ.get("VITE_DEV_UPSTREAM", DEFAULT_UPSTREAM),
+        help="where /api and /auth are forwarded",
+    )
     parser.add_argument("--open", action="store_true", help="open a browser")
     args = parser.parse_args()
 
     tool = npm()
     installed(tool)
     where = f"http://127.0.0.1:{args.port}/"
-    print(f"dashboard  {where}\nforwarding /api, /auth, /health and /openapi.json to {args.upstream}\n")
+    print(
+        f"dashboard  {where}\nforwarding /api, /auth, /health and /openapi.json to {args.upstream}\n"
+    )
     if args.open:
         webbrowser.open(where)
     finished = subprocess.run(

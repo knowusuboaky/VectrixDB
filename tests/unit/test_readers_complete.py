@@ -78,7 +78,9 @@ class TestAWordDocumentIsReadWhole:
         d.add_heading("Terms", level=1)
         d.add_paragraph("Payment is due within thirty days.")
         t = d.add_table(rows=3, cols=3)
-        for r, row in enumerate([["Region", "Revenue", "Growth"], ["EMEA", "1200", "4%"], ["APAC", "950", "0%"]]):
+        for r, row in enumerate(
+            [["Region", "Revenue", "Growth"], ["EMEA", "1200", "4%"], ["APAC", "950", "0%"]]
+        ):
             for c, value in enumerate(row):
                 t.cell(r, c).text = value
         d.add_paragraph("Figures are unaudited.")
@@ -93,12 +95,17 @@ class TestAWordDocumentIsReadWhole:
         docx = docx_module()
         d = docx.Document()
         t = d.add_table(rows=3, cols=3)
-        for r, row in enumerate([["Region", "Quarter", "Revenue"], ["EMEA", "Q1", "100"], ["", "Q2", "120"]]):
+        for r, row in enumerate(
+            [["Region", "Quarter", "Revenue"], ["EMEA", "Q1", "100"], ["", "Q2", "120"]]
+        ):
             for c, value in enumerate(row):
                 t.cell(r, c).text = value
         t.cell(1, 0).merge(t.cell(2, 0))
         lines = load(saved(d, tmp_path)).text.splitlines()
-        assert lines == ["Region: EMEA; Quarter: Q1; Revenue: 100", "Region: EMEA; Quarter: Q2; Revenue: 120"]
+        assert lines == [
+            "Region: EMEA; Quarter: Q1; Revenue: 100",
+            "Region: EMEA; Quarter: Q2; Revenue: 120",
+        ]
 
     def test_a_cell_spanning_two_columns_keeps_the_rest_in_line(self, tmp_path):
         docx = docx_module()
@@ -129,7 +136,11 @@ class TestAWordDocumentIsReadWhole:
         for step in ("Open the account.", "Sign.", "Fund it."):
             d.add_paragraph(step, style="List Number")
         assert load(saved(d, tmp_path)).text.split("\n\n") == [
-            "- A reminder after ten days.", "- A second after twenty.", "1. Open the account.", "2. Sign.", "3. Fund it.",
+            "- A reminder after ten days.",
+            "- A second after twenty.",
+            "1. Open the account.",
+            "2. Sign.",
+            "3. Fund it.",
         ]
 
     def test_footnotes_and_endnotes_follow_the_paragraph_that_calls_them(self, tmp_path):
@@ -139,30 +150,61 @@ class TestAWordDocumentIsReadWhole:
         from docx.opc.part import Part
 
         d = docx.Document()
-        put(d, raw('<w:r><w:t xml:space="preserve">Revenue grew</w:t></w:r><w:r><w:footnoteReference w:id="7"/></w:r><w:r><w:t>.</w:t></w:r>'))
-        put(d, raw('<w:r><w:t xml:space="preserve">Costs were flat</w:t></w:r><w:r><w:endnoteReference w:id="2"/></w:r>'))
+        put(
+            d,
+            raw(
+                '<w:r><w:t xml:space="preserve">Revenue grew</w:t></w:r><w:r><w:footnoteReference w:id="7"/></w:r><w:r><w:t>.</w:t></w:r>'
+            ),
+        )
+        put(
+            d,
+            raw(
+                '<w:r><w:t xml:space="preserve">Costs were flat</w:t></w:r><w:r><w:endnoteReference w:id="2"/></w:r>'
+            ),
+        )
         for kind, rel, content_type, note in (
-            ("footnote", RT.FOOTNOTES, "footnotes", '<w:footnote w:id="7"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> Unaudited.</w:t></w:r></w:p></w:footnote>'),
-            ("endnote", RT.ENDNOTES, "endnotes", '<w:endnote w:id="2"><w:p><w:r><w:t>See note 5.</w:t></w:r></w:p></w:endnote>'),
+            (
+                "footnote",
+                RT.FOOTNOTES,
+                "footnotes",
+                '<w:footnote w:id="7"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> Unaudited.</w:t></w:r></w:p></w:footnote>',
+            ),
+            (
+                "endnote",
+                RT.ENDNOTES,
+                "endnotes",
+                '<w:endnote w:id="2"><w:p><w:r><w:t>See note 5.</w:t></w:r></w:p></w:endnote>',
+            ),
         ):
             separator = f'<w:{kind} w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:{kind}>'
-            blob = f'<w:{kind}s {NS}>{separator}{note}</w:{kind}s>'.encode()
-            part = Part(PackURI(f"/word/{content_type}.xml"), f"application/vnd.openxmlformats-officedocument.wordprocessingml.{content_type}+xml", blob, d.part.package)
+            blob = f"<w:{kind}s {NS}>{separator}{note}</w:{kind}s>".encode()
+            part = Part(
+                PackURI(f"/word/{content_type}.xml"),
+                f"application/vnd.openxmlformats-officedocument.wordprocessingml.{content_type}+xml",
+                blob,
+                d.part.package,
+            )
             d.part.relate_to(part, rel)
         assert load(saved(d, tmp_path)).text.split("\n\n") == [
-            "Revenue grew[^1].", "[^1]: Unaudited.", "Costs were flat[^e1]", "[^e1]: See note 5.",
+            "Revenue grew[^1].",
+            "[^1]: Unaudited.",
+            "Costs were flat[^e1]",
+            "[^e1]: See note 5.",
         ]
 
     def test_a_text_box_is_read_once_after_its_paragraph(self, tmp_path):
         docx = docx_module()
         d = docx.Document()
-        box = '<w:txbxContent><w:p><w:r><w:t>Sidebar: rates rose.</w:t></w:r></w:p></w:txbxContent>'
-        put(d, raw(
-            '<w:r><w:t>Anchor paragraph.</w:t></w:r><w:r><mc:AlternateContent>'
-            f'<mc:Choice Requires="wps"><w:drawing><wp:anchor><a:graphic><a:graphicData><wps:wsp><wps:txbx>{box}</wps:txbx></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice>'
-            f'<mc:Fallback><w:pict><v:shape><v:textbox>{box}</v:textbox></v:shape></w:pict></mc:Fallback>'
-            '</mc:AlternateContent></w:r>'
-        ))
+        box = "<w:txbxContent><w:p><w:r><w:t>Sidebar: rates rose.</w:t></w:r></w:p></w:txbxContent>"
+        put(
+            d,
+            raw(
+                "<w:r><w:t>Anchor paragraph.</w:t></w:r><w:r><mc:AlternateContent>"
+                f'<mc:Choice Requires="wps"><w:drawing><wp:anchor><a:graphic><a:graphicData><wps:wsp><wps:txbx>{box}</wps:txbx></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice>'
+                f"<mc:Fallback><w:pict><v:shape><v:textbox>{box}</v:textbox></v:shape></w:pict></mc:Fallback>"
+                "</mc:AlternateContent></w:r>"
+            ),
+        )
         assert load(saved(d, tmp_path)).text == "Anchor paragraph.\n\nSidebar: rates rose."
 
     def test_what_is_shown_is_read_and_what_is_not_is_not(self, tmp_path):
@@ -171,14 +213,22 @@ class TestAWordDocumentIsReadWhole:
         from docx.oxml import parse_xml
 
         d = docx.Document()
-        put(d, parse_xml(f'<w:sdt {NS}><w:sdtPr/><w:sdtContent><w:p><w:r><w:t>Clause 4 applies.</w:t></w:r></w:p></w:sdtContent></w:sdt>'))
-        put(d, raw(
-            '<w:r><w:t xml:space="preserve">Rate: </w:t></w:r>'
-            '<w:del><w:r><w:delText>5%</w:delText><w:tab/></w:r></w:del><w:ins><w:r><w:t>6%</w:t></w:r></w:ins>'
-            '<w:r><w:t xml:space="preserve">, page </w:t></w:r>'
-            '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> PAGE </w:instrText></w:r>'
-            '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>3</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>'
-        ))
+        put(
+            d,
+            parse_xml(
+                f"<w:sdt {NS}><w:sdtPr/><w:sdtContent><w:p><w:r><w:t>Clause 4 applies.</w:t></w:r></w:p></w:sdtContent></w:sdt>"
+            ),
+        )
+        put(
+            d,
+            raw(
+                '<w:r><w:t xml:space="preserve">Rate: </w:t></w:r>'
+                "<w:del><w:r><w:delText>5%</w:delText><w:tab/></w:r></w:del><w:ins><w:r><w:t>6%</w:t></w:r></w:ins>"
+                '<w:r><w:t xml:space="preserve">, page </w:t></w:r>'
+                '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> PAGE </w:instrText></w:r>'
+                '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>3</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>'
+            ),
+        )
         assert load(saved(d, tmp_path)).text == "Clause 4 applies.\n\nRate: 6%, page 3"
 
     def test_the_title_is_the_files_own_else_its_title_paragraph(self, tmp_path):
@@ -188,9 +238,13 @@ class TestAWordDocumentIsReadWhole:
         d.add_heading("Terms", level=1)
         doc = load(saved(d, tmp_path))
         assert doc.metadata["title"] == "Lending Policy 2025"
-        assert doc.text.startswith("# Lending Policy 2025\n\n# Terms"), "and the first part is not left without a heading"
+        assert doc.text.startswith("# Lending Policy 2025\n\n# Terms"), (
+            "and the first part is not left without a heading"
+        )
         d.core_properties.title = "Lending policy, 2025 edition"
-        assert load(saved(d, tmp_path, "b.docx")).metadata["title"] == "Lending policy, 2025 edition"
+        assert (
+            load(saved(d, tmp_path, "b.docx")).metadata["title"] == "Lending policy, 2025 edition"
+        )
 
 
 class TestAWordDocumentsPages:
@@ -200,7 +254,12 @@ class TestAWordDocumentsPages:
         d.add_paragraph("Page one text.")
         b = d.add_paragraph("Page two starts here.")
         new_page_at_start(b)
-        put(d, raw('<w:r><w:t xml:space="preserve">Still page two. </w:t></w:r><w:r><w:lastRenderedPageBreak/><w:t>Page three begins mid-paragraph.</w:t></w:r>'))
+        put(
+            d,
+            raw(
+                '<w:r><w:t xml:space="preserve">Still page two. </w:t></w:r><w:r><w:lastRenderedPageBreak/><w:t>Page three begins mid-paragraph.</w:t></w:r>'
+            ),
+        )
         put(d, raw('<w:r><w:t>Before a manual break.</w:t><w:br w:type="page"/></w:r>'))
         f = d.add_paragraph("After the manual break.")
         new_page_at_start(f)
@@ -224,14 +283,21 @@ class TestAWordDocumentsPages:
         for r, row in enumerate([["Region", "Revenue"], ["EMEA", "1200"], ["APAC", "950"]]):
             for c, value in enumerate(row):
                 t.cell(r, c).text = value
-        t.cell(2, 0).paragraphs[0]._p.insert(0, parse_xml(f"<w:r {NS}><w:lastRenderedPageBreak/></w:r>"))
+        t.cell(2, 0).paragraphs[0]._p.insert(
+            0, parse_xml(f"<w:r {NS}><w:lastRenderedPageBreak/></w:r>")
+        )
         doc = load(saved(d, tmp_path))
         assert doc.pages == [(0, 1), (doc.text.index("Region: APAC"), 2)]
 
     def test_a_manual_break_and_words_own_mark_a_space_apart_are_one_page(self, tmp_path):
         docx = docx_module()
         d = docx.Document()
-        put(d, raw('<w:r><w:t>Before.</w:t><w:br w:type="page"/><w:t xml:space="preserve"> </w:t><w:lastRenderedPageBreak/><w:t>After.</w:t></w:r>'))
+        put(
+            d,
+            raw(
+                '<w:r><w:t>Before.</w:t><w:br w:type="page"/><w:t xml:space="preserve"> </w:t><w:lastRenderedPageBreak/><w:t>After.</w:t></w:r>'
+            ),
+        )
         assert len(load(saved(d, tmp_path)).pages) == 2
 
     def test_a_file_word_never_laid_out_has_no_pages(self, tmp_path):
@@ -268,9 +334,15 @@ class TestAWordDocumentsPages:
         d.add_paragraph("Payment is due within thirty days of the invoice date, every time.")
         new_page_at_start(d.add_heading("Late fees", level=1))
         d.add_paragraph("Interest accrues monthly on any overdue balance, and a reminder follows.")
-        prepared = prepare_document(load(saved(d, tmp_path)), "policy.docx", chunk="markdown", chunk_size=1000, overlap=0)
+        prepared = prepare_document(
+            load(saved(d, tmp_path)), "policy.docx", chunk="markdown", chunk_size=1000, overlap=0
+        )
         late = next(m for m in prepared.metadata if m.get("heading") == "Late fees")
-        assert (late["page"], late["_vx_citation"], late["_vx_readable_citation"]) == (2, "policy.docx#page=2", "policy.docx, p. 2")
+        assert (late["page"], late["_vx_citation"], late["_vx_readable_citation"]) == (
+            2,
+            "policy.docx#page=2",
+            "policy.docx, p. 2",
+        )
 
 
 # ================================================================ PDF ===
@@ -282,13 +354,29 @@ def text_pdf(pages, outline=(), title=None):
     from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
     writer = pypdf.PdfWriter()
-    font = DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"), NameObject("/BaseFont"): NameObject("/Helvetica")})
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
     for lines in pages:
         page = writer.add_blank_page(width=612, height=792)
-        escaped = [line.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)") for line in lines]
+        escaped = [
+            line.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)") for line in lines
+        ]
         stream = DecodedStreamObject()
-        stream.set_data("\n".join(["BT", "/F1 12 Tf", "16 TL", "72 720 Td"] + [f"({line}) Tj T*" for line in escaped] + ["ET"]).encode("latin-1"))
-        page[NameObject("/Resources")] = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})})
+        stream.set_data(
+            "\n".join(
+                ["BT", "/F1 12 Tf", "16 TL", "72 720 Td"]
+                + [f"({line}) Tj T*" for line in escaped]
+                + ["ET"]
+            ).encode("latin-1")
+        )
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})}
+        )
         page.replace_contents(stream)
     made = {}
     for name, index, parent in outline:
@@ -302,10 +390,18 @@ def text_pdf(pages, outline=(), title=None):
 
 REPORT = [
     ["Annual report 2025", "Who we are and what we do, in brief."],
-    ["Our results were strong this year, and every region grew.", "Message from the CEO", "Dear shareholders, a good year for all of us."],
+    [
+        "Our results were strong this year, and every region grew.",
+        "Message from the CEO",
+        "Dear shareholders, a good year for all of us.",
+    ],
     ["Our strategy", "Three pillars guide the next five years of work."],
 ]
-OUTLINE = [("Annual report 2025", 0, None), ("Message from the CEO", 1, "Annual report 2025"), ("Our strategy", 2, "Annual report 2025")]
+OUTLINE = [
+    ("Annual report 2025", 0, None),
+    ("Message from the CEO", 1, "Annual report 2025"),
+    ("Our strategy", 2, "Annual report 2025"),
+]
 
 
 class TestAPdfsBookmarksAreItsHeadings:
@@ -314,18 +410,26 @@ class TestAPdfsBookmarksAreItsHeadings:
         path.write_bytes(text_pdf(REPORT, OUTLINE, title="Annual Report 2025"))
         doc = load(path)
         assert [(title, level) for _o, title, level in doc.headings] == [
-            ("Annual report 2025", 1), ("Message from the CEO", 2), ("Our strategy", 2),
+            ("Annual report 2025", 1),
+            ("Message from the CEO", 2),
+            ("Our strategy", 2),
         ]
         message = next(o for o, t, _l in doc.headings if t == "Message from the CEO")
-        assert doc.text[message:].startswith("Message from the CEO"), "at its title's line, not at the top of its page"
+        assert doc.text[message:].startswith("Message from the CEO"), (
+            "at its title's line, not at the top of its page"
+        )
         assert doc.metadata["title"] == "Annual Report 2025"
 
     def test_the_chunks_carry_their_section_and_the_title(self, tmp_path):
         path = tmp_path / "report.pdf"
         path.write_bytes(text_pdf(REPORT, OUTLINE, title="Annual Report 2025"))
-        prepared = prepare_document(load(path), "report.pdf", chunk="markdown", chunk_size=1000, overlap=0)
+        prepared = prepare_document(
+            load(path), "report.pdf", chunk="markdown", chunk_size=1000, overlap=0
+        )
         section = {m["heading"]: m for m in prepared.metadata}
-        assert set(section) == {"Annual report 2025", "Message from the CEO", "Our strategy"}, "cut at the sections"
+        assert set(section) == {"Annual report 2025", "Message from the CEO", "Our strategy"}, (
+            "cut at the sections"
+        )
         assert section["Message from the CEO"]["page"] == 2
         assert all(m["title"] == "Annual Report 2025" for m in prepared.metadata)
 
@@ -356,9 +460,18 @@ class TestAPdfsBookmarksAreItsHeadings:
                 offset += len(text) + 2
             return {"text": "\n\n".join(pages), "pages": offsets, "metadata": {"source": name}}
 
-        doc = load_bytes(text_pdf(REPORT, OUTLINE, title="Annual Report 2025"), "report.pdf", extractors={".pdf": batched(service, pages=1, at_once=1)}, source="https://a.blob.core.windows.net/raw/report.pdf")
+        doc = load_bytes(
+            text_pdf(REPORT, OUTLINE, title="Annual Report 2025"),
+            "report.pdf",
+            extractors={".pdf": batched(service, pages=1, at_once=1)},
+            source="https://a.blob.core.windows.net/raw/report.pdf",
+        )
         assert doc.metadata["pieces"] == 3
-        assert [t for _o, t, _l in doc.headings] == ["Annual report 2025", "Message from the CEO", "Our strategy"]
+        assert [t for _o, t, _l in doc.headings] == [
+            "Annual report 2025",
+            "Message from the CEO",
+            "Our strategy",
+        ]
         assert doc.metadata["title"] == "Annual Report 2025"
 
 
@@ -387,25 +500,45 @@ class TestADecksNotesAndTitle:
         from test_table_and_deck_loaders import _slide, make_deck
 
         path = tmp_path / "deck.pptx"
-        make_deck(path, {"slide1.xml": _slide("Bread", ["Sourdough is leavened by wild yeast."]), "slide2.xml": _slide("Rock", ["Basalt."])})
+        make_deck(
+            path,
+            {
+                "slide1.xml": _slide("Bread", ["Sourdough is leavened by wild yeast."]),
+                "slide2.xml": _slide("Rock", ["Basalt."]),
+            },
+        )
         rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide"
         body = '<p:sp><p:nvSpPr><p:cNvPr id="3" name="Notes"/><p:cNvSpPr/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Mention the rye loaf.</a:t></a:r></a:p><a:p><a:r><a:t>It takes twelve hours.</a:t></a:r></a:p></p:txBody></p:sp>'
         number = '<p:sp><p:nvSpPr><p:cNvPr id="4" name="Slide Number"/><p:cNvSpPr/><p:nvPr><p:ph type="sldNum" idx="5"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>1</a:t></a:r></a:p></p:txBody></p:sp>'
         with zipfile.ZipFile(path, "a") as z:
-            z.writestr("ppt/slides/_rels/slide1.xml.rels", f'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId9" Type="{rel}" Target="../notesSlides/notesSlide1.xml"/></Relationships>')
-            z.writestr("ppt/notesSlides/notesSlide1.xml", f'<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree>{body}{number}</p:spTree></p:cSld></p:notes>')
+            z.writestr(
+                "ppt/slides/_rels/slide1.xml.rels",
+                f'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId9" Type="{rel}" Target="../notesSlides/notesSlide1.xml"/></Relationships>',
+            )
+            z.writestr(
+                "ppt/notesSlides/notesSlide1.xml",
+                f'<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree>{body}{number}</p:spTree></p:cSld></p:notes>',
+            )
             if core_title:
-                z.writestr("docProps/core.xml", f'<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{core_title}</dc:title></cp:coreProperties>')
+                z.writestr(
+                    "docProps/core.xml",
+                    f'<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{core_title}</dc:title></cp:coreProperties>',
+                )
         return path
 
     def test_speaker_notes_follow_their_slide(self, tmp_path):
         text = load(self.deck(tmp_path)).text
         slide_one = text.split("# Slide 2")[0].rstrip()
-        assert slide_one.endswith("Speaker notes: Mention the rye loaf.\nIt takes twelve hours."), "and not the notes page's slide number"
+        assert slide_one.endswith("Speaker notes: Mention the rye loaf.\nIt takes twelve hours."), (
+            "and not the notes page's slide number"
+        )
         assert "Speaker notes" not in text.split("# Slide 2")[1], "only the slide that has them"
 
     def test_the_decks_title_else_its_first_slides(self, tmp_path):
-        assert load(self.deck(tmp_path, core_title="Bakery basics")).metadata["title"] == "Bakery basics"
+        assert (
+            load(self.deck(tmp_path, core_title="Bakery basics")).metadata["title"]
+            == "Bakery basics"
+        )
         other = tmp_path / "other"
         other.mkdir()
         assert load(self.deck(other)).metadata["title"] == "Bread"
@@ -439,14 +572,20 @@ class TestAWebPage:
         assert doc.metadata["title"] == "Offline guide" and "Offline guide" not in doc.text
 
     def test_a_page_with_no_title_takes_its_first_heading(self, tmp_path):
-        (tmp_path / "page.html").write_text("<h1>Offline use</h1><p>Nothing downloads.</p>", encoding="utf-8")
+        (tmp_path / "page.html").write_text(
+            "<h1>Offline use</h1><p>Nothing downloads.</p>", encoding="utf-8"
+        )
         assert load(tmp_path / "page.html").metadata["title"] == "Offline use"
 
 
 class TestAMarkdownFilesTitle:
     def test_its_front_matter_else_its_first_top_level_heading(self, tmp_path):
-        (tmp_path / "a.md").write_text("---\ntitle: Lending terms\n---\n\n# Terms\n\nPay in thirty days.\n", encoding="utf-8")
-        (tmp_path / "b.md").write_text("Intro.\n\n## Detail\n\n# Terms\n\nPay in thirty days.\n", encoding="utf-8")
+        (tmp_path / "a.md").write_text(
+            "---\ntitle: Lending terms\n---\n\n# Terms\n\nPay in thirty days.\n", encoding="utf-8"
+        )
+        (tmp_path / "b.md").write_text(
+            "Intro.\n\n## Detail\n\n# Terms\n\nPay in thirty days.\n", encoding="utf-8"
+        )
         (tmp_path / "c.md").write_text("Just words.\n", encoding="utf-8")
         assert load(tmp_path / "a.md").metadata["title"] == "Lending terms"
         assert load(tmp_path / "b.md").metadata["title"] == "Terms"
@@ -471,8 +610,21 @@ class TestThroughTheExtractionApp:
         t.cell(0, 0).text, t.cell(0, 1).text = "Region", "Revenue"
         t.cell(1, 0).text, t.cell(1, 1).text = "EMEA", "1200"
         app = TestClient(create_extraction_app(ExtractionService(), allow_open=True))
-        reply = app.post("/extract/docx", content=saved(d, tmp_path).read_bytes(), headers={"X-Filename": "policy.docx", "Accept": "application/json"}).json()
-        assert reply["metadata"]["title"] == "Lending Policy 2025" and "Region: EMEA; Revenue: 1200" in reply["text"]
-        prepared = prepare_document(coerce(reply, "policy.docx"), "policy.docx", chunk="markdown", chunk_size=1000, overlap=0)
+        reply = app.post(
+            "/extract/docx",
+            content=saved(d, tmp_path).read_bytes(),
+            headers={"X-Filename": "policy.docx", "Accept": "application/json"},
+        ).json()
+        assert (
+            reply["metadata"]["title"] == "Lending Policy 2025"
+            and "Region: EMEA; Revenue: 1200" in reply["text"]
+        )
+        prepared = prepare_document(
+            coerce(reply, "policy.docx"),
+            "policy.docx",
+            chunk="markdown",
+            chunk_size=1000,
+            overlap=0,
+        )
         assert all(m["title"] == "Lending Policy 2025" for m in prepared.metadata)
         assert any("Region: EMEA; Revenue: 1200" in text for text in prepared.texts)

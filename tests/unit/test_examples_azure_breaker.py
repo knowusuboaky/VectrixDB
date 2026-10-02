@@ -19,8 +19,10 @@ import pytest
 
 MAIN_FUNCTION_APP = Path(__file__).resolve().parents[2] / "examples" / "azure" / "main_function_app"
 if not MAIN_FUNCTION_APP.exists():
-    pytest.skip("examples/ is kept on the machine that runs it, not in the repository", allow_module_level=True)
-
+    pytest.skip(
+        "examples/ is kept on the machine that runs it, not in the repository",
+        allow_module_level=True,
+    )
 
 
 @pytest.fixture
@@ -35,7 +37,13 @@ def br(monkeypatch):
 
     clock = types.SimpleNamespace(now=1000.0)
     blobs = FakeBlobService()
-    made = breaker.Breaker(breaker.state_files(blobs), "extraction app", threshold=3, open_for=60, clock=lambda: clock.now)
+    made = breaker.Breaker(
+        breaker.state_files(blobs),
+        "extraction app",
+        threshold=3,
+        open_for=60,
+        clock=lambda: clock.now,
+    )
     return types.SimpleNamespace(module=breaker, breaker=made, clock=clock, blobs=blobs)
 
 
@@ -48,8 +56,16 @@ def test_it_opens_at_the_threshold_and_lets_one_probe_through_after_the_window(b
     b.record_failure("/extract/pdf answered 503 for a.pdf")
     assert not b.allow() and ("ingestion", "state/extraction-app.json") in br.blobs.blobs
     said = b.status()
-    assert said["paused"] is True and said["failures"] == 3 and said["since"] == "1970-01-01T00:16:40Z" and said["until"] == "1970-01-01T00:17:40Z"
-    assert "has not answered since 1970-01-01T00:16:40Z, 3 reads in a row; the next try is at 1970-01-01T00:17:40Z" in said["said"]
+    assert (
+        said["paused"] is True
+        and said["failures"] == 3
+        and said["since"] == "1970-01-01T00:16:40Z"
+        and said["until"] == "1970-01-01T00:17:40Z"
+    )
+    assert (
+        "has not answered since 1970-01-01T00:16:40Z, 3 reads in a row; the next try is at 1970-01-01T00:17:40Z"
+        in said["said"]
+    )
     br.clock.now += 30
     assert not b.allow(), "still inside the window"
     br.clock.now += 31
@@ -64,14 +80,32 @@ def test_a_probe_that_reads_closes_it_and_one_that_fails_opens_it_again(br):
         b.record_failure("timed out")
     br.clock.now += 61
     assert b.allow()
-    assert b.record_success() is True and b.allow() and b.status() == {"dependency": "extraction app", "paused": False, "probing": False, "since": None, "until": None, "failures": 0, "last_error": None, "said": "the extraction app is answering"}
+    assert (
+        b.record_success() is True
+        and b.allow()
+        and b.status()
+        == {
+            "dependency": "extraction app",
+            "paused": False,
+            "probing": False,
+            "since": None,
+            "until": None,
+            "failures": 0,
+            "last_error": None,
+            "said": "the extraction app is answering",
+        }
+    )
     assert b.record_success() is False, "nothing to clear"
     for _ in range(3):
         b.record_failure("timed out")
     br.clock.now += 61
     assert b.allow()
     b.record_failure("timed out again")
-    assert not b.allow() and b.status()["failures"] == 4 and b.status()["since"] == "1970-01-01T00:18:42Z", "open again, from the probe's failure"
+    assert (
+        not b.allow()
+        and b.status()["failures"] == 4
+        and b.status()["since"] == "1970-01-01T00:18:42Z"
+    ), "open again, from the probe's failure"
     br.clock.now += 61
     assert b.allow(), "and the next window gives another probe"
 
@@ -86,14 +120,17 @@ def test_a_probe_an_instance_died_with_is_not_a_lock(br):
     assert b.allow(), "a probe that never reported back gives way to another after a window"
 
 
-@pytest.mark.parametrize("error, transient", [
-    ("/extract/pdf could not be reached: [Errno 111] Connection refused", True),
-    ("/extract/pdf answered 503 for a.pdf: busy", True),
-    ("/extract/pdf answered 429 for a.pdf", True),
-    ("read timed out", True),
-    ("/extract/pdf answered 500 for a.pdf: model not loaded", False),
-    ("the reply for a.pdf has no text", False),
-    ("", False),
-])
+@pytest.mark.parametrize(
+    "error, transient",
+    [
+        ("/extract/pdf could not be reached: [Errno 111] Connection refused", True),
+        ("/extract/pdf answered 503 for a.pdf: busy", True),
+        ("/extract/pdf answered 429 for a.pdf", True),
+        ("read timed out", True),
+        ("/extract/pdf answered 500 for a.pdf: model not loaded", False),
+        ("the reply for a.pdf has no text", False),
+        ("", False),
+    ],
+)
 def test_only_a_read_that_could_not_reach_the_app_counts(br, error, transient):
     assert br.module.is_transient(error) is transient

@@ -168,7 +168,9 @@ _LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
 #: The emergency admin's password is typed rarely and kept in a vault, so it can afford to be long.
 BREAK_GLASS_MIN_PASSWORD = 24
 #: A hash as ``passwords.hash_password`` writes it: scrypt, its three costs, the salt and the digest.
-_SCRYPT_HASH = re.compile(r"^scrypt\$\d{1,9}\$\d{1,3}\$\d{1,3}\$[A-Za-z0-9_-]{16,}\$[A-Za-z0-9_-]{32,}$")
+_SCRYPT_HASH = re.compile(
+    r"^scrypt\$\d{1,9}\$\d{1,3}\$\d{1,3}\$[A-Za-z0-9_-]{16,}\$[A-Za-z0-9_-]{32,}$"
+)
 _USERNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$")
 logger = logging.getLogger("vectrixdb.signin")
 
@@ -194,7 +196,9 @@ def _per_minute(env: Mapping[str, str], name: str) -> Optional[int]:
     except ValueError:
         number = 0
     if number < 1:
-        raise ConfigurationError(f"{name} is a whole number of requests a minute, 1 or more. It is {given!r}")
+        raise ConfigurationError(
+            f"{name} is a whole number of requests a minute, 1 or more. It is {given!r}"
+        )
     return number
 
 
@@ -209,7 +213,7 @@ def _json_env(env: Mapping[str, str], name: str) -> dict:
     try:
         value = json.loads(raw)
     except ValueError as exc:
-        raise ConfigurationError(f"{name} must be JSON, for example {{\"group\": \"admin\"}}") from exc
+        raise ConfigurationError(f'{name} must be JSON, for example {{"group": "admin"}}') from exc
     if not isinstance(value, dict):
         raise ConfigurationError(f"{name} must be a JSON object")
     return value
@@ -267,9 +271,13 @@ def break_glass_hash(password: str, admin: Optional[str] = None) -> str:
 def _until(given: str) -> float:
     text = given.strip()
     try:
-        moment = datetime.fromisoformat(text[:-1] + "+00:00" if text.upper().endswith("Z") else text)
+        moment = datetime.fromisoformat(
+            text[:-1] + "+00:00" if text.upper().endswith("Z") else text
+        )
     except ValueError as exc:
-        raise ConfigurationError(f"VECTRIXDB_BREAK_GLASS_UNTIL is {given!r}. Write it in UTC, for example 2026-09-28T02:00Z") from exc
+        raise ConfigurationError(
+            f"VECTRIXDB_BREAK_GLASS_UNTIL is {given!r}. Write it in UTC, for example 2026-09-28T02:00Z"
+        ) from exc
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     return moment.timestamp()
@@ -278,14 +286,22 @@ def _until(given: str) -> float:
 def _break_glass(env: Mapping[str, str], methods: tuple) -> Optional[BreakGlass]:
     if not _on(env, "VECTRIXDB_BREAK_GLASS"):
         return None
-    if str(env.get("VECTRIXDB_BREAK_GLASS_PASSWORD", "") or "").strip() or str(env.get("VECTRIXDB_BREAK_GLASS_PASSWORD_FILE", "") or "").strip():
+    if (
+        str(env.get("VECTRIXDB_BREAK_GLASS_PASSWORD", "") or "").strip()
+        or str(env.get("VECTRIXDB_BREAK_GLASS_PASSWORD_FILE", "") or "").strip()
+    ):
         raise ConfigurationError(
             "VECTRIXDB_BREAK_GLASS_PASSWORD holds the password itself, and the settings keep only its hash. Make the hash with: "
             "vectrixdb break-glass hash. Set it as VECTRIXDB_BREAK_GLASS_PASSWORD_HASH, keep the password in a key vault, and "
             "take VECTRIXDB_BREAK_GLASS_PASSWORD out"
         )
-    if str(env.get("VECTRIXDB_BREAK_GLASS_TOTP", "") or "").strip() or str(env.get("VECTRIXDB_BREAK_GLASS_TOTP_FILE", "") or "").strip():
-        raise ConfigurationError("Emergency sign-in takes no authenticator code: take VECTRIXDB_BREAK_GLASS_TOTP out")
+    if (
+        str(env.get("VECTRIXDB_BREAK_GLASS_TOTP", "") or "").strip()
+        or str(env.get("VECTRIXDB_BREAK_GLASS_TOTP_FILE", "") or "").strip()
+    ):
+        raise ConfigurationError(
+            "Emergency sign-in takes no authenticator code: take VECTRIXDB_BREAK_GLASS_TOTP out"
+        )
     admin = env.get("VECTRIXDB_BREAK_GLASS_ADMIN", "").strip()
     hashed = (env_secret(env, "VECTRIXDB_BREAK_GLASS_PASSWORD_HASH") or "").strip()
     until = env.get("VECTRIXDB_BREAK_GLASS_UNTIL", "").strip()
@@ -299,16 +315,23 @@ def _break_glass(env: Mapping[str, str], methods: tuple) -> Optional[BreakGlass]
         if not value
     ]
     if missing:
-        raise ConfigurationError(f"VECTRIXDB_BREAK_GLASS is on, and it needs {', '.join(missing)} too")
+        raise ConfigurationError(
+            f"VECTRIXDB_BREAK_GLASS is on, and it needs {', '.join(missing)} too"
+        )
     if not _USERNAME.match(admin):
-        raise ConfigurationError(f"VECTRIXDB_BREAK_GLASS_ADMIN is {admin!r}. Use letters, digits, dots, dashes and @, 64 at most")
+        raise ConfigurationError(
+            f"VECTRIXDB_BREAK_GLASS_ADMIN is {admin!r}. Use letters, digits, dots, dashes and @, 64 at most"
+        )
     if not _SCRYPT_HASH.match(hashed):
         raise ConfigurationError(
             "VECTRIXDB_BREAK_GLASS_PASSWORD_HASH is not a hash this server made. It starts scrypt$ and comes from: vectrixdb break-glass hash"
         )
     glass = BreakGlass(admin=admin, password_hash=hashed, until=_until(until))
     if not glass.open():
-        logger.warning("emergency sign-in turned itself off at %s, so it is off. Remove VECTRIXDB_BREAK_GLASS, or set a later VECTRIXDB_BREAK_GLASS_UNTIL", glass.until_iso)
+        logger.warning(
+            "emergency sign-in turned itself off at %s, so it is off. Remove VECTRIXDB_BREAK_GLASS, or set a later VECTRIXDB_BREAK_GLASS_UNTIL",
+            glass.until_iso,
+        )
     return glass
 
 
@@ -332,7 +355,9 @@ class DeveloperAccess:
     password: str = field(repr=False)
 
 
-def _developer_access(env: Mapping[str, str], public_url: Optional[str], methods: tuple = ()) -> Optional[DeveloperAccess]:
+def _developer_access(
+    env: Mapping[str, str], public_url: Optional[str], methods: tuple = ()
+) -> Optional[DeveloperAccess]:
     from urllib.parse import urlsplit
 
     if not _on(env, "VECTRIXDB_DEVELOPER_ACCESS"):
@@ -360,10 +385,14 @@ def _developer_access(env: Mapping[str, str], public_url: Optional[str], methods
             raise ConfigurationError(f"VECTRIXDB_DEVELOPER_USERS names {name} twice")
         accounts[name.lower()] = role
     if not accounts:
-        raise ConfigurationError("VECTRIXDB_DEVELOPER_ACCESS is on and VECTRIXDB_DEVELOPER_USERS names nobody: admin.user:admin, say")
+        raise ConfigurationError(
+            "VECTRIXDB_DEVELOPER_ACCESS is on and VECTRIXDB_DEVELOPER_USERS names nobody: admin.user:admin, say"
+        )
     password = env_secret(env, "VECTRIXDB_DEVELOPER_PASSWORD") or ""
     if not password:
-        raise ConfigurationError("VECTRIXDB_DEVELOPER_ACCESS is on and VECTRIXDB_DEVELOPER_PASSWORD is not set. There is no default password")
+        raise ConfigurationError(
+            "VECTRIXDB_DEVELOPER_ACCESS is on and VECTRIXDB_DEVELOPER_PASSWORD is not set. There is no default password"
+        )
     return DeveloperAccess(accounts=accounts, password=password)
 
 
@@ -380,7 +409,9 @@ def _recheck_days(env: Mapping[str, str], methods: tuple) -> Optional[int]:
     except ValueError:
         days = 0
     if days < 1:
-        raise ConfigurationError(f"VECTRIXDB_SSO_RECHECK_DAYS is a whole number of days, 1 or more. It is {given!r}")
+        raise ConfigurationError(
+            f"VECTRIXDB_SSO_RECHECK_DAYS is a whole number of days, 1 or more. It is {given!r}"
+        )
     return days
 
 
@@ -442,7 +473,9 @@ class SignInConfig:
         if "oidc" in self.methods or self.sso_pending:
             self.own_passkeys = False
         if self.require_passkey and not self.own_passkeys:
-            raise ConfigurationError("VECTRIXDB_SIGNIN_REQUIRE=passkey is for a server with no single sign-on, where people keep passkeys: VECTRIXDB_SIGNIN=email")
+            raise ConfigurationError(
+                "VECTRIXDB_SIGNIN_REQUIRE=passkey is for a server with no single sign-on, where people keep passkeys: VECTRIXDB_SIGNIN=email"
+            )
 
     @property
     def enabled(self) -> bool:
@@ -468,17 +501,27 @@ class SignInConfig:
     @classmethod
     def from_env(cls, db_path: Any, env: Optional[Mapping[str, str]] = None) -> "SignInConfig":
         env = os.environ if env is None else env
-        methods = tuple(m.strip().lower() for m in env.get("VECTRIXDB_SIGNIN", "").split(",") if m.strip())
+        methods = tuple(
+            m.strip().lower() for m in env.get("VECTRIXDB_SIGNIN", "").split(",") if m.strip()
+        )
         if not methods:
             if _on(env, "VECTRIXDB_BREAK_GLASS"):
-                raise ConfigurationError("VECTRIXDB_BREAK_GLASS is on and sign-in is not: it is for while the usual sign-in is down, so set VECTRIXDB_SIGNIN")
+                raise ConfigurationError(
+                    "VECTRIXDB_BREAK_GLASS is on and sign-in is not: it is for while the usual sign-in is down, so set VECTRIXDB_SIGNIN"
+                )
             if not _on(env, "VECTRIXDB_DEVELOPER_ACCESS"):
                 return cls()
             # Developer Access alone still signs people in, so it needs what any sign-in needs.
         unknown = [m for m in methods if m not in METHODS]
         if unknown:
-            raise ConfigurationError(f"VECTRIXDB_SIGNIN names {unknown[0]!r}. The ways to sign in are {' and '.join(METHODS)}")
-        secrets_ = tuple(s.strip() for s in (env_secret(env, "VECTRIXDB_SIGNIN_SECRET") or "").split(",") if s.strip())
+            raise ConfigurationError(
+                f"VECTRIXDB_SIGNIN names {unknown[0]!r}. The ways to sign in are {' and '.join(METHODS)}"
+            )
+        secrets_ = tuple(
+            s.strip()
+            for s in (env_secret(env, "VECTRIXDB_SIGNIN_SECRET") or "").split(",")
+            if s.strip()
+        )
         if not secrets_:
             raise ConfigurationError(
                 "sign-in is on, so VECTRIXDB_SIGNIN_SECRET is needed: 32 characters or more, the same on every restart. "
@@ -488,16 +531,26 @@ class SignInConfig:
         # Single sign-on asked for, and neither the provider nor the client named: not set up yet.
         # The page draws its button, says so, and a code by email is the way in until both are given.
         # One without the other is a mistake, and is said as one below.
-        pending = "oidc" in methods and not env.get("VECTRIXDB_OIDC_ISSUER", "").strip() and not env.get("VECTRIXDB_OIDC_CLIENT_ID", "").strip()
+        pending = (
+            "oidc" in methods
+            and not env.get("VECTRIXDB_OIDC_ISSUER", "").strip()
+            and not env.get("VECTRIXDB_OIDC_CLIENT_ID", "").strip()
+        )
         if pending:
             methods = tuple(m for m in methods if m != "oidc")
             if "email" not in methods:
                 methods += ("email",)
         if _on(env, "VECTRIXDB_ADMINS_USE_SSO") and "oidc" not in asked:
-            raise ConfigurationError("VECTRIXDB_ADMINS_USE_SSO needs single sign-on on: VECTRIXDB_SIGNIN=oidc,email")
+            raise ConfigurationError(
+                "VECTRIXDB_ADMINS_USE_SSO needs single sign-on on: VECTRIXDB_SIGNIN=oidc,email"
+            )
         public_url = env.get("VECTRIXDB_PUBLIC_URL", "").strip().rstrip("/") or None
-        if public_url and not public_url.startswith(("https://", "http://localhost", "http://127.0.0.1")):
-            raise ConfigurationError("VECTRIXDB_PUBLIC_URL must be https, because the session cookie is only sent over https")
+        if public_url and not public_url.startswith(
+            ("https://", "http://localhost", "http://127.0.0.1")
+        ):
+            raise ConfigurationError(
+                "VECTRIXDB_PUBLIC_URL must be https, because the session cookie is only sent over https"
+            )
 
         if not public_url:
             raise ConfigurationError(
@@ -520,7 +573,13 @@ class SignInConfig:
                 groups_url=env.get("VECTRIXDB_OIDC_GROUPS_URL", "").strip() or None,
                 label=env.get("VECTRIXDB_OIDC_LABEL", "").strip() or "Continue with SSO",
                 grant_map=_json_env(env, "VECTRIXDB_OIDC_GRANT_MAP"),
-                allowed_emails=tuple(e for e in env.get("VECTRIXDB_OIDC_ALLOWED_EMAILS", "").replace(";", ",").split(",") if e.strip()),
+                allowed_emails=tuple(
+                    e
+                    for e in env.get("VECTRIXDB_OIDC_ALLOWED_EMAILS", "")
+                    .replace(";", ",")
+                    .split(",")
+                    if e.strip()
+                ),
                 api_audience=env.get("VECTRIXDB_OIDC_API_AUDIENCE", "").strip() or None,
                 token_role=env.get("VECTRIXDB_OIDC_TOKEN_ROLE", "").strip().lower() or None,
                 client_key=env_secret(env, "VECTRIXDB_OIDC_CLIENT_KEY"),
@@ -541,14 +600,22 @@ class SignInConfig:
 
         require = env.get("VECTRIXDB_SIGNIN_REQUIRE", "").strip().lower()
         if require not in ("", "passkey"):
-            raise ConfigurationError(f"VECTRIXDB_SIGNIN_REQUIRE is {require!r}. It can be passkey, or left unset")
+            raise ConfigurationError(
+                f"VECTRIXDB_SIGNIN_REQUIRE is {require!r}. It can be passkey, or left unset"
+            )
         if require and ("email" not in asked or "oidc" in asked):
-            raise ConfigurationError("VECTRIXDB_SIGNIN_REQUIRE=passkey is for people on this server's own list: VECTRIXDB_SIGNIN=email")
+            raise ConfigurationError(
+                "VECTRIXDB_SIGNIN_REQUIRE=passkey is for people on this server's own list: VECTRIXDB_SIGNIN=email"
+            )
         if require and _on(env, "VECTRIXDB_SIGNIN_PASSWORDS"):
-            raise ConfigurationError("VECTRIXDB_SIGNIN_REQUIRE=passkey and VECTRIXDB_SIGNIN_PASSWORDS=on disagree: a passkey needs no password. Choose one")
+            raise ConfigurationError(
+                "VECTRIXDB_SIGNIN_REQUIRE=passkey and VECTRIXDB_SIGNIN_PASSWORDS=on disagree: a passkey needs no password. Choose one"
+            )
         samesite = env.get("VECTRIXDB_COOKIE_SAMESITE", "").strip().lower() or None
         if samesite not in (None, "strict", "lax"):
-            raise ConfigurationError(f"VECTRIXDB_COOKIE_SAMESITE is {samesite!r}. It can be strict or lax")
+            raise ConfigurationError(
+                f"VECTRIXDB_COOKIE_SAMESITE is {samesite!r}. It can be strict or lax"
+            )
         access = env.get("VECTRIXDB_ACCESS_LOG", "").strip()
         store_url = env_secret(env, "VECTRIXDB_SIGNIN_STORE")
         if store_url and store_url.strip().lower() == "sqlite":
@@ -557,7 +624,10 @@ class SignInConfig:
         # The sign-in folder sits beside the collections unless it is put somewhere
         # of its own, which it needs when the collections live in a service and
         # the local disk does not last.
-        root = Path(env.get("VECTRIXDB_AUTH_PATH", "").strip() or Path(db_path or "./vectrixdb_data") / "auth")
+        root = Path(
+            env.get("VECTRIXDB_AUTH_PATH", "").strip()
+            or Path(db_path or "./vectrixdb_data") / "auth"
+        )
         return cls(
             methods=methods,
             secrets=secrets_,

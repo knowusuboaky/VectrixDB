@@ -160,7 +160,9 @@ def written_to(blobs: Any, name: str) -> Dict[str, Any]:
     from vectrixdb.documents import BlobFiles, DocumentStore
 
     return {
-        "keep_source": DocumentStore(BlobFiles(blobs, CONTAINER, prefix=f"{MARKDOWN}/{name}"), keep_deleted=False),
+        "keep_source": DocumentStore(
+            BlobFiles(blobs, CONTAINER, prefix=f"{MARKDOWN}/{name}"), keep_deleted=False
+        ),
         "keep_chunks": BlobFiles(blobs, CONTAINER, prefix=f"{CHUNKS}/{name}"),
         "markdown_first": True,
     }

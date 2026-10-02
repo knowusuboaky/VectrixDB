@@ -147,6 +147,11 @@ and `GET /` reports `auth_enabled` so you can tell which mode a server is in.
 from files, and `VECTRIXDB_API_KEY_SHA256` and
 `VECTRIXDB_READ_ONLY_API_KEY_SHA256` take a key's SHA-256 in place of the key,
 so the server's environment never holds one that works.
+With a key and no sign-in, a read still needs no key: anyone who reaches the
+port lists the collections and reads the points, text and vectors included.
+`VECTRIXDB_OPEN_READS=0` closes that, so every read, and the live feed at
+`/ws`, asks for the full or the read-only key; only `/`, `/health`,
+`/auth/status`, `/openapi.json` and the dashboard's own files stay public.
 With sign-in on, an admin can also make named keys for scripts, each with its
 own role, shown once and revoked on its own: see
 [Sign people in](sign-in.md#api-keys).

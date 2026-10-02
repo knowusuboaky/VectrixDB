@@ -2,7 +2,7 @@
 
 # Settings
 
-Every setting VectrixDB reads, 149 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
+Every setting VectrixDB reads, 150 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
 
 ## The server
 
@@ -33,6 +33,7 @@ Every setting VectrixDB reads, 149 of them, each an environment variable. `vectr
 | `VECTRIXDB_API_KEY_SHA256` | The full key given as its SHA-256, so the key itself is never on the server. |  |
 | `VECTRIXDB_READ_ONLY_API_KEY` | A key that reads and never writes. (a secret, or `VECTRIXDB_READ_ONLY_API_KEY_FILE`) |  |
 | `VECTRIXDB_READ_ONLY_API_KEY_SHA256` | The read-only key as its SHA-256. |  |
+| `VECTRIXDB_OPEN_READS` | With a key and no sign-in: 0 makes every read ask for the full or the read-only key, the dashboard's live feed too. On unless set, so a read needs no key. | `1` |
 
 ## Sign-in
 

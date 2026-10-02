@@ -10,6 +10,8 @@ need more than one passage. Extraction uses the bundled rule-based
 extractor; install the nlp extra for spaCy, or pass an LLM extractor.
 """
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

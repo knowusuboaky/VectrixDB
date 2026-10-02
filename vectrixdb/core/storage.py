@@ -141,6 +141,11 @@ _NOT_FOUND_NAMES = frozenset(
 
 _INTERNAL_DATABASES = frozenset({"_meta", "_documents", "_nodes"})
 
+#: Every ``<name>.db`` in the database directory that is not a collection's:
+#: the internal ones above and VectrixDB's own catalogue. A collection by one
+#: of these names shared, and on delete removed, that file.
+RESERVED_DATABASE_NAMES = _INTERNAL_DATABASES | frozenset({"_vectrixdb"})
+
 
 def _is_not_found(exc: BaseException) -> bool:
     """True when ``exc`` means "the thing you asked for does not exist".
@@ -439,6 +444,16 @@ class StorageConfig:
 #: checked rather than parameterised, and the check is deliberately narrow:
 #: letters, digits and underscores, starting with a letter or underscore.
 _ROLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+
+
+def _pg_ident(name: str) -> str:
+    """``name`` as a quoted PostgreSQL identifier.
+
+    Identifiers cannot be bind parameters. Quoting alone let a name with a
+    double quote in it end the identifier and the statement with it; an
+    embedded quote is doubled, which is how PostgreSQL escapes one.
+    """
+    return '"' + str(name).replace('"', '""') + '"'
 
 
 def _quoted_role(role: str) -> str:
@@ -1204,6 +1219,9 @@ class SQLiteStorage(BaseStorage):
         self._local = threading.local()
 
         self._all_connections: List[Tuple[str, sqlite3.Connection]] = []
+        # id() of each connection in _all_connections, so a thread can tell
+        # in O(1) that its cached one was closed by another thread.
+        self._live_connections: set = set()
 
         self._lock = threading.RLock()
 
@@ -1247,6 +1265,13 @@ class SQLiteStorage(BaseStorage):
     def _get_connection(self, collection: str) -> sqlite3.Connection:
 
         with self._lock:
+            # delete_collection() and close() close every thread's connection
+            # but can only clear their own thread's cache. One closed from
+            # another thread is no longer in _all_connections; open afresh
+            # rather than fail with "Cannot operate on a closed database".
+            cached = self._connections.get(collection)
+            if cached is not None and id(cached) not in self._live_connections:
+                del self._connections[collection]
             if collection not in self._connections:
                 db_path = self.path / f"{collection}.db"
 
@@ -1315,6 +1340,7 @@ class SQLiteStorage(BaseStorage):
 
                 with self._lock:
                     self._all_connections.append((collection, conn))
+                    self._live_connections.add(id(conn))
 
             return self._connections[collection]
 
@@ -1334,6 +1360,7 @@ class SQLiteStorage(BaseStorage):
                 conn.close()
 
             self._all_connections.clear()
+            self._live_connections.clear()
 
             self._connections.clear()
 
@@ -1362,6 +1389,11 @@ class SQLiteStorage(BaseStorage):
 
         main_db.commit()
 
+        # Never the internal files, which a collection of the same name (made
+        # before such names were refused) would otherwise unlink.
+        if name.lower() in RESERVED_DATABASE_NAMES:
+            return
+
         # Close and delete collection database
 
         with self._lock:
@@ -1369,6 +1401,7 @@ class SQLiteStorage(BaseStorage):
                 entry[1].close()
 
                 self._all_connections.remove(entry)
+                self._live_connections.discard(id(entry[1]))
 
             self._connections.pop(name, None)
 
@@ -1647,10 +1680,16 @@ class SQLiteStorage(BaseStorage):
     def vector_search(
         self, collection: str, query_vector: List[float], limit: int = 10
     ) -> List[Tuple[str, Dict[str, Any], float]]:
-        """Dense vector search by cosine, over the blob column in one NumPy pass.
+        """Dense vector search over the blob column in one NumPy pass, by the
+        collection's own metric: cosine, euclidean, dot or manhattan.
 
         This is the fallback for when the ANN index is empty; it used to walk
-        every row in Python and sum products in a loop.
+        every row in Python and sum products in a loop, and it measured by
+        cosine whatever the collection was made with, so a euclidean
+        collection ranked and scored differently here than from its index.
+        The distance is what the index's would be: cosine and dot as
+        ``1 - similarity``, euclidean squared (as hnswlib and usearch report
+        it), manhattan as the sum.
         """
         conn = self._get_connection(collection)
         rows = conn.execute("SELECT id, data, vector FROM documents ORDER BY rowid").fetchall()
@@ -1677,15 +1716,26 @@ class SQLiteStorage(BaseStorage):
             return []
         matrix = np.vstack(vectors)
         query = np.asarray(query_vector, dtype=np.float32)
-        q_norm = np.linalg.norm(query)
-        norms = np.linalg.norm(matrix, axis=1)
-        if q_norm == 0:
-            return []
-        valid = norms > 0
-        similarity = np.zeros(len(ids), dtype=np.float32)
-        similarity[valid] = (matrix[valid] @ query) / (norms[valid] * q_norm)
-        order = np.argsort(-similarity)[:limit]
-        return [(ids[i], payloads[i], float(1.0 - similarity[i])) for i in order if valid[i]]
+        config = self.get_collection_config(collection) or {}
+        metric = str(config.get("metric") or "cosine").lower()
+        valid = np.ones(len(ids), dtype=bool)
+        if metric == "euclidean":
+            distance = ((matrix - query) ** 2).sum(axis=1)
+        elif metric == "manhattan":
+            distance = np.abs(matrix - query).sum(axis=1)
+        elif metric == "dot":
+            distance = 1.0 - (matrix @ query)
+        else:
+            q_norm = np.linalg.norm(query)
+            norms = np.linalg.norm(matrix, axis=1)
+            if q_norm == 0:
+                return []
+            valid = norms > 0
+            similarity = np.zeros(len(ids), dtype=np.float32)
+            similarity[valid] = (matrix[valid] @ query) / (norms[valid] * q_norm)
+            distance = 1.0 - similarity
+        order = np.argsort(distance, kind="stable")[: limit + int((~valid).sum())]
+        return [(ids[i], payloads[i], float(distance[i])) for i in order if valid[i]][:limit]
 
     def hybrid_search(
         self,
@@ -3070,10 +3120,10 @@ GRANT SELECT ON {table} TO {role};
 
         schema = self.config.lakebase_schema or "public"
 
-        collections_table = f'"{schema}"._vectrix_collections'
+        collections_table = f"{_pg_ident(schema)}._vectrix_collections"
 
         with self._conn.cursor() as cur:
-            cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_pg_ident(schema)}")
 
             cur.execute(f"""
 
@@ -3127,7 +3177,7 @@ GRANT SELECT ON {table} TO {role};
 
                 schema = self.config.lakebase_schema or "public"
 
-                table_ref = f'"{schema}"."{name}"'
+                table_ref = f"{_pg_ident(schema)}.{_pg_ident(name)}"
 
                 # Get config from collection if not provided
 
@@ -3178,7 +3228,7 @@ GRANT SELECT ON {table} TO {role};
                 if not existing_columns:
                     # Ensure schema exists
 
-                    cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+                    cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_pg_ident(schema)}")
 
                     cur.execute(f"""
 
@@ -3235,7 +3285,7 @@ GRANT SELECT ON {table} TO {role};
                 try:
                     cur.execute(f"""
 
-                        CREATE INDEX IF NOT EXISTS "{name}_dense_idx"
+                        CREATE INDEX IF NOT EXISTS {_pg_ident(name + "_dense_idx")}
 
                         ON {table_ref} USING hnsw (dense_embedding vector_cosine_ops)
 
@@ -3249,7 +3299,7 @@ GRANT SELECT ON {table} TO {role};
                 try:
                     cur.execute(f"""
 
-                        CREATE INDEX IF NOT EXISTS "{name}_metadata_idx"
+                        CREATE INDEX IF NOT EXISTS {_pg_ident(name + "_metadata_idx")}
 
                         ON {table_ref} USING GIN (metadata)
 
@@ -3263,7 +3313,7 @@ GRANT SELECT ON {table} TO {role};
                 try:
                     cur.execute(f"""
 
-                        CREATE INDEX IF NOT EXISTS "{name}_sparse_idx"
+                        CREATE INDEX IF NOT EXISTS {_pg_ident(name + "_sparse_idx")}
 
                         ON {table_ref} USING GIN (sparse_embedding)
 
@@ -3323,7 +3373,7 @@ GRANT SELECT ON {table} TO {role};
 
         schema = self.config.lakebase_schema or "public"
 
-        table_ref = f'"{schema}"."{name}"'
+        table_ref = f"{_pg_ident(schema)}.{_pg_ident(name)}"
 
         collections_table = self._collections_table_ref()
 
@@ -3391,7 +3441,7 @@ GRANT SELECT ON {table} TO {role};
 
                 schema = self.config.lakebase_schema or "public"
 
-                table_ref = f'"{schema}"."{collection}"'
+                table_ref = f"{_pg_ident(schema)}.{_pg_ident(collection)}"
 
                 cur.execute(
                     f"""
@@ -3520,7 +3570,7 @@ GRANT SELECT ON {table} TO {role};
 
         schema = self.config.lakebase_schema or "public"
 
-        return f'"{schema}"."{name}"'
+        return f"{_pg_ident(schema)}.{_pg_ident(name)}"
 
     def insert_batch(self, collection: str, documents: List[Tuple[str, Dict[str, Any]]]) -> int:
 
@@ -4236,21 +4286,21 @@ GRANT SELECT ON {table} TO {role};
 
         schema = self.config.lakebase_schema or "public"
 
-        return f'"{schema}"._vectrix_collections'
+        return f"{_pg_ident(schema)}._vectrix_collections"
 
     def _doc_table_ref(self) -> str:
         """Get schema-qualified document table reference."""
 
         schema = self.config.lakebase_schema or "public"
 
-        return f'"{schema}"._vectrix_documents'
+        return f"{_pg_ident(schema)}._vectrix_documents"
 
     def _node_table_ref(self) -> str:
         """Get schema-qualified node table reference."""
 
         schema = self.config.lakebase_schema or "public"
 
-        return f'"{schema}"._vectrix_nodes'
+        return f"{_pg_ident(schema)}._vectrix_nodes"
 
     def ensure_document_tables(self) -> None:
         """Create document and node tables if they don't exist."""
@@ -4265,7 +4315,7 @@ GRANT SELECT ON {table} TO {role};
             with self._conn.cursor() as cur:
                 # Ensure schema exists
 
-                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+                cur.execute(f"CREATE SCHEMA IF NOT EXISTS {_pg_ident(schema)}")
 
                 # Documents table
 
@@ -5718,9 +5768,6 @@ class DeltaLakeStorage(BaseStorage):
             return 0  # Delta Lake doesn't return row count easily
 
 
-
-
-
 # ============================================================================
 # PROMOTED FILTER FIELDS
 # ============================================================================
@@ -5756,20 +5803,30 @@ def _promoted_value(data: Dict[str, Any], path: str, kind: str) -> Any:
     if node is None:
         return None
     if kind == "string":
-        return str(node) if isinstance(node, (str, int, float)) and not isinstance(node, bool) else None
+        return (
+            str(node)
+            if isinstance(node, (str, int, float)) and not isinstance(node, bool)
+            else None
+        )
     if kind == "strings":
         values = node if isinstance(node, (list, tuple, set)) else [node]
-        out = [str(v) for v in values if isinstance(v, (str, int, float)) and not isinstance(v, bool)]
+        out = [
+            str(v) for v in values if isinstance(v, (str, int, float)) and not isinstance(v, bool)
+        ]
         return out or None
     if kind == "number":
-        return float(node) if isinstance(node, (int, float)) and not isinstance(node, bool) else None
+        return (
+            float(node) if isinstance(node, (int, float)) and not isinstance(node, bool) else None
+        )
     if kind == "boolean":
         return node if isinstance(node, bool) else None
     return None
 
 
 # Which vectors answer the OpenSearch search in progress, and the question's words.
-_OS_SELECTION: "contextvars.ContextVar[Any]" = contextvars.ContextVar("vectrixdb_opensearch_vectors", default=None)
+_OS_SELECTION: "contextvars.ContextVar[Any]" = contextvars.ContextVar(
+    "vectrixdb_opensearch_vectors", default=None
+)
 
 
 # ============================================================================
@@ -5801,21 +5858,29 @@ class OpenSearchStorage(BaseStorage):
     def __init__(self, config: StorageConfig, client: Any = None):
         mode = config.opensearch_embeddings
         if mode not in self.EMBEDDINGS:
-            raise ConfigurationError(f"embeddings is one of {', '.join(self.EMBEDDINGS)}, got {mode!r}")
+            raise ConfigurationError(
+                f"embeddings is one of {', '.join(self.EMBEDDINGS)}, got {mode!r}"
+            )
         if mode != "vectrixdb":
             if not callable(config.opensearch_embed_fn):
                 raise ConfigurationError(
                     f"embeddings={mode!r} needs embed_fn, texts to vectors: "
                     "vectrixdb.models.bedrock.BedrockEmbedder(boto3.client('bedrock-runtime'))"
                 )
-            dims = config.opensearch_embed_dimensions or getattr(config.opensearch_embed_fn, "dimensions", None)
+            dims = config.opensearch_embed_dimensions or getattr(
+                config.opensearch_embed_fn, "dimensions", None
+            )
             if not isinstance(dims, int) or dims <= 0:
-                raise ConfigurationError(f"embeddings={mode!r} needs the Bedrock model's dimensions")
+                raise ConfigurationError(
+                    f"embeddings={mode!r} needs the Bedrock model's dimensions"
+                )
         weights = config.opensearch_vector_weights or {}
         if set(weights) - {"vectrixdb", "bedrock"} or any(
             not isinstance(w, (int, float)) or w <= 0 for w in weights.values()
         ):
-            raise ConfigurationError("vector_weights maps 'vectrixdb' and 'bedrock' to positive numbers")
+            raise ConfigurationError(
+                "vector_weights maps 'vectrixdb' and 'bedrock' to positive numbers"
+            )
         self._staged: Dict[str, Dict[str, Any]] = {}
         self._staged_lock = threading.Lock()
         """``client`` is an already-built OpenSearch client, for tests that
@@ -5908,9 +5973,15 @@ class OpenSearchStorage(BaseStorage):
         # Every promoted field, present or not: an update is partial, so a
         # field that went away has to be sent as null or it would keep the
         # value it had, and a revocation would not reach the filter.
-        promoted = {_promoted_name(p): _promoted_value(metadata, p, k) for p, k in self._promoted().items()}
+        promoted = {
+            _promoted_name(p): _promoted_value(metadata, p, k) for p, k in self._promoted().items()
+        }
         named = data.get("named_vectors") or {}
-        second = {"dense_bedrock": [float(x) for x in named["bedrock"]]} if named.get("bedrock") is not None else {}
+        second = (
+            {"dense_bedrock": [float(x) for x in named["bedrock"]]}
+            if named.get("bedrock") is not None
+            else {}
+        )
         metadata.pop("named_vectors", None)
         return {
             **promoted,
@@ -5950,7 +6021,12 @@ class OpenSearchStorage(BaseStorage):
             return
 
         engine = self.config.opensearch_knn_engine
-        kinds = {"string": "keyword", "strings": "keyword", "number": "double", "boolean": "boolean"}
+        kinds = {
+            "string": "keyword",
+            "strings": "keyword",
+            "number": "double",
+            "boolean": "boolean",
+        }
         promoted = {_promoted_name(p): {"type": kinds[k]} for p, k in self._promoted().items()}
 
         body = {
@@ -6237,13 +6313,17 @@ class OpenSearchStorage(BaseStorage):
     # ------------------------------------------------------ the second vector
 
     def _bedrock_dimensions(self) -> int:
-        dims = self.config.opensearch_embed_dimensions or getattr(self.config.opensearch_embed_fn, "dimensions", 0)
+        dims = self.config.opensearch_embed_dimensions or getattr(
+            self.config.opensearch_embed_fn, "dimensions", 0
+        )
         return int(dims or 0)
 
     def vector_names(self) -> tuple:
-        return {"vectrixdb": ("vectrixdb",), "bedrock": ("bedrock",), "both": ("vectrixdb", "bedrock")}[
-            self.config.opensearch_embeddings
-        ]
+        return {
+            "vectrixdb": ("vectrixdb",),
+            "bedrock": ("bedrock",),
+            "both": ("vectrixdb", "bedrock"),
+        }[self.config.opensearch_embeddings]
 
     def embed_bedrock(self, texts: List[str]) -> List[List[float]]:
         vectors = [[float(x) for x in v] for v in self.config.opensearch_embed_fn(list(texts))]
@@ -6275,7 +6355,9 @@ class OpenSearchStorage(BaseStorage):
             for name, by_id in vectors.items():
                 self._staged.setdefault(name, {}).update(by_id)
 
-    def _with_bedrock_vectors(self, items: List[Tuple[str, Dict[str, Any]]]) -> List[Tuple[str, Dict[str, Any]]]:
+    def _with_bedrock_vectors(
+        self, items: List[Tuple[str, Dict[str, Any]]]
+    ) -> List[Tuple[str, Dict[str, Any]]]:
         if self.config.opensearch_embeddings != "both":
             return items
         with self._staged_lock:
@@ -6293,7 +6375,9 @@ class OpenSearchStorage(BaseStorage):
             data["named_vectors"] = named
             out.append((doc_id, data))
         if missing:
-            for i, vector in zip(missing, self.embed_bedrock([out[i][1]["text_content"] for i in missing])):
+            for i, vector in zip(
+                missing, self.embed_bedrock([out[i][1]["text_content"] for i in missing])
+            ):
                 out[i][1]["named_vectors"]["bedrock"] = vector
         return out
 
@@ -6339,7 +6423,12 @@ class OpenSearchStorage(BaseStorage):
         return [vectors]
 
     def _vector_runs(
-        self, collection: str, query_vector: List[float], limit: int, filter: Optional[Dict[str, Any]], text: Optional[str] = None
+        self,
+        collection: str,
+        query_vector: List[float],
+        limit: int,
+        filter: Optional[Dict[str, Any]],
+        text: Optional[str] = None,
     ) -> Dict[str, List[Tuple[str, Dict[str, Any], float]]]:
         """One k-NN search per vector that answers, by name."""
         selection = _OS_SELECTION.get()
@@ -6348,18 +6437,25 @@ class OpenSearchStorage(BaseStorage):
         runs: Dict[str, List[Tuple[str, Dict[str, Any], float]]] = {}
         for name in self._fields_for(chosen):
             if name == "vectrixdb" or self.config.opensearch_embeddings == "bedrock":
-                runs[name] = self._knn_search(collection, "dense_embedding", query_vector, limit, filter)
+                runs[name] = self._knn_search(
+                    collection, "dense_embedding", query_vector, limit, filter
+                )
                 continue
             if not query_text:
                 raise StorageOperationError(
-                    "vector_search", "OpenSearch",
+                    "vector_search",
+                    "OpenSearch",
                     "the Bedrock vector is searched with the question's words, and this search gave only a vector; "
                     "search through Vectrix, or pass vectors='vectrixdb'",
                 )
-            runs[name] = self._knn_search(collection, "dense_bedrock", self.embed_bedrock([query_text])[0], limit, filter)
+            runs[name] = self._knn_search(
+                collection, "dense_bedrock", self.embed_bedrock([query_text])[0], limit, filter
+            )
         return runs
 
-    def _fuse_vector_runs(self, runs: Dict[str, List[Tuple[str, Dict[str, Any], float]]], limit: int) -> List[Tuple[str, Dict[str, Any], float]]:
+    def _fuse_vector_runs(
+        self, runs: Dict[str, List[Tuple[str, Dict[str, Any], float]]], limit: int
+    ) -> List[Tuple[str, Dict[str, Any], float]]:
         if len(runs) == 1:
             return next(iter(runs.values()))[:limit]
         weights = self.config.opensearch_vector_weights or {}
@@ -6368,20 +6464,30 @@ class OpenSearchStorage(BaseStorage):
         similar: Dict[str, Dict[str, float]] = {}
         for name, hits in runs.items():
             for rank, (doc_id, doc, _score) in enumerate(hits):
-                scores[doc_id] = scores.get(doc_id, 0.0) + float(weights.get(name, 1.0)) / (60 + rank + 1)
+                scores[doc_id] = scores.get(doc_id, 0.0) + float(weights.get(name, 1.0)) / (
+                    60 + rank + 1
+                )
                 if doc.get("_vx_relevance") is not None:
                     similar.setdefault(doc_id, {})[name] = doc["_vx_relevance"]
                 data.setdefault(doc_id, doc)
         for doc_id, by_name in similar.items():
             # Two models measured this chunk. The collection's own is the one
             # a threshold is set on; both are kept for whoever compares them.
-            data[doc_id] = {**data[doc_id], "_vx_relevances": by_name, "_vx_relevance": by_name.get("vectrixdb", next(iter(by_name.values())))}
+            data[doc_id] = {
+                **data[doc_id],
+                "_vx_relevances": by_name,
+                "_vx_relevance": by_name.get("vectrixdb", next(iter(by_name.values()))),
+            }
         ordered = sorted(scores, key=lambda i: (-scores[i], i))[:limit]
         # 1 - score, as _knn_search does: the collection turns it back into the fused score.
         return [(i, data[i], 1.0 - scores[i]) for i in ordered]
 
     def vector_ranks(
-        self, collection: str, query_vector: List[float], limit: int = 50, filter: Optional[Dict[str, Any]] = None
+        self,
+        collection: str,
+        query_vector: List[float],
+        limit: int = 50,
+        filter: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Dict[str, int]]:
         ranks: Dict[str, Dict[str, int]] = {}
         for name, hits in self._vector_runs(collection, query_vector, limit, filter).items():
@@ -6390,7 +6496,12 @@ class OpenSearchStorage(BaseStorage):
         return ranks
 
     def _knn_search(
-        self, collection: str, field_name: str, vector: List[float], limit: int, filter: Optional[Dict[str, Any]]
+        self,
+        collection: str,
+        field_name: str,
+        vector: List[float],
+        limit: int,
+        filter: Optional[Dict[str, Any]],
     ) -> List[Tuple[str, Dict[str, Any], float]]:
         """One k-NN search. The third element is ``1 - _score``, the distance-like
         value every store hands the collection, which turns it back into the
@@ -6414,7 +6525,9 @@ class OpenSearchStorage(BaseStorage):
     #: once a hit has shown it. None until then, and relevance is None with it.
     _cosine_formula: Optional[str] = None
 
-    def _score_formula(self, hits: List[Dict[str, Any]], field_name: str, query: List[float]) -> Optional[str]:
+    def _score_formula(
+        self, hits: List[Dict[str, Any]], field_name: str, query: List[float]
+    ) -> Optional[str]:
         """Work out how this cluster turns a cosine distance into a score, from a hit.
 
         The documentation gives ``1 / (1 + d)`` for nmslib and faiss and
@@ -6457,7 +6570,9 @@ class OpenSearchStorage(BaseStorage):
     def filter_fields(self, collection: str) -> frozenset:
         return frozenset(self._promoted())
 
-    def compile_filter(self, collection: str, filter_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def compile_filter(
+        self, collection: str, filter_dict: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """The library's filter grammar as an OpenSearch query over the
         promoted fields. None when a field is not promoted or an operator has
         no honest translation, and the collection then applies that filter
@@ -6531,7 +6646,12 @@ class OpenSearchStorage(BaseStorage):
         if op == "eq":
             return {"term": {name: cls._value(value, kind)}}
         if op == "ne":
-            return {"bool": {"filter": [exists], "must_not": [{"term": {name: cls._value(value, kind)}}]}}
+            return {
+                "bool": {
+                    "filter": [exists],
+                    "must_not": [{"term": {name: cls._value(value, kind)}}],
+                }
+            }
         if op in ("gt", "gte", "lt", "lte"):
             if kind == "boolean":
                 raise _FilterUnsupported
@@ -6539,7 +6659,11 @@ class OpenSearchStorage(BaseStorage):
         raise _FilterUnsupported
 
     def _knn(
-        self, query_vector: List[float], k: int, filter: Optional[Dict[str, Any]], field_name: str = "dense_embedding"
+        self,
+        query_vector: List[float],
+        k: int,
+        filter: Optional[Dict[str, Any]],
+        field_name: str = "dense_embedding",
     ) -> Dict[str, Any]:
         """The k-NN clause, with the filter where this engine wants it.
 
@@ -6555,7 +6679,12 @@ class OpenSearchStorage(BaseStorage):
         if self.config.opensearch_knn_engine in ("lucene", "faiss"):
             return {"knn": {field_name: {"vector": query_vector, "k": k, "filter": filter}}}
         wide = min(max(k * 10, 100), 10000)
-        return {"bool": {"must": [{"knn": {field_name: {"vector": query_vector, "k": wide}}}], "filter": [filter]}}
+        return {
+            "bool": {
+                "must": [{"knn": {field_name: {"vector": query_vector, "k": wide}}}],
+                "filter": [filter],
+            }
+        }
 
     def vector_search(
         self,
@@ -6570,7 +6699,9 @@ class OpenSearchStorage(BaseStorage):
         store hands results to the collection. ``data`` carries the true
         cosine as ``_vx_relevance`` when the cluster's score formula is known.
         """
-        return self._fuse_vector_runs(self._vector_runs(collection, query_vector, limit, filter), limit)
+        return self._fuse_vector_runs(
+            self._vector_runs(collection, query_vector, limit, filter), limit
+        )
 
     def text_search(
         self,
@@ -6581,7 +6712,10 @@ class OpenSearchStorage(BaseStorage):
     ) -> List[Tuple[str, Dict[str, Any], float]]:
         """BM25 over ``text_content``. Returns ``(id, data, score)`` tuples, best first, with OpenSearch's own BM25 score."""
         match = {"match": {"text_content": {"query": query_text}}}
-        body = {"size": limit, "query": match if filter is None else {"bool": {"must": [match], "filter": [filter]}}}
+        body = {
+            "size": limit,
+            "query": match if filter is None else {"bool": {"must": [match], "filter": [filter]}},
+        }
         result = self._client.search(index=self._index_name(collection), body=body)
         return [
             (
@@ -6800,7 +6934,7 @@ GRANT SELECT ON {table} TO {role};
 
             cur.execute(f"""
 
-                CREATE TABLE IF NOT EXISTS {self.config.aurora_schema}._vectrix_collections (
+                CREATE TABLE IF NOT EXISTS {self._schema_ref()}._vectrix_collections (
 
                     name VARCHAR(255) PRIMARY KEY,
 
@@ -6822,8 +6956,12 @@ GRANT SELECT ON {table} TO {role};
             self._conn = None
 
     def _table_name(self, collection: str) -> str:
+        # Quoted, so a collection name is only ever a name: bare, a name
+        # with a space, a quote or a semicolon in it ended the statement.
+        return f"{self._schema_ref()}.{_pg_ident(collection)}"
 
-        return f"{self.config.aurora_schema}.{collection}"
+    def _schema_ref(self) -> str:
+        return _pg_ident(self.config.aurora_schema)
 
     def _ensure_collection_table(
         self, collection: str, dimension: int = 384, mode: str = "dense"
@@ -6857,16 +6995,16 @@ GRANT SELECT ON {table} TO {role};
             """)
 
             cur.execute(
-                f"CREATE INDEX IF NOT EXISTS {collection}_hnsw_idx ON {table} USING hnsw (dense_embedding vector_cosine_ops)"
+                f"CREATE INDEX IF NOT EXISTS {_pg_ident(collection + '_hnsw_idx')} ON {table} USING hnsw (dense_embedding vector_cosine_ops)"
             )
 
             cur.execute(
-                f"CREATE INDEX IF NOT EXISTS {collection}_metadata_idx ON {table} USING gin (metadata)"
+                f"CREATE INDEX IF NOT EXISTS {_pg_ident(collection + '_metadata_idx')} ON {table} USING gin (metadata)"
             )
 
             if mode in ("hybrid", "ultimate", "graph"):
                 cur.execute(
-                    f"CREATE INDEX IF NOT EXISTS {collection}_sparse_idx ON {table} USING gin (sparse_embedding)"
+                    f"CREATE INDEX IF NOT EXISTS {_pg_ident(collection + '_sparse_idx')} ON {table} USING gin (sparse_embedding)"
                 )
 
     def create_collection(self, name: str, metadata: Optional[Dict[str, Any]] = None) -> None:
@@ -6881,7 +7019,7 @@ GRANT SELECT ON {table} TO {role};
             cur.execute(
                 f"""
 
-                INSERT INTO {self.config.aurora_schema}._vectrix_collections (name, dimension, metadata)
+                INSERT INTO {self._schema_ref()}._vectrix_collections (name, dimension, metadata)
 
                 VALUES (%s, %s, %s)
 
@@ -6899,14 +7037,14 @@ GRANT SELECT ON {table} TO {role};
             cur.execute(f"DROP TABLE IF EXISTS {table}")
 
             cur.execute(
-                f"DELETE FROM {self.config.aurora_schema}._vectrix_collections WHERE name = %s",
+                f"DELETE FROM {self._schema_ref()}._vectrix_collections WHERE name = %s",
                 (name,),
             )
 
     def list_collections(self) -> List[str]:
 
         with self._conn.cursor() as cur:
-            cur.execute(f"SELECT name FROM {self.config.aurora_schema}._vectrix_collections")
+            cur.execute(f"SELECT name FROM {self._schema_ref()}._vectrix_collections")
 
             return [row[0] for row in cur.fetchall()]
 
@@ -6921,7 +7059,7 @@ GRANT SELECT ON {table} TO {role};
         assert self._conn is not None, "connect() first"
         with self._conn.cursor() as cur:
             cur.execute(
-                f"SELECT dimension, metadata FROM {self.config.aurora_schema}._vectrix_collections "
+                f"SELECT dimension, metadata FROM {self._schema_ref()}._vectrix_collections "
                 "WHERE name = %s",
                 (name,),
             )

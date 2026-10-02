@@ -80,6 +80,10 @@ python 06_create_main_function_app.py         # the main app, twice: an ingest a
 python 06_create_main_function_app.py --add-person you@example.com   # you, the first admin: a one-time link, printed here
 python "07_push_new_files_from local_to_blob_cosmosdb.py"   # the trigger test: walk away, it still reads
 
+python 10_retrieve_finds_the_most.py      # the three retrievals, each through one of the run's picks
+python 11_retrieve_best_for_balance.py    #   against a dashboard on this machine; see below
+python 12_retrieve_best_for_time.py
+
 python 99_delete_everything.py            # when you stop for the day
 ```
 
@@ -99,6 +103,20 @@ Each signs in with a key named after its pick, so the Access page ends with
 three rows under "who reads most", one a setup, and the Overview's searches
 chart has something in it. That is the comparison on one card instead of in
 three terminals.
+
+```bash
+python 10_retrieve_finds_the_most.py      # or 11_retrieve_best_for_balance.py, 12_retrieve_best_for_time.py
+python 10_retrieve_finds_the_most.py --port 8000 --collection financial --question "What was the total revenue?"
+```
+
+They go through the dashboard's Backend on this machine, `http://localhost:8000`
+unless `--port` says otherwise, so each search lands in the access log the
+Access and Overview pages are drawn from, at `/#/access` and `/#/overview`.
+Minting a setup's key is an admin's act, so the scripts need a key that may:
+`VX_API_KEY` in `settings.env`, the same key the dashboard's Backend holds as
+`UPSTREAM_KEY`, or failing that the query app's own `VECTRIXDB_API_KEY`, read
+back from Azure. With neither the script stops and says so. `--dry-run` says
+what it would ask and asks nothing.
 
 One gap worth knowing: a setup names the engine, the method, the reranker and
 which vectors answer. The REST routes carry the first three, not the last, so
@@ -171,6 +189,21 @@ setup spinner's Masking stage says what went. Nothing is set per collection.
   nothing, so the script says to rebuild it instead.
 
 `99_delete_everything.py` deletes it with the rest of the group.
+
+### Extraction app: what to check
+
+Two addresses and one message. `GET <app>/health` needs no key and proves the
+worker indexed the code; `GET <app>/health/wiring`, also without a key, says
+what the app was given without opening anything: which readers it has, by
+service, and what it does without each; the masking engine that loaded and
+the languages it covers; the jobs backend; the hosts an address route may
+fetch from; the upload limit; and how callers get in. It carries no key and
+no endpoint, so it is safe to paste into a bug report. When the app answers
+404 to both, its settings did not hold: the live log, under the function app
+in the portal, has one message that lists every setting that is wrong or
+missing, `VECTRIXDB_EXTRACT_JOBS=azure` with no storage connection, a host in
+`VECTRIXDB_EXTRACT_URL_HOSTS` that is not a host, a masking engine the library
+does not know, rather than the first of them raising mid-stack.
 
 ## What is being built
 
@@ -287,6 +320,14 @@ becomes a group, narrowed to the people on its list, and 07 sends it:
 To see a refusal for yourself, open a collection's Settings and use Check
 someone with an address the record does not list.
 
+One index you may see beside those three is `vectrix-collections`, empty, 0
+documents and 0 bytes. It is the library's catalog index under its default
+prefix, left by a run from before 06 set `AZURE_SEARCH_INDEX_PREFIX` empty;
+the catalog the app reads is plain `collections`. `06_create_main_function_app.py`
+deletes it on its next run when it is empty, and leaves it alone with a word
+when it holds anything, and `99_delete_everything.py` lists every index with
+its document count so a leftover is visible before the group goes.
+
 ### Where every decision is recorded
 
 In the storage account's third container, `audit`, which keeps what it
@@ -315,7 +356,7 @@ Each collection's record says, one file a collection in the mirror:
 {
   "name": "financial",
   "path": "raw/financial/",
-  "policy": {"method": "store", "allow": [{"email": "kwadwonyame@owusuboakye.com"}]}
+  "policy": {"method": "store", "allow": [{"email": "you@example.com"}]}
 }
 ```
 

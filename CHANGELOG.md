@@ -387,6 +387,124 @@ may change at any time.
 
 ### Fixed
 
+- **The audit before release.** Found by reading the tree and running it, each
+  with a test:
+  - `must_not` in a Qdrant-style filter was built as NOT(a AND b), so a
+    document matching only one excluded condition got through; it is NOT(a OR b).
+  - Keys beside `$and`, `$or` or `$not` in a filter were dropped silently, a
+    double `$not` stayed negated, and a `range` with `gte` and `lte` kept only
+    the first bound. Every part applies now.
+  - Date filters crashed on a `datetime` bound and never matched a naive
+    `datetime` field.
+  - A reopened collection answered `sparse_search()` with nothing: the sparse
+    index was never saved, and the flag that says it holds vectors started
+    False on every open. It is saved with the collection, and `delete()`
+    removes from it.
+  - `add()` with no ids raised `IndexError`; a wrong-dimension batch committed
+    its rows and failed only at the index, leaving points with no vector; ids
+    and vectors of different lengths were not refused. All three are checked
+    before anything is written.
+  - The search cache's key left out `score_threshold` and `ef`, so a second
+    search with a different threshold was served the first one's results; a
+    set operand (`{"$in": {"a", "b"}}`) made the key raise; and cached results
+    were handed out by reference, so a caller that edited them changed what
+    the next caller got.
+  - `dense_sparse_search()` never applied the collection's policy.
+  - `rebuild_index()` dropped vectors written while the new index was built;
+    they are carried over at the swap, and two rebuilds at once are serialised.
+  - A usearch index of at most 4,096 vectors is searched exactly: it costs
+    what the graph walk costs and misses nothing, where HNSW built on several
+    threads missed a true neighbour now and then even at forty vectors.
+  - A read-only open wrote: the version row, the collection's settings and
+    the deletion of demo collections. It writes nothing now.
+  - `enable_text_index=False` was not persisted, so every reopened collection
+    came back with a text index.
+  - A collection named `_vectrixdb`, `_meta`, `_documents` or `_nodes` shared
+    VectrixDB's own files and deleted them with itself; a name ending in
+    `.db` or `.documents` collided with another collection's files. All are
+    refused, and `delete_collection()` never unlinks an internal file.
+  - A collection that failed to load could neither be made again (the same
+    broken files opened) nor deleted. `create_collection()` says so and
+    `delete_collection()` removes it.
+  - A SQLite connection closed by `delete_collection()` or `close()` from
+    another thread left that thread failing with "Cannot operate on a closed
+    database"; it opens afresh.
+  - In a sharded index, removing a key that had been re-added brought its
+    sealed copy back, and a stale copy in a sealed shard could be returned
+    when the live copy was too far away to make its shard's list. The merge
+    runs on arrays, which halves a search across fifty shards with tombstones.
+  - A citation's source name with square brackets in it ended the citation
+    early, and a Windows path was cited whole on Linux; the brackets go and
+    the last part is the name.
+  - `ColBERT` token vectors for the second and later pieces of a document
+    were read from the wrong offset.
+  - A long line of text passed to `add()` raised `ENAMETOOLONG` on Linux
+    while being checked for being a file name.
+  - `reembed()` did not persist the new model's name or the policy, so a
+    reopen picked another model and the documents added next were open to
+    every caller. A policy stored before its role key was persisted gets it.
+  - `quick_search()` wrote a `_quick_search` collection into the working
+    directory and two calls at once cleared each other's; it is in memory.
+  - nDCG in `retrieval_report()` could pass 1 when two chunks of one page
+    both answered an entry.
+  - Recursive chunk spans on text with repeated words could point at an
+    earlier repeat; the chunker is mirrored with offsets, so they are exact.
+  - `ConversationMemory.forget(ids=...)` deleted any document named, memory
+    or not, and counted what was asked for rather than what went; turn 0 was
+    read as no turn, so the next turn was 0 again.
+  - A model manifest recorded from a Windows checkout failed to verify on
+    Linux: text files are matched with either line ending.
+  - Extraction quality counted "ratio," and "**Docs:**" as noise; edge
+    punctuation is stripped before a token is judged.
+  - Download of a URL for extraction read the whole body before checking
+    its size; it reads one byte past `max_bytes` and stops.
+  - The dashboard went blank on an address with a stray `%` in it; the part is
+    kept as typed and reads as a page that is not there. The Collections table
+    said "hybrid" for a collection the v1 API made as dense, since the v1 API
+    gives it a text index too: the `dense` tag decides. The value above the
+    tallest bar of "Chunks written a day" was cut off at the top of the chart.
+    The Evaluate page showed the server's own path to its runs; it names the
+    folder under the data folder instead, and the API's `where` is unchanged.
+  - The chat memory example's stand-in summariser looked for a word that
+    only the two turns `consolidate()` keeps contained, so it made no facts;
+    `00_login.py` reads `VX_SUBSCRIPTION` for an account with more than one
+    subscription, and `settings.example.env` says so.
+  - `benchmarks/README.md` lists every file, `answer_cutoff_scifact_bge.json`
+    and `memory_longmemeval_both.json` with their commands, says that the
+    e5-small-v2 LongMemEval figure has no file and how to measure it again,
+    and the four model comparisons `compare_models.py` can no longer write
+    moved to `benchmarks/archive/` with a note saying what wrote them.
+  - What a PDF reads as, checked against documents set the way reports,
+    papers and minutes are set:
+    - A line with no descender, "the self-insur-", ended its paragraph: the
+      gap to the next line was measured from the bottom of its letters. A
+      paragraph now ends where a line advances more than the page's leading,
+      measured from the tops of the lines, which the letters do not move.
+    - A word the line broke, "obliga-" / "tions", kept its hyphen, because
+      both halves had been counted as words the document uses. The halves
+      are left out of that count, and the word is joined.
+    - A footnote mark set clear above its line, as a report sets it, came out
+      as a line of its own, "1", twice; it is `[^1]` after its word, and the
+      footnote's own number opens its line as `[^1]`.
+    - A header of years and a word, "2025 2024 Change", was the table's
+      first row, so no figure under it said its year. It heads the columns.
+    - A title and the numbered heading under it, set in the same size, were
+      one heading. Two heading lines are one only when they share an edge
+      or a centre and the second does not open a numbered section.
+    - A list item ran on from the sentence before it, and its wrapped lines,
+      hanging in from the bullet, were taken for new paragraphs. An item is
+      a block of its own, written with Markdown's dash, and its lines hang
+      together until the next marker or a line back at the margin.
+    - A two-page document kept its running head; it is dropped when it is in
+      the margin of both pages, and a page's only line is never one.
+  - A page read by OCR, locally or by the `ocr` callable the loader takes,
+    was a line of text for every line of print, so its chunks ended
+    mid-sentence and its broken words stayed broken. The lines are joined
+    into the paragraphs they were printed as (`paragraphs_of`), a page of
+    short lines, an invoice, left a line a line.
+  - `looks_blank()` read every page as not blank under Pillow 12, whose
+    deprecation of `getdata()` raised where warnings are errors.
+
 - **The docs no longer describe what left with visibility.** The dashboard
   page gave a collection six tabs and showed its Settings tab, the sign-in
   page had an admin share a collection from there, the gateway and
@@ -2871,6 +2989,34 @@ may change at any time.
 
 ### Security
 
+- **The audit before release.** Each with a test:
+  - `VECTRIXDB_OPEN_READS=0` makes every read ask for the full or the
+    read-only key, the live feed at `/ws` included, on a server with a key
+    and no sign-in. Reads stay open unless it is set, as they always were;
+    and the read-only key can now run a search, the one POST that is a read.
+  - A collection-scoped key's path was percent-decoded twice, so a key for
+    `handbook%41` reached `handbookA`. The path is decoded once.
+  - A zip entry named `../x` or `/x` in a downloaded model, a cached model
+    archive or an imported snapshot was written where it pointed. Every
+    destination is checked before anything is extracted, and a snapshot's
+    manifest name is held to the rules a collection name is.
+  - The sparse index was a pickle, so a snapshot from elsewhere could run
+    code on load. It is an `.npz` read with `allow_pickle=False`; an existing
+    pickle is read once and replaced on the next save.
+  - PostgreSQL and Aurora statements quoted the schema and collection name
+    by hand or not at all, so a name with a quote or a semicolon in it ended
+    the statement. Every identifier goes through one quoting function.
+  - The MCP `forget` tool with no arguments deleted every turn of every
+    session; it now needs `all_sessions=true` for that, and `forget(ids=...)`
+    deletes only what the memory tools wrote.
+  - The Azure dashboard backend puts `UPSTREAM_KEY` on every call it forwards,
+    so a page on another site the operator had open could write with it, and
+    could open its WebSocket, which CORS does not cover. A write or a socket
+    whose `Origin` is another site is refused. The Azure ingest function app's
+    own routes, a collection's delete among them, were open to anyone with
+    the address: the server's key is asked for, in `api-key` or as a Bearer
+    token, as the library asks for it.
+
 - **The dashboard runs no inline script, and its policy refuses all of it.**
   Its 212 inline handlers became `data-on-<event>` attributes, each a JSON
   list of calls that one listener per kind of event reads, and the listener
@@ -4345,7 +4491,13 @@ may change at any time.
   and `dense_model="e5-small"` opens a collection with the older model. A
   collection that carries both, `dense_model=["bge-small", "e5-small"]`,
   scores 0.814, most of the gain in those same questions (0.677 against
-  0.494 and 0.642), at twice the embedding and the disk.
+  0.494 and 0.642), at twice the embedding and the disk. The bge-small
+  figures are `benchmarks/memory_longmemeval.json` and the two-model ones
+  `benchmarks/memory_longmemeval_both.json`; the e5-small-v2 run (0.797, and
+  0.642 multi-session) was measured before `memory_bench.py` wrote its model
+  into the file and that file was not kept, so
+  `python scripts/memory_bench.py longmemeval --limit 150 --dense-model e5-small --json ...`
+  is how to measure it again.
   `scripts/memory_bench.py` takes `--dense-model`, once or twice, refuses to
   quote a number for two models from a collection that does not carry two,
   and writes the models into the results it saves.

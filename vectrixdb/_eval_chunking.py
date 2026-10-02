@@ -31,6 +31,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import math
+import os
 import shutil
 import tempfile
 import threading
@@ -87,13 +88,49 @@ SEARCH: Dict[str, Any] = {"mode": "hybrid", "rerank": False}
 #: ``add_document`` is given; ``parents`` hands over the section a chunk sits
 #: in; ``needs`` is the model a technique cannot be built without.
 TECHNIQUES: Dict[str, Dict[str, Any]] = {
-    "markdown": {"name": "Structure-aware", "chunk": "markdown", "parents": False, "cuts": "At headings, then long sections"},
-    "parent": {"name": "Parent-child", "chunk": "markdown", "parents": True, "cuts": "Small chunks find, their sections are handed over"},
-    "recursive": {"name": "Recursive", "chunk": "recursive", "parents": False, "cuts": "Paragraphs, then lines, sentences and words, until a piece fits"},
-    "sentence": {"name": "Sentence", "chunk": "sentence", "parents": False, "cuts": "Whole sentences, up to the size"},
-    "semantic": {"name": "Semantic", "chunk": "semantic", "parents": False, "cuts": "A new chunk where the meaning shifts"},
-    "fixed": {"name": "Fixed-size", "chunk": "fixed", "parents": False, "cuts": "Every so many characters, at a space"},
-    "llm": {"name": "LLM-based", "chunk": "llm", "parents": False, "cuts": "A model says where each topic starts", "needs": "cut_with"},
+    "markdown": {
+        "name": "Structure-aware",
+        "chunk": "markdown",
+        "parents": False,
+        "cuts": "At headings, then long sections",
+    },
+    "parent": {
+        "name": "Parent-child",
+        "chunk": "markdown",
+        "parents": True,
+        "cuts": "Small chunks find, their sections are handed over",
+    },
+    "recursive": {
+        "name": "Recursive",
+        "chunk": "recursive",
+        "parents": False,
+        "cuts": "Paragraphs, then lines, sentences and words, until a piece fits",
+    },
+    "sentence": {
+        "name": "Sentence",
+        "chunk": "sentence",
+        "parents": False,
+        "cuts": "Whole sentences, up to the size",
+    },
+    "semantic": {
+        "name": "Semantic",
+        "chunk": "semantic",
+        "parents": False,
+        "cuts": "A new chunk where the meaning shifts",
+    },
+    "fixed": {
+        "name": "Fixed-size",
+        "chunk": "fixed",
+        "parents": False,
+        "cuts": "Every so many characters, at a space",
+    },
+    "llm": {
+        "name": "LLM-based",
+        "chunk": "llm",
+        "parents": False,
+        "cuts": "A model says where each topic starts",
+        "needs": "cut_with",
+    },
 }
 
 #: What a build puts in front of each chunk for the embedder, or how it embeds
@@ -130,8 +167,6 @@ def _model_of(db: Any) -> Optional[Dict[str, str]]:
         return None
 
 
-
-
 def chunking_plan(
     techniques: Optional[Iterable[str]] = None,
     *,
@@ -151,7 +186,11 @@ def chunking_plan(
     each technique at its middle size with a model's note in front of every
     chunk, ``-c``, and ``late`` one embedded late, ``-l``.
     """
-    chosen = [t for t in TECHNIQUES if not TECHNIQUES[t].get("needs")] if techniques is None else [str(t) for t in techniques]
+    chosen = (
+        [t for t in TECHNIQUES if not TECHNIQUES[t].get("needs")]
+        if techniques is None
+        else [str(t) for t in techniques]
+    )
     unknown = [t for t in chosen if t not in TECHNIQUES]
     if unknown:
         raise ValueError(f"the techniques are {', '.join(TECHNIQUES)}; got {unknown[0]!r}")
@@ -168,7 +207,9 @@ def chunking_plan(
         ladder = [int(size) for size in (child_sizes if spec["parents"] else sizes)]
         for size in ladder:
             if size < 50:
-                raise ValueError(f"a chunk of {size} characters is too small to cut; 50 is the least")
+                raise ValueError(
+                    f"a chunk of {size} characters is too small to cut; 50 is the least"
+                )
             for heading in headings:
                 builds.append(one(technique, size, "headings" if heading else "none"))
         middle = sorted(ladder)[len(ladder) // 2]
@@ -190,7 +231,12 @@ def chunking_build(key: str) -> Dict[str, Any]:
     """
     letters = {letter: adds for adds, letter in ADDS.items()}
     parts = str(key or "").strip().split("-")
-    if len(parts) != 3 or parts[0] not in TECHNIQUES or not parts[1].isdigit() or parts[2] not in letters:
+    if (
+        len(parts) != 3
+        or parts[0] not in TECHNIQUES
+        or not parts[1].isdigit()
+        or parts[2] not in letters
+    ):
         raise ValueError(
             f"{key!r} is not a build. A build is <technique>-<size>-<{'|'.join(letters)}>, like markdown-1000-h, "
             f"and the techniques are {', '.join(TECHNIQUES)}"
@@ -211,7 +257,9 @@ def chunking_build(key: str) -> Dict[str, Any]:
     }
 
 
-def chunking_options(build: Union[str, Mapping[str, Any]], *, cut_with: Any = None, context_with: Any = None) -> Dict[str, Any]:
+def chunking_options(
+    build: Union[str, Mapping[str, Any]], *, cut_with: Any = None, context_with: Any = None
+) -> Dict[str, Any]:
     """What ``add_document`` and ``rechunk`` are given to cut a document the way a build does.
 
     ``build`` is a key or a plan's entry. LLM-based needs ``cut_with``, and a
@@ -231,18 +279,24 @@ def chunking_options(build: Union[str, Mapping[str, Any]], *, cut_with: Any = No
     }
     if one["chunk"] == "llm":
         if cut_with is None:
-            raise ValueError("an LLM-based build needs cut_with=, a model that says where each topic starts")
+            raise ValueError(
+                "an LLM-based build needs cut_with=, a model that says where each topic starts"
+            )
         options["cut_with"] = cut_with
     if adds == "context":
         if context_with is None:
-            raise ValueError("a build with the model's note needs context_with=, a model that writes it")
+            raise ValueError(
+                "a build with the model's note needs context_with=, a model that writes it"
+            )
         options["context_with"] = context_with
     # Said either way: a document cut late before would otherwise stay late.
     options["late"] = adds == "late"
     return options
 
 
-def chunking_choice(results: Sequence[Mapping[str, Any]], current: Optional[str] = None, *, alpha: float = ALPHA) -> Dict[str, Any]:
+def chunking_choice(
+    results: Sequence[Mapping[str, Any]], current: Optional[str] = None, *, alpha: float = ALPHA
+) -> Dict[str, Any]:
     """Which build a run picks, given the one in use: ``{"pick": key, "switch": bool, "why": words}``.
 
     The run's best build, ranked as :func:`chunking_report` ranks them. The
@@ -257,16 +311,32 @@ def chunking_choice(results: Sequence[Mapping[str, Any]], current: Optional[str]
     scored = "answered" if any(r.get("answered") is not None for r in ok) else "found"
     best = _ranked(ok, scored)[0]
     if current is None:
-        return {"pick": best["key"], "switch": True, "why": f"the best of {len(ok)} builds, with none in use before"}
+        return {
+            "pick": best["key"],
+            "switch": True,
+            "why": f"the best of {len(ok)} builds, with none in use before",
+        }
     if best["key"] == current:
-        return {"pick": current, "switch": False, "why": f"{current}, the one in use, is still the best"}
+        return {
+            "pick": current,
+            "switch": False,
+            "why": f"{current}, the one in use, is still the best",
+        }
     mine = next((r for r in ok if r.get("key") == current), None)
     if mine is None:
-        return {"pick": best["key"], "switch": True, "why": f"{current}, the one in use, was not among the builds compared"}
+        return {
+            "pick": best["key"],
+            "switch": True,
+            "why": f"{current}, the one in use, was not among the builds compared",
+        }
     split = _head_to_head(best, mine, scored, alpha)
     said = f"{best['key']} got {split['only_this']} right that {current} missed, and missed {split['only_that']} it got (p = {split['p']})"
     if split["luck"]:
-        return {"pick": current, "switch": False, "why": f"{said}, which luck could do, so {current} stays"}
+        return {
+            "pick": current,
+            "switch": False,
+            "why": f"{said}, which luck could do, so {current} stays",
+        }
     return {"pick": best["key"], "switch": True, "why": f"{said}, more than luck"}
 
 
@@ -279,7 +349,9 @@ def late_possible(open_with: Optional[Mapping[str, Any]] = None) -> Optional[str
     try:
         db = Vectrix("late", path=str(home), embedding_cache=False, **dict(open_with or {}))
         try:
-            return late_ready(db.embed_fn if db.model_type == "custom" else getattr(db, "model", None))
+            return late_ready(
+                db.embed_fn if db.model_type == "custom" else getattr(db, "model", None)
+            )
         finally:
             db.close()
     except Exception as exc:  # a model that cannot even be opened cannot embed late
@@ -318,7 +390,9 @@ def plan_chunking(
     chosen = list(TECHNIQUES) if wanted is None else wanted
     if "llm" in chosen and cut_with is None:
         chosen.remove("llm")
-        skipped["llm"] = "LLM-based needs a model to say where each topic starts: chat= or cut_with="
+        skipped["llm"] = (
+            "LLM-based needs a model to say where each topic starts: chat= or cut_with="
+        )
     if context_with is None:
         skipped["context"] = "the model's note needs a model to write it: chat= or context_with="
     if late is None:
@@ -326,7 +400,14 @@ def plan_chunking(
         if why:
             skipped["late"] = why
         late = why is None
-    plan = chunking_plan(chosen, sizes=sizes, child_sizes=child_sizes, headings=headings, context=context_with is not None, late=bool(late))
+    plan = chunking_plan(
+        chosen,
+        sizes=sizes,
+        child_sizes=child_sizes,
+        headings=headings,
+        context=context_with is not None,
+        late=bool(late),
+    )
     return plan, skipped, cut_with, context_with
 
 
@@ -348,7 +429,9 @@ def _document(source: Any, doc_id: Optional[str]) -> Any:
     if isinstance(source, LoadedDocument):
         return source
     text = str(source)
-    if isinstance(source, Path) or (isinstance(source, str) and len(text) < 4096 and "\n" not in text and Path(text).is_file()):
+    if isinstance(source, Path) or (
+        isinstance(source, str) and len(text) < 4096 and "\n" not in text and os.path.isfile(text)
+    ):
         return load(text)
     doc = LoadedDocument.from_markdown(text)
     front, _body = split_front_matter(text)
@@ -367,7 +450,11 @@ def _loaded(documents: Any) -> Dict[str, Dict[str, Any]]:
     or texts is one too, each under the ``doc_id`` its front matter gives,
     else its file name.
     """
-    if isinstance(documents, Mapping) and documents and all(isinstance(v, Mapping) for v in documents.values()):
+    if (
+        isinstance(documents, Mapping)
+        and documents
+        and all(isinstance(v, Mapping) for v in documents.values())
+    ):
         groups = {str(name): list(docs.items()) for name, docs in documents.items()}
     elif isinstance(documents, Mapping):
         groups = {"": list(documents.items())}
@@ -380,7 +467,15 @@ def _loaded(documents: Any) -> Dict[str, Dict[str, Any]]:
             doc = _document(source, doc_id)
             if doc_id is None:
                 front = doc.metadata.get("doc_id")
-                doc_id = front if isinstance(front, str) and front else (Path(str(source)).name if isinstance(source, (str, Path)) and "\n" not in str(source) else f"doc-{n}")
+                doc_id = (
+                    front
+                    if isinstance(front, str) and front
+                    else (
+                        Path(str(source)).name
+                        if isinstance(source, (str, Path)) and "\n" not in str(source)
+                        else f"doc-{n}"
+                    )
+                )
             docs[str(doc_id)] = doc
         out[name] = docs
     return out
@@ -415,7 +510,11 @@ def luck(only_this: int, only_that: int) -> float:
 
 
 def _qid(question: Any, n: int) -> str:
-    return str(question.id) if getattr(question, "id", None) else "q" + hashlib.sha1(str(question.text).encode("utf-8")).hexdigest()[:12]
+    return (
+        str(question.id)
+        if getattr(question, "id", None)
+        else "q" + hashlib.sha1(str(question.text).encode("utf-8")).hexdigest()[:12]
+    )
 
 
 def _span(hit: Any, docs: Mapping[str, Any]) -> Optional[Tuple[int, int]]:
@@ -457,7 +556,9 @@ def _covers(hit: Any, expected: Iterable[Any], docs: Mapping[str, Any]) -> bool:
     return False
 
 
-def _owners(questions: Sequence[Any], held: Mapping[str, Iterable[str]]) -> Tuple[Dict[str, List[Any]], List[Any]]:
+def _owners(
+    questions: Sequence[Any], held: Mapping[str, Iterable[str]]
+) -> Tuple[Dict[str, List[Any]], List[Any]]:
     """Each question given to the collection that holds most of its documents; those none holds, apart."""
     from .evaluation import _where
 
@@ -516,7 +617,12 @@ def handed_over(
     how = dict(SEARCH if search is None else search)
     limit = min(100, max(10, math.ceil(int(budget) / max(50, int(one["size"]) // 2))))
     parents = one.get("parent_size") is not None
-    hits = db.search(question, limit=limit, parents=parents, **{k: v for k, v in how.items() if k not in ("limit", "parents")})
+    hits = db.search(
+        question,
+        limit=limit,
+        parents=parents,
+        **{k: v for k, v in how.items() if k not in ("limit", "parents")},
+    )
     return _handed(hits, int(budget))
 
 
@@ -570,23 +676,43 @@ def run_chunking_build(
     answering = answer is not None and judge is not None
     groups = _loaded(documents)
     labelled = [q for q in questions if getattr(q, "expected", None)]
-    no_reference = [q for q in labelled if answering and not str(getattr(q, "reference", "") or "").strip()]
+    no_reference = [
+        q for q in labelled if answering and not str(getattr(q, "reference", "") or "").strip()
+    ]
     askable = [q for q in labelled if q not in no_reference]
     owned, lost = _owners(askable, {name: docs.keys() for name, docs in groups.items()})
     adds = str(build.get("adds") or ("headings" if build.get("headings") else "none"))
     options = chunking_options(build, cut_with=cut_with, context_with=context_with)
-    result: Dict[str, Any] = {**{k: build.get(k) for k in ("key", "technique", "chunk", "size", "overlap", "headings", "parent_size")}, "adds": adds}
-    scratch = Path(workdir) if workdir is not None else Path(tempfile.mkdtemp(prefix="vectrixdb-chunking-"))
+    result: Dict[str, Any] = {
+        **{
+            k: build.get(k)
+            for k in ("key", "technique", "chunk", "size", "overlap", "headings", "parent_size")
+        },
+        "adds": adds,
+    }
+    scratch = (
+        Path(workdir)
+        if workdir is not None
+        else Path(tempfile.mkdtemp(prefix="vectrixdb-chunking-"))
+    )
     chunks, seconds, model, quoted = 0, 0.0, None, 0
     passages: Dict[str, Tuple[Any, List[str], bool]] = {}
     try:
         for number, (name, docs) in enumerate(groups.items()):
             home = scratch / f"{build['key']}-{number}"
-            db = Vectrix("chunking", path=str(home), mode=mode, embedding_cache=False, **dict(open_with or {}))
+            db = Vectrix(
+                "chunking",
+                path=str(home),
+                mode=mode,
+                embedding_cache=False,
+                **dict(open_with or {}),
+            )
             try:
                 began = time.perf_counter()
                 for doc_id, doc in docs.items():
-                    db.add_document(doc, doc_id=doc_id, progress=False, on_low_quality="allow", **options)
+                    db.add_document(
+                        doc, doc_id=doc_id, progress=False, on_low_quality="allow", **options
+                    )
                 seconds += time.perf_counter() - began
                 chunks += int(db.count())
                 model = model or _model_of(db)
@@ -596,7 +722,11 @@ def run_chunking_build(
                     by_words = evidence_found(q, handed, docs)
                     if by_words is not None:
                         quoted += 1
-                    found = by_words if by_words is not None else any(_covers(hit, q.expected, docs) for hit, _ in handed)
+                    found = (
+                        by_words
+                        if by_words is not None
+                        else any(_covers(hit, q.expected, docs) for hit, _ in handed)
+                    )
                     passages[_qid(q, len(passages))] = (q, [text for _, text in handed], found)
             finally:
                 db.close()
@@ -607,29 +737,40 @@ def run_chunking_build(
 
     verdicts: Dict[str, Optional[bool]] = {qid: None for qid in passages}
     if answering:
+
         def score(item: Tuple[str, Tuple[Any, List[str], bool]]) -> Tuple[str, bool]:
             qid, (q, texts, _found) = item
             said = answer(q.text, texts)  # type: ignore[misc]
-            return qid, _right(judge(metric="correctness", question=q.text, reference=q.reference, answer=str(said or ""), sources=texts))  # type: ignore[misc]
+            return qid, _right(
+                judge(  # type: ignore[misc]
+                    metric="correctness",
+                    question=q.text,
+                    reference=q.reference,
+                    answer=str(said or ""),
+                    sources=texts,
+                )
+            )
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, int(workers))) as pool:
             for qid, verdict in pool.map(score, list(passages.items())):
                 verdicts[qid] = verdict
 
     outcomes = {qid: [bool(found), verdicts[qid]] for qid, (_q, _texts, found) in passages.items()}
-    result.update({
-        "questions": len(outcomes),
-        "left_out": len(lost) + len(no_reference),
-        "collections": sorted(name for name in groups if name),
-        "chunks": chunks,
-        "build_s": round(seconds, 2),
-        "model": model,
-        "found": sum(1 for o in outcomes.values() if o[0]),
-        "by_evidence": quoted,
-        "answered": sum(1 for o in outcomes.values() if o[1]) if answering else None,
-        "outcomes": outcomes,
-        "error": None,
-    })
+    result.update(
+        {
+            "questions": len(outcomes),
+            "left_out": len(lost) + len(no_reference),
+            "collections": sorted(name for name in groups if name),
+            "chunks": chunks,
+            "build_s": round(seconds, 2),
+            "model": model,
+            "found": sum(1 for o in outcomes.values() if o[0]),
+            "by_evidence": quoted,
+            "answered": sum(1 for o in outcomes.values() if o[1]) if answering else None,
+            "outcomes": outcomes,
+            "error": None,
+        }
+    )
     return result
 
 
@@ -660,7 +801,9 @@ def _parts(result: Mapping[str, Any], scored: str) -> Tuple[int, int, int]:
     return right, wrong, len(outcomes) - right - wrong
 
 
-def _head_to_head(a: Mapping[str, Any], b: Mapping[str, Any], scored: str, alpha: float) -> Dict[str, Any]:
+def _head_to_head(
+    a: Mapping[str, Any], b: Mapping[str, Any], scored: str, alpha: float
+) -> Dict[str, Any]:
     ours, theirs = a.get("outcomes") or {}, b.get("outcomes") or {}
     common = [q for q in ours if q in theirs]
     only_this = sum(1 for q in common if _good(ours[q], scored) and not _good(theirs[q], scored))
@@ -677,7 +820,24 @@ def _head_to_head(a: Mapping[str, Any], b: Mapping[str, Any], scored: str, alpha
     }
 
 
-_BUILD_KEYS = ("key", "technique", "chunk", "size", "overlap", "headings", "adds", "parent_size", "questions", "left_out", "chunks", "build_s", "found", "by_evidence", "answered", "error")
+_BUILD_KEYS = (
+    "key",
+    "technique",
+    "chunk",
+    "size",
+    "overlap",
+    "headings",
+    "adds",
+    "parent_size",
+    "questions",
+    "left_out",
+    "chunks",
+    "build_s",
+    "found",
+    "by_evidence",
+    "answered",
+    "error",
+)
 
 
 def _ranked(ok: Sequence[Mapping[str, Any]], scored: str) -> List[Mapping[str, Any]]:
@@ -686,7 +846,15 @@ def _ranked(ok: Sequence[Mapping[str, Any]], scored: str) -> List[Mapping[str, A
     def score(r: Mapping[str, Any]) -> int:
         return int(r.get("answered") or 0) if scored == "answered" else int(r.get("found") or 0)
 
-    return sorted(ok, key=lambda r: (-score(r), int(r.get("chunks") or 0), int(r.get("size") or 0), str(r.get("key"))))
+    return sorted(
+        ok,
+        key=lambda r: (
+            -score(r),
+            int(r.get("chunks") or 0),
+            int(r.get("size") or 0),
+            str(r.get("key")),
+        ),
+    )
 
 
 def chunking_report(
@@ -731,24 +899,41 @@ def chunking_report(
     for rank, r in enumerate(bests.values(), start=1):
         spec = TECHNIQUES.get(str(r.get("technique")), {})
         right, wrong, missed = _parts(r, scored)
-        techniques.append({
-            "key": r.get("technique"),
-            "name": spec.get("name", r.get("technique")),
-            "cuts": spec.get("cuts", ""),
-            "rank": rank,
-            "best": r.get("key"),
-            **{k: r.get(k) for k in ("size", "overlap", "headings", "parent_size", "questions", "chunks", "build_s", "found", "answered")},
-            "adds": r.get("adds") or ("headings" if r.get("headings") else "none"),
-            "right": right,
-            "wrong": wrong,
-            "missed": missed,
-            "tie": False,
-            "against": {},
-        })
+        techniques.append(
+            {
+                "key": r.get("technique"),
+                "name": spec.get("name", r.get("technique")),
+                "cuts": spec.get("cuts", ""),
+                "rank": rank,
+                "best": r.get("key"),
+                **{
+                    k: r.get(k)
+                    for k in (
+                        "size",
+                        "overlap",
+                        "headings",
+                        "parent_size",
+                        "questions",
+                        "chunks",
+                        "build_s",
+                        "found",
+                        "answered",
+                    )
+                },
+                "adds": r.get("adds") or ("headings" if r.get("headings") else "none"),
+                "right": right,
+                "wrong": wrong,
+                "missed": missed,
+                "tie": False,
+                "against": {},
+            }
+        )
     for mine in techniques:
         for other in techniques:
             if other is not mine:
-                mine["against"][str(other["key"])] = _head_to_head(bests[str(mine["key"])], bests[str(other["key"])], scored, alpha)
+                mine["against"][str(other["key"])] = _head_to_head(
+                    bests[str(mine["key"])], bests[str(other["key"])], scored, alpha
+                )
     if techniques:
         leader = str(techniques[0]["key"])
         for other in techniques[1:]:
@@ -811,7 +996,11 @@ class ChunkingStore(ReportStore):
             "budget": report.get("budget"),
             "best": report.get("best"),
             "techniques": {
-                str(t.get("key")): {"right": t.get("right"), "questions": t.get("questions"), "best": t.get("best")}
+                str(t.get("key")): {
+                    "right": t.get("right"),
+                    "questions": t.get("questions"),
+                    "best": t.get("best"),
+                }
                 for t in report.get("techniques") or []
             },
         }
@@ -871,7 +1060,9 @@ class _Guard:
             if failure and failure[0] in (401, 403, 404):
                 raise WriterUnavailable(f"{label} refused: {failure[1][:300]}")
             if self.quiet >= 3:
-                raise WriterUnavailable(f"{label} stopped answering: {(failure or (0, 'no answer'))[1][:300]}")
+                raise WriterUnavailable(
+                    f"{label} stopped answering: {(failure or (0, 'no answer'))[1][:300]}"
+                )
         return None
 
 
@@ -889,7 +1080,12 @@ def answer_with(chat: Any) -> Answer:
 
     def answer(question: str, passages: Sequence[str]) -> str:
         block = "\n".join(f"<passage>{_inert(p)}</passage>" for p in passages) or "(no passages)"
-        reply = ask([{"role": "system", "content": _ANSWER}, {"role": "user", "content": f"{block}\n\nQuestion: {question}"}])
+        reply = ask(
+            [
+                {"role": "system", "content": _ANSWER},
+                {"role": "user", "content": f"{block}\n\nQuestion: {question}"},
+            ]
+        )
         found = json_in(reply or "") or {}
         return str(found.get("answer") or reply or "").strip()
 
@@ -979,15 +1175,26 @@ def compare_chunking(
     else:
         gold = Golden(questions=list(golden), source="in memory")
     if not gold.labelled:
-        raise ValueError("no labelled questions: every question needs the pages or documents that answer it in 'expected'")
+        raise ValueError(
+            "no labelled questions: every question needs the pages or documents that answer it in 'expected'"
+        )
     if chat is not None:
         answer = answer or answer_with(chat)
         judge = judge or judge_with(chat)
     if (answer is None) != (judge is None):
-        raise ValueError("answer and judge come together: pass both, or chat= for one model to do both")
+        raise ValueError(
+            "answer and judge come together: pass both, or chat= for one model to do both"
+        )
     plan, skipped, cut_with, context_with = plan_chunking(
-        chat=chat, cut_with=cut_with, context_with=context_with, late=late, open_with=open_with,
-        techniques=techniques, sizes=sizes, child_sizes=child_sizes, headings=headings,
+        chat=chat,
+        cut_with=cut_with,
+        context_with=context_with,
+        late=late,
+        open_with=open_with,
+        techniques=techniques,
+        sizes=sizes,
+        child_sizes=child_sizes,
+        headings=headings,
     )
     loaded = _loaded(documents)
     if not any(loaded.values()):
@@ -997,15 +1204,29 @@ def compare_chunking(
         if progress is not None:
             progress(build, number, len(plan))
         try:
-            results.append(run_chunking_build(
-                loaded, gold.labelled, build, budget=budget, search=search, answer=answer, judge=judge,
-                open_with=open_with, workdir=workdir, workers=workers, cut_with=cut_with, context_with=context_with,
-            ))
+            results.append(
+                run_chunking_build(
+                    loaded,
+                    gold.labelled,
+                    build,
+                    budget=budget,
+                    search=search,
+                    answer=answer,
+                    judge=judge,
+                    open_with=open_with,
+                    workdir=workdir,
+                    workers=workers,
+                    cut_with=cut_with,
+                    context_with=context_with,
+                )
+            )
         except WriterUnavailable:
             raise
         except Exception as exc:  # one technique that cannot run leaves the others to be compared
             results.append({**build, "questions": 0, "error": f"{type(exc).__name__}: {exc}"})
-    report = chunking_report(results, gold.describe(), budget=budget, search=search, alpha=alpha, skipped=skipped)
+    report = chunking_report(
+        results, gold.describe(), budget=budget, search=search, alpha=alpha, skipped=skipped
+    )
     if save_to is not None:
         chunking_store(save_to).save(report, golden=gold.raw or None)
     return report

@@ -139,7 +139,7 @@ function ckEmpty() {
     <div>Runs come from the library. Each technique is built at three sizes, with headings in and out, and hands the model the same characters for every golden question. The one that answers the most is picked.</div>
     <pre class="ev-code">from vectrixdb.evaluation import ChatWriter, compare_chunking
 compare_chunking(documents, "golden.jsonl", chat=ChatWriter.from_environment(), save_to="evaluations")</pre>
-    ${CK.where ? `<div class="faint">Runs are read from <span class="mono">${esc(CK.where)}</span>.</div>` : ''}
+    ${CK.where ? `<div class="faint">Runs are read from <span class="mono">${esc(evWhereLabel(CK.where))}</span>${evWhereIsLocal(CK.where) ? ' under the data folder' : ''}.</div>` : ''}
   </div>`;
 }
 

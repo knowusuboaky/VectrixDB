@@ -91,7 +91,9 @@ def frame_ancestors_from_env(env: Optional[Mapping[str, str]] = None) -> str:
 
 def dashboard_policy(host: str, ancestors: str = "'none'") -> str:
     """The dashboard page's policy. ``host`` lets its live connection back in."""
-    live = f" ws://{host} wss://{host}" if host and re.fullmatch(r"[A-Za-z0-9.:\[\]-]+", host) else ""
+    live = (
+        f" ws://{host} wss://{host}" if host and re.fullmatch(r"[A-Za-z0-9.:\[\]-]+", host) else ""
+    )
     return "; ".join(
         [
             "default-src 'self'",
@@ -122,18 +124,31 @@ def dashboard_policy(host: str, ancestors: str = "'none'") -> str:
 class SecurityHeadersMiddleware:
     """Adds the headers above to every HTTP reply that does not already carry them."""
 
-    def __init__(self, app: Callable[..., Awaitable[Any]], *, ancestors: str = "'none'", https: bool = False) -> None:
+    def __init__(
+        self, app: Callable[..., Awaitable[Any]], *, ancestors: str = "'none'", https: bool = False
+    ) -> None:
         self.app = app
         self.ancestors = ancestors
         self.https = https
 
-    async def __call__(self, scope: dict, receive: Callable[..., Awaitable[Any]], send: Callable[..., Awaitable[Any]]) -> None:
+    async def __call__(
+        self,
+        scope: dict,
+        receive: Callable[..., Awaitable[Any]],
+        send: Callable[..., Awaitable[Any]],
+    ) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
         path = str(scope.get("path") or "")
-        asked = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
-        secure = self.https or scope.get("scheme") == "https" or asked.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+        asked = {
+            k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []
+        }
+        secure = (
+            self.https
+            or scope.get("scheme") == "https"
+            or asked.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+        )
         host = asked.get("host", "")
 
         async def wrapped(message: dict) -> None:
@@ -146,18 +161,33 @@ class SecurityHeadersMiddleware:
                         headers.append((name.encode("latin-1"), value.encode("latin-1")))
                         have.add(name)
 
-                kind = next((v.decode("latin-1") for k, v in headers if k.decode("latin-1").lower() == "content-type"), "")
+                kind = next(
+                    (
+                        v.decode("latin-1")
+                        for k, v in headers
+                        if k.decode("latin-1").lower() == "content-type"
+                    ),
+                    "",
+                )
                 page = kind.startswith("text/html")
                 # A 304 has no body and no type, and the browser copies its headers
                 # onto the page it kept: a policy here would replace the page's own.
                 fresh = message.get("status") != 304
                 if fresh and not path.startswith(_OWN_RULES):
-                    put("content-security-policy", dashboard_policy(host, self.ancestors) if page else API_POLICY.format(ancestors=self.ancestors))
+                    put(
+                        "content-security-policy",
+                        dashboard_policy(host, self.ancestors)
+                        if page
+                        else API_POLICY.format(ancestors=self.ancestors),
+                    )
                 put("x-content-type-options", "nosniff")
                 if self.ancestors == "'none'":
                     put("x-frame-options", "DENY")
                 put("referrer-policy", "no-referrer")
-                put("permissions-policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+                put(
+                    "permissions-policy",
+                    "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+                )
                 if page and fresh:
                     put("cross-origin-opener-policy", "same-origin")
                 if secure:

@@ -166,9 +166,21 @@ from _common import (
 
 def region_of(az: Az, name: str, group: str) -> str:
     """The region an account is actually in, as Azure writes it in a command: ``canadacentral``. "" when it cannot be read."""
-    found = az("cognitiveservices", "account", "show", "--name", name, "--resource-group", group,
-               reads=True, quiet=True, allow_fail=True)
-    return str(found.get("location") or "").lower().replace(" ", "") if isinstance(found, dict) else ""
+    found = az(
+        "cognitiveservices",
+        "account",
+        "show",
+        "--name",
+        name,
+        "--resource-group",
+        group,
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
+    return (
+        str(found.get("location") or "").lower().replace(" ", "") if isinstance(found, dict) else ""
+    )
 
 
 def held(az: Az, name: str) -> Optional[Dict[str, str]]:
@@ -180,7 +192,10 @@ def held(az: Az, name: str) -> Optional[Dict[str, str]]:
     """
     if az.pretend:
         return None
-    every = az("cognitiveservices", "account", "list-deleted", reads=True, quiet=True, allow_fail=True) or []
+    every = (
+        az("cognitiveservices", "account", "list-deleted", reads=True, quiet=True, allow_fail=True)
+        or []
+    )
     for entry in every if isinstance(every, list) else []:
         if str(entry.get("name") or "").lower() != name.lower():
             continue
@@ -188,37 +203,66 @@ def held(az: Az, name: str) -> Optional[Dict[str, str]]:
         parts = str(entry.get("id") or "").split("/")
         lowered = [p.lower() for p in parts]
         group = parts[lowered.index("resourcegroups") + 1] if "resourcegroups" in lowered else ""
-        region = str(entry.get("location") or (parts[lowered.index("locations") + 1] if "locations" in lowered else ""))
+        region = str(
+            entry.get("location")
+            or (parts[lowered.index("locations") + 1] if "locations" in lowered else "")
+        )
         if group and region:
             return {"group": group, "region": region}
     return None
 
 
-def cognitive(az: Az, name: str, group: str, region: str, kind: str, sku: str, what: str, elsewhere: str = "") -> bool:
+def cognitive(
+    az: Az, name: str, group: str, region: str, kind: str, sku: str, what: str, elsewhere: str = ""
+) -> bool:
     """One Cognitive Services account, in the first region that takes it. False when every one refused."""
     if az.exists("cognitiveservices", "account", "show", "--name", name, "--resource-group", group):
         skipped(f"{name}, {what}")
         return True
     kept = held(az, name)
     if kept:
-        note(f"{name} was deleted less than 48 hours ago and Azure still holds the name, so it is purged first")
-        az("cognitiveservices", "account", "purge", "--name", name, "--resource-group", kept["group"],
-           "--location", kept["region"], allow_fail=True)
+        note(
+            f"{name} was deleted less than 48 hours ago and Azure still holds the name, so it is purged first"
+        )
+        az(
+            "cognitiveservices",
+            "account",
+            "purge",
+            "--name",
+            name,
+            "--resource-group",
+            kept["group"],
+            "--location",
+            kept["region"],
+            allow_fail=True,
+        )
     went = somewhere(
-        az, regions(region, elsewhere),
+        az,
+        regions(region, elsewhere),
         lambda where: az(
-            "cognitiveservices", "account", "create",
-            "--name", name,
-            "--resource-group", group,
-            "--location", where,
-            "--kind", kind,
-            "--sku", sku,
-            "--custom-domain", name,
+            "cognitiveservices",
+            "account",
+            "create",
+            "--name",
+            name,
+            "--resource-group",
+            group,
+            "--location",
+            where,
+            "--kind",
+            kind,
+            "--sku",
+            sku,
+            "--custom-domain",
+            name,
             "--yes",
-            "--output", "none",
+            "--output",
+            "none",
             allow_fail=True,
         ),
-        lambda: az.exists("cognitiveservices", "account", "show", "--name", name, "--resource-group", group),
+        lambda: az.exists(
+            "cognitiveservices", "account", "show", "--name", name, "--resource-group", group
+        ),
         name,
     )
     if not went:
@@ -249,7 +293,19 @@ def offered(az: Az, region: str, model: str) -> Optional[Tuple[str, str]]:
     answered every new deployment with "is in deprecating state and cannot
     be used for new deployments".
     """
-    every = az("cognitiveservices", "model", "list", "--location", region, reads=True, quiet=True, allow_fail=True) or []
+    every = (
+        az(
+            "cognitiveservices",
+            "model",
+            "list",
+            "--location",
+            region,
+            reads=True,
+            quiet=True,
+            allow_fail=True,
+        )
+        or []
+    )
     best: Optional[Tuple[str, str]] = None
     for entry in every:
         about = entry.get("model") or {}
@@ -289,13 +345,24 @@ def room(az: Az, region: str, model: str, sku: str, capacity: int) -> bool:
     """
     if az.pretend:
         return True
-    every = az("cognitiveservices", "usage", "list", "--location", region, reads=True, quiet=True, allow_fail=True)
+    every = az(
+        "cognitiveservices",
+        "usage",
+        "list",
+        "--location",
+        region,
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
     if not isinstance(every, list):
         return True
     wanted = f"OpenAI.{sku}.{model}".lower()
     for entry in every:
         if str((entry.get("name") or {}).get("value") or "").lower() == wanted:
-            return float(entry.get("limit") or 0) - float(entry.get("currentValue") or 0) >= capacity
+            return (
+                float(entry.get("limit") or 0) - float(entry.get("currentValue") or 0) >= capacity
+            )
     return False
 
 
@@ -332,14 +399,42 @@ def deployments(config: Dict[str, str]) -> List[Tuple[str, str, str, str, int]]:
     AZURE_OPENAI_VISION_DEPLOYMENT names another. The embedding model only for a
     second vector.
     """
-    writer, vision = config["AZURE_OPENAI_WRITER_DEPLOYMENT"], config["AZURE_OPENAI_VISION_DEPLOYMENT"]
+    writer, vision = (
+        config["AZURE_OPENAI_WRITER_DEPLOYMENT"],
+        config["AZURE_OPENAI_VISION_DEPLOYMENT"],
+    )
     detailed = wants(config, "VX_DETAILED_PICTURES")
     both = detailed and vision == writer
-    out = [(writer, writer, "drafts the golden questions" + (" and describes every picture in detail" if both else ""), "AZURE_OPENAI_WRITER_DEPLOYMENT", CHAT_CAPACITY)]
+    out = [
+        (
+            writer,
+            writer,
+            "drafts the golden questions"
+            + (" and describes every picture in detail" if both else ""),
+            "AZURE_OPENAI_WRITER_DEPLOYMENT",
+            CHAT_CAPACITY,
+        )
+    ]
     if detailed and not both:
-        out.append((vision, vision, "describes every picture in detail", "AZURE_OPENAI_VISION_DEPLOYMENT", CHAT_CAPACITY))
+        out.append(
+            (
+                vision,
+                vision,
+                "describes every picture in detail",
+                "AZURE_OPENAI_VISION_DEPLOYMENT",
+                CHAT_CAPACITY,
+            )
+        )
     if wants(config, "VX_SECOND_VECTOR"):
-        out.append((config["AZURE_OPENAI_EMBED_DEPLOYMENT"], config["AZURE_OPENAI_EMBED_DEPLOYMENT"], "is the second vector", "AZURE_OPENAI_EMBED_DEPLOYMENT", EMBED_CAPACITY))
+        out.append(
+            (
+                config["AZURE_OPENAI_EMBED_DEPLOYMENT"],
+                config["AZURE_OPENAI_EMBED_DEPLOYMENT"],
+                "is the second vector",
+                "AZURE_OPENAI_EMBED_DEPLOYMENT",
+                EMBED_CAPACITY,
+            )
+        )
     return out
 
 
@@ -385,12 +480,25 @@ def _removed(az: Az, name: str, group: str, state: str) -> bool:
     different failure and sent this script chasing the wrong cause.
     """
     note(f"{name} is in {state}, which Azure will not create over, so it is removed first")
-    az("cosmosdb", "delete", "--name", name, "--resource-group", group, "--yes", "--output", "none", allow_fail=True)
+    az(
+        "cosmosdb",
+        "delete",
+        "--name",
+        name,
+        "--resource-group",
+        group,
+        "--yes",
+        "--output",
+        "none",
+        allow_fail=True,
+    )
     for _ in range(60):
         if not az.state_of("cosmosdb", "show", "--name", name, "--resource-group", group):
             return True
         time.sleep(10)
-    note(f"{name} is still there ten minutes after being deleted; leaving it alone rather than guessing")
+    note(
+        f"{name} is still there ten minutes after being deleted; leaving it alone rather than guessing"
+    )
     return False
 
 
@@ -437,33 +545,77 @@ SHARED = 1000
 
 def _serverless(az: Az, name: str, group: str) -> bool:
     """Whether the account bills per request, where a database takes no throughput of its own."""
-    found = az("cosmosdb", "show", "--name", name, "--resource-group", group, reads=True, quiet=True, allow_fail=True)
+    found = az(
+        "cosmosdb",
+        "show",
+        "--name",
+        name,
+        "--resource-group",
+        group,
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
     if not isinstance(found, dict):
         return False
-    capabilities = found.get("capabilities") or (found.get("properties") or {}).get("capabilities") or []
+    capabilities = (
+        found.get("capabilities") or (found.get("properties") or {}).get("capabilities") or []
+    )
     return any(isinstance(c, dict) and c.get("name") == "EnableServerless" for c in capabilities)
 
 
 def _database(az: Az, name: str, group: str, serverless: bool) -> None:
     """The one database, with the throughput its containers share unless the account is serverless."""
-    az("cosmosdb", "sql", "database", "create", "--account-name", name, "--resource-group", group,
-       "--name", DATA, *(() if serverless else ("--throughput", str(SHARED))),
-       "--output", "none", allow_fail=True)
+    az(
+        "cosmosdb",
+        "sql",
+        "database",
+        "create",
+        "--account-name",
+        name,
+        "--resource-group",
+        group,
+        "--name",
+        DATA,
+        *(() if serverless else ("--throughput", str(SHARED))),
+        "--output",
+        "none",
+        allow_fail=True,
+    )
 
 
 def _says_what_it_costs(az: Az, name: str, group: str) -> None:
     """An ingestion database from before everything moved into data_db: nothing reads it, and its throughput is billed."""
     if az.pretend:
         return
-    old = az("cosmosdb", "sql", "database", "show", "--account-name", name, "--resource-group", group,
-             "--name", INGESTION, reads=True, quiet=True, allow_fail=True)
+    old = az(
+        "cosmosdb",
+        "sql",
+        "database",
+        "show",
+        "--account-name",
+        name,
+        "--resource-group",
+        group,
+        "--name",
+        INGESTION,
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
     if old:
-        note(f"the {INGESTION} database is from before everything moved into {DATA}, and no app reads it now; "
-             f"its own throughput is billed past the free tier's 1000 once {DATA} has {SHARED}")
-        note(f"copy its {PARENT_SECTIONS} and {CHUNK_RECORDS} into {DATA}'s, then delete it in the portal")
+        note(
+            f"the {INGESTION} database is from before everything moved into {DATA}, and no app reads it now; "
+            f"its own throughput is billed past the free tier's 1000 once {DATA} has {SHARED}"
+        )
+        note(
+            f"copy its {PARENT_SECTIONS} and {CHUNK_RECORDS} into {DATA}'s, then delete it in the portal"
+        )
 
 
-def cosmos(az: Az, name: str, group: str, region: str, free: bool, elsewhere: str = "") -> Optional[Dict[str, str]]:
+def cosmos(
+    az: Az, name: str, group: str, region: str, free: bool, elsewhere: str = ""
+) -> Optional[Dict[str, str]]:
     """The Cosmos account, its one database and the four containers in it, as the addresses the apps are given. None when refused.
 
     ``elsewhere`` is one region or several, in the order to try them when
@@ -486,22 +638,35 @@ def cosmos(az: Az, name: str, group: str, region: str, free: bool, elsewhere: st
         if state and not _removed(az, name, group, state):
             return None
         az(
-            "cosmosdb", "create",
-            "--name", name,
-            "--resource-group", group,
-            "--locations", f"regionName={region}", "failoverPriority=0", "isZoneRedundant=False",
+            "cosmosdb",
+            "create",
+            "--name",
+            name,
+            "--resource-group",
+            group,
+            "--locations",
+            f"regionName={region}",
+            "failoverPriority=0",
+            "isZoneRedundant=False",
             *(("--enable-free-tier", "true") if free else ("--capabilities", "EnableServerless")),
-            "--output", "none",
+            "--output",
+            "none",
             allow_fail=True,
         )
         # A create that prints nothing answers the same whether it worked or
         # not, so the account is asked what state it ended in.
-        if not az.pretend and az.state_of("cosmosdb", "show", "--name", name, "--resource-group", group) != "Succeeded":
+        if (
+            not az.pretend
+            and az.state_of("cosmosdb", "show", "--name", name, "--resource-group", group)
+            != "Succeeded"
+        ):
             if free:
                 # Why it was refused is in the output above. The usual reason
                 # is that the one free account a subscription is spent, but
                 # it is not the only one, so this does not claim to know.
-                note("the free tier was refused; trying serverless, which bills per request and is pennies at this size")
+                note(
+                    "the free tier was refused; trying serverless, which bills per request and is pennies at this size"
+                )
                 return cosmos(az, name, group, region, free=False, elsewhere=elsewhere)
             rest = regions(region, elsewhere)[1:]
             if rest:
@@ -512,19 +677,73 @@ def cosmos(az: Az, name: str, group: str, region: str, free: bool, elsewhere: st
 
     serverless = _serverless(az, name, group)
     _database(az, name, group, serverless)
-    az("cosmosdb", "sql", "container", "create", "--account-name", name, "--resource-group", group,
-       "--database-name", DATA, "--name", PARENT_SECTIONS, "--partition-key-path", "/doc",
-       "--output", "none", allow_fail=True)
+    az(
+        "cosmosdb",
+        "sql",
+        "container",
+        "create",
+        "--account-name",
+        name,
+        "--resource-group",
+        group,
+        "--database-name",
+        DATA,
+        "--name",
+        PARENT_SECTIONS,
+        "--partition-key-path",
+        "/doc",
+        "--output",
+        "none",
+        allow_fail=True,
+    )
     with _indexing_file() as policy:
-        az("cosmosdb", "sql", "container", "create", "--account-name", name, "--resource-group", group,
-           "--database-name", DATA, "--name", CHUNK_RECORDS, "--partition-key-path", "/collection",
-           "--idx", f"@{policy}", "--output", "none", allow_fail=True)
+        az(
+            "cosmosdb",
+            "sql",
+            "container",
+            "create",
+            "--account-name",
+            name,
+            "--resource-group",
+            group,
+            "--database-name",
+            DATA,
+            "--name",
+            CHUNK_RECORDS,
+            "--partition-key-path",
+            "/collection",
+            "--idx",
+            f"@{policy}",
+            "--output",
+            "none",
+            allow_fail=True,
+        )
     for container in (COLLECTION_RECORDS, SIGNIN_RECORDS):
-        az("cosmosdb", "sql", "container", "create", "--account-name", name, "--resource-group", group,
-           "--database-name", DATA, "--name", container, "--partition-key-path", "/kind", "--ttl", "-1",
-           "--output", "none", allow_fail=True)
-    done(f"{DATA}: {PARENT_SECTIONS}, {CHUNK_RECORDS}, {COLLECTION_RECORDS} and {SIGNIN_RECORDS}"
-         + ("" if serverless else f", sharing {SHARED} RU/s"))
+        az(
+            "cosmosdb",
+            "sql",
+            "container",
+            "create",
+            "--account-name",
+            name,
+            "--resource-group",
+            group,
+            "--database-name",
+            DATA,
+            "--name",
+            container,
+            "--partition-key-path",
+            "/kind",
+            "--ttl",
+            "-1",
+            "--output",
+            "none",
+            allow_fail=True,
+        )
+    done(
+        f"{DATA}: {PARENT_SECTIONS}, {CHUNK_RECORDS}, {COLLECTION_RECORDS} and {SIGNIN_RECORDS}"
+        + ("" if serverless else f", sharing {SHARED} RU/s")
+    )
     if not serverless:
         _says_what_it_costs(az, name, group)
 
@@ -548,8 +767,23 @@ def cosmos(az: Az, name: str, group: str, region: str, free: bool, elsewhere: st
 
 
 def endpoint_of(az: Az, name: str, group: str) -> str:
-    found = az("cognitiveservices", "account", "show", "--name", name, "--resource-group", group, reads=True, quiet=True, allow_fail=True)
-    return (found or {}).get("properties", {}).get("endpoint", f"https://{name}.cognitiveservices.azure.com/")
+    found = az(
+        "cognitiveservices",
+        "account",
+        "show",
+        "--name",
+        name,
+        "--resource-group",
+        group,
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
+    return (
+        (found or {})
+        .get("properties", {})
+        .get("endpoint", f"https://{name}.cognitiveservices.azure.com/")
+    )
 
 
 # ============================================================================
@@ -569,7 +803,11 @@ def main() -> int:
     config = settings()
     az = Az(args.dry_run)
     group, region = config["VX_RESOURCE_GROUP"], config["VX_LOCATION"]
-    begin("03", "The AI services", "Document Intelligence and Speech on their free tiers, then Azure OpenAI.")
+    begin(
+        "03",
+        "The AI services",
+        "Document Intelligence and Speech on their free tiers, then Azure OpenAI.",
+    )
 
     if not args.dry_run and not az.exists("group", "show", "--name", group):
         stop(f"There is no resource group {group} yet. Run 01_create_resources.py first.")
@@ -580,21 +818,43 @@ def main() -> int:
     # F0 is the free tier: 500 pages a month, and it reads only the first two
     # pages of any one document. Both TD reports have a real text layer, so
     # the library reads those itself and only the PNGs come here.
-    if cognitive(az, config["VX_DOCINTEL"], group, region, "FormRecognizer", "F0", "free tier, 500 pages a month", config["VX_ELSEWHERE"]):
+    if cognitive(
+        az,
+        config["VX_DOCINTEL"],
+        group,
+        region,
+        "FormRecognizer",
+        "F0",
+        "free tier, 500 pages a month",
+        config["VX_ELSEWHERE"],
+    ):
         kept["docintel_endpoint"] = endpoint_of(az, config["VX_DOCINTEL"], group)
-        note("the free tier reads the first two pages of a document; a long scan needs S0, about 2 CAD a thousand pages")
+        note(
+            "the free tier reads the first two pages of a document; a long scan needs S0, about 2 CAD a thousand pages"
+        )
     else:
         note("Document Intelligence was refused, so a scanned page will read as nothing")
 
     step("Speech, for the WAV and the videos")
-    if cognitive(az, config["VX_SPEECH"], group, region, "SpeechServices", "F0", "free tier, 5 hours a month", config["VX_ELSEWHERE"]):
+    if cognitive(
+        az,
+        config["VX_SPEECH"],
+        group,
+        region,
+        "SpeechServices",
+        "F0",
+        "free tier, 5 hours a month",
+        config["VX_ELSEWHERE"],
+    ):
         kept["speech_endpoint"] = endpoint_of(az, config["VX_SPEECH"], group)
     else:
         note("Speech was refused, so the audio and the videos will read as nothing")
 
     if wants(config, "VX_COSMOS"):
         home = config.get("VX_COSMOS_LOCATION") or region
-        step(f"Cosmos DB, for the parent sections a search returns, the chunks the pages count, and who may see what, in {home}")
+        step(
+            f"Cosmos DB, for the parent sections a search returns, the chunks the pages count, and who may see what, in {home}"
+        )
         made = cosmos(
             az,
             config["VX_COSMOS_NAME"],
@@ -605,66 +865,127 @@ def main() -> int:
         )
         if made:
             kept.update(made)
-            note("every instance reads these; a file on one instance is invisible to the next and is not kept")
+            note(
+                "every instance reads these; a file on one instance is invisible to the next and is not kept"
+            )
         else:
-            note("Cosmos was refused, so parents, the pages' chunks and sign-in stay on each instance: one process only")
+            note(
+                "Cosmos was refused, so parents, the pages' chunks and sign-in stay on each instance: one process only"
+            )
     else:
-        note("VX_COSMOS is not yes, so parents, the pages' chunks and sign-in stay on each instance: one process only")
+        note(
+            "VX_COSMOS is not yes, so parents, the pages' chunks and sign-in stay on each instance: one process only"
+        )
 
     if wants(config, "VX_VISION"):
         step(f"Azure AI Vision, for what each picture shows, in {config['VX_VISION_LOCATION']}")
         if cognitive(
-            az, config["VX_VISION_NAME"], group, config["VX_VISION_LOCATION"], "ComputerVision", "F0",
-            "free tier, 5,000 pictures a month", config["VX_ELSEWHERE"],
+            az,
+            config["VX_VISION_NAME"],
+            group,
+            config["VX_VISION_LOCATION"],
+            "ComputerVision",
+            "F0",
+            "free tier, 5,000 pictures a month",
+            config["VX_ELSEWHERE"],
         ):
             kept["vision_endpoint"] = endpoint_of(az, config["VX_VISION_NAME"], group)
-            note("it says what a picture is and reads the words in it; it does not reason about a chart")
+            note(
+                "it says what a picture is and reads the words in it; it does not reason about a chart"
+            )
             if config["VX_VISION_LOCATION"] != config["VX_LOCATION"]:
-                note(f"it sits in {config['VX_VISION_LOCATION']} because {config['VX_LOCATION']} cannot caption")
+                note(
+                    f"it sits in {config['VX_VISION_LOCATION']} because {config['VX_LOCATION']} cannot caption"
+                )
         else:
-            note("Vision was refused, so a figure keeps its caption and its picture and gains no description")
+            note(
+                "Vision was refused, so a figure keeps its caption and its picture and gains no description"
+            )
     else:
         note("VX_VISION is not yes, so pictures are found by their captions alone")
 
     if wants(config, "VX_LANGUAGE"):
-        step("Azure AI Language, which finds the names, addresses and ids in a document before it is kept")
+        step(
+            "Azure AI Language, which finds the names, addresses and ids in a document before it is kept"
+        )
         if cognitive(
-            az, config["VX_LANGUAGE_NAME"], group, config["VX_LOCATION"], "TextAnalytics", "F0",
-            "free tier, 5,000 text records a month", config["VX_ELSEWHERE"],
+            az,
+            config["VX_LANGUAGE_NAME"],
+            group,
+            config["VX_LOCATION"],
+            "TextAnalytics",
+            "F0",
+            "free tier, 5,000 text records a month",
+            config["VX_ELSEWHERE"],
         ):
             kept["language_endpoint"] = endpoint_of(az, config["VX_LANGUAGE_NAME"], group)
-            note("the extraction app masks every document with it, in English and French alike; the patterns run after it")
-            note(f"AZURE_LANGUAGE_ENDPOINT={kept['language_endpoint']}; 05 reads its key from Azure as AZURE_LANGUAGE_KEY and never writes it down")
+            note(
+                "the extraction app masks every document with it, in English and French alike; the patterns run after it"
+            )
+            note(
+                f"AZURE_LANGUAGE_ENDPOINT={kept['language_endpoint']}; 05 reads its key from Azure as AZURE_LANGUAGE_KEY and never writes it down"
+            )
         else:
-            note("Language was refused, so the extraction app masks by the patterns alone: emails, phones, cards and ids by their shape")
+            note(
+                "Language was refused, so the extraction app masks by the patterns alone: emails, phones, cards and ids by their shape"
+            )
     else:
-        note("VX_LANGUAGE is not yes, so the extraction app masks by the patterns alone: emails, phones, cards and ids by their shape")
+        note(
+            "VX_LANGUAGE is not yes, so the extraction app masks by the patterns alone: emails, phones, cards and ids by their shape"
+        )
 
     if wants(config, "VX_TRANSLATOR"):
         step("Azure AI Translator, which the extraction app's /translate routes answer with")
         name = config["VX_TRANSLATOR_NAME"]
-        if cognitive(az, name, group, region, "TextTranslation", "F0", "free tier, 2 million characters a month", config["VX_ELSEWHERE"]):
+        if cognitive(
+            az,
+            name,
+            group,
+            region,
+            "TextTranslation",
+            "F0",
+            "free tier, 2 million characters a month",
+            config["VX_ELSEWHERE"],
+        ):
             # A regional resource is called at the one address every
             # Translator shares, with its region beside its key. Without the
             # region the first call is refused, so the region it landed in
             # is what is kept.
             kept["translator_region"] = region_of(az, name, group) or region
-            note(f"AZURE_TRANSLATOR_REGION={kept['translator_region']}; 05 reads its key from Azure as AZURE_TRANSLATOR_KEY and never writes it down")
+            note(
+                f"AZURE_TRANSLATOR_REGION={kept['translator_region']}; 05 reads its key from Azure as AZURE_TRANSLATOR_KEY and never writes it down"
+            )
         else:
-            note("Translator was refused, so /translate/text and /translate/detect answer 503 and name the setting they need")
+            note(
+                "Translator was refused, so /translate/text and /translate/detect answer 503 and name the setting they need"
+            )
     else:
-        note("VX_TRANSLATOR is not yes, so /translate/text and /translate/detect answer 503 and name the setting they need")
+        note(
+            "VX_TRANSLATOR is not yes, so /translate/text and /translate/detect answer 503 and name the setting they need"
+        )
 
     if not wants(config, "VX_OPENAI"):
         note("VX_OPENAI is not yes, so no chat model, no detailed pictures and no second vector")
         remember(**kept, openai_endpoint=None)
-        finish("The AI services are ready, without Azure OpenAI.", "04_push_local_to_blob_cosmosdb.py")
+        finish(
+            "The AI services are ready, without Azure OpenAI.", "04_push_local_to_blob_cosmosdb.py"
+        )
         return 0
 
     step("Azure OpenAI")
     name = config["VX_OPENAI_NAME"]
-    there = az("cognitiveservices", "account", "show", "--name", name, "--resource-group", group,
-               reads=True, quiet=True, allow_fail=True)
+    there = az(
+        "cognitiveservices",
+        "account",
+        "show",
+        "--name",
+        name,
+        "--resource-group",
+        group,
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
     if isinstance(there, dict) and there.get("location"):
         # Made on an earlier run: its deployments go where it already is.
         region = str(there["location"]).lower().replace(" ", "")
@@ -672,30 +993,57 @@ def main() -> int:
     else:
         home, tries = region, regions(region, config.get("VX_OPENAI_ELSEWHERE", ""))
         region = home_of_openai(az, config, tries)
-        after = ",".join(tries[tries.index(region) + 1:])
+        after = ",".join(tries[tries.index(region) + 1 :])
         if region != home:
             note(f"Azure OpenAI goes in {region}, where the quota is")
-    if not cognitive(az, name, group, region, "OpenAI", "S0", "the chat model and the second vector", after):
+    if not cognitive(
+        az, name, group, region, "OpenAI", "S0", "the chat model and the second vector", after
+    ):
         note(
             "Azure could not make it. Usually that means this subscription has not been given access, "
             "or the region has none left. Everything else works without it: set VX_OPENAI=no in settings.env "
             "and run this again, or ask for access in the portal and come back."
         )
         remember(**kept, openai_endpoint=None)
-        finish("The AI services are ready, without Azure OpenAI.", "04_push_local_to_blob_cosmosdb.py")
+        finish(
+            "The AI services are ready, without Azure OpenAI.", "04_push_local_to_blob_cosmosdb.py"
+        )
         return 0
 
     kept["openai_endpoint"] = endpoint_of(az, name, group)
-    landed = az("cognitiveservices", "account", "show", "--name", name, "--resource-group", group,
-                reads=True, quiet=True, allow_fail=True)
+    landed = az(
+        "cognitiveservices",
+        "account",
+        "show",
+        "--name",
+        name,
+        "--resource-group",
+        group,
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
     if isinstance(landed, dict) and landed.get("location"):
         # Its deployments are asked of the region it is actually in.
         region = str(landed["location"]).lower().replace(" ", "")
     if not wants(config, "VX_SECOND_VECTOR"):
-        note("VX_SECOND_VECTOR is no, so no embedding deployment: every chunk is embedded with the built-in model alone")
+        note(
+            "VX_SECOND_VECTOR is no, so no embedding deployment: every chunk is embedded with the built-in model alone"
+        )
     for deployment, model, what, setting, capacity in deployments(config):
         step(f"The {deployment} deployment, which {what}")
-        if az.exists("cognitiveservices", "account", "deployment", "show", "--name", name, "--resource-group", group, "--deployment-name", deployment):
+        if az.exists(
+            "cognitiveservices",
+            "account",
+            "deployment",
+            "show",
+            "--name",
+            name,
+            "--resource-group",
+            group,
+            "--deployment-name",
+            deployment,
+        ):
             skipped(deployment)
             continue
         found = offered(az, region, model)
@@ -708,23 +1056,51 @@ def main() -> int:
         version, sku = found
         print(f"       {region} offers version {version} as {sku}")
         made = az(
-            "cognitiveservices", "account", "deployment", "create",
-            "--name", name,
-            "--resource-group", group,
-            "--deployment-name", deployment,
-            "--model-name", model,
-            "--model-version", version,
-            "--model-format", "OpenAI",
-            "--sku-name", sku,
-            "--sku-capacity", str(capacity),
-            "--output", "none",
+            "cognitiveservices",
+            "account",
+            "deployment",
+            "create",
+            "--name",
+            name,
+            "--resource-group",
+            group,
+            "--deployment-name",
+            deployment,
+            "--model-name",
+            model,
+            "--model-version",
+            version,
+            "--model-format",
+            "OpenAI",
+            "--sku-name",
+            sku,
+            "--sku-capacity",
+            str(capacity),
+            "--output",
+            "none",
             allow_fail=True,
         )
-        if made is None and not az.pretend and not az.exists(
-            "cognitiveservices", "account", "deployment", "show", "--name", name, "--resource-group", group, "--deployment-name", deployment
+        if (
+            made is None
+            and not az.pretend
+            and not az.exists(
+                "cognitiveservices",
+                "account",
+                "deployment",
+                "show",
+                "--name",
+                name,
+                "--resource-group",
+                group,
+                "--deployment-name",
+                deployment,
+            )
         ):
             why = reason(az)
-            note(f"{model} {version} would not deploy as {sku}. " + (f"Azure said: {why}" if why else "Azure gave no reason."))
+            note(
+                f"{model} {version} would not deploy as {sku}. "
+                + (f"Azure said: {why}" if why else "Azure gave no reason.")
+            )
             continue
         done(f"{deployment}, {model} {version}, {sku}, capacity {capacity}")
 
@@ -732,10 +1108,28 @@ def main() -> int:
     links(
         ("document intelligence", portal("cognitive", config["VX_DOCINTEL"], config)),
         ("speech", portal("cognitive", config["VX_SPEECH"], config)),
-        ("cosmos db", portal("cosmos", config["VX_COSMOS_NAME"], config) if kept.get("parent_store") else ""),
-        ("azure ai vision", portal("cognitive", config["VX_VISION_NAME"], config) if kept.get("vision_endpoint") else ""),
-        ("azure ai language", portal("cognitive", config["VX_LANGUAGE_NAME"], config) if kept.get("language_endpoint") else ""),
-        ("azure ai translator", portal("cognitive", config["VX_TRANSLATOR_NAME"], config) if kept.get("translator_region") else ""),
+        (
+            "cosmos db",
+            portal("cosmos", config["VX_COSMOS_NAME"], config) if kept.get("parent_store") else "",
+        ),
+        (
+            "azure ai vision",
+            portal("cognitive", config["VX_VISION_NAME"], config)
+            if kept.get("vision_endpoint")
+            else "",
+        ),
+        (
+            "azure ai language",
+            portal("cognitive", config["VX_LANGUAGE_NAME"], config)
+            if kept.get("language_endpoint")
+            else "",
+        ),
+        (
+            "azure ai translator",
+            portal("cognitive", config["VX_TRANSLATOR_NAME"], config)
+            if kept.get("translator_region")
+            else "",
+        ),
         ("azure openai", portal("cognitive", name, config)),
         ("its models, in AI Foundry", "https://ai.azure.com/"),
     )

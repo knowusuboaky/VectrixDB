@@ -51,6 +51,38 @@ class TestSnapshot:
         assert restored.default_mode == "graph"
         assert len(restored.graph.graph.nodes) == built
 
+    def test_members_outside_the_target_are_refused_before_anything_is_written(self, tmp_path):
+        import json
+        import zipfile
+
+        from vectrixdb.snapshot import import_snapshot
+
+        evil = tmp_path / "evil.zip"
+        with zipfile.ZipFile(evil, "w") as zf:
+            zf.writestr("manifest.json", json.dumps({"format": 1, "name": "c", "mode": "dense"}))
+            zf.writestr("c/c.db", "fine")
+            zf.writestr("../escaped.txt", "pwned")
+            zf.writestr(str(tmp_path / "absolute.txt"), "pwned")
+        with pytest.raises(ConfigurationError, match="outside"):
+            import_snapshot(evil, tmp_path / "target")
+        assert not (tmp_path / "escaped.txt").exists()
+        assert not (tmp_path / "absolute.txt").exists()
+        assert not (tmp_path / "target" / "c").exists()
+
+    def test_a_manifest_name_that_is_a_path_is_refused(self, tmp_path):
+        import json
+        import zipfile
+
+        from vectrixdb.snapshot import import_snapshot
+
+        bad = tmp_path / "bad.zip"
+        with zipfile.ZipFile(bad, "w") as zf:
+            zf.writestr(
+                "manifest.json", json.dumps({"format": 1, "name": "../up", "mode": "dense"})
+            )
+        with pytest.raises(ConfigurationError, match="cannot be imported"):
+            import_snapshot(bad, tmp_path / "target")
+
 
 class TestRebuild:
     def test_rebuild_keeps_search_working_and_drops_tombstones(self, tmp_path):

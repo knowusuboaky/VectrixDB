@@ -39,7 +39,13 @@ Nothing else changed in the period.
 
 def png(width, height, marker):
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    head = b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + ihdr + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr))
+    head = (
+        b"\x89PNG\r\n\x1a\n"
+        + struct.pack(">I", 13)
+        + b"IHDR"
+        + ihdr
+        + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr))
+    )
     return head + marker * 1500
 
 
@@ -57,7 +63,13 @@ class TwoSided:
 
     def embed_images(self, images):
         self.images += list(images)
-        return np.asarray([[1, 0, 0] if b"bars" in data else [0, 1, 0] if b"tree" in data else [0, 0, 1] for data in images], dtype=np.float32)
+        return np.asarray(
+            [
+                [1, 0, 0] if b"bars" in data else [0, 1, 0] if b"tree" in data else [0, 0, 1]
+                for data in images
+            ],
+            dtype=np.float32,
+        )
 
     def embed_texts(self, texts):
         self.texts += list(texts)
@@ -93,21 +105,39 @@ def inbox(tmp_path):
 def open_db(tmp_path, model, **options):
     from vectrixdb import Vectrix
 
-    return Vectrix("reports", path=str(tmp_path / "db"), embed_fn=words, dimension=8, embedding_cache=False, image_embedder=model, **options)
+    return Vectrix(
+        "reports",
+        path=str(tmp_path / "db"),
+        embed_fn=words,
+        dimension=8,
+        embedding_cache=False,
+        image_embedder=model,
+        **options,
+    )
 
 
 class TestAFigureIsFoundByItsLooks:
-    def test_the_picture_is_what_is_embedded_and_the_question_goes_through_the_text_side(self, tmp_path, inbox):
+    def test_the_picture_is_what_is_embedded_and_the_question_goes_through_the_text_side(
+        self, tmp_path, inbox
+    ):
         model = TwoSided()
         db = open_db(tmp_path, model)
         try:
             db.add_document(inbox / "q3.md", doc_id="q3.md", chunk="markdown")
-            assert sorted(model.images) == sorted([BARS, TREE]), "each picture once, and the one nobody kept not at all"
+            assert sorted(model.images) == sorted([BARS, TREE]), (
+                "each picture once, and the one nobody kept not at all"
+            )
             assert db.vector_names() == ["own", "image"]
             found = db.search("a chart with columns", limit=2, vectors="image")
-            assert [h.metadata["figure_src"] for h in found] == ["charts/bars.png", "charts/tree.png"]
+            assert [h.metadata["figure_src"] for h in found] == [
+                "charts/bars.png",
+                "charts/tree.png",
+            ]
             assert "a chart with columns" in model.texts
-            assert [h.metadata["figure_src"] for h in db.search("hierarchy of boxes", limit=1, vectors="image")] == ["charts/tree.png"]
+            assert [
+                h.metadata["figure_src"]
+                for h in db.search("hierarchy of boxes", limit=1, vectors="image")
+            ] == ["charts/tree.png"]
         finally:
             db.close()
 
@@ -116,13 +146,17 @@ class TestAFigureIsFoundByItsLooks:
         try:
             db.add_document(inbox / "q3.md", doc_id="q3.md", chunk="markdown")
             (hit,) = db.search("bar chart", limit=1, vectors="image")
-            assert hit.metadata["figure_id"] == "q3.md#fig1" and hit.text.startswith("[Figure: Figure 1: Revenue by region")
+            assert hit.metadata["figure_id"] == "q3.md#fig1" and hit.text.startswith(
+                "[Figure: Figure 1: Revenue by region"
+            )
             assert db.get([hit.id])[0].text == hit.text, "the same id the collection holds"
             assert db.figure_bytes(hit) == BARS
         finally:
             db.close()
 
-    def test_a_search_that_does_not_ask_for_pictures_is_the_search_it_always_was(self, tmp_path, inbox):
+    def test_a_search_that_does_not_ask_for_pictures_is_the_search_it_always_was(
+        self, tmp_path, inbox
+    ):
         model = TwoSided()
         db = open_db(tmp_path, model)
         plain = open_db(tmp_path / "plain", None)
@@ -130,9 +164,16 @@ class TestAFigureIsFoundByItsLooks:
             for handle in (db, plain):
                 handle.add_document(inbox / "q3.md", doc_id="q3.md", chunk="markdown")
             asked = len(model.texts)
-            ours, theirs = db.search("reporting lines", limit=5), plain.search("reporting lines", limit=5)
-            assert [h.id for h in ours] == [h.id for h in theirs] and [h.score for h in ours] == [h.score for h in theirs]
-            assert ours.items[0].relevance is not None, "the verdict is kept, which a fused list does not have"
+            ours, theirs = (
+                db.search("reporting lines", limit=5),
+                plain.search("reporting lines", limit=5),
+            )
+            assert [h.id for h in ours] == [h.id for h in theirs] and [h.score for h in ours] == [
+                h.score for h in theirs
+            ]
+            assert ours.items[0].relevance is not None, (
+                "the verdict is kept, which a fused list does not have"
+            )
             assert len(model.texts) == asked, "and the picture model was not asked"
         finally:
             db.close()
@@ -144,7 +185,9 @@ class TestAFigureIsFoundByItsLooks:
             db.add_document(inbox / "q3.md", doc_id="q3.md", chunk="markdown")
             found = db.search("hierarchy of boxes", limit=3, vectors="all", explain=True)
             tree = next(h for h in found if h.metadata.get("figure_src") == "charts/tree.png")
-            assert tree.explain["vector_ranks"]["image"] == 1, "no word of the question is in its caption; its picture found it"
+            assert tree.explain["vector_ranks"]["image"] == 1, (
+                "no word of the question is in its caption; its picture found it"
+            )
         finally:
             db.close()
 
@@ -154,9 +197,14 @@ class TestTheImageIndexFollowsTheCollection:
         db = open_db(tmp_path, TwoSided())
         try:
             db.add_document(inbox / "q3.md", doc_id="q3.md", chunk="markdown")
-            (inbox / "q3.md").write_text(REPORT.replace("![Figure 2: Reporting lines](charts/tree.png)", ""), encoding="utf-8")
+            (inbox / "q3.md").write_text(
+                REPORT.replace("![Figure 2: Reporting lines](charts/tree.png)", ""),
+                encoding="utf-8",
+            )
             db.add_document(inbox / "q3.md", doc_id="q3.md", chunk="markdown")
-            assert [h.metadata["figure_src"] for h in db.search("tree", limit=5, vectors="image")] == ["charts/bars.png"]
+            assert [
+                h.metadata["figure_src"] for h in db.search("tree", limit=5, vectors="image")
+            ] == ["charts/bars.png"]
             db.delete_document("q3.md")
             assert db.search("bar chart", limit=5, vectors="image").items == []
         finally:
@@ -172,8 +220,14 @@ class TestTheImageIndexFollowsTheCollection:
                 picture.unlink()
             db.rechunk(chunk="recursive", chunk_size=300, overlap=50)
             found = db.search("bar chart", limit=5, vectors="image")
-            assert [h.metadata["figure_src"] for h in found] == ["charts/bars.png", "charts/tree.png"]
-            assert all(db.get([h.id])[0].metadata.get("figure_src") == h.metadata["figure_src"] for h in found)
+            assert [h.metadata["figure_src"] for h in found] == [
+                "charts/bars.png",
+                "charts/tree.png",
+            ]
+            assert all(
+                db.get([h.id])[0].metadata.get("figure_src") == h.metadata["figure_src"]
+                for h in found
+            )
         finally:
             db.close()
 
@@ -182,7 +236,9 @@ class TestTheImageIndexFollowsTheCollection:
         db = open_db(tmp_path, model)
         try:
             db.add(["a bar chart described in words"], ids=["t1"])
-            assert model.images == [] and db.search("bar chart", limit=5, vectors="image").items == []
+            assert (
+                model.images == [] and db.search("bar chart", limit=5, vectors="image").items == []
+            )
         finally:
             db.close()
 
@@ -196,7 +252,10 @@ class TestTheImageIndexFollowsTheCollection:
             Vectrix("reports", path=str(tmp_path / "db"), embed_fn=words, dimension=8)
         again = open_db(tmp_path, TwoSided())
         try:
-            assert [h.metadata["figure_src"] for h in again.search("bar chart", limit=1, vectors="image")] == ["charts/bars.png"]
+            assert [
+                h.metadata["figure_src"]
+                for h in again.search("bar chart", limit=1, vectors="image")
+            ] == ["charts/bars.png"]
         finally:
             again.close()
 
@@ -236,7 +295,9 @@ class TestWhatIsRefused:
 
         db = open_db(tmp_path, Broken())
         try:
-            with pytest.raises(ExtractionError, match="embedding the figures of q3.md failed: out of memory"):
+            with pytest.raises(
+                ExtractionError, match="embedding the figures of q3.md failed: out of memory"
+            ):
                 db.add_document(inbox / "q3.md", doc_id="q3.md", chunk="markdown")
         finally:
             db.close()
@@ -249,4 +310,6 @@ class TestWhatIsRefused:
         from vectrixdb.policy import Overlap, Policy
 
         with pytest.raises(ConfigurationError, match="entitlement policy"):
-            open_db(tmp_path, TwoSided(), policy=Policy([Overlap("client_id", "clients", scope=True)]))
+            open_db(
+                tmp_path, TwoSided(), policy=Policy([Overlap("client_id", "clients", scope=True)])
+            )

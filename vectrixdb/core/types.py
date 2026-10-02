@@ -9,7 +9,7 @@ Author: Kwadwo Daddy Nyame Owusu - Boakye
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from .._time import parse_iso, utcnow
+from .._time import ensure_aware, parse_iso, utcnow
 from enum import Enum
 from typing import Any, Optional, Union, List, Dict
 import numpy as np
@@ -477,7 +477,9 @@ class SearchResult:
     relevance: Optional[float] = None
     relevance_kind: Optional[str] = None  # similarity, reranker, distance, relative
     matched_by: Optional[list[str]] = None  # "meaning", "keywords"
-    relevances: Optional[dict[str, float]] = None  # per dense vector, when a store holds more than one
+    relevances: Optional[dict[str, float]] = (
+        None  # per dense vector, when a store holds more than one
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -715,6 +717,19 @@ class _Missing:
 MISSING = _Missing()
 
 
+def _as_datetime(value: Any) -> Optional[datetime]:
+    """An aware datetime from an ISO string or a datetime, else None.
+
+    Bounds given as datetime objects used to crash in ``parse_iso``, and a
+    naive datetime field never compared against the aware bounds.
+    """
+    if isinstance(value, datetime):
+        return ensure_aware(value)
+    if isinstance(value, str):
+        return parse_iso(value)
+    return None
+
+
 @dataclass
 class FilterCondition:
     """A filter condition for metadata queries."""
@@ -736,7 +751,17 @@ class FilterCondition:
         return field_value in operand
 
     def matches(self, metadata: dict[str, Any]) -> bool:
-        """Check if metadata matches this condition."""
+        """Check if metadata matches this condition.
+
+        The semantics docs/reference/filters.md documents, in short: an
+        absent field matches no comparison operator, ``ne`` and ``nin``
+        included (``exists`` is the one operator that sees absence); a
+        present null takes part in equality and membership, not ordering.
+        ``contains`` and ``icontains`` are a substring test against a string
+        field, and against a list field they ask whether an element equals
+        the value: ``"an"`` is in the string ``"banana"`` and is not in the
+        list ``["banana"]``, where it used to match by way of ``str(list)``.
+        """
         # Handle nested field access with dot notation
         field_value = self._get_nested_value(metadata, self.field)
 
@@ -806,10 +831,16 @@ class FilterCondition:
                 return field_value in self.value
             return any(v in self.value for v in field_value)
 
-        # String operators
+        # String operators. Against a list, an element that equals the value;
+        # the substring test ran over str(list) and matched its brackets,
+        # commas and the inside of every element.
         elif self.operator == "contains":
+            if isinstance(field_value, (list, tuple, set)):
+                return any(v == self.value or str(v) == str(self.value) for v in field_value)
             return str(self.value) in str(field_value)
         elif self.operator == "icontains":
+            if isinstance(field_value, (list, tuple, set)):
+                return any(str(v).lower() == str(self.value).lower() for v in field_value)
             return str(self.value).lower() in str(field_value).lower()
         elif self.operator == "starts_with":
             return str(field_value).startswith(str(self.value))
@@ -833,20 +864,14 @@ class FilterCondition:
         # Date range
         elif self.operator == "date_range":
             try:
-                if isinstance(field_value, str):
-                    field_date = parse_iso(field_value)
-                elif isinstance(field_value, datetime):
-                    field_date = field_value
-                else:
-                    return False
-
+                field_date = _as_datetime(field_value)
                 if field_date is None:
                     return False
 
                 if not isinstance(self.value, (list, tuple)) or len(self.value) != 2:
                     return False
-                start = parse_iso(self.value[0])
-                end = parse_iso(self.value[1])
+                start = _as_datetime(self.value[0])
+                end = _as_datetime(self.value[1])
                 if start is None or end is None:
                     return False
                 return start <= field_date <= end
@@ -1005,23 +1030,27 @@ class Filter:
         if not isinstance(filter_dict, dict):
             raise TypeError(f"filter must be a dict, got {type(filter_dict).__name__}")
 
-        # Handle Qdrant-style filter
-        if any(k in filter_dict for k in ["must", "should", "must_not"]):
-            return cls._from_qdrant_format(filter_dict)
-
-        # Handle extended format with $and/$or
-        if "$and" in filter_dict:
-            nested = [cls.from_dict(f) for f in cls._clauses(filter_dict["$and"], "$and")]
-            return cls(nested=nested, logic="and")
-
-        if "$or" in filter_dict:
-            nested = [cls.from_dict(f) for f in cls._clauses(filter_dict["$or"], "$or")]
-            return cls(nested=nested, logic="or")
-
-        if "$not" in filter_dict:
-            inner = cls.from_dict(filter_dict["$not"])
-            inner.negate = True
-            return inner
+        # Combinators. Every part of the dict is ANDed: keys beside a
+        # combinator used to be dropped silently, and $not set ``negate`` on
+        # the inner filter instead of wrapping it, so a double $not stayed
+        # negated.
+        qdrant_keys = [k for k in ("must", "should", "must_not") if k in filter_dict]
+        if qdrant_keys or any(k in filter_dict for k in ("$and", "$or", "$not")):
+            rest = dict(filter_dict)
+            parts: list["Filter"] = []
+            if qdrant_keys:
+                parts.append(cls._from_qdrant_format({k: rest.pop(k) for k in qdrant_keys}))
+            if "$and" in rest:
+                clauses = cls._clauses(rest.pop("$and"), "$and")
+                parts.append(cls(nested=[cls.from_dict(f) for f in clauses], logic="and"))
+            if "$or" in rest:
+                clauses = cls._clauses(rest.pop("$or"), "$or")
+                parts.append(cls(nested=[cls.from_dict(f) for f in clauses], logic="or"))
+            if "$not" in rest:
+                parts.append(cls(nested=[cls.from_dict(rest.pop("$not"))], negate=True))
+            if rest:
+                parts.append(cls.from_dict(rest))
+            return parts[0] if len(parts) == 1 else cls(nested=parts, logic="and")
 
         # Handle extended single condition
         if "field" in filter_dict and "op" in filter_dict:
@@ -1083,34 +1112,29 @@ class Filter:
                 filter_dict = dict(filter_dict)
                 filter_dict[key] = cls._clauses(filter_dict[key], key)
 
-        # Handle "must" (AND conditions)
-        if "must" in filter_dict:
-            must_conditions = []
-            for cond in filter_dict["must"]:
-                must_conditions.append(cls._parse_qdrant_condition(cond))
-            if must_conditions:
-                nested_filters.append(cls(conditions=must_conditions, logic="and"))
-
-        # Handle "should" (OR conditions)
-        if "should" in filter_dict:
-            should_conditions = []
-            for cond in filter_dict["should"]:
-                should_conditions.append(cls._parse_qdrant_condition(cond))
-            if should_conditions:
-                nested_filters.append(cls(conditions=should_conditions, logic="or"))
-
-        # Handle "must_not" (negated AND)
-        if "must_not" in filter_dict:
-            must_not_conditions = []
-            for cond in filter_dict["must_not"]:
-                must_not_conditions.append(cls._parse_qdrant_condition(cond))
-            if must_not_conditions:
-                nested_filters.append(cls(conditions=must_not_conditions, logic="and", negate=True))
+        # must: all of; should: any of; must_not: none of, which is
+        # NOT(a OR b). It was built as NOT(a AND b), so a document matching
+        # only one excluded condition got through.
+        for key, logic, negate in (
+            ("must", "and", False),
+            ("should", "or", False),
+            ("must_not", "or", True),
+        ):
+            if key not in filter_dict or not filter_dict[key]:
+                continue
+            group = cls(logic=logic, negate=negate)
+            for cond in filter_dict[key]:
+                parsed = cls._parse_qdrant_condition(cond)
+                if isinstance(parsed, Filter):
+                    group.nested.append(parsed)
+                else:
+                    group.conditions.append(parsed)
+            nested_filters.append(group)
 
         return cls(nested=nested_filters, logic="and")
 
     @classmethod
-    def _parse_qdrant_condition(cls, cond: dict) -> FilterCondition:
+    def _parse_qdrant_condition(cls, cond: dict) -> Union[FilterCondition, "Filter"]:
         """Parse a single Qdrant-style condition."""
         if not isinstance(cond, dict):
             raise TypeError(f"a Qdrant condition is a dict, got {type(cond).__name__}")
@@ -1126,10 +1150,18 @@ class Filter:
                 return FilterCondition(field=key, operator="any", value=match["any"])
 
         if "range" in cond:
+            # Every bound applies: a range with gte and lte used to keep only
+            # the first, so it was a half-open range.
             range_cond = cond["range"]
-            for op in ["gt", "gte", "lt", "lte"]:
-                if op in range_cond:
-                    return FilterCondition(field=key, operator=op, value=range_cond[op])
+            bounds = [
+                FilterCondition(field=key, operator=op, value=range_cond[op])
+                for op in ("gt", "gte", "lt", "lte")
+                if op in range_cond
+            ]
+            if len(bounds) == 1:
+                return bounds[0]
+            if bounds:
+                return cls(conditions=bounds, logic="and")
 
         if "geo_radius" in cond:
             return FilterCondition(field=key, operator="geo_radius", value=cond["geo_radius"])

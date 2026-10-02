@@ -72,7 +72,8 @@ PAGES = [
     "with the fastest growth among firms of fewer than twenty people.\n\n"
     "[Figure: Chart of lending by province]\nA bar chart shows lending balances for each province in "
     "billions of dollars, with Ontario highest and the Maritime provinces lowest, and every bar taller than last year.",
-    "Deposits\n| Account | 2025 | 2024 |\n" + "".join(f"| {n:,} | {n * 3:,} | {n * 7:,} |\n" for n in range(1000, 1400, 13)),
+    "Deposits\n| Account | 2025 | 2024 |\n"
+    + "".join(f"| {n:,} | {n * 3:,} | {n * 7:,} |\n" for n in range(1000, 1400, 13)),
     "Risk\nThe bank manages risk through three lines of defence, and the Falcon committee reviews every large exposure. "
     "Risk appetite is set by the board each year and reported against every quarter. "
     "No limit was breached this year, the committee reported to the board.",
@@ -94,14 +95,27 @@ def report(pages=PAGES, sections=SECTIONS, labels=None):
         if i in sections:
             headings.append((start, sections[i], 1))
         headings.append((start, page.split("\n", 1)[0], 2))
-    return LoadedDocument(text=text, pages=offsets, headings=headings, page_labels=labels or {}, metadata={"title": "Harbor Bank Annual Report 2025"})
+    return LoadedDocument(
+        text=text,
+        pages=offsets,
+        headings=headings,
+        page_labels=labels or {},
+        metadata={"title": "Harbor Bank Annual Report 2025"},
+    )
 
 
 def open_collection(tmp_path, name="annual"):
     from vectrixdb import Vectrix
 
-    return Vectrix(name, path=str(tmp_path / name), embed_fn=embed, dimension=WIDTH, mode="dense",
-                   keep_source=str(tmp_path / f"{name}-kept"), embedding_cache=False)
+    return Vectrix(
+        name,
+        path=str(tmp_path / name),
+        embed_fn=embed,
+        dimension=WIDTH,
+        mode="dense",
+        keep_source=str(tmp_path / f"{name}-kept"),
+        embedding_cache=False,
+    )
 
 
 @pytest.fixture
@@ -116,7 +130,13 @@ def db(tmp_path):
 def letter(tmp_path):
     """A collection with one passage worth a question: the chair's letter."""
     handle = open_collection(tmp_path, "letter")
-    handle.add_document(report(pages=[PAGES[1]], sections={}), doc_id="letter.pdf", chunk="markdown", chunk_size=700, overlap=0)
+    handle.add_document(
+        report(pages=[PAGES[1]], sections={}),
+        doc_id="letter.pdf",
+        chunk="markdown",
+        chunk_size=700,
+        overlap=0,
+    )
     yield handle
     handle.close()
 
@@ -134,7 +154,9 @@ def code_in(text):
 
 def sentence_with(word, text):
     """The first sentence with the word in it, a heading being too short to quote."""
-    return next(s.strip() for s in re.split(r"(?<=[.!?])\s+|\n", text) if word in s and len(s.split()) >= 5)
+    return next(
+        s.strip() for s in re.split(r"(?<=[.!?])\s+|\n", text) if word in s and len(s.split()) >= 5
+    )
 
 
 class Model:
@@ -161,11 +183,20 @@ class Model:
         self.prompts.append(user)
         if user.startswith(_JUDGE_PASSAGE):
             score = self.passage_score(passages_in(user)[0])
-            return json.dumps({"clarity": score, "depth": score, "structure": score, "relevance": score})
+            return json.dumps(
+                {"clarity": score, "depth": score, "structure": score, "relevance": score}
+            )
         if user.startswith(_JUDGE_QUESTION):
             question = re.search(r"^Question: (.*)$", user, re.MULTILINE).group(1)
             score = self.question_score(question)
-            return json.dumps({"standalone": score, "clear": score, "answered": score, "feedback": "" if score >= 0.5 else "Name the programme it is about."})
+            return json.dumps(
+                {
+                    "standalone": score,
+                    "clear": score,
+                    "answered": score,
+                    "feedback": "" if score >= 0.5 else "Name the programme it is about.",
+                }
+            )
         for how, said in _EVOLUTION.items():
             if user.startswith(said):
                 found = self.rewrite(how, user) if self.rewrite else self.unchanged(user)
@@ -188,20 +219,36 @@ class Model:
         code = code_in(first)
         quotes = [sentence_with(code, first)]
         if kind == "search":
-            return {"question": f"{code} plans at Harbor Bank", "answer": quotes[0], "quotes": quotes}
+            return {
+                "question": f"{code} plans at Harbor Bank",
+                "answer": quotes[0],
+                "quotes": quotes,
+            }
         if kind == "two_page":
             other = code_in(passages[1])
             quotes.append(sentence_with(other, passages[1]))
-            return {"question": f"How do the {code} and {other} findings compare?", "answer": "Both rose.", "quotes": quotes}
+            return {
+                "question": f"How do the {code} and {other} findings compare?",
+                "answer": "Both rose.",
+                "quotes": quotes,
+            }
         if kind == "why":
-            return {"question": f"Why did Harbor Bank change course on {code}?", "answer": quotes[0], "quotes": quotes}
+            return {
+                "question": f"Why did Harbor Bank change course on {code}?",
+                "answer": quotes[0],
+                "quotes": quotes,
+            }
         if kind == "long":
             asked = (
                 f"I look after my family's savings and hold shares in Harbor Bank, and its annual report keeps coming "
                 f"back to {code}, so what exactly did the bank say it did about that this year?"
             )
             return {"question": asked, "answer": quotes[0], "quotes": quotes}
-        return {"question": f"What did Harbor Bank report about {code} in 2025?", "answer": quotes[0], "quotes": quotes}
+        return {
+            "question": f"What did Harbor Bank report about {code} in 2025?",
+            "answer": quotes[0],
+            "quotes": quotes,
+        }
 
     def writing_prompts(self):
         return [p for p in self.prompts if any(p.startswith(said) for said in _KIND.values())]
@@ -222,21 +269,42 @@ class TestTheRows:
         assert check.ok, check.summary()
         assert (check.ready, check.drafts) == (6, 6)
         rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
-        assert rows == written.rows and [r["id"] for r in rows] == ["w1", "w2", "w3", "w4", "w5", "w6"]
+        assert rows == written.rows and [r["id"] for r in rows] == [
+            "w1",
+            "w2",
+            "w3",
+            "w4",
+            "w5",
+            "w6",
+        ]
         assert all(r["draft"] is True and r["reference"] and r["hint"] for r in rows)
 
     def test_expected_names_the_page_and_the_hint_says_where_with_the_words(self, db):
         rows = write_golden(db, n=6, writer=Model(), mix={"fact": 1}, evolve=0).rows
         zephyr = next(r for r in rows if "Zephyr" in r["question"])
         assert zephyr["expected"] == ["report.pdf#page=2"]
-        assert zephyr["hint"] == "Page 2, under Chair's letter: \"The board met twelve times this year and approved a new Zephyr strategy for the bank.\""
+        assert (
+            zephyr["hint"]
+            == 'Page 2, under Chair\'s letter: "The board met twelve times this year and approved a new Zephyr strategy for the bank."'
+        )
 
     def test_the_quotes_it_was_checked_against_are_kept_as_its_evidence(self, db):
         rows = write_golden(db, n=6, writer=Model(), mix={"fact": 1}, evolve=0).rows
         zephyr = next(r for r in rows if "Zephyr" in r["question"])
-        assert zephyr["evidence"] == ["The board met twelve times this year and approved a new Zephyr strategy for the bank."]
-        assert all(r["evidence"] for r in rows), "every question the writer keeps was checked against its quotes"
-        assert [k for k in zephyr if k != "id"] == ["question", "expected", "reference", "evidence", "hint", "draft"]
+        assert zephyr["evidence"] == [
+            "The board met twelve times this year and approved a new Zephyr strategy for the bank."
+        ]
+        assert all(r["evidence"] for r in rows), (
+            "every question the writer keeps was checked against its quotes"
+        )
+        assert [k for k in zephyr if k != "id"] == [
+            "question",
+            "expected",
+            "reference",
+            "evidence",
+            "hint",
+            "draft",
+        ]
 
     def test_rows_are_in_the_order_of_the_document(self, db):
         """The letters' first question never passes, so its replacement is written last and still filed first."""
@@ -248,38 +316,69 @@ class TestTheRows:
                 refused.append(code)
             return 0.1 if refused and code == refused[0] else 1.0
 
-        written = write_golden(db, n=3, writer=Model(question_score=score), mix={"fact": 1}, evolve=0)
+        written = write_golden(
+            db, n=3, writer=Model(question_score=score), mix={"fact": 1}, evolve=0
+        )
         pages = [int(r["expected"][0].split("=")[1]) for r in written.rows]
-        assert written.set_aside == 1 and len(pages) == 3 and pages == sorted(pages) and pages[0] in (2, 3)
+        assert (
+            written.set_aside == 1
+            and len(pages) == 3
+            and pages == sorted(pages)
+            and pages[0] in (2, 3)
+        )
 
     def test_the_printed_number_is_in_the_hint(self, tmp_path):
         handle = open_collection(tmp_path)
         try:
-            handle.add_document(report(labels={2: "ii", 3: "iii"}), doc_id="report.pdf", chunk="markdown", chunk_size=700, overlap=0)
+            handle.add_document(
+                report(labels={2: "ii", 3: "iii"}),
+                doc_id="report.pdf",
+                chunk="markdown",
+                chunk_size=700,
+                overlap=0,
+            )
             rows = write_golden(handle, n=7, writer=Model(), mix={"fact": 1}, evolve=0).rows
         finally:
             handle.close()
-        assert next(r for r in rows if "Zephyr" in r["question"])["hint"].startswith("Page 2, printed ii, under Chair's letter")
+        assert next(r for r in rows if "Zephyr" in r["question"])["hint"].startswith(
+            "Page 2, printed ii, under Chair's letter"
+        )
 
     def test_a_quote_on_the_second_page_of_a_chunk_names_the_second_page(self, tmp_path):
         """A chunk runs over pages 1 to 3; the label is where the answer is, not where the chunk starts."""
         pages = [
-            "The opening page talks about the weather in general terms and says nothing that anybody would search for at all, " * 2,
-            "On this page the Zephyr fund returned eleven percent for the year, the best of any fund the bank runs. " * 2,
-            "The closing page thanks the readers and lists the offices where the annual meeting will be held next spring. " * 2,
+            "The opening page talks about the weather in general terms and says nothing that anybody would search for at all, "
+            * 2,
+            "On this page the Zephyr fund returned eleven percent for the year, the best of any fund the bank runs. "
+            * 2,
+            "The closing page thanks the readers and lists the offices where the annual meeting will be held next spring. "
+            * 2,
         ]
         text, offsets = join_pages(pages)
         handle = open_collection(tmp_path, "long")
         try:
             labels = {1: "i", 2: "ii", 3: "iii"}
-            handle.add_document(LoadedDocument(text=text, pages=offsets, page_labels=labels), doc_id="long.pdf", chunk="recursive", chunk_size=2000, overlap=0)
-            (chunk_id, _, meta), = list(handle._collection._iter_documents_raw())
-            assert (meta["page"], meta["page_end"], meta["page_label"], meta["page_label_end"]) == (1, 3, "i", "iii")
+            handle.add_document(
+                LoadedDocument(text=text, pages=offsets, page_labels=labels),
+                doc_id="long.pdf",
+                chunk="recursive",
+                chunk_size=2000,
+                overlap=0,
+            )
+            ((chunk_id, _, meta),) = list(handle._collection._iter_documents_raw())
+            assert (meta["page"], meta["page_end"], meta["page_label"], meta["page_label_end"]) == (
+                1,
+                3,
+                "i",
+                "iii",
+            )
             rows = write_golden(handle, n=1, writer=Model(), mix={"fact": 1}, evolve=0).rows
         finally:
             handle.close()
         assert rows[0]["expected"] == ["long.pdf#page=2"]
-        assert rows[0]["hint"].startswith('Page 2, printed ii: "On this page the Zephyr fund'), "the chunk knows its first and last page's numbers; the document knows page 2's"
+        assert rows[0]["hint"].startswith('Page 2, printed ii: "On this page the Zephyr fund'), (
+            "the chunk knows its first and last page's numbers; the document knows page 2's"
+        )
 
     def test_a_document_without_pages_is_named_whole(self, tmp_path):
         handle = open_collection(tmp_path, "notes")
@@ -293,7 +392,9 @@ class TestTheRows:
         finally:
             handle.close()
         assert rows[0]["expected"] == ["policy.md"]
-        assert rows[0]["hint"].startswith('Under Kestrel policy: "The Kestrel policy lets customers')
+        assert rows[0]["hint"].startswith(
+            'Under Kestrel policy: "The Kestrel policy lets customers'
+        )
 
     def test_several_collections_make_one_file(self, db, tmp_path):
         other = open_collection(tmp_path, "notes")
@@ -321,21 +422,35 @@ class TestThePassages:
         model = Model()
         written = write_golden(db, n=7, writer=model, evolve=0)
         sent = "\n".join(model.prompts)
-        for never in ("Chair's letter ..........", "Photo credits", "[Figure: Chart of lending", "| 1,000 | 3,000 |"):
+        for never in (
+            "Chair's letter ..........",
+            "Photo credits",
+            "[Figure: Chart of lending",
+            "| 1,000 | 3,000 |",
+        ):
             assert never not in sent, never
         assert written.passed_over == {"contents": 1, "thin": 1, "figure": 1, "numbers": 2}
 
     def test_garbled_text_is_passed_over(self):
-        prose = "The bank kept a liquidity coverage ratio well above the minimum and funded its lending from deposits. " * 3
+        prose = (
+            "The bank kept a liquidity coverage ratio well above the minimum and funded its lending from deposits. "
+            * 3
+        )
         assert _passed_over(prose, {"_vx_quality": 0.3}) == "garbled"
         assert _passed_over(prose, {"_vx_quality": 0.95}) is None
 
     def test_a_contents_page_and_a_table_of_figures_are_told_apart(self):
         assert _contents(PAGES[0])
-        table = "\n".join(f"| Net income, segment {n} | {n * 1.37:,.2f} |" for n in (9, 4, 12, 3, 8, 5))
+        table = "\n".join(
+            f"| Net income, segment {n} | {n * 1.37:,.2f} |" for n in (9, 4, 12, 3, 8, 5)
+        )
         assert not _contents(table), "decimals, going up and down"
-        rising = "\n".join(f"| Deposits at the end of quarter {q} | 1,{234 + q * 60} |" for q in range(1, 8))
-        assert not _contents(rising), "figures that rise are still figures: a page number has no thousands"
+        rising = "\n".join(
+            f"| Deposits at the end of quarter {q} | 1,{234 + q * 60} |" for q in range(1, 8)
+        )
+        assert not _contents(rising), (
+            "figures that rise are still figures: a page number has no thousands"
+        )
         assert not _contents(PAGES[1])
 
     def test_every_section_is_asked_about(self, db):
@@ -350,15 +465,25 @@ class TestThePassages:
         assert _shares([2, 2, 3], 6, random.Random(0)) == [2, 1, 3]
         assert _shares([10, 1, 1], 6, random.Random(0)) == [4, 1, 1]
         assert _shares([2, 2], 50, random.Random(0)) == [2, 2]
-        assert sum(_shares([1] * 10, 4, random.Random(0))) == 4, "fewer questions than sections: spread, one each"
+        assert sum(_shares([1] * 10, 4, random.Random(0))) == 4, (
+            "fewer questions than sections: spread, one each"
+        )
         picked = [i for i, share in enumerate(_shares([1] * 10, 2, random.Random(0))) if share]
         assert picked[1] - picked[0] == 5, "two questions over ten sections are five sections apart"
 
     def test_a_passage_the_critic_scores_low_is_swapped_for_the_next_in_its_section(self, db):
         first = write_golden(db, n=3, writer=Model(), mix={"fact": 1}, evolve=0).rows
-        letters = next(code_in(r["question"]) for r in first if code_in(r["question"]) in ("Zephyr", "Quartz"))
+        letters = next(
+            code_in(r["question"]) for r in first if code_in(r["question"]) in ("Zephyr", "Quartz")
+        )
         other = "Quartz" if letters == "Zephyr" else "Zephyr"
-        written = write_golden(db, n=3, writer=Model(passage_score=lambda text: 0.2 if letters in text else 1.0), mix={"fact": 1}, evolve=0)
+        written = write_golden(
+            db,
+            n=3,
+            writer=Model(passage_score=lambda text: 0.2 if letters in text else 1.0),
+            mix={"fact": 1},
+            evolve=0,
+        )
         assert other in codes_asked(written.rows) and letters not in codes_asked(written.rows)
         assert written.passed_over["critic"] == 1
 
@@ -373,7 +498,9 @@ class TestThePassages:
             seen.append(code) if code not in seen else None
             return 0.2 if code == seen[0] else 0.4
 
-        written = write_golden(db, n=3, writer=Model(passage_score=score), mix={"fact": 1}, evolve=0)
+        written = write_golden(
+            db, n=3, writer=Model(passage_score=score), mix={"fact": 1}, evolve=0
+        )
         assert len(seen) == 2, "both of the letters' passages were tried"
         assert seen[1] in codes_asked(written.rows) and seen[0] not in codes_asked(written.rows)
 
@@ -383,21 +510,38 @@ class TestThePassages:
 
 class TestTheChecks:
     def test_a_quote_not_in_the_passage_is_asked_for_again_with_the_reason(self, letter):
-        made_up = {"question": "What did Harbor Bank report about its strategy in 2025?", "answer": "A new one.", "quotes": ["The board approved a bold new plan."]}
+        made_up = {
+            "question": "What did Harbor Bank report about its strategy in 2025?",
+            "answer": "A new one.",
+            "quotes": ["The board approved a bold new plan."],
+        }
         model = Model(writes=[made_up])
         written = write_golden(letter, n=1, writer=model, mix={"fact": 1}, evolve=0)
         assert written.turned_down == {"not_quoted": 1} and len(written.rows) == 1
-        assert written.rows[0]["expected"] == ["letter.pdf"], "a document of one page is named whole"
+        assert written.rows[0]["expected"] == ["letter.pdf"], (
+            "a document of one page is named whole"
+        )
         again = model.writing_prompts()[1]
-        assert 'was turned down: this quote is not in the passage word for word: "The board approved a bold new plan."' in again
+        assert (
+            'was turned down: this quote is not in the passage word for word: "The board approved a bold new plan."'
+            in again
+        )
 
     def test_a_quote_is_found_whatever_its_case_spacing_bars_and_ellipsis(self):
-        passage = _Passage(id="d:0", doc="d", text="| Net income | 20,085 |\nNet income rose to 9.2 billion dollars as lending grew in every region.", handle=0, order=0)
+        passage = _Passage(
+            id="d:0",
+            doc="d",
+            text="| Net income | 20,085 |\nNet income rose to 9.2 billion dollars as lending grew in every region.",
+            handle=0,
+            order=0,
+        )
         from vectrixdb._eval_writer import _found
 
         assert _found("net income 20085", [passage]) == (0, 2)
         assert _found("Net income rose to 9.2 billion ... in every region", [passage]) is not None
-        assert _found("Net income rose to 9.3 billion dollars", [passage]) is None, "a figure is not a near match"
+        assert _found("Net income rose to 9.3 billion dollars", [passage]) is None, (
+            "a figure is not a near match"
+        )
         assert _found("Net income", [passage]) is None, "two words prove nothing"
 
     def test_copying_the_wording_is_sent_back_but_names_and_figures_are_not_copying(self):
@@ -406,20 +550,37 @@ class TestTheChecks:
             "Net income of Canadian Personal and Commercial Banking rose to 9.2 billion dollars in 2025."
         )
         passage = _Passage(id="d:0", doc="d", text=text, handle=0, order=0)
-        assert _copied("Why did the provision rise when more commercial loans became impaired this year?", [passage]) == "more commercial loans became impaired this year"
-        assert _copied("What was the net income of Canadian Personal and Commercial Banking in 2025?", [passage]) is None
+        assert (
+            _copied(
+                "Why did the provision rise when more commercial loans became impaired this year?",
+                [passage],
+            )
+            == "more commercial loans became impaired this year"
+        )
+        assert (
+            _copied(
+                "What was the net income of Canadian Personal and Commercial Banking in 2025?",
+                [passage],
+            )
+            is None
+        )
         assert _copied("How much did Harbor set aside for bad loans?", [passage]) is None
 
     def test_a_copying_question_is_asked_for_again(self, letter):
         copying = {
             "question": "Why were directors visited branches in every province and heard from customers?",
             "answer": "To hear customers.",
-            "quotes": ["Directors visited branches in every province and heard from customers about digital banking."],
+            "quotes": [
+                "Directors visited branches in every province and heard from customers about digital banking."
+            ],
         }
         model = Model(writes=[copying])
         written = write_golden(letter, n=1, writer=model, mix={"fact": 1}, evolve=0)
         assert written.turned_down == {"copied": 1}
-        assert 'it copies "directors visited branches in every province and heard from customers" from the passage' in model.writing_prompts()[1]
+        assert (
+            'it copies "directors visited branches in every province and heard from customers" from the passage'
+            in model.writing_prompts()[1]
+        )
 
     @pytest.mark.parametrize(
         "question",
@@ -430,23 +591,50 @@ class TestTheChecks:
         ],
     )
     def test_a_question_that_points_at_the_passage_is_sent_back(self, letter, question):
-        pointing = {"question": question, "answer": "A strategy.", "quotes": ["approved a new Zephyr strategy for the bank"]}
-        written = write_golden(letter, n=1, writer=Model(writes=[pointing]), mix={"fact": 1}, evolve=0)
+        pointing = {
+            "question": question,
+            "answer": "A strategy.",
+            "quotes": ["approved a new Zephyr strategy for the bank"],
+        }
+        written = write_golden(
+            letter, n=1, writer=Model(writes=[pointing]), mix={"fact": 1}, evolve=0
+        )
         assert written.turned_down == {"pointing": 1}
 
     def test_repeats_are_sent_back_but_numbered_siblings_are_two_questions(self):
         assert _same_question("What was net income in 2025?", "What was the net income in 2025?")
         assert not _same_question("What was net income in 2024?", "What was net income in 2025?")
-        assert not _same_question("What was net income in 2025?", "What was net interest income in 2025?")
+        assert not _same_question(
+            "What was net income in 2025?", "What was net interest income in 2025?"
+        )
 
     def test_a_search_is_short_and_a_question_is_a_sentence(self, letter):
-        long_search = {"question": "what the Zephyr strategy approved by the board this year means for customers in every province", "answer": "x", "quotes": ["approved a new Zephyr strategy for the bank"]}
-        written = write_golden(letter, n=1, writer=Model(writes=[long_search]), mix={"search": 1}, evolve=0)
+        long_search = {
+            "question": "what the Zephyr strategy approved by the board this year means for customers in every province",
+            "answer": "x",
+            "quotes": ["approved a new Zephyr strategy for the bank"],
+        }
+        written = write_golden(
+            letter, n=1, writer=Model(writes=[long_search]), mix={"search": 1}, evolve=0
+        )
         assert written.turned_down == {"length": 1}
-        assert all("?" not in r["question"] and len(r["question"].split()) <= 10 for r in written.rows)
+        assert all(
+            "?" not in r["question"] and len(r["question"].split()) <= 10 for r in written.rows
+        )
 
     def test_json_that_is_not_there_or_is_missing_a_part_is_sent_back(self, letter):
-        written = write_golden(letter, n=1, writer=Model(writes=["I think a good question would be about Zephyr.", {"question": "What about Zephyr?"}]), mix={"fact": 1}, evolve=0)
+        written = write_golden(
+            letter,
+            n=1,
+            writer=Model(
+                writes=[
+                    "I think a good question would be about Zephyr.",
+                    {"question": "What about Zephyr?"},
+                ]
+            ),
+            mix={"fact": 1},
+            evolve=0,
+        )
         assert written.turned_down == {"no_json": 1, "shape": 1} and len(written.rows) == 1
 
 
@@ -455,7 +643,11 @@ class TestTheChecks:
 
 class TestTheCritic:
     def test_a_question_it_scores_low_is_asked_for_again_with_its_feedback(self, letter):
-        vague = {"question": "What did Harbor Bank decide on it?", "answer": "x", "quotes": ["approved a new Zephyr strategy for the bank"]}
+        vague = {
+            "question": "What did Harbor Bank decide on it?",
+            "answer": "x",
+            "quotes": ["approved a new Zephyr strategy for the bank"],
+        }
         model = Model(question_score=lambda q: 0.2 if "decide on it" in q else 1.0, writes=[vague])
         written = write_golden(letter, n=1, writer=model, mix={"fact": 1}, evolve=0)
         assert written.turned_down == {"critic": 1}
@@ -463,11 +655,23 @@ class TestTheCritic:
 
     def test_one_that_never_passes_is_set_aside_and_its_section_tries_another_passage(self, db):
         first = write_golden(db, n=3, writer=Model(), mix={"fact": 1}, evolve=0).rows
-        letters = next(code_in(r["question"]) for r in first if code_in(r["question"]) in ("Zephyr", "Quartz"))
+        letters = next(
+            code_in(r["question"]) for r in first if code_in(r["question"]) in ("Zephyr", "Quartz")
+        )
         other = "Quartz" if letters == "Zephyr" else "Zephyr"
-        written = write_golden(db, n=3, writer=Model(question_score=lambda q: 0.1 if letters in q else 1.0), mix={"fact": 1}, evolve=0)
+        written = write_golden(
+            db,
+            n=3,
+            writer=Model(question_score=lambda q: 0.1 if letters in q else 1.0),
+            mix={"fact": 1},
+            evolve=0,
+        )
         assert written.set_aside == 1 and written.turned_down == {"critic": 3}
-        assert other in codes_asked(written.rows) and letters not in codes_asked(written.rows) and len(written.rows) == 3
+        assert (
+            other in codes_asked(written.rows)
+            and letters not in codes_asked(written.rows)
+            and len(written.rows) == 3
+        )
 
     def test_a_critic_that_gives_no_verdict_leaves_the_checks_to_decide(self, db):
         model = Model()
@@ -483,7 +687,10 @@ class TestTheCritic:
 
     def test_scores_out_of_ten_are_read_and_nonsense_is_no_verdict(self):
         assert _scores('{"a": 8, "b": 6}', ("a", "b")) == (0.7, "")
-        assert _scores('{"a": 0.5, "b": 1, "feedback": " Be  clearer. "}', ("a", "b")) == (0.75, "Be clearer.")
+        assert _scores('{"a": 0.5, "b": 1, "feedback": " Be  clearer. "}', ("a", "b")) == (
+            0.75,
+            "Be clearer.",
+        )
         assert _scores('{"a": 0.5}', ("a", "b")) is None
         assert _scores('{"a": 11, "b": 1}', ("a", "b")) is None
         assert _scores("Good.", ("a",)) is None
@@ -510,9 +717,23 @@ class TestKindsAndPlaces:
     def test_the_mix(self):
         import random
 
-        assert Counter(_kinds(100, MIX, random.Random(0))) == {"fact": 30, "why": 20, "search": 20, "long": 15, "two_page": 15}
-        assert Counter(_kinds(50, MIX, random.Random(0))) == {"fact": 15, "why": 10, "search": 10, "long": 8, "two_page": 7}
-        assert Counter(_kinds(3, {"fact": 1, "why": 0, "search": 0, "two_page": 0}, random.Random(0))) == {"fact": 3}
+        assert Counter(_kinds(100, MIX, random.Random(0))) == {
+            "fact": 30,
+            "why": 20,
+            "search": 20,
+            "long": 15,
+            "two_page": 15,
+        }
+        assert Counter(_kinds(50, MIX, random.Random(0))) == {
+            "fact": 15,
+            "why": 10,
+            "search": 10,
+            "long": 8,
+            "two_page": 7,
+        }
+        assert Counter(
+            _kinds(3, {"fact": 1, "why": 0, "search": 0, "two_page": 0}, random.Random(0))
+        ) == {"fact": 3}
 
     def test_a_mix_with_a_kind_that_is_not_one_is_refused(self, db):
         with pytest.raises(ValueError, match="mix gives each kind a share"):
@@ -525,14 +746,31 @@ class TestKindsAndPlaces:
 
     def test_searches_are_asked_for_as_searches(self, db):
         model = Model()
-        written = write_golden(db, n=3, writer=model, mix={"search": 1}, evolve=0, examples=["How much did the bank earn last year?", "Why were more loans impaired?"])
+        written = write_golden(
+            db,
+            n=3,
+            writer=model,
+            mix={"search": 1},
+            evolve=0,
+            examples=["How much did the bank earn last year?", "Why were more loans impaired?"],
+        )
         assert written.kinds == {"search": 3}
-        assert all(p.startswith(_KIND["search"]) and "People ask questions like these" not in p for p in model.writing_prompts())
+        assert all(
+            p.startswith(_KIND["search"]) and "People ask questions like these" not in p
+            for p in model.writing_prompts()
+        )
 
     def test_examples_set_the_style_and_one_repeated_is_sent_back(self, db):
         example = "What did Harbor Bank report about Zephyr in 2025?"
         model = Model()
-        written = write_golden(db, n=6, writer=model, mix={"fact": 1}, evolve=0, examples=[example, "Why were more loans impaired?"])
+        written = write_golden(
+            db,
+            n=6,
+            writer=model,
+            mix={"fact": 1},
+            evolve=0,
+            examples=[example, "Why were more loans impaired?"],
+        )
         assert all(f"- {example}" in p for p in model.writing_prompts())
         assert written.turned_down == {"repeat": 3} and written.set_aside == 1
         assert example not in [r["question"] for r in written.rows] and len(written.rows) == 6
@@ -541,24 +779,46 @@ class TestKindsAndPlaces:
         pages = [FALCON, TRAVEL, OSPREY]
         handle = open_collection(tmp_path, "risk")
         try:
-            handle.add_document(report(pages=pages, sections={}), doc_id="risk.pdf", chunk="markdown", chunk_size=700, overlap=0)
+            handle.add_document(
+                report(pages=pages, sections={}),
+                doc_id="risk.pdf",
+                chunk="markdown",
+                chunk_size=700,
+                overlap=0,
+            )
             model = Model()
             # By these vectors the two committee pages are 0.81 alike, and the travel page 0.73 and 0.61 like them.
-            written = write_golden(handle, n=1, writer=model, mix={"two_page": 1}, evolve=0, similarity=0.75)
+            written = write_golden(
+                handle, n=1, writer=model, mix={"two_page": 1}, evolve=0, similarity=0.75
+            )
         finally:
             handle.close()
         (row,) = written.rows
         assert written.kinds == {"two_page": 1}
         assert sorted(row["expected"]) == ["risk.pdf#page=1", "risk.pdf#page=3"]
-        assert len(passages_in(model.writing_prompts()[0])) == 2, "the travel page is not like either"
+        assert len(passages_in(model.writing_prompts()[0])) == 2, (
+            "the travel page is not like either"
+        )
 
     def test_a_two_place_question_quoting_one_place_is_sent_back(self, tmp_path):
         pages = [FALCON, OSPREY]
-        one_place = {"question": "How often does the risk group report to the directors?", "answer": "Each quarter.", "quotes": ["reports to the board each quarter on credit risk and limits"]}
+        one_place = {
+            "question": "How often does the risk group report to the directors?",
+            "answer": "Each quarter.",
+            "quotes": ["reports to the board each quarter on credit risk and limits"],
+        }
         handle = open_collection(tmp_path, "risk")
         try:
-            handle.add_document(report(pages=pages, sections={}), doc_id="risk.pdf", chunk="markdown", chunk_size=700, overlap=0)
-            written = write_golden(handle, n=1, writer=Model(writes=[one_place]), mix={"two_page": 1}, evolve=0)
+            handle.add_document(
+                report(pages=pages, sections={}),
+                doc_id="risk.pdf",
+                chunk="markdown",
+                chunk_size=700,
+                overlap=0,
+            )
+            written = write_golden(
+                handle, n=1, writer=Model(writes=[one_place]), mix={"two_page": 1}, evolve=0
+            )
         finally:
             handle.close()
         assert written.turned_down == {"one_place": 1} and written.kinds == {"two_page": 1}
@@ -570,17 +830,36 @@ class TestKindsAndPlaces:
         def passage(id, page, doc="d"):
             return _Passage(id=id, doc=doc, text=id, handle=0, order=int(id[-1]), page=page)
 
-        seed, same_page, next_page, far, other_doc = passage("d:0", 4), passage("d:1", 4), passage("d:2", 5), passage("d:3", 9), passage("e:4", 1, doc="e")
+        seed, same_page, next_page, far, other_doc = (
+            passage("d:0", 4),
+            passage("d:1", 4),
+            passage("d:2", 5),
+            passage("d:3", 9),
+            passage("e:4", 1, doc="e"),
+        )
         # Each vector's cosine with the seed's is its first number: 0.95, 0.9, 0.4 and 0.8.
-        like = {p.id: [c, (1 - c * c) ** 0.5] for p, c in ((seed, 1.0), (same_page, 0.95), (next_page, 0.9), (far, 0.4), (other_doc, 0.8))}
+        like = {
+            p.id: [c, (1 - c * c) ** 0.5]
+            for p, c in (
+                (seed, 1.0),
+                (same_page, 0.95),
+                (next_page, 0.9),
+                (far, 0.4),
+                (other_doc, 0.8),
+            )
+        }
         embedded = []
 
         def embed(texts):
             embedded.append(len(texts))
             return np.array([like[t] for t in texts], dtype=np.float32)
 
-        likeness = _Likeness([types.SimpleNamespace(embed=embed)], [seed, same_page, next_page, far, other_doc])
-        assert likeness.neighbours(seed, 0.5) == [next_page, other_doc], "not on the seed's page, and at 0.5 or more"
+        likeness = _Likeness(
+            [types.SimpleNamespace(embed=embed)], [seed, same_page, next_page, far, other_doc]
+        )
+        assert likeness.neighbours(seed, 0.5) == [next_page, other_doc], (
+            "not on the seed's page, and at 0.5 or more"
+        )
         assert likeness.neighbours(seed, 0.85) == [next_page]
         assert embedded == [5], "every passage embedded once"
 
@@ -593,18 +872,30 @@ class TestKindsAndPlaces:
         def embed(texts):
             raise ValueError("Model type 'fastembed-sparse' gives no dense vectors")
 
-        assert _Likeness([types.SimpleNamespace(embed=embed)], [seed, other]).neighbours(seed, 0.5) == []
+        assert (
+            _Likeness([types.SimpleNamespace(embed=embed)], [seed, other]).neighbours(seed, 0.5)
+            == []
+        )
 
     def test_with_nothing_similar_on_another_page_it_is_written_from_one(self, db):
-        written = write_golden(db, n=1, writer=Model(), mix={"two_page": 1}, evolve=0, similarity=0.999)
+        written = write_golden(
+            db, n=1, writer=Model(), mix={"two_page": 1}, evolve=0, similarity=0.999
+        )
         assert (written.no_neighbours, written.kinds) == (1, {"fact": 1})
 
     def test_a_long_question_gives_the_situation_and_is_long(self, letter):
-        short = {"question": "What did the board approve this year?", "answer": "x", "quotes": ["approved a new Zephyr strategy for the bank"]}
+        short = {
+            "question": "What did the board approve this year?",
+            "answer": "x",
+            "quotes": ["approved a new Zephyr strategy for the bank"],
+        }
         model = Model(writes=[short])
         written = write_golden(letter, n=1, writer=model, mix={"long": 1}, evolve=0)
         assert written.turned_down == {"length": 1} and written.kinds == {"long": 1}
-        assert "a long question is 20 to 45 words, the situation and then the question." in model.writing_prompts()[1]
+        assert (
+            "a long question is 20 to 45 words, the situation and then the question."
+            in model.writing_prompts()[1]
+        )
         assert model.writing_prompts()[0].startswith(_KIND["long"])
         assert 15 <= len(written.rows[0]["question"].split()) <= 60
 
@@ -612,17 +903,27 @@ class TestKindsAndPlaces:
         def harder(how, prompt):
             first = passages_in(prompt)[0]
             code = code_in(first)
-            return {"question": f"Which {code} change did the Harbor Bank directors sign off in 2025?", "answer": "x", "quotes": [sentence_with(code, first)]}
+            return {
+                "question": f"Which {code} change did the Harbor Bank directors sign off in 2025?",
+                "answer": "x",
+                "quotes": [sentence_with(code, first)],
+            }
 
         written = write_golden(db, n=1, writer=Model(rewrite=harder), mix={"fact": 1}, evolve=1)
         assert written.evolved == 1 and written.rows[0]["question"].startswith("Which ")
 
     def test_a_rewrite_that_fails_a_check_is_dropped_for_the_question_before_it(self, db):
         def worse(how, prompt):
-            return {"question": "What did this document say about the plan?", "answer": "x", "quotes": ["approved a new Zephyr strategy for the bank"]}
+            return {
+                "question": "What did this document say about the plan?",
+                "answer": "x",
+                "quotes": ["approved a new Zephyr strategy for the bank"],
+            }
 
         written = write_golden(db, n=1, writer=Model(rewrite=worse), mix={"fact": 1}, evolve=1)
-        assert written.evolved == 0 and written.rows[0]["question"].startswith("What did Harbor Bank report about")
+        assert written.evolved == 0 and written.rows[0]["question"].startswith(
+            "What did Harbor Bank report about"
+        )
 
     def test_a_search_is_never_rewritten(self, db):
         model = Model(rewrite=lambda how, prompt: pytest.fail("a search was sent to be rewritten"))
@@ -651,14 +952,28 @@ class TestWhatTheModelIsSent:
     def test_the_page_is_not_given_to_the_model(self, db):
         model = Model()
         write_golden(db, n=1, writer=model, mix={"fact": 1}, evolve=0)
-        assert 'document="report.pdf" title="Harbor Bank Annual Report 2025" section="' in model.writing_prompts()[0]
+        assert (
+            'document="report.pdf" title="Harbor Bank Annual Report 2025" section="'
+            in model.writing_prompts()[0]
+        )
         assert "page=" not in model.writing_prompts()[0]
 
     def test_scenario_and_task_say_who_asks(self, db):
         model = Model()
-        write_golden(db, n=1, writer=model, mix={"why": 1}, evolve=0, scenario="an investor reading the annual report", task="how the bank handles risk")
+        write_golden(
+            db,
+            n=1,
+            writer=model,
+            mix={"why": 1},
+            evolve=0,
+            scenario="an investor reading the annual report",
+            task="how the bank handles risk",
+        )
         prompt = model.writing_prompts()[0]
-        assert "Who asks: an investor reading the annual report" in prompt and "What they are after: how the bank handles risk" in prompt
+        assert (
+            "Who asks: an investor reading the annual report" in prompt
+            and "What they are after: how the bank handles risk" in prompt
+        )
 
 
 # ============================================================ runs ===
@@ -670,7 +985,12 @@ class TestRuns:
         first = write_golden(db, n=4, writer=Model(), cache=cache)
         silent = Model()
         again = write_golden(db, n=4, writer=silent, cache=cache)
-        assert again.rows == first.rows and silent.prompts == [] and again.asked == 0 and again.reused == first.asked
+        assert (
+            again.rows == first.rows
+            and silent.prompts == []
+            and again.asked == 0
+            and again.reused == first.asked
+        )
 
     def test_it_never_writes_over_a_file(self, db, tmp_path):
         out = tmp_path / "golden.jsonl"
@@ -678,18 +998,36 @@ class TestRuns:
         model = Model()
         with pytest.raises(FileExistsError, match="not written over"):
             write_golden(db, out, writer=model)
-        assert model.prompts == [] and out.read_text(encoding="utf-8").startswith('{"question": "Mine"')
+        assert model.prompts == [] and out.read_text(encoding="utf-8").startswith(
+            '{"question": "Mine"'
+        )
 
     def test_a_model_that_refuses_stops_the_run_at_once(self, db, tmp_path):
         requests = []
 
         def service(method, url, headers, body, timeout):
             requests.append(url)
-            return 404, {}, json.dumps({"error": {"code": "DeploymentNotFound", "message": "The API deployment for this resource does not exist."}}).encode()
+            return (
+                404,
+                {},
+                json.dumps(
+                    {
+                        "error": {
+                            "code": "DeploymentNotFound",
+                            "message": "The API deployment for this resource does not exist.",
+                        }
+                    }
+                ).encode(),
+            )
 
-        writer = ChatWriter.azure_openai("https://o.openai.azure.com/", "phi-4-mini", key="k", transport=service, max_wait=0)
+        writer = ChatWriter.azure_openai(
+            "https://o.openai.azure.com/", "phi-4-mini", key="k", transport=service, max_wait=0
+        )
         out = tmp_path / "golden.jsonl"
-        with pytest.raises(WriterUnavailable, match=r"phi-4-mini refused: 404 .*DeploymentNotFound.*Nothing was written: 0 of 4"):
+        with pytest.raises(
+            WriterUnavailable,
+            match=r"phi-4-mini refused: 404 .*DeploymentNotFound.*Nothing was written: 0 of 4",
+        ):
             write_golden(db, out, n=4, writer=writer)
         assert len(requests) == 1 and not out.exists()
 
@@ -711,8 +1049,16 @@ class TestRuns:
             tried.append(url)
             raise ConnectionRefusedError("actively refused")
 
-        writer = ChatWriter("http://localhost:11434/v1/chat/completions", model="phi4-mini", transport=service, max_wait=0, tries=1)
-        with pytest.raises(WriterUnavailable, match="phi4-mini stopped answering: 0 actively refused"):
+        writer = ChatWriter(
+            "http://localhost:11434/v1/chat/completions",
+            model="phi4-mini",
+            transport=service,
+            max_wait=0,
+            tries=1,
+        )
+        with pytest.raises(
+            WriterUnavailable, match="phi4-mini stopped answering: 0 actively refused"
+        ):
             write_golden(db, n=4, writer=writer)
         assert len(tried) == 1, "a server that never answered is not asked two more times"
 
@@ -734,22 +1080,48 @@ class TestRuns:
 
     def test_a_policied_collection_is_read_as_somebody_and_only_what_they_may_see_is_sent(self):
         rows = [
-            ("a.md:0", "The Beacon account pays two percent on balances above five thousand dollars, and there is no monthly fee. " * 3, {"_vx_doc": "a.md", "client": "td"}),
-            ("b.md:0", "The Zephyr account belongs to another client and its terms must never reach anybody else at all. " * 3, {"_vx_doc": "b.md", "client": "rbc"}),
+            (
+                "a.md:0",
+                "The Beacon account pays two percent on balances above five thousand dollars, and there is no monthly fee. "
+                * 3,
+                {"_vx_doc": "a.md", "client": "td"},
+            ),
+            (
+                "b.md:0",
+                "The Zephyr account belongs to another client and its terms must never reach anybody else at all. "
+                * 3,
+                {"_vx_doc": "b.md", "client": "rbc"},
+            ),
         ]
-        policy = types.SimpleNamespace(decide=lambda who, meta: types.SimpleNamespace(allowed=meta.get("client") in who["clients"]))
-        handle = types.SimpleNamespace(name="deposits", _collection=types.SimpleNamespace(_iter_documents_raw=lambda: iter(rows)), _policy=policy, _principal=None, documents=None)
+        policy = types.SimpleNamespace(
+            decide=lambda who, meta: types.SimpleNamespace(
+                allowed=meta.get("client") in who["clients"]
+            )
+        )
+        handle = types.SimpleNamespace(
+            name="deposits",
+            _collection=types.SimpleNamespace(_iter_documents_raw=lambda: iter(rows)),
+            _policy=policy,
+            _principal=None,
+            documents=None,
+        )
         with pytest.raises(ValueError, match="carries a policy"):
             write_golden(handle, writer=Model())
         handle._principal = {"clients": ["td"]}
         model = Model()
         written = write_golden(handle, n=2, writer=model, mix={"fact": 1}, evolve=0)
-        assert "Zephyr" not in "\n".join(model.prompts) and [r["expected"] for r in written.rows] == [["a.md"]]
+        assert "Zephyr" not in "\n".join(model.prompts) and [
+            r["expected"] for r in written.rows
+        ] == [["a.md"]]
 
     def test_the_kept_chunks_are_read_before_a_copy_that_holds_one_instances_share(self):
         """In a function app the copy beside the process holds what that instance wrote; the kept chunks hold everything."""
+
         def said(name):
-            return f"The {name} account pays two percent on balances above five thousand dollars, with no monthly fee at all. " * 3
+            return (
+                f"The {name} account pays two percent on balances above five thousand dollars, with no monthly fee at all. "
+                * 3
+            )
 
         chunks = {
             "a.md": [{"id": "a.md:0", "text": said("Kestrel"), "metadata": {"_vx_doc": "a.md"}}],
@@ -757,7 +1129,9 @@ class TestRuns:
         }
         handle = types.SimpleNamespace(
             name="deposits",
-            _collection=types.SimpleNamespace(_iter_documents_raw=lambda: iter([("a.md:0", said("Kestrel"), {"_vx_doc": "a.md"})])),
+            _collection=types.SimpleNamespace(
+                _iter_documents_raw=lambda: iter([("a.md:0", said("Kestrel"), {"_vx_doc": "a.md"})])
+            ),
             documents=types.SimpleNamespace(ids=lambda: sorted(chunks), get=lambda doc_id: None),
             kept_chunks=types.SimpleNamespace(get=lambda doc_id: chunks[doc_id]),
             _policy=None,
@@ -780,28 +1154,60 @@ class TestRuns:
 
 class TestChatWriter:
     def test_from_the_settings(self, monkeypatch):
-        azure = ChatWriter.from_environment({"AZURE_OPENAI_WRITER_DEPLOYMENT": "phi-4-mini", "AZURE_OPENAI_ENDPOINT": "https://o.openai.azure.com/", "AZURE_OPENAI_KEY": "the-key"})
-        assert azure.url == "https://o.openai.azure.com/openai/deployments/phi-4-mini/chat/completions?api-version=2024-10-21"
+        azure = ChatWriter.from_environment(
+            {
+                "AZURE_OPENAI_WRITER_DEPLOYMENT": "phi-4-mini",
+                "AZURE_OPENAI_ENDPOINT": "https://o.openai.azure.com/",
+                "AZURE_OPENAI_KEY": "the-key",
+            }
+        )
+        assert (
+            azure.url
+            == "https://o.openai.azure.com/openai/deployments/phi-4-mini/chat/completions?api-version=2024-10-21"
+        )
         assert azure.key_header == "api-key" and "the-key" not in repr(azure)
-        local = ChatWriter.from_environment({"VECTRIXDB_WRITER_URL": "http://localhost:11434/v1/chat/completions", "VECTRIXDB_WRITER_MODEL": "phi4-mini"})
+        local = ChatWriter.from_environment(
+            {
+                "VECTRIXDB_WRITER_URL": "http://localhost:11434/v1/chat/completions",
+                "VECTRIXDB_WRITER_MODEL": "phi4-mini",
+            }
+        )
         assert (local.model, local.label) == ("phi4-mini", "phi4-mini")
         assert ChatWriter.from_environment({}) is None
-        vision = {"AZURE_OPENAI_VISION_DEPLOYMENT": "gpt-4o", "AZURE_OPENAI_ENDPOINT": "https://o.openai.azure.com/", "AZURE_OPENAI_KEY": "k"}
-        assert ChatWriter.from_environment(vision) is None, "the picture describer's model is not the writer"
+        vision = {
+            "AZURE_OPENAI_VISION_DEPLOYMENT": "gpt-4o",
+            "AZURE_OPENAI_ENDPOINT": "https://o.openai.azure.com/",
+            "AZURE_OPENAI_KEY": "k",
+        }
+        assert ChatWriter.from_environment(vision) is None, (
+            "the picture describer's model is not the writer"
+        )
 
     def test_it_asks_for_json_at_temperature_zero_and_answers_with_the_text(self):
         sent = []
 
         def service(method, url, headers, body, timeout):
             sent.append(json.loads(body))
-            return 200, {}, json.dumps({"choices": [{"message": {"content": '{"question": "q"}'}}]}).encode()
+            return (
+                200,
+                {},
+                json.dumps({"choices": [{"message": {"content": '{"question": "q"}'}}]}).encode(),
+            )
 
-        writer = ChatWriter("http://localhost:11434/v1/chat/completions", model="phi4-mini", transport=service)
+        writer = ChatWriter(
+            "http://localhost:11434/v1/chat/completions", model="phi4-mini", transport=service
+        )
         assert writer([{"role": "user", "content": "hello"}]) == '{"question": "q"}'
-        assert (sent[0]["temperature"], sent[0]["response_format"], sent[0]["model"]) == (0, {"type": "json_object"}, "phi4-mini")
+        assert (sent[0]["temperature"], sent[0]["response_format"], sent[0]["model"]) == (
+            0,
+            {"type": "json_object"},
+            "phi4-mini",
+        )
 
     def test_nothing_to_write_with_says_which_settings(self, db, monkeypatch):
         for name in ("AZURE_OPENAI_WRITER_DEPLOYMENT", "VECTRIXDB_WRITER_URL"):
             monkeypatch.delenv(name, raising=False)
-        with pytest.raises(ValueError, match="VECTRIXDB_WRITER_URL, or AZURE_OPENAI_WRITER_DEPLOYMENT"):
+        with pytest.raises(
+            ValueError, match="VECTRIXDB_WRITER_URL, or AZURE_OPENAI_WRITER_DEPLOYMENT"
+        ):
             write_golden(db)

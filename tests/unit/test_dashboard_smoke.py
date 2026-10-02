@@ -37,9 +37,19 @@ class TestDashboardIsServed:
         # script fetches it the first time the Graph tab is opened, and the tab is hidden until a collection has a graph.
         for marker in ('id="tab-graph"', '"switchTab"'):
             assert marker in html, f"dashboard page is missing {marker!r}"
-        assert "cytoscape" not in html and "function ensureCytoscape()" in client.get("/dashboard/app.js").text
+        assert (
+            "cytoscape" not in html
+            and "function ensureCytoscape()" in client.get("/dashboard/app.js").text
+        )
         # The page is three files now; the script and the stylesheet must be served beside it.
-        for asset in ("app.js", "app.css", "demo-data.js", "evaluate.js", "chunking.js", "trends.js"):
+        for asset in (
+            "app.js",
+            "app.css",
+            "demo-data.js",
+            "evaluate.js",
+            "chunking.js",
+            "trends.js",
+        ):
             assert f'"{asset}"' in html, f"the page no longer loads {asset}"
             served = client.get(f"/dashboard/{asset}")
             assert served.status_code == 200, f"{asset} is not served"
@@ -167,7 +177,9 @@ class TestDocumentsInThePage:
         import re
 
         unescaped = re.compile(r'on[a-z]+="[^"`]*\$\{JSON\.stringify\(')
-        assert unescaped.search('<div onclick="showPoint(${JSON.stringify(id)})">'), "the pattern has to catch the bug"
+        assert unescaped.search('<div onclick="showPoint(${JSON.stringify(id)})">'), (
+            "the pattern has to catch the bug"
+        )
         assert not unescaped.search('<div onclick="showPoint(${esc(JSON.stringify(id))})">')
         raw = unescaped.findall(self._script(client))
         assert raw == [], f"unescaped JSON inside an attribute: {raw}"

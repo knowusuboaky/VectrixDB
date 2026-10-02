@@ -102,7 +102,12 @@ class ChatWriter(ChatRoute):
 
     label = "chat-writer"
     _AZURE_DEPLOYMENT = "AZURE_OPENAI_WRITER_DEPLOYMENT"
-    _ROUTE = ("VECTRIXDB_WRITER_URL", "VECTRIXDB_WRITER_KEY", "VECTRIXDB_WRITER_MODEL", "VECTRIXDB_WRITER_KEY_HEADER")
+    _ROUTE = (
+        "VECTRIXDB_WRITER_URL",
+        "VECTRIXDB_WRITER_KEY",
+        "VECTRIXDB_WRITER_MODEL",
+        "VECTRIXDB_WRITER_KEY_HEADER",
+    )
     _WITHOUT = "golden questions are not written by it"
 
     def __call__(self, messages: Sequence[Mapping[str, Any]]) -> Optional[str]:
@@ -222,7 +227,9 @@ def _inert(text: str) -> str:
 
 
 def _attribute(value: str) -> str:
-    return _inert(" ".join(str(value).split()).replace('"', "'").replace("<", "(").replace(">", ")"))
+    return _inert(
+        " ".join(str(value).split()).replace('"', "'").replace("<", "(").replace(">", ")")
+    )
 
 
 def _passages(context: Sequence["_Passage"]) -> str:
@@ -262,7 +269,12 @@ class _Style:
         return out
 
 
-def _writing(kind: str, context: Sequence["_Passage"], style: _Style, turned_down: Optional[Tuple[str, str]] = None) -> Messages:
+def _writing(
+    kind: str,
+    context: Sequence["_Passage"],
+    style: _Style,
+    turned_down: Optional[Tuple[str, str]] = None,
+) -> Messages:
     lines = [_KIND[kind], *style.lines(kind)]
     lines.append(
         _RULES.format(
@@ -272,25 +284,41 @@ def _writing(kind: str, context: Sequence["_Passage"], style: _Style, turned_dow
     )
     if turned_down:
         last, why = turned_down
-        lines.append(f'Your last question, "{last}", was turned down: {why} Write a better one.' if last else f"Your last answer was turned down: {why} Write a better one.")
+        lines.append(
+            f'Your last question, "{last}", was turned down: {why} Write a better one.'
+            if last
+            else f"Your last answer was turned down: {why} Write a better one."
+        )
     lines.append(_passages(context))
     return [{"role": "system", "content": _WRITER}, {"role": "user", "content": "\n\n".join(lines)}]
 
 
-def _rewriting(how: str, kind: str, context: Sequence["_Passage"], style: _Style, question: str) -> Messages:
+def _rewriting(
+    how: str, kind: str, context: Sequence["_Passage"], style: _Style, question: str
+) -> Messages:
     lines = [_EVOLUTION[how], f'The question now: "{question}"', *style.lines(kind)]
-    lines.append(_RULES.format(words=_OWN_WORDS, each=", one from each passage you used" if len(context) > 1 else ""))
+    lines.append(
+        _RULES.format(
+            words=_OWN_WORDS, each=", one from each passage you used" if len(context) > 1 else ""
+        )
+    )
     lines.append(_passages(context))
     return [{"role": "system", "content": _WRITER}, {"role": "user", "content": "\n\n".join(lines)}]
 
 
 def _judging_passage(passage: "_Passage") -> Messages:
-    return [{"role": "system", "content": _CRITIC}, {"role": "user", "content": f"{_JUDGE_PASSAGE}\n\n{_passages([passage])}"}]
+    return [
+        {"role": "system", "content": _CRITIC},
+        {"role": "user", "content": f"{_JUDGE_PASSAGE}\n\n{_passages([passage])}"},
+    ]
 
 
 def _judging_question(draft: Mapping[str, Any], context: Sequence["_Passage"]) -> Messages:
     asked = f"Question: {draft['question']}\nAnswer given: {draft['answer']}"
-    return [{"role": "system", "content": _CRITIC}, {"role": "user", "content": f"{_JUDGE_QUESTION}\n\n{asked}\n\n{_passages(context)}"}]
+    return [
+        {"role": "system", "content": _CRITIC},
+        {"role": "user", "content": f"{_JUDGE_QUESTION}\n\n{asked}\n\n{_passages(context)}"},
+    ]
 
 
 def _scores(answer: Optional[str], keys: Sequence[str]) -> Optional[Tuple[float, str]]:
@@ -582,7 +610,10 @@ def _rows_of(handle: Any) -> List[Tuple[str, str, Dict[str, Any]]]:
     if kept is not None and store is not None:
         for doc_id in store.ids():
             try:
-                rows += [(str(c.get("id")), str(c.get("text") or ""), dict(c.get("metadata") or {})) for c in kept.get(doc_id)]
+                rows += [
+                    (str(c.get("id")), str(c.get("text") or ""), dict(c.get("metadata") or {}))
+                    for c in kept.get(doc_id)
+                ]
             except Exception:  # noqa: BLE001 - a document whose chunks were not kept
                 continue
         if rows:
@@ -642,16 +673,28 @@ def _gather(handles: Sequence[Any], passed_over: Counter) -> List[_Passage]:
                 continue
             document = documents[doc_id]
             start = meta.get("_vx_start")
-            if not (document is not None and isinstance(start, int) and document.text.startswith(text[:200], start)):
+            if not (
+                document is not None
+                and isinstance(start, int)
+                and document.text.startswith(text[:200], start)
+            ):
                 start = None
             section = ""
-            if document is not None and isinstance(meta.get("_vx_start"), int) and levels[doc_id] is not None:
+            if (
+                document is not None
+                and isinstance(meta.get("_vx_start"), int)
+                and levels[doc_id] is not None
+            ):
                 for offset, heading, level in document.headings:
                     if offset > meta["_vx_start"]:
                         break
                     if level == levels[doc_id]:
                         section = heading
-            title = str(((getattr(document, "metadata", None) or {}).get("title")) or meta.get("title") or "")
+            title = str(
+                ((getattr(document, "metadata", None) or {}).get("title"))
+                or meta.get("title")
+                or ""
+            )
             found.append(
                 _Passage(
                     id=chunk_id,
@@ -660,7 +703,9 @@ def _gather(handles: Sequence[Any], passed_over: Counter) -> List[_Passage]:
                     handle=h,
                     order=int(meta.get("_vx_chunk") or 0),
                     page=page if isinstance(page, int) else None,
-                    page_end=meta.get("page_end") if isinstance(meta.get("page_end"), int) else None,
+                    page_end=meta.get("page_end")
+                    if isinstance(meta.get("page_end"), int)
+                    else None,
                     label=str(meta["page_label"]) if meta.get("page_label") else None,
                     label_end=str(meta["page_label_end"]) if meta.get("page_label_end") else None,
                     heading=str(meta.get("heading") or "") or None,
@@ -672,7 +717,10 @@ def _gather(handles: Sequence[Any], passed_over: Counter) -> List[_Passage]:
             )
         for p in found:
             document = p.document
-            p.paged = p.page is not None and (len(document.pages) if document is not None else pages_seen[p.doc]) >= 2
+            p.paged = (
+                p.page is not None
+                and (len(document.pages) if document is not None else pages_seen[p.doc]) >= 2
+            )
         out += sorted(found, key=lambda p: (p.doc, p.order))
     return out
 
@@ -692,9 +740,14 @@ class _Section:
     def left(self) -> int:
         return len(self.passages) - len(self.used)
 
-    def nearest(self, target: int, accept: Optional[Callable[[_Passage], bool]] = None, most: int = 20) -> Optional[_Passage]:
+    def nearest(
+        self, target: int, accept: Optional[Callable[[_Passage], bool]] = None, most: int = 20
+    ) -> Optional[_Passage]:
         """The unused passage nearest ``target`` that ``accept`` takes, looking at ``most`` of them; it is used from now on."""
-        order = sorted((i for i in range(len(self.passages)) if i not in self.used), key=lambda i: (abs(i - target), i))
+        order = sorted(
+            (i for i in range(len(self.passages)) if i not in self.used),
+            key=lambda i: (abs(i - target), i),
+        )
         for i in order[:most]:
             if accept is None or accept(self.passages[i]):
                 self.used.add(i)
@@ -736,7 +789,9 @@ def _shares(sizes: Sequence[int], n: int, rng: random.Random) -> List[int]:
             shares[i] += add
             grown = grown or add > 0
         if not grown:
-            for i in sorted(room, key=lambda i: (-(exact[i] - int(exact[i])), i))[: n - sum(shares)]:
+            for i in sorted(room, key=lambda i: (-(exact[i] - int(exact[i])), i))[
+                : n - sum(shares)
+            ]:
                 shares[i] += 1
     return shares
 
@@ -746,7 +801,9 @@ def _kinds(n: int, mix: Mapping[str, float], rng: random.Random) -> List[str]:
     total = sum(mix.values())
     exact = {k: n * mix.get(k, 0.0) / total for k in MIX}
     counts = {k: int(v) for k, v in exact.items()}
-    for k in sorted(MIX, key=lambda k: (-(exact[k] - counts[k]), list(MIX).index(k)))[: n - sum(counts.values())]:
+    for k in sorted(MIX, key=lambda k: (-(exact[k] - counts[k]), list(MIX).index(k)))[
+        : n - sum(counts.values())
+    ]:
         counts[k] += 1
     kinds = [k for k in MIX for _ in range(counts[k])]
     rng.shuffle(kinds)
@@ -775,7 +832,13 @@ _PASSED_OVER = {
     "garbled": "text the reading garbled",
     "critic": "scored under the threshold by the critic",
 }
-_KIND_SAID = {"fact": "facts", "why": "how or why", "search": "searches", "long": "long questions", "two_page": "needing two places"}
+_KIND_SAID = {
+    "fact": "facts",
+    "why": "how or why",
+    "search": "searches",
+    "long": "long questions",
+    "two_page": "needing two places",
+}
 
 
 class _Answers:
@@ -795,7 +858,9 @@ class _Answers:
     @staticmethod
     def key(model: Any, messages: Messages) -> str:
         label = str(getattr(model, "label", "") or type(model).__name__)
-        return hashlib.sha256(json.dumps([label, messages], sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        return hashlib.sha256(
+            json.dumps([label, messages], sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
 
     def get(self, key: str) -> Optional[str]:
         return self.kept.get(key)
@@ -810,7 +875,17 @@ class _Answers:
 class _Writer:
     """One writing: the model calls, what came back, and what was turned down and why."""
 
-    def __init__(self, writer: Any, critic: Any, answers: _Answers, style: _Style, *, threshold: float, tries: int, rng: random.Random) -> None:
+    def __init__(
+        self,
+        writer: Any,
+        critic: Any,
+        answers: _Answers,
+        style: _Style,
+        *,
+        threshold: float,
+        tries: int,
+        rng: random.Random,
+    ) -> None:
         self.writer, self.critic, self.answers, self.style = writer, critic, answers, style
         self.threshold, self.tries, self.rng = float(threshold), max(int(tries), 1), rng
         self.asked = self.reused = self.silent = self.unjudged = 0
@@ -839,7 +914,9 @@ class _Writer:
             refused = status in (401, 403, 404)
             if refused or (not self.answered and status == 0) or self.silent >= 3:
                 reason = f"{status} {said}".strip() if status is not None else "no answer"
-                raise WriterUnavailable(f"{label} {'refused' if refused else 'stopped answering'}: {reason[:300]}")
+                raise WriterUnavailable(
+                    f"{label} {'refused' if refused else 'stopped answering'}: {reason[:300]}"
+                )
             return None
         self.silent = 0
         self.answered = True
@@ -849,10 +926,15 @@ class _Writer:
     # -- passages
 
     def worth(self, passage: _Passage) -> Optional[float]:
-        found = _scores(self.ask(self.critic, _judging_passage(passage)), ("clarity", "depth", "structure", "relevance"))
+        found = _scores(
+            self.ask(self.critic, _judging_passage(passage)),
+            ("clarity", "depth", "structure", "relevance"),
+        )
         return None if found is None else found[0]
 
-    def seed(self, section: _Section, target: int, accept: Optional[Callable[[_Passage], bool]] = None) -> Optional[_Passage]:
+    def seed(
+        self, section: _Section, target: int, accept: Optional[Callable[[_Passage], bool]] = None
+    ) -> Optional[_Passage]:
         """The passage a question is written from: the nearest to ``target`` the critic passes, or the best of ``tries``."""
         tried: List[Tuple[float, _Passage]] = []
         for _ in range(self.tries):
@@ -874,7 +956,9 @@ class _Writer:
 
     # -- questions
 
-    def check(self, kind: str, context: Sequence[_Passage], answer: str, kept: Sequence[str]) -> Tuple[Optional[Dict[str, Any]], str, str]:
+    def check(
+        self, kind: str, context: Sequence[_Passage], answer: str, kept: Sequence[str]
+    ) -> Tuple[Optional[Dict[str, Any]], str, str]:
         """The draft in an answer, or why it is turned down: the reason's name and what the model is told."""
         parsed = json_in(answer)
         if parsed is None:
@@ -883,19 +967,32 @@ class _Writer:
         reference = " ".join(str(parsed.get("answer") or "").split())
         quotes = parsed.get("quotes")
         quotes = [quotes] if isinstance(quotes, str) else quotes
-        quotes = [" ".join(str(q).split()) for q in quotes or [] if isinstance(q, str) and q.strip()]
+        quotes = [
+            " ".join(str(q).split()) for q in quotes or [] if isinstance(q, str) and q.strip()
+        ]
         if not (question and reference and quotes):
-            return None, "shape", 'it needs a "question", an "answer" and at least one quote in "quotes".'
+            return (
+                None,
+                "shape",
+                'it needs a "question", an "answer" and at least one quote in "quotes".',
+            )
         if kind == "search":
             question = question.rstrip("?").strip()
         size = len(question.split())
         least, most = _LENGTH.get(kind, _USUAL_LENGTH)
         if not least <= size <= most:
-            said = {"search": "a search is 3 to 8 words.", "long": "a long question is 20 to 45 words, the situation and then the question."}
+            said = {
+                "search": "a search is 3 to 8 words.",
+                "long": "a long question is 20 to 45 words, the situation and then the question.",
+            }
             return None, "length", said.get(kind, "a question is one sentence of at most 40 words.")
         pointing = _POINTING.search(question)
         if pointing:
-            return None, "pointing", f'it says "{pointing.group(0)}". Name what it is about instead, so it makes sense on its own.'
+            return (
+                None,
+                "pointing",
+                f'it says "{pointing.group(0)}". Name what it is about instead, so it makes sense on its own.',
+            )
         places, missing = [], []
         for quote in quotes:
             found = _found(quote, context)
@@ -904,21 +1001,44 @@ class _Writer:
             else:
                 places.append((found[0], found[1], quote))
         if missing or not places:
-            return None, "not_quoted", f'this quote is not in the passage word for word: "{missing[0][:160]}".'
+            return (
+                None,
+                "not_quoted",
+                f'this quote is not in the passage word for word: "{missing[0][:160]}".',
+            )
         if kind == "two_page" and len({_place_key(context[i], at) for i, at, _ in places}) < 2:
-            return None, "one_place", "its quotes come from one place; it must need two of the passages."
+            return (
+                None,
+                "one_place",
+                "its quotes come from one place; it must need two of the passages.",
+            )
         copied = _copied(question, context)
         if copied:
-            return None, "copied", f'it copies "{copied}" from the passage. Ask it the way a person would, in their own words.'
+            return (
+                None,
+                "copied",
+                f'it copies "{copied}" from the passage. Ask it the way a person would, in their own words.',
+            )
         for other in kept:
             if _same_question(question, other):
-                return None, "repeat", f'it asks the same as "{other}". Ask about something else the passage says.'
+                return (
+                    None,
+                    "repeat",
+                    f'it asks the same as "{other}". Ask about something else the passage says.',
+                )
         return {"question": question, "answer": reference, "places": places}, "", ""
 
-    def verdict(self, draft: Mapping[str, Any], context: Sequence[_Passage]) -> Optional[Tuple[float, str]]:
-        return _scores(self.ask(self.critic, _judging_question(draft, context)), ("standalone", "clear", "answered"))
+    def verdict(
+        self, draft: Mapping[str, Any], context: Sequence[_Passage]
+    ) -> Optional[Tuple[float, str]]:
+        return _scores(
+            self.ask(self.critic, _judging_question(draft, context)),
+            ("standalone", "clear", "answered"),
+        )
 
-    def write(self, kind: str, context: Sequence[_Passage], kept: Sequence[str]) -> Optional[Dict[str, Any]]:
+    def write(
+        self, kind: str, context: Sequence[_Passage], kept: Sequence[str]
+    ) -> Optional[Dict[str, Any]]:
         """A question that passes every check and the critic, asked for up to ``tries`` times; None when none did."""
         turned_down: Optional[Tuple[str, str]] = None
         for _ in range(self.tries):
@@ -938,20 +1058,35 @@ class _Writer:
             if judged[0] >= self.threshold:
                 return draft
             self.turned_down["critic"] += 1
-            turned_down = (draft["question"], judged[1] or "it did not stand alone, was not clear, or the passages did not answer it.")
+            turned_down = (
+                draft["question"],
+                judged[1]
+                or "it did not stand alone, was not clear, or the passages did not answer it.",
+            )
         return None
 
-    def evolve(self, kind: str, context: Sequence[_Passage], draft: Dict[str, Any], kept: Sequence[str], times: int) -> Dict[str, Any]:
+    def evolve(
+        self,
+        kind: str,
+        context: Sequence[_Passage],
+        draft: Dict[str, Any],
+        kept: Sequence[str],
+        times: int,
+    ) -> Dict[str, Any]:
         """The question made harder ``times`` times, each rewrite kept only when it passes what the question passed."""
         for _ in range(max(int(times), 0)):
             ways = [how for how in _EVOLVES[kind] if how != "several" or len(context) > 1]
             if not ways:
                 break
             how = self.rng.choice(ways)
-            answer = self.ask(self.writer, _rewriting(how, kind, context, self.style, draft["question"]))
+            answer = self.ask(
+                self.writer, _rewriting(how, kind, context, self.style, draft["question"])
+            )
             if answer is None:
                 break
-            better, _, _ = self.check(kind, context, answer, [*kept, draft["question"]] if how == "broader" else kept)
+            better, _, _ = self.check(
+                kind, context, answer, [*kept, draft["question"]] if how == "broader" else kept
+            )
             if better is None or better["question"] == draft["question"]:
                 continue
             judged = self.verdict(better, context)
@@ -964,7 +1099,11 @@ class _Writer:
 
 def _place_key(passage: _Passage, offset: int) -> Tuple[int, str, Any]:
     page = passage.page_of(offset)
-    return (passage.handle, passage.doc, page if page is not None else tuple(passage.pages) or passage.id)
+    return (
+        passage.handle,
+        passage.doc,
+        page if page is not None else tuple(passage.pages) or passage.id,
+    )
 
 
 def _printed(passage: _Passage, page: int) -> Optional[str]:
@@ -972,7 +1111,13 @@ def _printed(passage: _Passage, page: int) -> Optional[str]:
     labels = getattr(passage.document, "page_labels", None)
     if labels:
         return labels.get(page)
-    return passage.label if page == passage.page else passage.label_end if page == passage.page_end else None
+    return (
+        passage.label
+        if page == passage.page
+        else passage.label_end
+        if page == passage.page_end
+        else None
+    )
 
 
 def _where(passage: _Passage, page: Optional[int]) -> str:
@@ -1000,14 +1145,29 @@ def _row(draft: Mapping[str, Any], context: Sequence[_Passage]) -> Dict[str, Any
         passage = context[index]
         page = passage.page_of(offset)
         if passage.paged:
-            entries = [f"{passage.doc}#page={page}"] if page is not None else [f"{passage.doc}#page={p}" for p in passage.pages]
+            entries = (
+                [f"{passage.doc}#page={page}"]
+                if page is not None
+                else [f"{passage.doc}#page={p}" for p in passage.pages]
+            )
         else:
             entries = [passage.doc]
         expected += [e for e in entries if e not in expected]
         said = quote if len(quote) <= 240 else quote[:237].rsplit(" ", 1)[0] + "..."
-        where = _where(passage, page) if passage.paged else (f"Under {passage.heading}" if passage.heading else "")
+        where = (
+            _where(passage, page)
+            if passage.paged
+            else (f"Under {passage.heading}" if passage.heading else "")
+        )
         hints.append(f'{where}: "{said}"' if where else f'"{said}"')
-    return {"question": draft["question"], "expected": expected, "reference": draft["answer"], "evidence": evidence, "hint": " and ".join(hints), "draft": True}
+    return {
+        "question": draft["question"],
+        "expected": expected,
+        "reference": draft["answer"],
+        "evidence": evidence,
+        "hint": " and ".join(hints),
+        "draft": True,
+    }
 
 
 @dataclass
@@ -1041,24 +1201,49 @@ class GoldenWriting:
     def summary(self) -> str:
         """What was written and what was not, a few lines a person reads."""
         where = f" to {self.path}" if self.path else ""
-        lines = [f"Wrote {len(self.rows)} of {self.wanted} questions{where}, every one a draft to check."]
+        lines = [
+            f"Wrote {len(self.rows)} of {self.wanted} questions{where}, every one a draft to check."
+        ]
         if self.kinds:
-            said = ", ".join(f"{count} {_KIND_SAID[kind]}" for kind, count in self.kinds.items() if count)
+            said = ", ".join(
+                f"{count} {_KIND_SAID[kind]}" for kind, count in self.kinds.items() if count
+            )
             lines.append(f"  {said}" + (f"; {self.evolved} made harder." if self.evolved else "."))
-        lines.append(f"  From {self.sections} of {self.of_sections} sections. {self.asked} model calls" + (f", {self.reused} answers reused." if self.reused else "."))
+        lines.append(
+            f"  From {self.sections} of {self.of_sections} sections. {self.asked} model calls"
+            + (f", {self.reused} answers reused." if self.reused else ".")
+        )
         if self.passed_over:
-            lines.append("  Passages passed over: " + ", ".join(f"{n} {_PASSED_OVER[r]}" for r, n in sorted(self.passed_over.items(), key=lambda t: -t[1])) + ".")
+            lines.append(
+                "  Passages passed over: "
+                + ", ".join(
+                    f"{n} {_PASSED_OVER[r]}"
+                    for r, n in sorted(self.passed_over.items(), key=lambda t: -t[1])
+                )
+                + "."
+            )
         if self.turned_down:
-            lines.append("  Asked for again: " + ", ".join(f"{n} {_TURNED_DOWN[r]}" for r, n in sorted(self.turned_down.items(), key=lambda t: -t[1])) + ".")
+            lines.append(
+                "  Asked for again: "
+                + ", ".join(
+                    f"{n} {_TURNED_DOWN[r]}"
+                    for r, n in sorted(self.turned_down.items(), key=lambda t: -t[1])
+                )
+                + "."
+            )
         if self.set_aside:
             lines.append(
                 f"  {self.set_aside} places gave no question that passed, and another passage was tried in each one's place, "
                 "from the same section while it had one."
             )
         if self.no_neighbours:
-            lines.append(f"  {self.no_neighbours} questions meant to need two places were written from one: nothing similar enough was on another page.")
+            lines.append(
+                f"  {self.no_neighbours} questions meant to need two places were written from one: nothing similar enough was on another page."
+            )
         if self.unjudged:
-            lines.append(f"  {self.unjudged} questions got no verdict from the critic and were kept on the checks alone.")
+            lines.append(
+                f"  {self.unjudged} questions got no verdict from the critic and were kept on the checks alone."
+            )
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1105,8 +1290,14 @@ class _Likeness:
         if h not in self.vectors:
             items = self.of.get(h, [])
             try:
-                parts = [np.asarray(self.handles[h].embed([p.text for p in items[i : i + self.BATCH]]), dtype=np.float32) for i in range(0, len(items), self.BATCH)]
-                matrix = np.vstack(parts)
+                parts = [
+                    np.asarray(
+                        self.handles[h].embed([p.text for p in items[i : i + self.BATCH]]),
+                        dtype=np.float32,
+                    )
+                    for i in range(0, len(items), self.BATCH)
+                ]
+                matrix: Any = np.vstack(parts)
                 norms = np.linalg.norm(matrix, axis=1, keepdims=True)
                 matrix = matrix / np.where(norms == 0, 1.0, norms)
             except Exception:  # noqa: BLE001 - a model with no dense vectors to compare gives no second place
@@ -1178,13 +1369,17 @@ def write_golden(
     same rows.
     """
     if path is not None and Path(path).exists():
-        raise FileExistsError(f"{path} is already there, and questions somebody checked are not written over. Give another path.")
+        raise FileExistsError(
+            f"{path} is already there, and questions somebody checked are not written over. Give another path."
+        )
     if n < 1:
         raise ValueError(f"n is how many questions to write, at least 1; got {n}")
     mix = dict(MIX if mix is None else mix)
     unknown = sorted(set(mix) - set(MIX))
     if unknown or any(float(v) < 0 for v in mix.values()) or sum(mix.values()) <= 0:
-        raise ValueError(f"mix gives each kind a share, {', '.join(MIX)}, none below 0 and not all 0; got {dict(mix)}")
+        raise ValueError(
+            f"mix gives each kind a share, {', '.join(MIX)}, none below 0 and not all 0; got {dict(mix)}"
+        )
     if writer is None:
         writer = ChatWriter.from_environment()
     if writer is None:
@@ -1194,8 +1389,14 @@ def write_golden(
         )
     handles = list(db) if isinstance(db, (list, tuple)) else [db]
     rng = random.Random(seed)
-    style = _Style(examples=[" ".join(str(e).split()) for e in examples if str(e).strip()][:8], scenario=" ".join(scenario.split()), task=" ".join(task.split()))
-    work = _Writer(writer, critic or writer, _Answers(cache), style, threshold=threshold, tries=tries, rng=rng)
+    style = _Style(
+        examples=[" ".join(str(e).split()) for e in examples if str(e).strip()][:8],
+        scenario=" ".join(scenario.split()),
+        task=" ".join(task.split()),
+    )
+    work = _Writer(
+        writer, critic or writer, _Answers(cache), style, threshold=threshold, tries=tries, rng=rng
+    )
     passages = _gather(handles, work.passed_over)
     if not passages:
         raise ValueError(
@@ -1212,7 +1413,8 @@ def write_golden(
             start = rng.random() * step
             places += [(section, int(start + i * step)) for i in range(share)]
     slots: Deque[Tuple[_Section, int, str]] = deque(
-        (section, target, kind) for (section, target), kind in zip(places, _kinds(len(places), mix, rng))
+        (section, target, kind)
+        for (section, target), kind in zip(places, _kinds(len(places), mix, rng))
     )
 
     likeness = _Likeness(handles, passages)
@@ -1260,16 +1462,26 @@ def write_golden(
                 continue
             draft = work.evolve(kind, context, draft, kept, evolve)
             kept.append(draft["question"])
-            written.append(((chosen.handle, chosen.doc, chosen.order), kind, section.key, _row(draft, context)))
+            written.append(
+                ((chosen.handle, chosen.doc, chosen.order), kind, section.key, _row(draft, context))
+            )
             if progress is not None:
                 progress(len(written), wanted)
     except WriterUnavailable as exc:
-        kept_in = f" The {work.asked} answers it gave are kept in {cache}, and a run again starts where this one stopped." if cache else ""
-        raise WriterUnavailable(f"{exc}. Nothing was written: {len(written)} of {wanted} questions were done.{kept_in}") from exc
+        kept_in = (
+            f" The {work.asked} answers it gave are kept in {cache}, and a run again starts where this one stopped."
+            if cache
+            else ""
+        )
+        raise WriterUnavailable(
+            f"{exc}. Nothing was written: {len(written)} of {wanted} questions were done.{kept_in}"
+        ) from exc
     written.sort(key=lambda w: w[0])
     rows = [{"id": f"w{i}", **row} for i, (_, _, _, row) in enumerate(written, start=1)]
     if path is not None:
-        Path(path).write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+        Path(path).write_text(
+            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8"
+        )
     kinds = Counter(kind for _, kind, _, _ in written)
     return GoldenWriting(
         rows=rows,

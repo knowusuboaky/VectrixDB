@@ -117,7 +117,9 @@ def main(argv: list[str] | None = None) -> int:
     if not scripts:
         # examples/ is kept on the machine that runs it, not in the repository,
         # so a fresh checkout has none: nothing to make, and nothing is made.
-        print(f"no example scripts in {EXAMPLES.relative_to(ROOT).as_posix()}/, so there are no notebooks to make")
+        print(
+            f"no example scripts in {EXAMPLES.relative_to(ROOT).as_posix()}/, so there are no notebooks to make"
+        )
         return 0
     OUT.mkdir(parents=True, exist_ok=True)
     for script in scripts:

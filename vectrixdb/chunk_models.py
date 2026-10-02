@@ -112,8 +112,13 @@ def llm_cutter(chat: Any, *, window: int = 12000) -> Cutter:
             block = [text[s:e] for s, e in units[i:j]]
             key = hashlib.sha256("\x00".join(block).encode("utf-8")).hexdigest()
             if key not in said:
-                body = "\n".join(f'<paragraph n="{n}">{_inert(p)}</paragraph>' for n, p in enumerate(block, start=1))
-                reply = ask([{"role": "system", "content": _CUT}, {"role": "user", "content": body}])
+                body = "\n".join(
+                    f'<paragraph n="{n}">{_inert(p)}</paragraph>'
+                    for n, p in enumerate(block, start=1)
+                )
+                reply = ask(
+                    [{"role": "system", "content": _CUT}, {"role": "user", "content": body}]
+                )
                 found = (json_in(reply or "") or {}).get("starts")
                 numbers = []
                 for n in found if isinstance(found, list) else []:
@@ -147,7 +152,9 @@ def context_writer(chat: Any, *, around: int = 8000) -> Noter:
             return said[key]
         half = max(0, (around - (end - start)) // 2)
         a, b = max(0, start - half), min(len(document), end + half)
-        opening = f"<document_opening>{_inert(document[:1500])}</document_opening>\n" if a > 1500 else ""
+        opening = (
+            f"<document_opening>{_inert(document[:1500])}</document_opening>\n" if a > 1500 else ""
+        )
         body = f"{opening}<document>{_inert(document[a:b])}</document>\n<passage>{_inert(chunk)}</passage>"
         reply = ask([{"role": "system", "content": _CONTEXT}, {"role": "user", "content": body}])
         found = json_in(reply or "")
@@ -173,7 +180,9 @@ def context_writer(chat: Any, *, around: int = 8000) -> Noter:
 
 
 def _name(model: Any) -> str:
-    return str(getattr(model, "model_name", None) or getattr(model, "name", None) or type(model).__name__)
+    return str(
+        getattr(model, "model_name", None) or getattr(model, "name", None) or type(model).__name__
+    )
 
 
 def late_ready(model: Any) -> Optional[str]:
@@ -182,7 +191,10 @@ def late_ready(model: Any) -> Optional[str]:
         return "late chunking needs the collection's own embedding model, and this collection has none here"
     if callable(getattr(model, "embed_tokens", None)):
         return None
-    if getattr(model, "session", None) is not None and getattr(model, "tokenizer", None) is not None:
+    if (
+        getattr(model, "session", None) is not None
+        and getattr(model, "tokenizer", None) is not None
+    ):
         if str(getattr(model, "pooling", "mean")) != "mean":
             return (
                 f"late chunking takes the mean of a chunk's own tokens, which is how a question is embedded only by a model "
@@ -199,7 +211,9 @@ def _token_vectors(model: Any, pieces: Sequence[str]) -> List[np.ndarray]:
         # A model of your own: a (tokens, dimension) array a piece, read in order.
         return [np.asarray(v, dtype=np.float32) for v in model.embed_tokens(list(pieces))]
     tok = model.tokenizer
-    ids_of = [[tok._vocab.get(t, tok.unk_token_id) for t in tok._tokenize(p.lower())] for p in pieces]
+    ids_of = [
+        [tok._vocab.get(t, tok.unk_token_id) for t in tok._tokenize(p.lower())] for p in pieces
+    ]
     flat = [i for ids in ids_of for i in ids]
     width = max(8, int(getattr(model, "max_length", 512)) - 2)
     stride = max(1, width * 3 // 4)
@@ -228,8 +242,10 @@ def _token_vectors(model: Any, pieces: Sequence[str]) -> List[np.ndarray]:
     dim = best.shape[-1] if best is not None else 0
     out_pieces, at = [], 0
     for piece in ids_of:
-        out_pieces.append(best[at : at + len(piece)] if best is not None else np.zeros((0, dim), dtype=np.float32))
-        at += len(ids)
+        out_pieces.append(
+            best[at : at + len(piece)] if best is not None else np.zeros((0, dim), dtype=np.float32)
+        )
+        at += len(piece)
     return out_pieces
 
 
@@ -252,7 +268,9 @@ def late_vectors(model: Any, text: str, spans: Sequence[Tuple[int, int]]) -> np.
     vectors: List[Optional[np.ndarray]] = []
     missing: List[int] = []
     for n, (s, e) in enumerate(spans):
-        inside = [tokens[i] for i, (a, b) in enumerate(pieces) if a >= s and b <= e and len(tokens[i])]
+        inside = [
+            tokens[i] for i, (a, b) in enumerate(pieces) if a >= s and b <= e and len(tokens[i])
+        ]
         if not inside:
             vectors.append(None)
             missing.append(n)
@@ -261,7 +279,13 @@ def late_vectors(model: Any, text: str, spans: Sequence[Tuple[int, int]]) -> np.
         vectors.append(v / (np.linalg.norm(v) + 1e-9))
     if missing:
         embed = getattr(model, "embed", None) or model
-        alone = np.asarray(embed([text[spans[n][0] : spans[n][1]] for n in missing]), dtype=np.float32)
+        alone = np.asarray(
+            embed([text[spans[n][0] : spans[n][1]] for n in missing]), dtype=np.float32
+        )
         for n, v in zip(missing, alone):
             vectors[n] = v / (np.linalg.norm(v) + 1e-9)
-    return np.vstack([v for v in vectors if v is not None]).astype(np.float32) if vectors else np.zeros((0, 0), dtype=np.float32)
+    return (
+        np.vstack([v for v in vectors if v is not None]).astype(np.float32)
+        if vectors
+        else np.zeros((0, 0), dtype=np.float32)
+    )

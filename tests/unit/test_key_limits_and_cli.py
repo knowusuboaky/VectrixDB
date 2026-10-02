@@ -47,7 +47,10 @@ class TestOneCountHoweverManyServers:
     @pytest.fixture
     def servers(self, tmp_path):
         """Two servers over one sign-in file, as two processes behind a load balancer are."""
-        one, two = SignInStore(tmp_path / "signin.db", (SECRET,)), SignInStore(tmp_path / "signin.db", (SECRET,))
+        one, two = (
+            SignInStore(tmp_path / "signin.db", (SECRET,)),
+            SignInStore(tmp_path / "signin.db", (SECRET,)),
+        )
         yield one, two
         one.close()
         two.close()
@@ -101,11 +104,18 @@ def serve(data, **over):
     from vectrixdb.api.server import create_app
 
     config = SignInConfig(
-        methods=("email",), secrets=(SECRET,), public_url=PUBLIC, users=(("ada@example.com", "admin"),),
-        store_path=data / "auth" / "signin.db", access_log=data / "auth" / "access.jsonl",
-        sender=lambda to, subject, text: None, **over,
+        methods=("email",),
+        secrets=(SECRET,),
+        public_url=PUBLIC,
+        users=(("ada@example.com", "admin"),),
+        store_path=data / "auth" / "signin.db",
+        access_log=data / "auth" / "access.jsonl",
+        sender=lambda to, subject, text: None,
+        **over,
     )
-    return TestClient(create_app(db_path=str(data), enable_dashboard=False, signin=config), base_url=PUBLIC)
+    return TestClient(
+        create_app(db_path=str(data), enable_dashboard=False, signin=config), base_url=PUBLIC
+    )
 
 
 class TestAKeyHasALimit:
@@ -115,7 +125,9 @@ class TestAKeyHasALimit:
         monkeypatch.delenv("VECTRIXDB_AUDIT_JSONL", raising=False)
 
     def make(self, client, **body):
-        reply = client.post("/api/v1/keys", json={"name": "an-app", "role": "searcher", **body}, headers=ADMIN)
+        reply = client.post(
+            "/api/v1/keys", json={"name": "an-app", "role": "searcher", **body}, headers=ADMIN
+        )
         assert reply.status_code == 200, reply.text
         return reply.json()["data"]
 
@@ -129,34 +141,49 @@ class TestAKeyHasALimit:
             refused = client.get("/api/v1/collections", headers=key)
             assert 1 <= int(refused.headers["retry-after"]) <= 60
             body = refused.json()
-            assert set(body) == {"ok", "message", "data", "detail"} and body["data"]["retry_after"] >= 1
+            assert (
+                set(body) == {"ok", "message", "data", "detail"}
+                and body["data"]["retry_after"] >= 1
+            )
             assert "an-app" in body["message"] and "3 requests a minute" in body["message"]
 
     def test_the_servers_setting_covers_a_key_with_no_number(self, data):
         with serve(data, key_requests_per_minute=2) as client:
             key = {"api-key": self.make(client)["key"]}
-            assert [client.get("/api/v1/collections", headers=key).status_code for _ in range(3)] == [200, 200, 429]
+            assert [
+                client.get("/api/v1/collections", headers=key).status_code for _ in range(3)
+            ] == [200, 200, 429]
 
     def test_the_keys_own_number_wins_over_the_servers(self, data):
         with serve(data, key_requests_per_minute=1) as client:
             key = {"api-key": self.make(client, requests_per_minute=3)["key"]}
-            assert [client.get("/api/v1/collections", headers=key).status_code for _ in range(4)] == [200, 200, 200, 429]
+            assert [
+                client.get("/api/v1/collections", headers=key).status_code for _ in range(4)
+            ] == [200, 200, 200, 429]
 
     def test_with_neither_a_key_is_as_unlimited_as_it_always_was(self, data):
         with serve(data) as client:
             made = self.make(client)
             assert made["requests_per_minute"] is None
             key = {"api-key": made["key"]}
-            assert {client.get("/api/v1/collections", headers=key).status_code for _ in range(40)} == {200}
+            assert {
+                client.get("/api/v1/collections", headers=key).status_code for _ in range(40)
+            } == {200}
 
     def test_the_servers_own_key_is_never_limited(self, data):
         with serve(data, key_requests_per_minute=1) as client:
-            assert {client.get("/api/v1/collections", headers=ADMIN).status_code for _ in range(5)} == {200}
+            assert {
+                client.get("/api/v1/collections", headers=ADMIN).status_code for _ in range(5)
+            } == {200}
 
     @pytest.mark.parametrize("number", [0, -5, 100001])
     def test_a_number_that_is_no_number_is_refused(self, data, number):
         with serve(data) as client:
-            reply = client.post("/api/v1/keys", json={"name": "x", "role": "reader", "requests_per_minute": number}, headers=ADMIN)
+            reply = client.post(
+                "/api/v1/keys",
+                json={"name": "x", "role": "reader", "requests_per_minute": number},
+                headers=ADMIN,
+            )
             assert reply.status_code == 422
 
     def test_the_store_refuses_it_too(self, tmp_path):
@@ -166,22 +193,42 @@ class TestAKeyHasALimit:
         store.close()
 
     def test_a_key_written_before_this_has_no_number(self):
-        old = {"key_id": "abc", "name": "old", "role": "reader", "prefix": "vx_abc_", "created_at": 1.0}
+        old = {
+            "key_id": "abc",
+            "name": "old",
+            "role": "reader",
+            "prefix": "vx_abc_",
+            "created_at": 1.0,
+        }
         assert SignInStore._key(old, None).per_minute is None
 
 
 class TestTheSetting:
     def test_it_is_read_from_the_environment(self, tmp_path):
-        env = {"VECTRIXDB_SIGNIN": "email", "VECTRIXDB_SIGNIN_SECRET": SECRET, "VECTRIXDB_PUBLIC_URL": PUBLIC, "VECTRIXDB_KEY_REQUESTS_PER_MINUTE": "120"}
+        env = {
+            "VECTRIXDB_SIGNIN": "email",
+            "VECTRIXDB_SIGNIN_SECRET": SECRET,
+            "VECTRIXDB_PUBLIC_URL": PUBLIC,
+            "VECTRIXDB_KEY_REQUESTS_PER_MINUTE": "120",
+        }
         assert SignInConfig.from_env(tmp_path, env).key_requests_per_minute == 120
 
     def test_left_out_there_is_no_limit(self, tmp_path):
-        env = {"VECTRIXDB_SIGNIN": "email", "VECTRIXDB_SIGNIN_SECRET": SECRET, "VECTRIXDB_PUBLIC_URL": PUBLIC}
+        env = {
+            "VECTRIXDB_SIGNIN": "email",
+            "VECTRIXDB_SIGNIN_SECRET": SECRET,
+            "VECTRIXDB_PUBLIC_URL": PUBLIC,
+        }
         assert SignInConfig.from_env(tmp_path, env).key_requests_per_minute is None
 
     @pytest.mark.parametrize("given", ["0", "-1", "many", "1.5"])
     def test_a_value_that_is_not_a_number_of_requests_stops_the_start(self, tmp_path, given):
-        env = {"VECTRIXDB_SIGNIN": "email", "VECTRIXDB_SIGNIN_SECRET": SECRET, "VECTRIXDB_PUBLIC_URL": PUBLIC, "VECTRIXDB_KEY_REQUESTS_PER_MINUTE": given}
+        env = {
+            "VECTRIXDB_SIGNIN": "email",
+            "VECTRIXDB_SIGNIN_SECRET": SECRET,
+            "VECTRIXDB_PUBLIC_URL": PUBLIC,
+            "VECTRIXDB_KEY_REQUESTS_PER_MINUTE": given,
+        }
         with pytest.raises(ConfigurationError, match="VECTRIXDB_KEY_REQUESTS_PER_MINUTE"):
             SignInConfig.from_env(tmp_path, env)
 
@@ -211,23 +258,49 @@ class TestKeysFromTheConsole:
         return CliRunner().invoke(app, ["keys", *args, "--path", str(db)])
 
     def test_a_key_is_made_shown_once_and_works(self, signin_on, data, monkeypatch):
-        made = self.keys(data, "add", "handbook-bot", "--collection", "handbook", "--days", "90", "--per-minute", "60")
+        made = self.keys(
+            data,
+            "add",
+            "handbook-bot",
+            "--collection",
+            "handbook",
+            "--days",
+            "90",
+            "--per-minute",
+            "60",
+        )
         assert made.exit_code == 0, made.output
         said = flat(made.output)
-        assert "handbook-bot" in said and "searcher" in said and "handbook" in said and "60 a minute" in said
+        assert (
+            "handbook-bot" in said
+            and "searcher" in said
+            and "handbook" in said
+            and "60 a minute" in said
+        )
         key = re.search(r"vx_[0-9a-f]{8}_[\w-]+", made.output).group(0)
 
         monkeypatch.setenv("VECTRIXDB_API_KEY", KEY)
         with serve(data) as client:
-            assert client.get("/api/v1/collections/handbook", headers={"Authorization": f"Bearer {key}"}).status_code == 200
+            assert (
+                client.get(
+                    "/api/v1/collections/handbook", headers={"Authorization": f"Bearer {key}"}
+                ).status_code
+                == 200
+            )
             listed = client.get("/api/v1/keys", headers=ADMIN).json()["data"]["keys"][0]
-            assert listed["created_by"] == "server console" and listed["collections"] == ["handbook"]
+            assert listed["created_by"] == "server console" and listed["collections"] == [
+                "handbook"
+            ]
 
     def test_the_key_is_not_in_the_listing_and_not_in_the_file(self, signin_on, data):
         made = self.keys(data, "add", "nightly")
         key = re.search(r"vx_[0-9a-f]{8}_[\w-]+", made.output).group(0)
         listed = self.keys(data, "list")
-        assert "nightly" in listed.output and "every collection" in flat(listed.output) and key not in listed.output
+        assert (
+            "nightly" in listed.output
+            and "every collection" in flat(listed.output)
+            and key not in listed.output
+        )
         assert key.encode() not in (data / "auth" / "signin.db").read_bytes()
 
     def test_making_one_is_written_down(self, signin_on, data):
@@ -245,11 +318,14 @@ class TestKeysFromTheConsole:
         assert done.exit_code == 0 and "Revoked nightly" in done.output
         assert "No keys yet" in self.keys(data, "list").output
 
-    @pytest.mark.parametrize("args, said", [
-        (["add", "x", "--role", "admin"], "not a role a key can have"),
-        (["add", "x", "--days", "0"], "--days"),
-        (["add", "x", "--per-minute", "0"], "no requests is no key"),
-    ])
+    @pytest.mark.parametrize(
+        "args, said",
+        [
+            (["add", "x", "--role", "admin"], "not a role a key can have"),
+            (["add", "x", "--days", "0"], "--days"),
+            (["add", "x", "--per-minute", "0"], "no requests is no key"),
+        ],
+    )
     def test_what_cannot_be_made_is_refused_in_words(self, signin_on, data, args, said):
         result = self.keys(data, *args)
         assert result.exit_code == 2 and said in flat(result.output)

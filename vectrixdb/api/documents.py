@@ -157,12 +157,19 @@ def _files_at(where: str, name: str) -> Any:
         account = _blob_account(where)
         if where.startswith("s3://"):
             parsed = urlparse(where)
-            _files[key] = S3Files(_s3_client(), parsed.netloc, f"{parsed.path.strip('/')}/{name}".lstrip("/"))
+            _files[key] = S3Files(
+                _s3_client(), parsed.netloc, f"{parsed.path.strip('/')}/{name}".lstrip("/")
+            )
         elif account:
             container, _, prefix = urlparse(where).path.lstrip("/").partition("/")
             if not container:
-                raise HTTPException(status_code=500, detail="VECTRIXDB_KEEP_SOURCE is a Blob address with no container in it")
-            _files[key] = BlobFiles(_blob_client(account), container, f"{prefix.strip('/')}/{name}".lstrip("/"))
+                raise HTTPException(
+                    status_code=500,
+                    detail="VECTRIXDB_KEEP_SOURCE is a Blob address with no container in it",
+                )
+            _files[key] = BlobFiles(
+                _blob_client(account), container, f"{prefix.strip('/')}/{name}".lstrip("/")
+            )
         else:
             _files[key] = LocalFiles(Path(where) / name)
     return _files[key]
@@ -172,7 +179,20 @@ def _readers() -> Dict[str, Any]:
     from ..extract import resolve
     from ..extract.engines import AUDIO_SUFFIXES, IMAGE_SUFFIXES, VIDEO_SUFFIXES
 
-    built_in = [".md", ".markdown", ".txt", ".html", ".htm", ".csv", ".pptx", ".pdf", ".docx", ".doc", ".xlsx", ".xlsm"]
+    built_in = [
+        ".md",
+        ".markdown",
+        ".txt",
+        ".html",
+        ".htm",
+        ".csv",
+        ".pptx",
+        ".pdf",
+        ".docx",
+        ".doc",
+        ".xlsx",
+        ".xlsm",
+    ]
     local = sorted(IMAGE_SUFFIXES + AUDIO_SUFFIXES + VIDEO_SUFFIXES)
     extractors = configured_extractors()
     routed = resolve(extractors).suffixes() if extractors is not None else resolve(None).suffixes()
@@ -184,7 +204,11 @@ async def extractors():
     """Which file types this server reads, and who reads them. The Ingest
     page asks, so its drop zone takes what the server takes."""
     readers = _readers()
-    accepted = sorted(set(readers["built_in"]) | set(readers["local_engines"]) | {s for s in readers["extractors"] if s != "*"})
+    accepted = sorted(
+        set(readers["built_in"])
+        | set(readers["local_engines"])
+        | {s for s in readers["extractors"] if s != "*"}
+    )
     return {
         **readers,
         "accepted": accepted,
@@ -213,7 +237,9 @@ async def _upload(request: Request) -> tuple:
     """``(bytes, name)`` from a raw body with X-Filename, or a multipart form."""
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"The file is larger than {MAX_UPLOAD_BYTES} bytes")
+        raise HTTPException(
+            status_code=413, detail=f"The file is larger than {MAX_UPLOAD_BYTES} bytes"
+        )
     if (request.headers.get("content-type") or "").lower().startswith("multipart/form-data"):
         try:
             form = await request.form()
@@ -234,10 +260,15 @@ async def _upload(request: Request) -> tuple:
     if not data:
         raise HTTPException(status_code=400, detail="The request has no file in it")
     if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"The file is larger than {MAX_UPLOAD_BYTES} bytes")
+        raise HTTPException(
+            status_code=413, detail=f"The file is larger than {MAX_UPLOAD_BYTES} bytes"
+        )
     name = Path(name.replace("\\", "/")).name
     if not name:
-        raise HTTPException(status_code=400, detail="Name the file in X-Filename, for example X-Filename: report.pdf")
+        raise HTTPException(
+            status_code=400,
+            detail="Name the file in X-Filename, for example X-Filename: report.pdf",
+        )
     return data, name
 
 
@@ -245,7 +276,9 @@ async def _upload(request: Request) -> tuple:
 async def add_document(
     name: str,
     request: Request,
-    doc_id: Optional[str] = Query(None, description="The document's id. The file's name when left out."),
+    doc_id: Optional[str] = Query(
+        None, description="The document's id. The file's name when left out."
+    ),
     chunk: str = Query("markdown"),
     chunk_size: int = Query(1000, ge=50, le=20000),
     overlap: int = Query(200, ge=0),
@@ -260,11 +293,20 @@ async def add_document(
     """
     from ..ingest import STRATEGIES, load_bytes, prepare_document, texts_to_embed
     from ..quality import DEFAULT_THRESHOLD
-    from .server import DEFAULT_QUERY_MODEL, _mint_build, _servable, emit_event, get_db, get_text_embedder
+    from .server import (
+        DEFAULT_QUERY_MODEL,
+        _mint_build,
+        _servable,
+        emit_event,
+        get_db,
+        get_text_embedder,
+    )
 
     collection = _servable(get_db(), name)
     if chunk not in STRATEGIES or chunk in ("semantic", "llm"):
-        raise HTTPException(status_code=400, detail="chunk is recursive, sentence, markdown or fixed")
+        raise HTTPException(
+            status_code=400, detail="chunk is recursive, sentence, markdown or fixed"
+        )
     try:
         extra = json.loads(metadata) if metadata else {}
     except ValueError as exc:
@@ -280,14 +322,25 @@ async def add_document(
     except DependencyError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     front_id = doc.metadata.get("doc_id")
-    document_id = doc_id or (front_id if isinstance(front_id, str) and front_id else None) or filename
+    document_id = (
+        doc_id or (front_id if isinstance(front_id, str) and front_id else None) or filename
+    )
     prepared = prepare_document(
-        doc, document_id, chunk=chunk, chunk_size=chunk_size, overlap=overlap, metadata=extra, embed_heading=embed_heading
+        doc,
+        document_id,
+        chunk=chunk,
+        chunk_size=chunk_size,
+        overlap=overlap,
+        metadata=extra,
+        embed_heading=embed_heading,
     )
     if prepared is None:
         raise HTTPException(status_code=422, detail=f"Nothing could be read from {filename}")
     if prepared.quality < DEFAULT_THRESHOLD and on_low_quality == "reject":
-        raise HTTPException(status_code=422, detail=str(ExtractionQualityError(document_id, prepared.quality, DEFAULT_THRESHOLD)))
+        raise HTTPException(
+            status_code=422,
+            detail=str(ExtractionQualityError(document_id, prepared.quality, DEFAULT_THRESHOLD)),
+        )
 
     try:
         embedder = get_text_embedder()
@@ -295,7 +348,10 @@ async def add_document(
         raise HTTPException(status_code=500, detail=f"Text embedder not available: {exc}")
     try:
         vectors = embedder.embed(texts_to_embed(prepared.texts, prepared.metadata))
-        metas = [dict(m, text=t) if "text" not in m else dict(m) for m, t in zip(prepared.metadata, prepared.texts)]
+        metas = [
+            dict(m, text=t) if "text" not in m else dict(m)
+            for m, t in zip(prepared.metadata, prepared.texts)
+        ]
         build = _mint_build(metas)
         stale = chunk_source.document_chunks(collection, document_id)
         if stale:
@@ -305,7 +361,10 @@ async def add_document(
 
             collection.set_meta("embedding_model", _default_model_name())
         added = collection.add(
-            ids=prepared.ids, vectors=[v.tolist() for v in vectors], metadata=metas, texts=prepared.texts
+            ids=prepared.ids,
+            vectors=[v.tolist() for v in vectors],
+            metadata=metas,
+            texts=prepared.texts,
         )
         collection.save()
         collection.set_meta("index_build_id", build)
@@ -317,10 +376,18 @@ async def add_document(
         store.put(
             document_id,
             doc,
-            chunking={"chunk": chunk, "chunk_size": chunk_size, "overlap": overlap, "embed_heading": embed_heading},
+            chunking={
+                "chunk": chunk,
+                "chunk_size": chunk_size,
+                "overlap": overlap,
+                "embed_heading": embed_heading,
+            },
             user_metadata=extra,
         )
-    await emit_event("points_added", {"collection": name, "added": added, "total": collection.count(), "ids": prepared.ids})
+    await emit_event(
+        "points_added",
+        {"collection": name, "added": added, "total": collection.count(), "ids": prepared.ids},
+    )
     return {
         "ok": True,
         "doc_id": document_id,
@@ -355,11 +422,17 @@ def _kept(name: str) -> Any:
 @router.get("/api/v1/collections/{name}/documents", tags=["documents"])
 async def list_documents(name: str):
     store = _kept(name)
-    return {"documents": [{"doc_id": doc_id, **entry} for doc_id, entry in sorted(store.entries().items())]}
+    return {
+        "documents": [
+            {"doc_id": doc_id, **entry} for doc_id, entry in sorted(store.entries().items())
+        ]
+    }
 
 
 @router.get("/api/v1/collections/{name}/documents/{doc_id:path}", tags=["documents"])
-async def get_document(name: str, doc_id: str, raw: bool = Query(False, description="With the front matter.")):
+async def get_document(
+    name: str, doc_id: str, raw: bool = Query(False, description="With the front matter.")
+):
     """The Markdown a document was indexed from, as text."""
     from ..exceptions import DocumentNotFoundError
     from ..ingest import split_front_matter
@@ -369,7 +442,9 @@ async def get_document(name: str, doc_id: str, raw: bool = Query(False, descript
         text = store.markdown(doc_id)
     except DocumentNotFoundError:
         raise HTTPException(status_code=404, detail=f"No kept document {doc_id!r}")
-    return PlainTextResponse(text if raw else split_front_matter(text)[1], media_type="text/markdown; charset=utf-8")
+    return PlainTextResponse(
+        text if raw else split_front_matter(text)[1], media_type="text/markdown; charset=utf-8"
+    )
 
 
 @router.delete("/api/v1/collections/{name}/documents/{doc_id:path}", tags=["documents"])
@@ -385,4 +460,9 @@ async def delete_document(name: str, doc_id: str):
     moved = store.delete(doc_id) if store is not None else False
     if not ids and not moved:
         raise HTTPException(status_code=404, detail=f"No document {doc_id!r}")
-    return {"ok": True, "doc_id": doc_id, "chunks_removed": len(ids), "kept_copy_moved_aside": bool(moved)}
+    return {
+        "ok": True,
+        "doc_id": doc_id,
+        "chunks_removed": len(ids),
+        "kept_copy_moved_aside": bool(moved),
+    }

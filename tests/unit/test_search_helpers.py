@@ -208,6 +208,45 @@ class TestSparseIndexBasics:
         assert list(got.indices) == [0, 2]
         assert list(got.values) == pytest.approx([1.0, 2.0])
 
+    def test_save_writes_an_npz_and_never_a_pickle(self, tmp_path):
+        """A pickle runs code when read, and a snapshot can bring one from anywhere."""
+        idx = SparseIndex(path=tmp_path / "idx")
+        idx.add("a", {0: 1.0, 2: 2.0})
+        idx.add("b", {2: 0.5})
+        idx.save()
+        assert (tmp_path / "idx" / "sparse_index.npz").exists()
+        assert not (tmp_path / "idx" / "sparse_index.pkl").exists()
+        reloaded = SparseIndex(path=tmp_path / "idx")
+        assert reloaded.count() == 2 and reloaded.stats()["total_nnz"] == 3
+        assert [r.id for r in reloaded.search({2: 1.0}, limit=10)] == ["a", "b"]
+        assert reloaded._norms["a"] == pytest.approx(5**0.5)
+        empty = SparseIndex(path=tmp_path / "empty")
+        empty.save()
+        assert SparseIndex(path=tmp_path / "empty").count() == 0
+
+    def test_a_pickle_from_before_is_read_once_and_replaced_on_save(self, tmp_path):
+        import pickle
+
+        folder = tmp_path / "idx"
+        folder.mkdir()
+        data = {
+            "inverted_index": {0: [("a", 1.0)]},
+            "docs": {"a": {"indices": [0], "values": [1.0]}},
+            "norms": {"a": 1.0},
+            "count": 1,
+            "total_nnz": 1,
+            "normalize": True,
+        }
+        with open(folder / "sparse_index.pkl", "wb") as f:
+            pickle.dump(data, f)
+        idx = SparseIndex(path=folder)
+        assert idx.count() == 1 and idx.normalize is True
+        assert [r.id for r in idx.search({0: 1.0}, limit=10)] == ["a"]
+        idx.save()
+        assert not (folder / "sparse_index.pkl").exists()
+        assert (folder / "sparse_index.npz").exists()
+        assert SparseIndex(path=folder).count() == 1
+
     def test_add_same_id_twice_replaces_the_vector(self):
         idx = SparseIndex()
         idx.add("a", {0: 1.0})
