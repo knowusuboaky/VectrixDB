@@ -198,6 +198,26 @@ What it costs: one write a chunk, with its text and metadata and no vector. Pyth
 
 The kept Markdown works the same way. `VECTRIXDB_KEEP_SOURCE` takes a folder, `s3://bucket/prefix` or a Blob address as well as `1`, with one folder a collection inside it, and the Documents page then opens what the ingesting process kept.
 
+## Delta Lake to Lakebase, deletes included
+
+Delta Lake is slow to search and Lakebase is fast, so the usual shape is Delta Lake as the governed source and Lakebase as the copy that answers. `VectrixSync` keeps the copy. `full()` and `incremental()` only ever copy, so a chunk deleted or revoked in Delta Lake stays searchable in Lakebase. `cdc()` carries deletes too.
+
+```python
+from vectrixdb import VectrixDB, VectrixSync
+
+source = VectrixDB.with_delta_lake("https://your-workspace.cloud.databricks.com", token="YOUR_TOKEN")
+target = VectrixDB.with_lakebase("your-instance.database.cloud.databricks.com", token="YOUR_TOKEN")
+
+sync = VectrixSync(source, target)
+result = sync.cdc()                  # one pass
+result.rows_synced, result.rows_deleted, result.fallbacks
+sync.start_cdc(interval_seconds=30)  # or a pass every 30 seconds, until stop_cdc()
+```
+
+The first pass for a collection copies every row and deletes every Lakebase row Delta Lake does not have. After that, a pass reads the table's change data feed from the version the last one reached, so it costs what changed rather than what is there. A collection table this release creates has the feed on. One created before needs `enable_change_feed("name")` on the Delta Lake backend once, by someone allowed to alter the table, and the feed starts from that version. Until then, or when VACUUM has removed the files an old version needs, the pass compares the whole collection on both sides and names it in `fallbacks`; the copy is still right, it just costs more. Other source backends have no feed and are always compared that way.
+
+Vector collections only: the document index is still copied by `full()`, and a collection dropped in the source is not dropped in the copy. The version each collection has reached is held on the `VectrixSync` instance, so a new instance starts with a comparison.
+
 ## Which one
 
 | Backend | Use when |

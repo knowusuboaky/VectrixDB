@@ -31,6 +31,16 @@ does not understand:
   mechanical rather than a general SQL rewrite.
 - ``:name`` parameter binding needs no translation: it is also how the
   stdlib ``sqlite3`` module binds named parameters.
+- The change data feed. Every table has a version, bumped once per
+  ``INSERT``, ``UPDATE``, ``DELETE`` or ``MERGE`` that names it, and reset by
+  ``DROP TABLE``. A table created with ``TBLPROPERTIES
+  (delta.enableChangeDataFeed = true)``, or altered to have it, gets a
+  ``__cdf_<table>`` log filled by SQLite triggers with the row, its
+  ``_change_type`` (``insert``, ``update_preimage``, ``update_postimage``,
+  ``delete``) and ``_commit_version``, as Delta records them.
+  ``DESCRIBE HISTORY ... LIMIT 1`` answers the latest version, and
+  ``table_changes(:table, :start, :end)`` reads the log, refusing a start
+  before the feed was on, as Delta does.
 
 The backend never asks the database to rank vectors: ``vector_search`` and
 its callers already pull every row out with a plain SELECT and score them in
@@ -73,6 +83,21 @@ def _flatten_identifiers(sql: str) -> str:
     return _IDENT_CHAIN.sub(repl, sql)
 
 
+_CDF_PROPERTY = re.compile(
+    r"\bTBLPROPERTIES\s*\(\s*delta\.enableChangeDataFeed\s*=\s*true\s*\)", re.IGNORECASE
+)
+_MUTATION = re.compile(
+    r'^(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\s+"((?:[^"]|"")*)"', re.IGNORECASE
+)
+_TABLE_CHANGES = re.compile(
+    r"table_changes\(\s*:(\w+)\s*,\s*:(\w+)\s*,\s*:(\w+)\s*\)", re.IGNORECASE
+)
+
+
+def _quote(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _translate_tokens(sql: str) -> str:
     """Rewrite the Databricks type names and clauses SQLite does not have."""
 
@@ -105,11 +130,57 @@ class FakeDatabricksCursor:
     # -- statement execution --------------------------------------------
 
     def execute(self, sql: str, params: Optional[Dict[str, Any]] = None) -> "FakeDatabricksCursor":
+        with_feed = bool(_CDF_PROPERTY.search(sql))
+        sql = _CDF_PROPERTY.sub("", sql)
         sql = _translate_tokens(sql)
         sql = _flatten_identifiers(sql).strip()
         self._synthetic_rows = None
 
         upper = sql.upper()
+        if upper.startswith("ALTER TABLE") and with_feed:
+            table = re.match(r'ALTER\s+TABLE\s+"((?:[^"]|"")*)"', sql, re.IGNORECASE).group(1)
+            self._bump(table)
+            self._install_feed(table)
+            self.description = None
+            return self
+
+        if upper.startswith("DESCRIBE HISTORY"):
+            table = re.match(r'DESCRIBE\s+HISTORY\s+"((?:[^"]|"")*)"', sql, re.IGNORECASE).group(1)
+            self._raw.execute("SELECT version FROM __delta_log WHERE tbl = ?", (table,))
+            found = self._raw.fetchone()
+            if found is None:
+                raise sqlite3.OperationalError(f"no such table: {table}")
+            self._synthetic_rows = [(found[0],)]
+            self.description = [("version",)]
+            return self
+
+        if _TABLE_CHANGES.search(sql):
+            sql = self._table_changes(sql, params or {})
+
+        mutated = _MUTATION.match(sql)
+        if mutated:
+            self._bump(mutated.group(1).replace('""', '"'))
+
+        if upper.startswith("DROP TABLE"):
+            table = sql.rstrip().split()[-1].strip('"').replace('""', '"')
+            self._raw.execute(f"DROP TABLE IF EXISTS {_quote('__cdf_' + table)}")
+            self._raw.execute("DELETE FROM __delta_log WHERE tbl = ?", (table,))
+
+        if upper.startswith("CREATE TABLE"):
+            table = re.match(
+                r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"((?:[^"]|"")*)"', sql, re.IGNORECASE
+            ).group(1)
+            self._raw.execute(sql)
+            self._raw.execute(
+                "INSERT OR IGNORE INTO __delta_log (tbl, version, cdf_from) VALUES (?, 0, ?)",
+                (table, 0 if with_feed else None),
+            )
+            if with_feed:
+                self._install_feed(table)
+            self.description = None
+            self.rowcount = -1
+            return self
+
         if upper.startswith("CREATE SCHEMA"):
             # SQLite has no schema/catalog namespace to create; the fake
             # connection is already scoped to one (catalog, schema) pair.
@@ -190,6 +261,65 @@ class FakeDatabricksCursor:
         self.description = None
         self.rowcount = self._raw.rowcount
 
+    # -- change data feed --------------------------------------------------
+
+    def _bump(self, table: str) -> None:
+        """One commit on a table: its version goes up by one."""
+        self._raw.execute("UPDATE __delta_log SET version = version + 1 WHERE tbl = ?", (table,))
+
+    def _install_feed(self, table: str) -> None:
+        """Start recording a table's changes from its current version."""
+        self._raw.execute(
+            "UPDATE __delta_log SET cdf_from = version WHERE tbl = ? AND cdf_from IS NULL", (table,)
+        )
+        log = _quote("__cdf_" + table)
+        self._raw.execute(f"PRAGMA table_info({_quote(table)})")
+        columns = [col[1] for col in self._raw.fetchall()]
+        self._raw.execute(
+            f"CREATE TABLE IF NOT EXISTS {log} ("
+            + ", ".join(_quote(c) for c in columns)
+            + ", _change_type TEXT, _commit_version INTEGER)"
+        )
+        names = ", ".join(_quote(c) for c in columns)
+        version = (
+            f"(SELECT version FROM __delta_log WHERE tbl = '{table.replace(chr(39), chr(39) * 2)}')"
+        )
+
+        def row(prefix: str, kind: str) -> str:
+            values = ", ".join(f"{prefix}.{_quote(c)}" for c in columns)
+            return f"INSERT INTO {log} ({names}, _change_type, _commit_version) VALUES ({values}, '{kind}', {version});"
+
+        for event, body in (
+            ("INSERT", row("NEW", "insert")),
+            ("UPDATE", row("OLD", "update_preimage") + " " + row("NEW", "update_postimage")),
+            ("DELETE", row("OLD", "delete")),
+        ):
+            trigger = _quote(f"__cdf_{table}_{event.lower()}")
+            self._raw.execute(
+                f"CREATE TRIGGER IF NOT EXISTS {trigger} AFTER {event} ON {_quote(table)} BEGIN {body} END"
+            )
+
+    def _table_changes(self, sql: str, params: Dict[str, Any]) -> str:
+        """Swap ``table_changes(...)`` for a subquery over the table's log."""
+        match = _TABLE_CHANGES.search(sql)
+        table = _flatten_identifiers(params[match.group(1)]).strip('"').replace('""', '"')
+        start, end = int(params[match.group(2)]), int(params[match.group(3)])
+        self._raw.execute("SELECT cdf_from FROM __delta_log WHERE tbl = ?", (table,))
+        found = self._raw.fetchone()
+        if found is None or found[0] is None:
+            raise sqlite3.OperationalError(f"change data feed is not enabled on {table}")
+        if start < found[0]:
+            raise sqlite3.OperationalError(
+                f"change data feed of {table} starts at version {found[0]}, not {start}"
+            )
+        subquery = (
+            f"(SELECT * FROM {_quote('__cdf_' + table)} "
+            f"WHERE _commit_version BETWEEN {start} AND {end})"
+        )
+        for key in (match.group(1), match.group(2), match.group(3)):
+            params.pop(key, None)
+        return sql[: match.start()] + subquery + sql[match.end() :]
+
     # -- results ----------------------------------------------------------
 
     def _decode(self, row: Optional[Tuple[Any, ...]]) -> Optional[Tuple[Any, ...]]:
@@ -239,6 +369,9 @@ class FakeDatabricksConnection:
     def __init__(self) -> None:
         self._sqlite = sqlite3.connect(":memory:", isolation_level=None)
         self._sqlite.create_function("ARRAY", -1, _array_literal_fn)
+        self._sqlite.execute(
+            "CREATE TABLE __delta_log (tbl TEXT PRIMARY KEY, version INTEGER, cdf_from INTEGER)"
+        )
 
     def cursor(self) -> FakeDatabricksCursor:
         return FakeDatabricksCursor(self._sqlite)

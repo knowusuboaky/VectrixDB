@@ -4992,6 +4992,8 @@ class DeltaLakeStorage(BaseStorage):
 
                     ) USING DELTA
 
+                    TBLPROPERTIES (delta.enableChangeDataFeed = true)
+
                 """)
 
             else:
@@ -5386,6 +5388,95 @@ class DeltaLakeStorage(BaseStorage):
                     yield row[0], self._row_to_data(row[1:])
 
                 offset += batch_size
+
+    # Change data feed: what VectrixSync.cdc() reads so deletes reach the
+    # target. A table made by this backend has the feed on from its first
+    # version; one made before needs enable_change_feed() once, and its feed
+    # starts at the version that call commits.
+
+    def enable_change_feed(self, collection: str) -> None:
+        """Turn on Delta Lake's change data feed for a collection's table.
+
+        Changes are recorded from the version this commits onwards, not
+        before it. A table this backend creates has it on already.
+        """
+
+        with self._lock:
+            try:
+                self._run(
+                    f"ALTER TABLE {self._full_table_name(collection)} "
+                    "SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
+                )
+
+            except Exception as exc:
+                raise StorageOperationError("enable_change_feed", "DeltaLake", str(exc)) from exc
+
+    def current_version(self, collection: str) -> int:
+        """The latest commit version of a collection's table."""
+
+        with self._lock:
+            try:
+                self._run(f"DESCRIBE HISTORY {self._full_table_name(collection)} LIMIT 1")
+
+                row = self._cursor.fetchone()
+
+            except Exception as exc:
+                raise StorageOperationError("current_version", "DeltaLake", str(exc)) from exc
+
+        if not row:
+            raise StorageOperationError(
+                "current_version", "DeltaLake", f"{collection} has no history"
+            )
+
+        return int(row[0])
+
+    def changes(
+        self, collection: str, start_version: int, end_version: int
+    ) -> Iterator[Tuple[int, str, str, Optional[Dict[str, Any]]]]:
+        """Every change to a collection between two versions, both included.
+
+        Yields ``(version, kind, id, data)`` in commit order, where kind is
+        ``"upsert"`` or ``"delete"`` and data is None for a delete. An
+        update's pre-image is left out: only the row as it now stands is
+        worth copying.
+
+        Raises StorageOperationError when the feed cannot answer: it was not
+        on at ``start_version``, or VACUUM has removed the files it needs.
+        The caller has to compare the whole table instead.
+        """
+
+        with self._lock:
+            try:
+                self._run(
+                    f"""
+
+                    SELECT id, {self._POINT_COLUMNS}, _change_type, _commit_version
+
+                    FROM table_changes(:table, :start, :end)
+
+                    WHERE _change_type != 'update_preimage'
+
+                    ORDER BY _commit_version
+
+                    """,
+                    {
+                        "table": self._full_table_name(collection),
+                        "start": int(start_version),
+                        "end": int(end_version),
+                    },
+                )
+
+                rows = self._cursor.fetchall()
+
+            except Exception as exc:
+                raise StorageOperationError("changes", "DeltaLake", str(exc)) from exc
+
+        for row in rows:
+            change_type, version = row[6], int(row[7])
+            if change_type == "delete":
+                yield version, "delete", row[0], None
+            else:
+                yield version, "upsert", row[0], self._row_to_data(row[1:6])
 
     def vector_search(
         self, collection: str, query_vector: List[float], limit: int = 10

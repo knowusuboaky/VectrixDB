@@ -1299,7 +1299,7 @@ class _Likeness:
                 ]
                 matrix: Any = np.vstack(parts)
                 norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-                matrix = matrix / np.where(norms == 0, 1.0, norms)
+                matrix = (matrix / np.where(norms == 0, 1.0, norms)).astype(np.float32)
             except Exception:  # noqa: BLE001 - a model with no dense vectors to compare gives no second place
                 matrix = None
             self.vectors[h] = matrix
