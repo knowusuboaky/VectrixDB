@@ -90,7 +90,18 @@ class TestAPageIsReadAsItsContent:
         text = read(SITE)
         assert text.startswith("# About the Harbour Bakery")
         assert "We have baked bread in Halifax since 1952." in text
-        for around in ("Bread\n", "Cakes", "About us", "Skip to main content", "cookies", "Accept", "Site Index", "Accounts", "Water Street", "Privacy"):
+        for around in (
+            "Bread\n",
+            "Cakes",
+            "About us",
+            "Skip to main content",
+            "cookies",
+            "Accept",
+            "Site Index",
+            "Accounts",
+            "Water Street",
+            "Privacy",
+        ):
             assert around not in text, around
 
     def test_the_title_is_still_the_pages_title(self):
@@ -99,13 +110,18 @@ class TestAPageIsReadAsItsContent:
     def test_no_line_is_only_space_and_no_item_is_empty(self):
         found = lines_of(read(SITE))
         assert all(line == line.rstrip() for line in found)
-        assert not [line for line in found if line.strip() in ("-", "")] or "\n\n\n" not in read(SITE)
+        assert not [line for line in found if line.strip() in ("-", "")] or "\n\n\n" not in read(
+            SITE
+        )
         assert not [line for line in found if line.strip() == "-"], "a marker with nothing after it"
         assert "\n\n\n" not in read(SITE)
 
     def test_an_item_keeps_its_title_and_its_words_together(self):
         text = read(SITE)
-        assert "- Sourdough\n  Fermented for two days, baked every morning.\n- Rye\n  Dark, dense and sliced thin." in text
+        assert (
+            "- Sourdough\n  Fermented for two days, baked every morning.\n- Rye\n  Dark, dense and sliced thin."
+            in text
+        )
 
     def test_a_picture_the_page_calls_decoration_is_left_out(self):
         text = read(SITE)
@@ -175,14 +191,33 @@ class TestWhatIsAroundTheContentIsLeftOutEverywhere:
 
     def test_each_kind_is_left_out(self):
         text = read(self.PAGE)
-        for around in ("Site banner", "Role nav", "Role banner", "Home / About", "Consent words", "Dialog words",
-                       "Hidden words", "Aria hidden", "Display none", "opens in a new window", "A sidebar.",
-                       "Canada", "typed", "Send", "Close icon", "Site footer"):
+        for around in (
+            "Site banner",
+            "Role nav",
+            "Role banner",
+            "Home / About",
+            "Consent words",
+            "Dialog words",
+            "Hidden words",
+            "Aria hidden",
+            "Display none",
+            "opens in a new window",
+            "A sidebar.",
+            "Canada",
+            "typed",
+            "Send",
+            "Close icon",
+            "Site footer",
+        ):
             assert around not in text, around
 
     def test_what_is_only_hidden_at_some_widths_is_kept(self):
         text = read(self.PAGE)
-        assert "Shown on a desktop" in text and "Shown on a tablet" in text and "Found by search" in text
+        assert (
+            "Shown on a desktop" in text
+            and "Shown on a tablet" in text
+            and "Found by search" in text
+        )
 
     def test_a_header_and_an_aside_inside_an_article_are_the_article(self):
         text = read(self.PAGE)
@@ -231,7 +266,9 @@ class TestTheShapeOfTheText:
         assert "- Bread\n  - Rye\n  - Spelt\n- Cakes" in read(page)
 
     def test_a_line_break_is_a_line_not_a_paragraph(self):
-        assert "66 Wellington Street West\nToronto, ON" in read("<p>66 Wellington Street West<br>Toronto, ON</p>")
+        assert "66 Wellington Street West\nToronto, ON" in read(
+            "<p>66 Wellington Street West<br>Toronto, ON</p>"
+        )
 
     def test_code_keeps_its_indentation_in_a_fence(self):
         page = "<p>Call it so:</p><pre><code>def rate(years):\n    return 4.2 if years == 5 else 4.9\n</code></pre><p>Done.</p>"
@@ -255,7 +292,12 @@ class TestTheShapeOfTheText:
             "<img src='chart.png' alt='Sales by month'>"
         )
         text = read(page)
-        assert "[Figure: Sales by month]" in text and "pixel" not in text and "base64" not in text and "AAAA" not in text
+        assert (
+            "[Figure: Sales by month]" in text
+            and "pixel" not in text
+            and "base64" not in text
+            and "AAAA" not in text
+        )
 
     def test_markup_a_browser_would_forgive_does_not_lose_words(self):
         text = read("<div><p>One</div></span><p>Two<li>Three<ul><li>Four</div><p>Five")
@@ -273,18 +315,24 @@ class TestTheShapeOfTheText:
         parser = _HTMLText()
         parser.feed("<body>" + "<p>Paragraph" * 5000 + "<ul>" + "<li>Item" * 500 + "</ul>")
         parser.close()
-        assert len(parser._open) <= 3, "each paragraph closes the one before, as it does in a browser"
+        assert len(parser._open) <= 3, (
+            "each paragraph closes the one before, as it does in a browser"
+        )
         text = "".join(parser.parts)
         assert text.count("Paragraph") == 5000 and text.count("- Item") == 500
 
     def test_an_unclosed_cell_keeps_its_words(self):
-        text = read("<table><tr><th>Term<th>Rate<tr><td>1 year<td>4.9%<tr><td>5 years<td>4.2%</table>")
+        text = read(
+            "<table><tr><th>Term<th>Rate<tr><td>1 year<td>4.9%<tr><td>5 years<td>4.2%</table>"
+        )
         assert "Term: 1 year; Rate: 4.9%" in text and "Term: 5 years; Rate: 4.2%" in text
 
     def test_the_sections_still_chunk_by_their_headings(self):
         doc = _load_html(SITE)
         found = [c.heading for c in chunk(doc, "markdown", size=500)]
-        assert list(dict.fromkeys(found)) == ["About the Harbour Bakery", "What we make"], "the oven's figure is a chunk of its own, under its section" 
+        assert list(dict.fromkeys(found)) == ["About the Harbour Bakery", "What we make"], (
+            "the oven's figure is a chunk of its own, under its section"
+        )
 
 
 class TestAPageIsReadInItsOwnEncoding:
@@ -312,5 +360,7 @@ class TestAPageIsReadInItsOwnEncoding:
         assert "Café" in _decode_html("<meta charset='x-made-up'><p>Café</p>".encode("utf-8"))
 
     def test_a_file_on_disk_is_read_the_same_way(self, tmp_path):
-        (tmp_path / "page.html").write_bytes("<meta charset='windows-1252'><h1>Menu</h1><p>Crème brûlée</p>".encode("cp1252"))
+        (tmp_path / "page.html").write_bytes(
+            "<meta charset='windows-1252'><h1>Menu</h1><p>Crème brûlée</p>".encode("cp1252")
+        )
         assert "Crème brûlée" in load(tmp_path / "page.html").text

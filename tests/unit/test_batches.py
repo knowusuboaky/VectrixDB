@@ -79,7 +79,9 @@ class Reader:
             return self.pages(data, name)
         if name.endswith(".wav"):
             length = seconds_of(data)
-            return segments_to_document([(0.0, length / 2, f"{name} begins"), (length / 2, length, f"{name} ends")])
+            return segments_to_document(
+                [(0.0, length / 2, f"{name} begins"), (length / 2, length, f"{name} ends")]
+            )
         return LoadedDocument(text=f"all of {name}", metadata={"filename": name})
 
     def pages(self, data, name):
@@ -91,7 +93,11 @@ class Reader:
         for n, text in enumerate(texts, start=1):
             offsets.append((offset, n))
             offset += len(text) + 2
-        return LoadedDocument(text="\n\n".join(texts), pages=offsets, metadata={"ocr_pages": [1], "pages_ocr": 1, "filename": name})
+        return LoadedDocument(
+            text="\n\n".join(texts),
+            pages=offsets,
+            metadata={"ocr_pages": [1], "pages_ocr": 1, "filename": name},
+        )
 
 
 def a_pdf(pages: int) -> bytes:
@@ -125,7 +131,9 @@ class TestWhatFfmpegSays:
             "[silencedetect @ 0x1] silence_end: 596.75 | silence_duration: 2.5\n"
             "[silencedetect @ 0x1] silence_start: 1200.5\n"
         )
-        assert parse_silences(said) == [(0.0, 0.52), (594.25, 596.75)], "a pause still open at the end is not one"
+        assert parse_silences(said) == [(0.0, 0.52), (594.25, 596.75)], (
+            "a pause still open at the end is not one"
+        )
 
 
 # ================================================================ where to cut ===
@@ -147,7 +155,9 @@ class TestWhereToCut:
 
     def test_no_piece_is_ever_much_longer_than_asked(self):
         rng = random.Random(4)
-        pauses = sorted((t, t + rng.uniform(0.3, 2.0)) for t in (rng.uniform(0, 3600) for _ in range(400)))
+        pauses = sorted(
+            (t, t + rng.uniform(0.3, 2.0)) for t in (rng.uniform(0, 3600) for _ in range(400))
+        )
         bounds = [0.0, *cut_points(3600, 600, pauses), 3600.0]
         assert all(0 < b - a <= 600 * 1.2 + 2 for a, b in zip(bounds, bounds[1:]))
 
@@ -159,7 +169,9 @@ class TestSound:
     def test_a_short_recording_is_one_call_as_it_came(self):
         reader, ffmpeg = Reader(), Ffmpeg(seconds=2.0)
         doc = batched(reader, minutes=0.05, sound=ffmpeg)(b"the mp3 as it came", "call.mp3")
-        assert [(name, data) for name, data, _ in reader.calls] == [("call.mp3", b"the mp3 as it came")]
+        assert [(name, data) for name, data, _ in reader.calls] == [
+            ("call.mp3", b"the mp3 as it came")
+        ]
         assert ffmpeg.converted == [] and doc.text == "all of call.mp3"
 
     def test_a_long_one_is_cut_at_its_pauses_and_put_back_in_time(self):
@@ -167,7 +179,11 @@ class TestSound:
         reader = Reader()
         ffmpeg = Ffmpeg(seconds=8.0, pauses=[(2.4, 2.6), (5.4, 5.6), (7.0, 7.1)])
         doc = batched(reader, minutes=0.05, sound=ffmpeg)(b"eight seconds", "call.mp3")
-        assert [name for name, _data, _ in reader.calls] == ["call.part1.wav", "call.part2.wav", "call.part3.wav"]
+        assert [name for name, _data, _ in reader.calls] == [
+            "call.part1.wav",
+            "call.part2.wav",
+            "call.part3.wav",
+        ]
         assert [round(seconds_of(data), 2) for _name, data, _ in reader.calls] == [2.5, 3.0, 2.5]
         assert [(round(a, 2), text) for a, _b, text in doc.segments] == [
             (0.0, "call.part1.wav begins"),
@@ -189,7 +205,9 @@ class TestSound:
     def test_a_big_short_file_goes_as_one_small_wav(self):
         """Too big to send as it is, short enough for one call: its sound alone is small."""
         reader, ffmpeg = Reader(), Ffmpeg(seconds=2.0)
-        batched(reader, minutes=0.05, max_bytes=10, sound=ffmpeg)(b"more than ten bytes", "call.wav")
+        batched(reader, minutes=0.05, max_bytes=10, sound=ffmpeg)(
+            b"more than ten bytes", "call.wav"
+        )
         assert [name for name, _data, _ in reader.calls] == ["call.part1.wav"] and ffmpeg.converted
 
     def test_a_video_is_its_sound(self):
@@ -212,7 +230,13 @@ class TestPdf:
     def test_a_long_one_is_read_twenty_pages_at_a_time_and_numbered_as_one(self):
         reader = Reader()
         doc = batched(reader)(a_pdf(45), "report.pdf")
-        assert [name for name, _data, _ in reader.calls] == ["report.pages-1.pdf", "report.pages-21.pdf", "report.pages-41.pdf"]
+        # The batches are read side by side, so the calls arrive in whichever
+        # order they finish; the pages must still come back as one numbering.
+        called = sorted(
+            (name for name, _data, _ in reader.calls),
+            key=lambda name: int(name.split("-")[1].split(".")[0]),
+        )
+        assert called == ["report.pages-1.pdf", "report.pages-21.pdf", "report.pages-41.pdf"]
         assert [n for _o, n in doc.pages] == list(range(1, 46))
         for offset, number in doc.pages:
             piece_page = (number - 1) % 20 + 1
@@ -221,7 +245,11 @@ class TestPdf:
     def test_what_each_piece_says_about_its_pages_is_moved_on_too(self):
         doc = batched(Reader())(a_pdf(45), "report.pdf")
         assert doc.metadata["ocr_pages"] == [1, 21, 41] and doc.metadata["pages_ocr"] == 3
-        assert doc.metadata["pages"] == 45 and doc.metadata["pieces"] == 3 and doc.metadata["filename"] == "report.pdf"
+        assert (
+            doc.metadata["pages"] == 45
+            and doc.metadata["pieces"] == 3
+            and doc.metadata["filename"] == "report.pdf"
+        )
 
     def test_a_short_one_is_one_call_as_it_came(self):
         reader, data = Reader(), a_pdf(12)
@@ -274,8 +302,12 @@ class TestAPieceThatFails:
 class TestEverythingElse:
     def test_a_word_document_is_one_call_as_it_came(self):
         reader = Reader()
-        doc = batched(reader)(b"a docx", "notes.docx", source="https://x.blob.core.windows.net/notes.docx")
-        assert reader.calls == [("notes.docx", b"a docx", "https://x.blob.core.windows.net/notes.docx")]
+        doc = batched(reader)(
+            b"a docx", "notes.docx", source="https://x.blob.core.windows.net/notes.docx"
+        )
+        assert reader.calls == [
+            ("notes.docx", b"a docx", "https://x.blob.core.windows.net/notes.docx")
+        ]
         assert doc.text == "all of notes.docx"
 
     def test_it_reads_what_its_reader_reads_and_says_it_cuts(self):
@@ -301,9 +333,9 @@ def test_ffmpeg_is_an_extra_of_its_own():
     from pathlib import Path
 
     tomllib = pytest.importorskip("tomllib")
-    extras = tomllib.loads((Path(__file__).resolve().parents[2] / "pyproject.toml").read_text(encoding="utf-8"))["project"][
-        "optional-dependencies"
-    ]
+    extras = tomllib.loads(
+        (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["optional-dependencies"]
     assert extras["ffmpeg"] == ["imageio-ffmpeg>=0.4.9"]
     assert "vectrixdb[ffmpeg]" in extras["video"], "video is ffmpeg and a local transcriber"
 
@@ -344,7 +376,13 @@ class TestTheRealFfmpeg:
         import math
 
         rate, frames, sample = 16000, bytearray(), 0
-        for seconds, speaking in ((2.4, True), (0.4, False), (2.5, True), (0.4, False), (2.3, True)):
+        for seconds, speaking in (
+            (2.4, True),
+            (0.4, False),
+            (2.5, True),
+            (0.4, False),
+            (2.3, True),
+        ):
             for _ in range(int(seconds * rate)):
                 value = int(12000 * math.sin(2 * math.pi * 440 * sample / rate)) if speaking else 0
                 frames += value.to_bytes(2, "little", signed=True)
@@ -378,7 +416,8 @@ class TestTheRealFfmpeg:
 
         path = self.talk(tmp_path)
         reader = Reader()
-        doc = batched(reader, minutes=0.05, sound=FfmpegSound(pause=0.3))(path.read_bytes(), "talk.wav")
+        doc = batched(reader, minutes=0.05, sound=FfmpegSound(pause=0.3))(
+            path.read_bytes(), "talk.wav"
+        )
         assert [round(seconds_of(data), 1) for _name, data, _ in reader.calls] == [2.6, 2.9, 2.5]
         assert [round(a, 1) for a, _b, _t in doc.segments][::2] == [0.0, 2.6, 5.5]
-

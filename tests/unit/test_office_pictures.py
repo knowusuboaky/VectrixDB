@@ -27,7 +27,9 @@ REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 def picture(seed: int = 0, size=(120, 90)) -> bytes:
     """A real PNG with something in it: big enough, and busy enough, not to be taken for decoration."""
     rng = random.Random(seed)
-    image = Image.frombytes("RGB", size, bytes(rng.randrange(256) for _ in range(size[0] * size[1] * 3)))
+    image = Image.frombytes(
+        "RGB", size, bytes(rng.randrange(256) for _ in range(size[0] * size[1] * 3))
+    )
     buffer = io.BytesIO()
     image.save(buffer, "PNG")
     return buffer.getvalue()
@@ -51,9 +53,18 @@ def deck(tmp_path, slides, external: bool = False):
     path = tmp_path / "deck.pptx"
     with zipfile.ZipFile(path, "w") as archive:
         ids = "".join(f'<p:sldId id="{255 + n}" r:id="rId{n}"/>' for n in range(1, len(slides) + 1))
-        archive.writestr("ppt/presentation.xml", f'<p:presentation xmlns:p="{P}" xmlns:r="{R}"><p:sldIdLst>{ids}</p:sldIdLst></p:presentation>')
-        links = "".join(f'<Relationship Id="rId{n}" Type="slide" Target="slides/slide{n}.xml"/>' for n in range(1, len(slides) + 1))
-        archive.writestr("ppt/_rels/presentation.xml.rels", f'<Relationships xmlns="{REL}">{links}</Relationships>')
+        archive.writestr(
+            "ppt/presentation.xml",
+            f'<p:presentation xmlns:p="{P}" xmlns:r="{R}"><p:sldIdLst>{ids}</p:sldIdLst></p:presentation>',
+        )
+        links = "".join(
+            f'<Relationship Id="rId{n}" Type="slide" Target="slides/slide{n}.xml"/>'
+            for n in range(1, len(slides) + 1)
+        )
+        archive.writestr(
+            "ppt/_rels/presentation.xml.rels",
+            f'<Relationships xmlns="{REL}">{links}</Relationships>',
+        )
         media = 0
         for number, (title, line, shown) in enumerate(slides, start=1):
             pics, rels = "", ""
@@ -72,7 +83,10 @@ def deck(tmp_path, slides, external: bool = False):
                 f"<p:sp><p:txBody><a:p><a:r><a:t>{line}</a:t></a:r></a:p></p:txBody></p:sp>{pics}"
                 "</p:spTree></p:cSld></p:sld>",
             )
-            archive.writestr(f"ppt/slides/_rels/slide{number}.xml.rels", f'<Relationships xmlns="{REL}">{rels}</Relationships>')
+            archive.writestr(
+                f"ppt/slides/_rels/slide{number}.xml.rels",
+                f'<Relationships xmlns="{REL}">{rels}</Relationships>',
+            )
     return path
 
 
@@ -103,8 +117,16 @@ def described(data, context):
 class TestWord:
     def test_a_picture_is_a_figure_after_the_paragraph_that_shows_it(self, tmp_path):
         doc = load(word(tmp_path, picture()), images=True)
-        assert doc.text == "# Results\n\nRevenue grew in every region.\n\n[Figure: fig1.png]\n\nThe chart above is unaudited."
-        assert doc.figures == [(doc.text.index("[Figure"), {"caption": "fig1.png", "src": "fig1.png", "described": False})]
+        assert (
+            doc.text
+            == "# Results\n\nRevenue grew in every region.\n\n[Figure: fig1.png]\n\nThe chart above is unaudited."
+        )
+        assert doc.figures == [
+            (
+                doc.text.index("[Figure"),
+                {"caption": "fig1.png", "src": "fig1.png", "described": False},
+            )
+        ]
         assert doc.images["fig1.png"][:8] == b"\x89PNG\r\n\x1a\n"
 
     def test_the_pictures_are_numbered_in_the_order_they_are_shown(self, tmp_path):
@@ -113,22 +135,34 @@ class TestWord:
 
     def test_without_images_the_text_is_what_it_always_was(self, tmp_path):
         doc = load(word(tmp_path, picture()))
-        assert doc.text == "# Results\n\nRevenue grew in every region.\n\nThe chart above is unaudited."
+        assert (
+            doc.text
+            == "# Results\n\nRevenue grew in every region.\n\nThe chart above is unaudited."
+        )
         assert doc.figures == [] and doc.images == {}
 
     def test_the_headings_still_point_at_their_words(self, tmp_path):
         doc = load(word(tmp_path, picture()), images=True)
-        assert [(doc.text[o : o + len(h) + 2], h) for o, h, _level in doc.headings] == [("# Results", "Results")]
+        assert [(doc.text[o : o + len(h) + 2], h) for o, h, _level in doc.headings] == [
+            ("# Results", "Results")
+        ]
 
 
 class TestPowerPoint:
     def test_a_picture_is_a_figure_at_the_end_of_its_slide(self, tmp_path):
-        doc = load(deck(tmp_path, [("Revenue", "Up everywhere.", [picture()]), ("Costs", "Flat.", [])]), images=True)
-        assert doc.text.startswith("# Slide 1: Revenue\n\nUp everywhere.\n\n[Figure: s1-fig1.png]\n\n# Slide 2: Costs")
+        doc = load(
+            deck(tmp_path, [("Revenue", "Up everywhere.", [picture()]), ("Costs", "Flat.", [])]),
+            images=True,
+        )
+        assert doc.text.startswith(
+            "# Slide 1: Revenue\n\nUp everywhere.\n\n[Figure: s1-fig1.png]\n\n# Slide 2: Costs"
+        )
         assert [info["src"] for _o, info in doc.figures] == ["s1-fig1.png"]
 
     def test_the_slides_are_still_the_pages(self, tmp_path):
-        doc = load(deck(tmp_path, [("Revenue", "Up.", [picture()]), ("Costs", "Flat.", [])]), images=True)
+        doc = load(
+            deck(tmp_path, [("Revenue", "Up.", [picture()]), ("Costs", "Flat.", [])]), images=True
+        )
         assert [doc.text[o : o + 9] for o, _n in doc.pages] == ["# Slide 1", "# Slide 2"]
 
     def test_a_picture_linked_from_the_web_is_not_fetched(self, tmp_path):
@@ -143,7 +177,11 @@ class TestExcel:
     def test_a_picture_is_a_figure_after_its_sheets_rows(self, tmp_path):
         doc = load(workbook(tmp_path), images=True)
         chart = doc.text.index("# Chart")
-        assert doc.text.index("Quarter: Q1; Sales: 10") < doc.text.index("[Figure: sheet2-fig1.png]") > chart
+        assert (
+            doc.text.index("Quarter: Q1; Sales: 10")
+            < doc.text.index("[Figure: sheet2-fig1.png]")
+            > chart
+        )
 
     def test_a_sheet_that_is_only_a_picture_is_still_read(self, tmp_path):
         doc = load(workbook(tmp_path), images=True)
@@ -152,20 +190,32 @@ class TestExcel:
 
     def test_without_images_the_text_is_what_it_always_was(self, tmp_path):
         doc = load(workbook(tmp_path))
-        assert "[Figure" not in doc.text and "Picture only" not in doc.text and doc.metadata["sheets"] == 2
+        assert (
+            "[Figure" not in doc.text
+            and "Picture only" not in doc.text
+            and doc.metadata["sheets"] == 2
+        )
 
 
 class TestTheyAreDescribedLikeAPdfsFigures:
     def test_the_description_goes_under_the_figure_where_it_sits(self, tmp_path):
-        doc = describe_figures(load(word(tmp_path, picture()), images=True), described, name="report.docx")
+        doc = describe_figures(
+            load(word(tmp_path, picture()), images=True), described, name="report.docx"
+        )
         figure = doc.text.index("[Figure:")
-        assert doc.text.index("A bar chart of revenue by region") > figure > doc.text.index("Revenue grew")
+        assert (
+            doc.text.index("A bar chart of revenue by region")
+            > figure
+            > doc.text.index("Revenue grew")
+        )
         assert doc.figures[0][1]["described"] is True
 
     def test_a_picture_on_every_slide_is_a_letterhead_and_is_never_described(self, tmp_path):
         """The same picture three times is decoration, and it is not paid for."""
         logo = picture(7)
         asked = []
-        doc = load(deck(tmp_path, [(f"Slide {n}", "Text.", [logo]) for n in range(1, 4)]), images=True)
+        doc = load(
+            deck(tmp_path, [(f"Slide {n}", "Text.", [logo]) for n in range(1, 4)]), images=True
+        )
         doc = describe_figures(doc, lambda data, context: asked.append(context) or "a logo")
         assert asked == [] and "[Figure" not in doc.text

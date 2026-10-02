@@ -41,7 +41,9 @@ __all__ = ["MaskingMiddleware", "masked_reply"]
 _COLLECTION = re.compile(r"^/api(?:/v\d+)?/collections/([^/]+)")
 
 #: Keys whose values a caller sends back, or that name rather than say.
-_KEPT = frozenset({"id", "ids", "collection", "name", "citation", "citations", "route", "build", "index_build_id"})
+_KEPT = frozenset(
+    {"id", "ids", "collection", "name", "citation", "citations", "route", "build", "index_build_id"}
+)
 
 
 def _kept(key: str) -> bool:
@@ -86,10 +88,16 @@ class MaskingMiddleware(BaseHTTPMiddleware):
         body = b"".join([part async for part in response.body_iterator])
         if kind.startswith("application/json"):
             try:
-                shown = json.dumps(masked_reply(json.loads(body)), ensure_ascii=False).encode("utf-8")
+                shown = json.dumps(masked_reply(json.loads(body)), ensure_ascii=False).encode(
+                    "utf-8"
+                )
             except ValueError:
                 shown = body
         else:
             shown = mask_text(body.decode("utf-8", errors="replace")).encode("utf-8")
-        headers = {name: value for name, value in response.headers.items() if name.lower() != "content-length"}
+        headers = {
+            name: value
+            for name, value in response.headers.items()
+            if name.lower() != "content-length"
+        }
         return Response(content=shown, status_code=response.status_code, headers=headers)

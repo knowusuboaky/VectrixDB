@@ -71,6 +71,17 @@ dev = [
     # FastAPI's TestClient is built on it. The mcp extra happened to bring it,
     # so a test job without mcp stopped at collection, before a single test ran.
     "httpx>=0.24.0",
+    # Draws the PDFs the layout tests read, and nothing else: the reader under
+    # test is PDFium. Without it the sixty tests of the PDF reader skipped
+    # everywhere, CI included, and seven faults in what a PDF reads as went
+    # unnoticed. Not a runtime dependency, and AGPL, so it stays here.
+    "pymupdf>=1.24.0",
+    # The blank-page tests draw their pages with it; the library only needs it
+    # when asked to tell a blank scan from a page.
+    "pillow>=10.0.0",
+    # Three tests read pyproject.toml; tomllib arrived in Python 3.11, and the
+    # 3.9 and 3.10 jobs stopped at collection without this.
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
 # REST API server and built-in dashboard
 api = [

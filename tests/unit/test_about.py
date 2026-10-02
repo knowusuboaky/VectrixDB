@@ -40,14 +40,22 @@ def create_app(**kwargs):
 
 @pytest.fixture
 def serve(tmp_path, monkeypatch):
-    for name in ("VECTRIXDB_API_KEY", "VECTRIXDB_SIGNIN", "VECTRIXDB_BRAND_ACCENT", "VECTRIXDB_BRAND_PALETTE", "VECTRIXDB_BRAND_NAME"):
+    for name in (
+        "VECTRIXDB_API_KEY",
+        "VECTRIXDB_SIGNIN",
+        "VECTRIXDB_BRAND_ACCENT",
+        "VECTRIXDB_BRAND_PALETTE",
+        "VECTRIXDB_BRAND_NAME",
+    ):
         monkeypatch.delenv(name, raising=False)
     built = []
 
     def build(signin=None, **settings):
         for name, value in settings.items():
             monkeypatch.setenv(name, value)
-        app = create_app(db_path=str(tmp_path / f"db{len(built)}"), enable_dashboard=False, signin=signin)
+        app = create_app(
+            db_path=str(tmp_path / f"db{len(built)}"), enable_dashboard=False, signin=signin
+        )
         built.append(app)
         return TestClient(app, base_url=PUBLIC)
 
@@ -59,15 +67,28 @@ def serve(tmp_path, monkeypatch):
 
 def _config(root: Path) -> SignInConfig:
     return SignInConfig(
-        methods=("email",), secrets=(SECRET,), public_url=PUBLIC, guests=True,
-        store_path=root / "auth" / "signin.db", access_log=root / "auth" / "access.jsonl", sender=lambda *a: None,
+        methods=("email",),
+        secrets=(SECRET,),
+        public_url=PUBLIC,
+        guests=True,
+        store_path=root / "auth" / "signin.db",
+        access_log=root / "auth" / "access.jsonl",
+        sender=lambda *a: None,
     )
 
 
 def as_role(client: TestClient, role: str) -> TestClient:
     """Signed in with that role, by a session opened straight in the store: how somebody got in is not what is tested."""
     runtime = client.app.state.signin
-    sid, session = runtime.store.open_session(subject=f"{role}@example.com", email=None, name=role, role=role, principal={}, method="oidc", hours=1)
+    sid, session = runtime.store.open_session(
+        subject=f"{role}@example.com",
+        email=None,
+        name=role,
+        role=role,
+        principal={},
+        method="oidc",
+        hours=1,
+    )
     client.cookies.set("__Host-vx_sid", runtime.store.sign(sid))
     return client
 
@@ -76,12 +97,23 @@ class TestWhatAboutSays:
     def test_the_name_the_version_the_licence_and_the_notice_whole(self):
         said = about()
         assert said["name"] == "VectrixDB" and said["version"] == __version__
-        assert said["licence"] == "Apache-2.0" and said["licence_line"] == LICENCE_LINE == "Licensed under the Apache License, Version 2.0."
-        assert said["notice"] == (REPO / "NOTICE").read_text(encoding="utf-8"), "the file as it is, every model with it"
+        assert (
+            said["licence"] == "Apache-2.0"
+            and said["licence_line"]
+            == LICENCE_LINE
+            == "Licensed under the Apache License, Version 2.0."
+        )
+        assert said["notice"] == (REPO / "NOTICE").read_text(encoding="utf-8"), (
+            "the file as it is, every model with it"
+        )
 
     def test_the_licence_is_the_apache_licence_as_carried(self):
         text = licence_text()
-        assert text == (REPO / "LICENSE").read_text(encoding="utf-8") and "Apache License" in text and "Version 2.0" in text
+        assert (
+            text == (REPO / "LICENSE").read_text(encoding="utf-8")
+            and "Apache License" in text
+            and "Version 2.0" in text
+        )
 
     def test_an_install_reads_them_from_the_packages_metadata(self, monkeypatch, tmp_path):
         """A wheel keeps them under licenses/ in its metadata, which is where an install finds them."""
@@ -89,9 +121,13 @@ class TestWhatAboutSays:
 
         class Installed:
             def read_text(self, name):
-                return {"licenses/NOTICE": "the notice", "licenses/LICENSE": "the licence"}.get(name)
+                return {"licenses/NOTICE": "the notice", "licenses/LICENSE": "the licence"}.get(
+                    name
+                )
 
-        monkeypatch.setattr(module, "__file__", str(tmp_path / "site-packages" / "vectrixdb" / "about.py"))
+        monkeypatch.setattr(
+            module, "__file__", str(tmp_path / "site-packages" / "vectrixdb" / "about.py")
+        )
         monkeypatch.setattr(module.metadata, "distribution", lambda name: Installed())
         assert module.about()["notice"] == "the notice" and module.licence_text() == "the licence"
 
@@ -102,7 +138,11 @@ class TestWhoMayReadIt:
         reply = client.get("/api/v1/about")
         assert reply.status_code == 200 and reply.json()["data"] == about()
         licence = client.get("/api/v1/about/licence")
-        assert licence.status_code == 200 and licence.headers["content-type"].startswith("text/plain") and "Apache License" in licence.text
+        assert (
+            licence.status_code == 200
+            and licence.headers["content-type"].startswith("text/plain")
+            and "Apache License" in licence.text
+        )
 
     @pytest.mark.parametrize("role", [roles.VIEWER, roles.OPERATOR])
     def test_anybody_else_signed_in_is_refused(self, serve, tmp_path, role):
@@ -120,16 +160,28 @@ class TestWhoMayReadIt:
         assert client.get("/api/v1/about").json()["data"]["version"] == __version__
 
     def test_only_admins_hold_it_in_the_table(self):
-        assert [role for role in roles.GRANTS if "about.read" in roles.GRANTS[role]] == [roles.ADMIN]
-        assert roles.action_for("GET", "/api/v1/about") == roles.action_for("GET", "/api/v1/about/licence") == "about.read"
+        assert [role for role in roles.GRANTS if "about.read" in roles.GRANTS[role]] == [
+            roles.ADMIN
+        ]
+        assert (
+            roles.action_for("GET", "/api/v1/about")
+            == roles.action_for("GET", "/api/v1/about/licence")
+            == "about.read"
+        )
 
 
 class TestTheBrandsColoursAsAStylesheet:
     def test_a_palette_and_an_accent_come_as_css_for_anybody(self, serve, tmp_path):
-        client = serve(signin=_config(tmp_path / "b"), VECTRIXDB_BRAND_ACCENT="#1f6f54", VECTRIXDB_BRAND_PALETTE='{"light": {"page": "#f4f6f4"}}')
+        client = serve(
+            signin=_config(tmp_path / "b"),
+            VECTRIXDB_BRAND_ACCENT="#1f6f54",
+            VECTRIXDB_BRAND_PALETTE='{"light": {"page": "#f4f6f4"}}',
+        )
         reply = client.get("/brand.css")
         assert reply.status_code == 200 and reply.headers["content-type"].startswith("text/css")
-        assert reply.text == client.app.state.brand.css() and re.search(r":root\[data-theme=\"light\"\] \{ --g0: #f4f6f4;", reply.text)
+        assert reply.text == client.app.state.brand.css() and re.search(
+            r":root\[data-theme=\"light\"\] \{ --g0: #f4f6f4;", reply.text
+        )
 
     def test_with_no_brand_it_is_empty(self, serve):
         reply = serve().get("/brand.css")

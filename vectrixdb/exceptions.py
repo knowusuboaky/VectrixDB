@@ -139,7 +139,9 @@ class ExtractionError(VectrixError):
     else. ``route`` and ``status`` are set when an endpoint was involved.
     """
 
-    def __init__(self, message: str, *, route: Optional[str] = None, status: Optional[int] = None) -> None:
+    def __init__(
+        self, message: str, *, route: Optional[str] = None, status: Optional[int] = None
+    ) -> None:
         self.route = route
         self.status = status
         super().__init__(message)
@@ -155,7 +157,9 @@ class TranslationError(VectrixError):
     service's answer when there was one.
     """
 
-    def __init__(self, message: str, *, route: Optional[str] = None, status: Optional[int] = None) -> None:
+    def __init__(
+        self, message: str, *, route: Optional[str] = None, status: Optional[int] = None
+    ) -> None:
         self.route = route
         self.status = status
         super().__init__(message)

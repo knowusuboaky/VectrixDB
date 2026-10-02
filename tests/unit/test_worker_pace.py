@@ -31,7 +31,9 @@ def test_a_burst_costs_nothing_and_the_rest_waits_for_the_rate():
 
     pace = TokenBucket(10, clock=clock, sleep=sleep)
     assert pace.take(20) == 0.0 and slept == [], "two seconds' worth is the burst"
-    assert pace.take(5) == pytest.approx(0.5) and slept == [pytest.approx(0.5)], "five short at ten a second is half a second"
+    assert pace.take(5) == pytest.approx(0.5) and slept == [pytest.approx(0.5)], (
+        "five short at ten a second is half a second"
+    )
     clock.now += 10
     assert pace.take(20) == 0.0, "ten seconds later the bucket is full again, and no fuller"
 

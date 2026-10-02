@@ -143,7 +143,9 @@ def from_opensearch_cosine_score(score: Optional[float], formula: Optional[str])
     return None
 
 
-def pick_opensearch_formula(score: float, true_cosine: float, tolerance: float = 0.01) -> Optional[str]:
+def pick_opensearch_formula(
+    score: float, true_cosine: float, tolerance: float = 0.01
+) -> Optional[str]:
     """Which documented formula turns this score into this cosine, or None if neither does."""
     fits = []
     for formula in OPENSEARCH_FORMULAS:

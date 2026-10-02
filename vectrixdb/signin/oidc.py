@@ -137,28 +137,40 @@ class OidcConfig:
 
     def __post_init__(self) -> None:
         if not self.issuer or not self.client_id:
-            raise ConfigurationError("single sign-on needs VECTRIXDB_OIDC_ISSUER and VECTRIXDB_OIDC_CLIENT_ID")
+            raise ConfigurationError(
+                "single sign-on needs VECTRIXDB_OIDC_ISSUER and VECTRIXDB_OIDC_CLIENT_ID"
+            )
         if self.client_key and self.client_secret:
             raise ConfigurationError(
                 "VECTRIXDB_OIDC_CLIENT_KEY and VECTRIXDB_OIDC_CLIENT_SECRET are both set. Choose one: the key, so no secret exists to leak"
             )
         if self.client_cert and not self.client_key:
-            raise ConfigurationError("VECTRIXDB_OIDC_CLIENT_CERT is set without VECTRIXDB_OIDC_CLIENT_KEY, the private key it belongs to")
+            raise ConfigurationError(
+                "VECTRIXDB_OIDC_CLIENT_CERT is set without VECTRIXDB_OIDC_CLIENT_KEY, the private key it belongs to"
+            )
         if self.client_key:
             self._signer = _ClientSigner(self.client_key, self.client_cert, self.client_key_id)
-        self.allowed_emails = tuple(str(e).strip().lower() for e in self.allowed_emails if str(e).strip())
+        self.allowed_emails = tuple(
+            str(e).strip().lower() for e in self.allowed_emails if str(e).strip()
+        )
         if "*" in self.allowed_emails and len(self.allowed_emails) > 1:
-            raise ConfigurationError("VECTRIXDB_OIDC_ALLOWED_EMAILS is * alone, the groups deciding on their own, or a list of addresses: not both")
+            raise ConfigurationError(
+                "VECTRIXDB_OIDC_ALLOWED_EMAILS is * alone, the groups deciding on their own, or a list of addresses: not both"
+            )
         for entry in self.allowed_emails:
             if entry != "*" and ("@" not in entry or entry.endswith("@") or " " in entry):
                 raise ConfigurationError(
                     f"VECTRIXDB_OIDC_ALLOWED_EMAILS has {entry!r}. Each entry is an address, ama@company.com, or a domain, @company.com"
                 )
-        if self.token_role is not None and (self.token_role not in roles.GRANTS or self.token_role in (roles.ADMIN, roles.GUEST)):
+        if self.token_role is not None and (
+            self.token_role not in roles.GRANTS or self.token_role in (roles.ADMIN, roles.GUEST)
+        ):
             raise ConfigurationError(
                 f"VECTRIXDB_OIDC_TOKEN_ROLE is {self.token_role!r}. It is one of reader, searcher, viewer or operator: never an admin, since a token is an app"
             )
-        if not self.issuer.startswith("https://") and not self.issuer.startswith("http://localhost"):
+        if not self.issuer.startswith("https://") and not self.issuer.startswith(
+            "http://localhost"
+        ):
             raise ConfigurationError("the identity provider's issuer must be an https address")
         for group, role in self.role_map.items():
             if role not in roles.ROLES:
@@ -242,12 +254,19 @@ class _ClientSigner:
             ) from exc
         if isinstance(key, rsa.RSAPrivateKey):
             if key.key_size < 2048:
-                raise ConfigurationError(f"VECTRIXDB_OIDC_CLIENT_KEY is a {key.key_size} bit RSA key. Use 2048 bits or more")
+                raise ConfigurationError(
+                    f"VECTRIXDB_OIDC_CLIENT_KEY is a {key.key_size} bit RSA key. Use 2048 bits or more"
+                )
             self.algorithm = "RS256"
-        elif isinstance(key, ec.EllipticCurvePrivateKey) and key.curve.name in ("secp256r1", "secp384r1"):
+        elif isinstance(key, ec.EllipticCurvePrivateKey) and key.curve.name in (
+            "secp256r1",
+            "secp384r1",
+        ):
             self.algorithm = "ES256" if key.curve.name == "secp256r1" else "ES384"
         else:
-            raise ConfigurationError("VECTRIXDB_OIDC_CLIENT_KEY must be an RSA key, or an EC key on P-256 or P-384")
+            raise ConfigurationError(
+                "VECTRIXDB_OIDC_CLIENT_KEY must be an RSA key, or an EC key on P-256 or P-384"
+            )
         self.key = key
         self.header: dict = {"typ": "JWT"}
         if key_id:
@@ -256,16 +275,29 @@ class _ClientSigner:
             try:
                 cert = x509.load_pem_x509_certificate(_pem(cert_pem))
             except ValueError as exc:
-                raise ConfigurationError("VECTRIXDB_OIDC_CLIENT_CERT is not a certificate in PEM: -----BEGIN CERTIFICATE----- ...") from exc
-            mine = key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
-            theirs = cert.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+                raise ConfigurationError(
+                    "VECTRIXDB_OIDC_CLIENT_CERT is not a certificate in PEM: -----BEGIN CERTIFICATE----- ..."
+                ) from exc
+            mine = key.public_key().public_bytes(
+                serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            theirs = cert.public_key().public_bytes(
+                serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+            )
             if mine != theirs:
-                raise ConfigurationError("VECTRIXDB_OIDC_CLIENT_CERT is not the certificate of VECTRIXDB_OIDC_CLIENT_KEY: their public keys differ")
+                raise ConfigurationError(
+                    "VECTRIXDB_OIDC_CLIENT_CERT is not the certificate of VECTRIXDB_OIDC_CLIENT_KEY: their public keys differ"
+                )
             ends = cert.not_valid_after_utc.timestamp()
             if ends < time.time():
-                raise ConfigurationError("the certificate in VECTRIXDB_OIDC_CLIENT_CERT has expired. Register a new one with the provider")
+                raise ConfigurationError(
+                    "the certificate in VECTRIXDB_OIDC_CLIENT_CERT has expired. Register a new one with the provider"
+                )
             if ends - time.time() < 30 * 86400:
-                logger.warning("the single sign-on certificate expires in %d days. Register its successor with the provider", int((ends - time.time()) // 86400))
+                logger.warning(
+                    "the single sign-on certificate expires in %d days. Register its successor with the provider",
+                    int((ends - time.time()) // 86400),
+                )
             der = cert.public_bytes(serialization.Encoding.DER)
             self.header["x5t"] = _b64(hashlib.sha1(der).digest())  # noqa: S324 - the thumbprint Entra ID matches on, not a security hash
             self.header["x5t#S256"] = _b64(hashlib.sha256(der).digest())
@@ -274,7 +306,15 @@ class _ClientSigner:
         import jwt
 
         now = int(time.time())
-        claims = {"iss": client_id, "sub": client_id, "aud": audience, "jti": secrets.token_urlsafe(16), "iat": now, "nbf": now, "exp": now + ASSERTION_SECONDS}
+        claims = {
+            "iss": client_id,
+            "sub": client_id,
+            "aud": audience,
+            "jti": secrets.token_urlsafe(16),
+            "iat": now,
+            "nbf": now,
+            "exp": now + ASSERTION_SECONDS,
+        }
         return jwt.encode(claims, self.key, algorithm=self.algorithm, headers=self.header)
 
 
@@ -299,7 +339,9 @@ def challenge_of(verifier: str) -> str:
 
 
 class OidcClient:
-    def __init__(self, config: OidcConfig, *, transport: Optional[Transport] = None, timeout: float = 10.0) -> None:
+    def __init__(
+        self, config: OidcConfig, *, transport: Optional[Transport] = None, timeout: float = 10.0
+    ) -> None:
         self.config = config
         self.timeout = timeout
         if transport is None:
@@ -316,29 +358,49 @@ class OidcClient:
 
     # ----------------------------------------------------------- provider ---
 
-    def _json(self, method: str, url: str, headers: Optional[dict] = None, body: bytes = b"") -> dict:
+    def _json(
+        self, method: str, url: str, headers: Optional[dict] = None, body: bytes = b""
+    ) -> dict:
         try:
-            status, _, reply = self._transport(method, url, {"Accept": "application/json", **(headers or {})}, body, self.timeout)
+            status, _, reply = self._transport(
+                method, url, {"Accept": "application/json", **(headers or {})}, body, self.timeout
+            )
         except OSError as exc:
-            raise SignInRefused("The identity provider could not be reached. Try again in a moment.", code="provider_unreachable") from exc
+            raise SignInRefused(
+                "The identity provider could not be reached. Try again in a moment.",
+                code="provider_unreachable",
+            ) from exc
         try:
-            parsed = json.loads(reply.decode("utf-8") if isinstance(reply, (bytes, bytearray)) else reply)
+            parsed = json.loads(
+                reply.decode("utf-8") if isinstance(reply, (bytes, bytearray)) else reply
+            )
         except (ValueError, UnicodeDecodeError):
             parsed = {}
         if status >= 400 or not isinstance(parsed, dict):
             # The provider's own words stay in the log. The person gets a sentence.
-            raise SignInRefused("The identity provider refused the sign-in.", code=str(parsed.get("error", status)) if isinstance(parsed, dict) else str(status))
+            raise SignInRefused(
+                "The identity provider refused the sign-in.",
+                code=str(parsed.get("error", status)) if isinstance(parsed, dict) else str(status),
+            )
         return parsed
 
     def discovery(self) -> dict:
         if self._discovery is None:
-            found = self._json("GET", self.config.issuer.rstrip("/") + "/.well-known/openid-configuration")
+            found = self._json(
+                "GET", self.config.issuer.rstrip("/") + "/.well-known/openid-configuration"
+            )
             # The document must be the one for the issuer that was asked for.
             if str(found.get("issuer", "")).rstrip("/") != self.config.issuer.rstrip("/"):
-                raise SignInRefused("The identity provider described a different issuer from the one configured.", code="issuer_mismatch")
+                raise SignInRefused(
+                    "The identity provider described a different issuer from the one configured.",
+                    code="issuer_mismatch",
+                )
             for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
                 if not str(found.get(key, "")).startswith(("https://", "http://localhost")):
-                    raise SignInRefused("The identity provider's configuration is incomplete.", code="discovery_incomplete")
+                    raise SignInRefused(
+                        "The identity provider's configuration is incomplete.",
+                        code="discovery_incomplete",
+                    )
             self._discovery = found
         return self._discovery
 
@@ -350,7 +412,15 @@ class OidcClient:
 
     # --------------------------------------------------------------- flow ---
 
-    def authorization_url(self, *, redirect_uri: str, state: str, nonce: str, verifier: str, prompt: Optional[str] = None) -> str:
+    def authorization_url(
+        self,
+        *,
+        redirect_uri: str,
+        state: str,
+        nonce: str,
+        verifier: str,
+        prompt: Optional[str] = None,
+    ) -> str:
         """Where to send the person. ``prompt`` is ``select_account`` to let them pick another account, or ``login`` to ask again."""
         query = {
             "response_type": "code",
@@ -379,7 +449,9 @@ class OidcClient:
         if self.config._signer is not None:
             # Proof by signature: a fresh assertion, for this token address, minutes long.
             form["client_assertion_type"] = ASSERTION_TYPE
-            form["client_assertion"] = self.config._signer.assertion(self.config.client_id, endpoint)
+            form["client_assertion"] = self.config._signer.assertion(
+                self.config.client_id, endpoint
+            )
         elif self.config.client_secret:
             form["client_secret"] = self.config.client_secret
         tokens = self._json(
@@ -404,12 +476,22 @@ class OidcClient:
         try:
             header = jwt.get_unverified_header(id_token)
         except jwt.PyJWTError as exc:
-            raise SignInRefused("The identity token could not be read.", code="token_unreadable") from exc
+            raise SignInRefused(
+                "The identity token could not be read.", code="token_unreadable"
+            ) from exc
         if header.get("alg") not in ALGORITHMS:
-            raise SignInRefused("The identity token is signed in a way this server does not accept.", code="algorithm")
-        key = self._signing_key(header.get("kid")) or self._signing_key(header.get("kid"), refresh=True)
+            raise SignInRefused(
+                "The identity token is signed in a way this server does not accept.",
+                code="algorithm",
+            )
+        key = self._signing_key(header.get("kid")) or self._signing_key(
+            header.get("kid"), refresh=True
+        )
         if key is None:
-            raise SignInRefused("The identity token was signed with a key the provider does not publish.", code="unknown_key")
+            raise SignInRefused(
+                "The identity token was signed with a key the provider does not publish.",
+                code="unknown_key",
+            )
         try:
             claims = jwt.decode(
                 id_token,
@@ -421,14 +503,20 @@ class OidcClient:
                 options={"require": ["exp", "iat", "iss", "aud", "sub"]},
             )
         except jwt.PyJWTError as exc:
-            raise SignInRefused("The identity token did not verify.", code=type(exc).__name__) from exc
+            raise SignInRefused(
+                "The identity token did not verify.", code=type(exc).__name__
+            ) from exc
         if time.time() - float(claims["iat"]) > MAX_TOKEN_AGE + LEEWAY:
-            raise SignInRefused("The identity token is older than a sign-in should be.", code="token_age")
+            raise SignInRefused(
+                "The identity token is older than a sign-in should be.", code="token_age"
+            )
         given = str(claims.get("nonce", ""))
         if not given or not secrets.compare_digest(given, nonce):
             raise SignInRefused("The identity token belongs to a different sign-in.", code="nonce")
         if claims.get("azp") and claims["azp"] != self.config.client_id:
-            raise SignInRefused("The identity token was issued to a different application.", code="azp")
+            raise SignInRefused(
+                "The identity token was issued to a different application.", code="azp"
+            )
         return dict(claims)
 
     def verify_api_token(self, token: str) -> dict:
@@ -456,10 +544,16 @@ class OidcClient:
         except jwt.PyJWTError as exc:
             raise SignInRefused("The token could not be read.", code="token_unreadable") from exc
         if header.get("alg") not in ALGORITHMS:
-            raise SignInRefused("The token is signed in a way this server does not accept.", code="algorithm")
-        key = self._signing_key(header.get("kid")) or self._signing_key(header.get("kid"), refresh=True)
+            raise SignInRefused(
+                "The token is signed in a way this server does not accept.", code="algorithm"
+            )
+        key = self._signing_key(header.get("kid")) or self._signing_key(
+            header.get("kid"), refresh=True
+        )
         if key is None:
-            raise SignInRefused("The token was signed with a key the provider does not publish.", code="unknown_key")
+            raise SignInRefused(
+                "The token was signed with a key the provider does not publish.", code="unknown_key"
+            )
         try:
             claims = jwt.decode(
                 token,
@@ -515,7 +609,11 @@ class OidcClient:
             if not url:
                 break
             page = self._json("GET", url, {"Authorization": f"Bearer {access_token}"})
-            groups.extend(str(entry["id"]) for entry in page.get("value", []) if isinstance(entry, dict) and entry.get("id"))
+            groups.extend(
+                str(entry["id"])
+                for entry in page.get("value", [])
+                if isinstance(entry, dict) and entry.get("id")
+            )
             url = page.get("@odata.nextLink")
             # a next page is only ever followed on the host that was configured
             if url and urlsplit(str(url))[:2] != urlsplit(self.config.groups_url)[:2]:
@@ -537,7 +635,9 @@ class OidcClient:
         domain = "@" + email.rsplit("@", 1)[1]
         return email in self.config.allowed_emails or domain in self.config.allowed_emails
 
-    def identity(self, claims: Mapping[str, Any], groups: Sequence[str], *, signing_in: bool = True) -> Identity:
+    def identity(
+        self, claims: Mapping[str, Any], groups: Sequence[str], *, signing_in: bool = True
+    ) -> Identity:
         """Who this is, with their role. Signing in, on a list as well as in a group; with a token, the group alone.
 
         Signing in to the platform is for the people who run it, so the list is
@@ -551,7 +651,9 @@ class OidcClient:
         order = {role: i for i, role in enumerate(roles.ROLES)}
         held = [self.config.role_map[g] for g in groups if g in self.config.role_map]
         role = max(held, key=lambda r: order[r]) if held else self.config.default_role
-        grants = roles.clean_grants(g for group in groups for g in self.config.grant_map.get(group, ()))
+        grants = roles.clean_grants(
+            g for group in groups for g in self.config.grant_map.get(group, ())
+        )
         email = claims.get("email") or claims.get("preferred_username")
         # An address the provider says it has not checked is on no list: anybody could have typed it.
         checked = claims.get("email_verified") is not False
@@ -559,16 +661,23 @@ class OidcClient:
         if not signing_in and self.config.token_role is not None:
             role = self.config.token_role
         elif role is None:
-            raise SignInRefused("You signed in, but you are not in a group that has access here.", code="no_role")
+            raise SignInRefused(
+                "You signed in, but you are not in a group that has access here.", code="no_role"
+            )
         if signing_in:
             # Both locks, or none: in the security group and on a list.
             person = self.listed(str(email)) if email and checked else None
             if person is not None:
                 if person.disabled:
-                    raise SignInRefused("You signed in, but your access here is turned off.", code="turned_off")
+                    raise SignInRefused(
+                        "You signed in, but your access here is turned off.", code="turned_off"
+                    )
                 role, grants, listed = person.role, list(person.grants), True
             elif not (self.groups_alone or (checked and self.allows(email))):
-                raise SignInRefused("You signed in, but your address is not on the list for this server.", code="not_listed")
+                raise SignInRefused(
+                    "You signed in, but your address is not on the list for this server.",
+                    code="not_listed",
+                )
         principal: dict = {}
         for attribute, claim in self.config.principal_claims.items():
             value = list(groups) if claim == self.config.groups_claim else claims.get(claim)

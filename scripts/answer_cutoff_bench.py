@@ -52,9 +52,15 @@ import beir_eval  # noqa: E402
 # documents; the docs quote it as an example of the method, never as a cut-off
 # to borrow.
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("dataset", nargs="?", default="scifact")
-    parser.add_argument("--dense-model", default=None, help="a model by its alias, e5-small; left out, the default model")
+    parser.add_argument(
+        "--dense-model",
+        default=None,
+        help="a model by its alias, e5-small; left out, the default model",
+    )
     parser.add_argument("--json", type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -64,30 +70,45 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     corpus, queries, qrels = beir_eval.load(args.dataset)
     if args.dense_model:
-        path = beir_eval.CACHE / "index" / f"{args.dataset}-dense-{args.dense_model}-full-{len(corpus)}"
+        path = (
+            beir_eval.CACHE
+            / "index"
+            / f"{args.dataset}-dense-{args.dense_model}-full-{len(corpus)}"
+        )
         db = Vectrix("beir", path=str(path), mode="dense", dense_model=args.dense_model)
         if db.count() != len(corpus):
             db.clear()
             db.add(list(corpus.values()), ids=list(corpus), progress=True)
         if args.dense_model.split("-")[0] not in str(db.model_name):
-            print(f"asked for {args.dense_model} and the collection opened with {db.model_name}", file=sys.stderr)
+            print(
+                f"asked for {args.dense_model} and the collection opened with {db.model_name}",
+                file=sys.stderr,
+            )
             return 1
     else:
         db, _ = beir_eval.build(args.dataset, "dense", corpus, False, None)
-    questions = [Question(text, expected=sorted(qrels[qid]), id=qid) for qid, text in queries.items()]
+    questions = [
+        Question(text, expected=sorted(qrels[qid]), id=qid) for qid, text in queries.items()
+    ]
     try:
         # A BEIR document is one row whose id is the corpus id, so the grain is the row.
         found = answer_cutoff(db, questions, by="chunk", mode="dense")
     finally:
         db.close()
 
-    print(f"{args.dataset}, {found['model']}: {found['answers']} answers and {found['near_misses']} near misses at the top of {found['questions']} queries")
-    print(f"an answer outscores a near miss {found['separation']:.1%} of the time; cut-off {found['cutoff']}")
+    print(
+        f"{args.dataset}, {found['model']}: {found['answers']} answers and {found['near_misses']} near misses at the top of {found['questions']} queries"
+    )
+    print(
+        f"an answer outscores a near miss {found['separation']:.1%} of the time; cut-off {found['cutoff']}"
+    )
     print("| Cut-off | right when it answers | answers kept | near misses declined |")
     print("| ---: | ---: | ---: | ---: |")
     for row in found["table"]:
         mark = " (chosen)" if row["cutoff"] == found["cutoff"] else ""
-        print(f"| {row['cutoff']:.3f}{mark} | {row['precision']:.1%} | {row['answered']:.1%} | {row['declined']:.1%} |")
+        print(
+            f"| {row['cutoff']:.3f}{mark} | {row['precision']:.1%} | {row['answered']:.1%} | {row['declined']:.1%} |"
+        )
     if args.json:
         provenance = {
             "dataset": args.dataset,

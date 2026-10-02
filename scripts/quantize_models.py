@@ -38,7 +38,14 @@ MODELS_DIR = SCRIPT_DIR.parent / "vectrixdb" / "models" / "data"
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 
 #: Operators only a quantized graph contains.
-QUANTIZED_OPS = {"DynamicQuantizeLinear", "MatMulInteger", "QuantizeLinear", "DequantizeLinear", "QLinearMatMul", "ConvInteger"}
+QUANTIZED_OPS = {
+    "DynamicQuantizeLinear",
+    "MatMulInteger",
+    "QuantizeLinear",
+    "DequantizeLinear",
+    "QLinearMatMul",
+    "ConvInteger",
+}
 
 
 # ============================================================================
@@ -111,11 +118,15 @@ def quantize_model(model_name: str, backup: bool = True) -> bool:
 
     model_path = MODELS[model_name]["path"]
     if is_quantized(model_path):
-        print(f"{model_name} is INT8 already; quantizing it again would only lose accuracy. Left as it is.")
+        print(
+            f"{model_name} is INT8 already; quantizing it again would only lose accuracy. Left as it is."
+        )
         return True
 
     original_size = get_file_size_mb(model_path)
-    print(f"\n{'=' * 60}\nQuantizing {model_name} ({MODELS[model_name]['description']}), {original_size:.1f} MB\n{'=' * 60}")
+    print(
+        f"\n{'=' * 60}\nQuantizing {model_name} ({MODELS[model_name]['description']}), {original_size:.1f} MB\n{'=' * 60}"
+    )
     backup_path = model_path.with_suffix(".onnx.backup")
     if backup and not backup_path.exists():
         print(f"Keeping the original as {backup_path.name}")
@@ -123,10 +134,14 @@ def quantize_model(model_name: str, backup: bool = True) -> bool:
 
     temp_path = model_path.with_suffix(".onnx.quantized")
     try:
-        quantize_dynamic(model_input=str(model_path), model_output=str(temp_path), weight_type=QuantType.QUInt8)
+        quantize_dynamic(
+            model_input=str(model_path), model_output=str(temp_path), weight_type=QuantType.QUInt8
+        )
         quantized_size = get_file_size_mb(temp_path)
         temp_path.replace(model_path)
-        print(f"Now {quantized_size:.1f} MB, {(1 - quantized_size / original_size) * 100:.1f}% smaller")
+        print(
+            f"Now {quantized_size:.1f} MB, {(1 - quantized_size / original_size) * 100:.1f}% smaller"
+        )
         return True
     except Exception as exc:
         print(f"Quantizing {model_name} failed: {exc}")
@@ -165,7 +180,9 @@ def show() -> None:
         backup = ", backup kept" if config["path"].with_suffix(".onnx.backup").exists() else ""
         print(f"  {name:<24} {size:8.1f} MB  {state}{backup}  ({config['description']})")
     print(f"  {'total':<24} {total:8.1f} MB")
-    print("\nNothing was changed. Name one with --model, or --model all for every model not yet INT8.")
+    print(
+        "\nNothing was changed. Name one with --model, or --model all for every model not yet INT8."
+    )
 
 
 # ============================================================================
@@ -180,10 +197,21 @@ def show() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Quantize a VectrixDB ONNX model to INT8, in place.")
-    parser.add_argument("--model", choices=["all", *MODELS], default=None, help="the model to quantize, or all; left out, nothing is changed")
-    parser.add_argument("--no-backup", action="store_true", help="do not keep the original as .onnx.backup")
-    parser.add_argument("--restore", action="store_true", help="put the original back from its backup")
+    parser = argparse.ArgumentParser(
+        description="Quantize a VectrixDB ONNX model to INT8, in place."
+    )
+    parser.add_argument(
+        "--model",
+        choices=["all", *MODELS],
+        default=None,
+        help="the model to quantize, or all; left out, nothing is changed",
+    )
+    parser.add_argument(
+        "--no-backup", action="store_true", help="do not keep the original as .onnx.backup"
+    )
+    parser.add_argument(
+        "--restore", action="store_true", help="put the original back from its backup"
+    )
     args = parser.parse_args(argv)
 
     if args.model is None:

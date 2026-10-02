@@ -18,11 +18,18 @@ from vectrixdb.ingest import LoadedDocument, describe_figures
 
 def box(left, top, right, bottom):
     """A polygon the way Image Analysis writes one: four corners, each a map."""
-    return [{"x": left, "y": top}, {"x": right, "y": top}, {"x": right, "y": bottom}, {"x": left, "y": bottom}]
+    return [
+        {"x": left, "y": top},
+        {"x": right, "y": top},
+        {"x": right, "y": bottom},
+        {"x": left, "y": bottom},
+    ]
 
 
 def reply(caption=None, dense=(), lines=()):
-    answer = {"readResult": {"blocks": [{"lines": [{"text": t, "boundingPolygon": b} for b, t in lines]}]}}
+    answer = {
+        "readResult": {"blocks": [{"lines": [{"text": t, "boundingPolygon": b} for b, t in lines]}]}
+    }
     if caption is not None:
         answer["captionResult"] = {"text": caption[0], "confidence": caption[1]}
     if dense:
@@ -31,7 +38,12 @@ def reply(caption=None, dense=(), lines=()):
 
 
 def describer(answer, **options):
-    return AzureImageAnalysis("https://v.cognitiveservices.azure.com", "a-secret-key", transport=lambda url, image: answer, **options)
+    return AzureImageAnalysis(
+        "https://v.cognitiveservices.azure.com",
+        "a-secret-key",
+        transport=lambda url, image: answer,
+        **options,
+    )
 
 
 class TestACornerCanBeAMap:
@@ -39,7 +51,10 @@ class TestACornerCanBeAMap:
 
     def test_reading_order_takes_both_spellings(self):
         as_maps = [(box(0, 0, 60, 10), "Revenue by quarter"), (box(0, 40, 25, 50), "Q1")]
-        as_pairs = [([(0, 0), (60, 0), (60, 10), (0, 10)], "Revenue by quarter"), ([(0, 40), (25, 40), (25, 50), (0, 50)], "Q1")]
+        as_pairs = [
+            ([(0, 0), (60, 0), (60, 10), (0, 10)], "Revenue by quarter"),
+            ([(0, 40), (25, 40), (25, 50), (0, 50)], "Q1"),
+        ]
         assert reading_order(as_maps) == reading_order(as_pairs) == ["Revenue by quarter", "Q1"]
 
     def test_a_plain_rectangle_still_works(self):
@@ -50,7 +65,13 @@ class TestTheWordsAreReadInOrder:
     def test_what_the_service_emitted_last_can_be_read_first(self):
         """The whole reason for the boxes: emission order is not reading order."""
         asking = describer(
-            reply(lines=[(box(80, 40, 95, 50), "Q4"), (box(0, 0, 60, 10), "Revenue by quarter"), (box(10, 40, 25, 50), "Q1")])
+            reply(
+                lines=[
+                    (box(80, 40, 95, 50), "Q4"),
+                    (box(0, 0, 60, 10), "Revenue by quarter"),
+                    (box(10, 40, 25, 50), "Q1"),
+                ]
+            )
         )
         said = asking(b"PNG", {})["description"]
         assert said == "The words in it read: Revenue by quarter; Q1 Q4."
@@ -61,7 +82,9 @@ class TestTheWordsAreReadInOrder:
 
     def test_a_line_with_no_box_is_kept_where_it_came(self):
         answer = {"readResult": {"blocks": [{"lines": [{"text": "first"}, {"text": "second"}]}]}}
-        assert describer(answer)(b"PNG", {})["description"] == "The words in it read: first; second."
+        assert (
+            describer(answer)(b"PNG", {})["description"] == "The words in it read: first; second."
+        )
 
     def test_a_wall_of_words_is_cut_to_what_a_chunk_can_hold(self):
         lines = [(box(0, i * 10, 50, i * 10 + 8), f"line {i}") for i in range(60)]
@@ -89,7 +112,11 @@ class TestWhatItSaysThePictureIs:
 
     def test_a_guess_is_not_written_down(self):
         """A low-confidence caption is searchable and wrong, which is worse than absent."""
-        asking = describer(reply(caption=("two people on a beach", 0.05), lines=[(box(0, 0, 60, 10), "Total assets")]))
+        asking = describer(
+            reply(
+                caption=("two people on a beach", 0.05), lines=[(box(0, 0, 60, 10), "Total assets")]
+            )
+        )
         assert asking(b"PNG", {})["description"] == "The words in it read: Total assets."
 
     def test_nothing_seen_and_nothing_written_is_decoration(self):
@@ -140,7 +167,9 @@ class TestWhenTheServiceWillNotPlay:
             raise urllib.error.URLError("no route to host")
 
         asking = AzureImageAnalysis("https://v.cognitiveservices.azure.com", "k", transport=refuse)
-        assert asking(b"PNG", {"caption": "Figure 1"}) is None, "one refusal is not worth failing a document for"
+        assert asking(b"PNG", {"caption": "Figure 1"}) is None, (
+            "one refusal is not worth failing a document for"
+        )
 
     def test_the_key_is_not_in_what_gets_printed(self):
         assert "a-secret-key" not in repr(describer(reply()))
@@ -153,19 +182,32 @@ class TestWhenTheServiceWillNotPlay:
 class TestItIsBuiltFromTheTwoSettings:
     def test_both_or_nothing(self):
         assert AzureImageAnalysis.from_environment({}) is None
-        assert AzureImageAnalysis.from_environment({"AZURE_VISION_ENDPOINT": "https://v.cognitiveservices.azure.com"}) is None
+        assert (
+            AzureImageAnalysis.from_environment(
+                {"AZURE_VISION_ENDPOINT": "https://v.cognitiveservices.azure.com"}
+            )
+            is None
+        )
         assert AzureImageAnalysis.from_environment({"AZURE_VISION_KEY": "k"}) is None
         made = AzureImageAnalysis.from_environment(
-            {"AZURE_VISION_ENDPOINT": "https://v.cognitiveservices.azure.com", "AZURE_VISION_KEY": "k"}
+            {
+                "AZURE_VISION_ENDPOINT": "https://v.cognitiveservices.azure.com",
+                "AZURE_VISION_KEY": "k",
+            }
         )
         assert isinstance(made, AzureImageAnalysis)
 
     def test_none_is_a_working_deployment_without_one(self):
         """So a host passes it straight to describe_figures without deciding first."""
-        doc = LoadedDocument(text="[Figure: a.png]", figures=[(0, {"src": "a.png"})], images={"a.png": b"PNG"})
+        doc = LoadedDocument(
+            text="[Figure: a.png]", figures=[(0, {"src": "a.png"})], images={"a.png": b"PNG"}
+        )
         # skip_decorative off, or the triage drops the figure and the document
         # changes for a reason that has nothing to do with the describer.
-        assert describe_figures(doc, AzureImageAnalysis.from_environment({}), skip_decorative=False) is doc
+        assert (
+            describe_figures(doc, AzureImageAnalysis.from_environment({}), skip_decorative=False)
+            is doc
+        )
 
 
 class TestThroughTheLibraryThatCallsIt:
@@ -175,7 +217,12 @@ class TestThroughTheLibraryThatCallsIt:
             figures=[(0, {"src": "p1-fig1.png", "caption": ""})],
             images={"p1-fig1.png": b"\x89PNG\r\n\x1a\n" + bytes(4000)},
         )
-        asking = describer(reply(caption=("a bar chart of revenue", 0.7), lines=[(box(0, 0, 60, 10), "Revenue by quarter")]))
+        asking = describer(
+            reply(
+                caption=("a bar chart of revenue", 0.7),
+                lines=[(box(0, 0, 60, 10), "Revenue by quarter")],
+            )
+        )
         after = describe_figures(doc, asking, name="q3.pdf", skip_decorative=False)
         assert after.text == (
             "[Figure: a bar chart of revenue]\nA bar chart of revenue. The words in it read: Revenue by quarter."

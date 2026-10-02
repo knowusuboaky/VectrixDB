@@ -280,10 +280,12 @@ class ShardedIndex:
         try:
             if self._head.contains(key):
                 self._head.remove(key)
-                return
         except Exception:  # pragma: no cover - backend specific
             pass
-        self._removed.add(key)
+        # A key re-added after its shard was sealed also has a sealed copy,
+        # which returning early here used to bring back from the dead.
+        if any(self._contains(shard, key) for shard in self._sealed):
+            self._removed.add(key)
 
     def contains(self, key) -> bool:
         key = int(key)
@@ -302,6 +304,14 @@ class ShardedIndex:
             return bool(shard.contains(key))
         except Exception:  # pragma: no cover - backend specific
             return False
+
+    @classmethod
+    def _contains_many(cls, shard: Any, keys: np.ndarray) -> np.ndarray:
+        """Whether the shard holds each key, in one call where the backend allows it."""
+        try:
+            return np.asarray(shard.contains(keys), dtype=bool).reshape(-1)
+        except Exception:  # pragma: no cover - backend specific
+            return np.array([cls._contains(shard, int(key)) for key in keys], dtype=bool)
 
     def get(self, key):
         """The vector for ``key``, from the newest shard that holds it."""
@@ -326,30 +336,115 @@ class ShardedIndex:
         that was re-added shadows its older copy.
         """
         count = max(1, int(count))
-        best: Dict[int, float] = {}
+        shards = [self._head] + list(reversed(self._sealed))
 
-        for shard in [self._head] + list(reversed(self._sealed)):
-            if len(shard) == 0:
+        # Every shard's candidates, merged by distance, in arrays: with
+        # tombstones the collection asks for thousands, and a Python loop over
+        # each of them doubled the time of a search across fifty shards.
+        found_keys: List[np.ndarray] = []
+        found_distances: List[np.ndarray] = []
+        found_orders: List[np.ndarray] = []
+        for order, shard in enumerate(shards):
+            size = len(shard)
+            if size == 0:
                 continue
             try:
-                matches = shard.search(query, min(count, len(shard)))
+                matches = shard.search(query, min(count, size))
             except Exception:  # pragma: no cover - backend specific
                 continue
             keys = getattr(matches, "keys", None)
             if keys is None:
                 continue
-            for key, distance in zip(
-                np.asarray(keys).flatten().tolist(),
-                np.asarray(matches.distances).flatten().tolist(),
-            ):
-                key = int(key)
-                if key in self._removed or key in best:
-                    continue  # an older copy, or a key already taken
-                best[key] = float(distance)
+            keys = np.asarray(keys, dtype=np.uint64).reshape(-1)
+            found_keys.append(keys)
+            found_distances.append(
+                np.asarray(matches.distances, dtype=np.float64).reshape(-1)[: len(keys)]
+            )
+            found_orders.append(np.full(len(keys), order))
+        if not found_keys:
+            return self._matches({}, count)
+        held = np.concatenate(found_keys)
+        distances = np.concatenate(found_distances)
+        orders = np.concatenate(found_orders)
 
+        # A key a newer shard holds is shadowed here, even when that newer
+        # copy was too far away to be among its shard's results: taking this
+        # stale copy returned a vector the key no longer has. Candidates sit
+        # in shard order, so each shard is asked once, for the slice of
+        # candidates that came from the shards older than it.
+        stale = np.zeros(len(held), dtype=bool)
+        for newer, shard in enumerate(shards[:-1]):
+            start = int(np.searchsorted(orders, newer, side="right"))
+            if len(shard) and start < len(held):
+                stale[start:] |= self._contains_many(shard, held[start:])
+        ranked = np.argsort(distances, kind="stable")
+        held, distances, stale = held[ranked], distances[ranked], stale[ranked]
+        shadowed = bool(stale.any())
+        live = ~stale
+        if self._removed:
+            live &= ~np.isin(
+                held, np.fromiter(self._removed, dtype=np.uint64, count=len(self._removed))
+            )
+        held, distances = held[live], distances[live]
+        # The nearest copy of a key that is live in more than one place.
+        _unique, first = np.unique(held, return_index=True)
+        first.sort()
+        first = first[:count]
+        best: Dict[int, float] = dict(zip(held[first].tolist(), distances[first].tolist()))
+
+        if shadowed and len(best) < count:
+            # Shadowed copies crowded out live keys: rare, so the thorough
+            # walk that asks each shard for more is kept for it alone.
+            return self._search_past_shadows(query, count, shards)
+        return self._matches(best, count)
+
+    def _search_past_shadows(self, query, count: int, shards: List[Any]) -> ShardedMatches:
+        """The merge, asking a shard again for more when shadowed keys fill its answer."""
+        best: Dict[int, float] = {}
+        newer: List[Any] = []
+        for shard in shards:
+            size = len(shard)
+            if size == 0:
+                newer.append(shard)
+                continue
+            asked = min(count, size)
+            found: Dict[int, float] = {}
+            while True:
+                try:
+                    matches = shard.search(query, asked)
+                except Exception:  # pragma: no cover - backend specific
+                    break
+                keys = getattr(matches, "keys", None)
+                if keys is None:
+                    break
+                found = {}
+                skipped = 0
+                for key, distance in zip(
+                    np.asarray(keys).flatten().tolist(),
+                    np.asarray(matches.distances).flatten().tolist(),
+                ):
+                    key = int(key)
+                    if key in found:
+                        continue
+                    if (
+                        key in best
+                        or key in self._removed
+                        or any(self._contains(n, key) for n in newer)
+                    ):
+                        skipped += 1
+                        continue  # an older copy, or a removed key
+                    found[key] = float(distance)
+                if not skipped or len(found) >= count or asked >= size:
+                    break
+                asked = min(size, asked * 2)
+            best.update(found)
+            newer.append(shard)
+        return self._matches(best, count)
+
+    @staticmethod
+    def _matches(best: Dict[int, float], count: int) -> ShardedMatches:
         if not best:
             return ShardedMatches(np.zeros(0, dtype=np.uint64), np.zeros(0, dtype=np.float32))
-
         ordered = sorted(best.items(), key=lambda item: item[1])[:count]
         return ShardedMatches(
             np.array([k for k, _ in ordered], dtype=np.uint64),

@@ -19,7 +19,13 @@ from vectrixdb.ingest import load, load_bytes
 
 def png(width: int, height: int, filler: int = 4000) -> bytes:
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    head = b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + ihdr + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr))
+    head = (
+        b"\x89PNG\r\n\x1a\n"
+        + struct.pack(">I", 13)
+        + b"IHDR"
+        + ihdr
+        + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr))
+    )
     return head + bytes(filler)
 
 
@@ -43,7 +49,10 @@ def report(tmp_path, monkeypatch):
     pages = [
         Page("Revenue grew in every region this year, and costs were flat."),
         Page("   "),  # a scanned insert: nothing in the text layer
-        Page("Costs were flat across the period, as the table shows.", [Image("Im1.png", png(640, 480))]),
+        Page(
+            "Costs were flat across the period, as the table shows.",
+            [Image("Im1.png", png(640, 480))],
+        ),
     ]
 
     class Reader:
@@ -70,7 +79,10 @@ class TestOnlyThePagesThatNeedItAreRead:
 
         class Reader:
             def __init__(self, path):
-                self.pages = [Page("Revenue grew in every region this year."), Page("Costs were flat across it.")]
+                self.pages = [
+                    Page("Revenue grew in every region this year."),
+                    Page("Costs were flat across it."),
+                ]
 
         monkeypatch.setattr(pypdf, "PdfReader", Reader)
         path = tmp_path / "clean.pdf"
@@ -112,7 +124,10 @@ class TestOnlyThePagesThatNeedItAreRead:
                 self.pages = [Page("Revenue grew in every region this year."), Page("")]
 
         monkeypatch.setattr(pypdf, "PdfReader", Reader)
-        monkeypatch.setattr("vectrixdb.ingest._pdf_page_images", lambda path, wanted: [(i, png(1000, 1400)) for i in wanted])
+        monkeypatch.setattr(
+            "vectrixdb.ingest._pdf_page_images",
+            lambda path, wanted: [(i, png(1000, 1400)) for i in wanted],
+        )
         monkeypatch.setattr("vectrixdb.extract.layout.looks_blank", lambda image, ink=0.002: True)
         path = tmp_path / "b.pdf"
         path.write_bytes(b"%PDF")
@@ -148,7 +163,10 @@ class TestTheFiguresSurviveIt:
                 self.pages = [Page("  ", [Image("Im1.png", png(640, 480))])]
 
         monkeypatch.setattr(pypdf, "PdfReader", Reader)
-        monkeypatch.setattr("vectrixdb.ingest._pdf_page_images", lambda path, wanted: [(i, png(1000, 1400)) for i in wanted])
+        monkeypatch.setattr(
+            "vectrixdb.ingest._pdf_page_images",
+            lambda path, wanted: [(i, png(1000, 1400)) for i in wanted],
+        )
         path = tmp_path / "scan.pdf"
         path.write_bytes(b"%PDF")
         doc = load(path, images=True, ocr=lambda image: ["Quarterly summary", "Revenue 1200"])

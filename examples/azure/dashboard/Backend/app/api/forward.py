@@ -15,7 +15,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from app.core.headers import downward, upward
+from app.core.headers import downward, from_another_site, upward
 from app.core.settings import forwardable
 from app.integrations.retrieval_integration import target
 
@@ -44,11 +44,17 @@ async def forward(request: Request) -> Response:
     client: httpx.AsyncClient = request.app.state.client
     path = request.url.path
 
+    if request.method not in ("GET", "HEAD", "OPTIONS") and from_another_site(request.headers):
+        return JSONResponse(
+            {"detail": "a call from a page on another site is not forwarded"}, status_code=403
+        )
     if not forwardable(path, settings.forwarded):
         return JSONResponse({"detail": f"{path} is not forwarded"}, status_code=404)
     if not settings.ready:
         return JSONResponse(
-            {"detail": "UPSTREAM is not set, so there is nothing to forward to. Put the retrieval service's address in Backend/.env."},
+            {
+                "detail": "UPSTREAM is not set, so there is nothing to forward to. Put the retrieval service's address in Backend/.env."
+            },
             status_code=503,
         )
 
@@ -64,12 +70,19 @@ async def forward(request: Request) -> Response:
         # The service is asleep, unreachable or slower than its own ceiling.
         # Said plainly, in the shape every refusal takes, and never as a 500
         # from this service, which is up.
-        return JSONResponse({"detail": f"the retrieval service did not answer: {type(exc).__name__}"}, status_code=502)
+        return JSONResponse(
+            {"detail": f"the retrieval service did not answer: {type(exc).__name__}"},
+            status_code=502,
+        )
 
     if answer.is_stream_consumed:
         # A transport that hands back a body already loaded, the fake one the
         # tests use for instance, has nothing left to stream.
-        passed: Response = Response(content=answer.content, status_code=answer.status_code, background=BackgroundTask(answer.aclose))
+        passed: Response = Response(
+            content=answer.content,
+            status_code=answer.status_code,
+            background=BackgroundTask(answer.aclose),
+        )
     else:
         passed = StreamingResponse(
             answer.aiter_raw(),

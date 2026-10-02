@@ -93,7 +93,9 @@ def batched(
     """
     if reader is None:
         return None
-    return Batched(reader, minutes=minutes, pages=pages, at_once=at_once, max_bytes=max_bytes, sound=sound)
+    return Batched(
+        reader, minutes=minutes, pages=pages, at_once=at_once, max_bytes=max_bytes, sound=sound
+    )
 
 
 # ============================================================================
@@ -133,7 +135,10 @@ def parse_silences(said: str) -> List[Tuple[float, float]]:
 
 
 def cut_points(
-    total: float, piece: float, pauses: Sequence[Tuple[float, float]], window: Optional[float] = None
+    total: float,
+    piece: float,
+    pauses: Sequence[Tuple[float, float]],
+    window: Optional[float] = None,
 ) -> List[float]:
     """Where to cut ``total`` seconds of sound into pieces of about ``piece`` seconds each.
 
@@ -166,7 +171,9 @@ class FfmpegSound:
     long it lasts at least, in seconds.
     """
 
-    def __init__(self, binary: Optional[str] = None, *, noise: str = "-35dB", pause: float = 0.4) -> None:
+    def __init__(
+        self, binary: Optional[str] = None, *, noise: str = "-35dB", pause: float = 0.4
+    ) -> None:
         self.binary = binary
         self.noise = noise
         self.pause = pause
@@ -184,7 +191,9 @@ class FfmpegSound:
         return imageio_ffmpeg.get_ffmpeg_exe()
 
     def _run(self, *args: str) -> Tuple[int, str]:
-        done = subprocess.run([self._ffmpeg(), "-hide_banner", "-nostdin", *args], capture_output=True)  # noqa: S603 - fixed argv, no shell
+        done = subprocess.run(
+            [self._ffmpeg(), "-hide_banner", "-nostdin", *args], capture_output=True
+        )  # noqa: S603 - fixed argv, no shell
         return done.returncode, done.stderr.decode("utf-8", errors="replace")
 
     def duration(self, path: str) -> Optional[float]:
@@ -198,7 +207,16 @@ class FfmpegSound:
             raise ExtractionError(f"ffmpeg could not take the sound out: {tail[0]}")
 
     def silences(self, wav: str) -> List[Tuple[float, float]]:
-        said = self._run("-nostats", "-i", wav, "-af", f"silencedetect=noise={self.noise}:d={self.pause}", "-f", "null", "-")[1]
+        said = self._run(
+            "-nostats",
+            "-i",
+            wav,
+            "-af",
+            f"silencedetect=noise={self.noise}:d={self.pause}",
+            "-f",
+            "null",
+            "-",
+        )[1]
         return parse_silences(said)
 
 
@@ -323,7 +341,11 @@ class Batched:
 
         for attempt in range(1, self.tries + 1):
             try:
-                answer = self.reader(data, name, source=source) if _takes_source(self.reader) else self.reader(data, name)
+                answer = (
+                    self.reader(data, name, source=source)
+                    if _takes_source(self.reader)
+                    else self.reader(data, name)
+                )
                 return coerce(answer, name)
             except ExtractionError as exc:
                 if attempt == self.tries or not _worth_again(exc):
@@ -331,7 +353,9 @@ class Batched:
                 time.sleep(self._pause * attempt)
         raise AssertionError("unreachable")  # pragma: no cover - the loop returns or raises
 
-    def _each(self, pieces: Sequence[Tuple[bytes, str]], whole: str, source: Optional[str]) -> List[LoadedDocument]:
+    def _each(
+        self, pieces: Sequence[Tuple[bytes, str]], whole: str, source: Optional[str]
+    ) -> List[LoadedDocument]:
         """Every piece read, several at a time, in the order they were cut."""
 
         def read(numbered: Tuple[int, Tuple[bytes, str]]) -> LoadedDocument:
@@ -340,7 +364,9 @@ class Batched:
                 return self._read(data, name, source)
             except ExtractionError as exc:
                 raise ExtractionError(
-                    f"piece {index} of {len(pieces)} of {whole} did not read: {exc}", route=exc.route, status=exc.status
+                    f"piece {index} of {len(pieces)} of {whole} did not read: {exc}",
+                    route=exc.route,
+                    status=exc.status,
                 ) from exc
 
         numbered = list(enumerate(pieces, start=1))
@@ -369,8 +395,12 @@ class Batched:
         for start in range(0, total, self.pages):
             cut.extend(self._pdf_pieces(reader, start, min(start + self.pages, total)))
         stem = Path(name).stem
-        docs = self._each([(piece, f"{stem}.pages-{first + 1}.pdf") for first, piece in cut], name, source)
-        return self._join_pages(name, total, [(first, doc) for (first, _piece), doc in zip(cut, docs)], source)
+        docs = self._each(
+            [(piece, f"{stem}.pages-{first + 1}.pdf") for first, piece in cut], name, source
+        )
+        return self._join_pages(
+            name, total, [(first, doc) for (first, _piece), doc in zip(cut, docs)], source
+        )
 
     def _pdf_pieces(self, reader: Any, start: int, end: int) -> List[Tuple[int, bytes]]:
         """Pages ``start`` to ``end`` as a PDF of their own, halved again while it is too big to send."""
@@ -388,7 +418,11 @@ class Batched:
         return [(start, data)]
 
     def _join_pages(
-        self, name: str, total: int, parts: Sequence[Tuple[int, LoadedDocument]], source: Optional[str] = None
+        self,
+        name: str,
+        total: int,
+        parts: Sequence[Tuple[int, LoadedDocument]],
+        source: Optional[str] = None,
     ) -> LoadedDocument:
         texts: List[str] = []
         pages: List[Tuple[int, int]] = []
@@ -412,12 +446,19 @@ class Batched:
         # A printed number that is the page's own place says nothing a citation needs.
         labels = {n: label for n, label in labels.items() if label != str(n)}
         return LoadedDocument(
-            text="\n\n".join(texts), pages=pages, headings=headings, metadata=metadata, figures=figures, page_labels=labels
+            text="\n\n".join(texts),
+            pages=pages,
+            headings=headings,
+            metadata=metadata,
+            figures=figures,
+            page_labels=labels,
         )
 
     # -- sound and video
 
-    def _sound_file(self, data: bytes, name: str, source: Optional[str], *, video: bool) -> LoadedDocument:
+    def _sound_file(
+        self, data: bytes, name: str, source: Optional[str], *, video: bool
+    ) -> LoadedDocument:
         sound = self._sound if self._sound is not None else FfmpegSound()
         piece = self.minutes * 60.0
         suffix = PurePosixPath(name).suffix.lower()
@@ -433,9 +474,20 @@ class Batched:
             cuts = cut_points(total, piece, sound.silences(str(wav))) if total > piece else []
             cut = _wav_pieces(wav, [0.0, *cuts, total])
         stem = Path(name).stem
-        docs = self._each([(piece_data, f"{stem}.part{index}.wav") for index, (_start, piece_data) in enumerate(cut, start=1)], name, source)
+        docs = self._each(
+            [
+                (piece_data, f"{stem}.part{index}.wav")
+                for index, (_start, piece_data) in enumerate(cut, start=1)
+            ],
+            name,
+            source,
+        )
         return self._join_sound(
-            name, [(start, doc) for (start, _data), doc in zip(cut, docs)], total, video=video, source=source
+            name,
+            [(start, doc) for (start, _data), doc in zip(cut, docs)],
+            total,
+            video=video,
+            source=source,
         )
 
     def _join_sound(
@@ -454,14 +506,21 @@ class Batched:
         metadata: Dict[str, Any] = {}
         for start, doc in parts:
             if doc.segments:
-                timed.extend((float(a) + start, float(b) + start, str(text)) for a, b, text in doc.segments)
+                timed.extend(
+                    (float(a) + start, float(b) + start, str(text)) for a, b, text in doc.segments
+                )
             elif doc.text.strip():
                 # A reader that sent no times: the words are kept, in order.
                 untimed.append(doc.text.strip())
             _merge(metadata, doc.metadata, 0)
         joined = segments_to_document(timed) if timed else LoadedDocument(text="\n\n".join(untimed))
         joined.metadata = {**metadata, **joined.metadata}
-        joined.metadata.update(source=source or name, filename=name, pieces=len(parts), duration_seconds=round(total, 2))
+        joined.metadata.update(
+            source=source or name,
+            filename=name,
+            pieces=len(parts),
+            duration_seconds=round(total, 2),
+        )
         if video:
             joined.metadata["video"] = True
         return joined

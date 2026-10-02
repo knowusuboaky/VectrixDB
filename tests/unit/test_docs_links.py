@@ -40,7 +40,11 @@ INSTALLED = {"node_modules", "dist", ".venv", "venv", "__pycache__"}
 
 
 def _markdown_files() -> list[Path]:
-    examples = [p for p in (ROOT / "examples").rglob("*.md") if not INSTALLED.intersection(p.relative_to(ROOT).parts)]
+    examples = [
+        p
+        for p in (ROOT / "examples").rglob("*.md")
+        if not INSTALLED.intersection(p.relative_to(ROOT).parts)
+    ]
     return [
         *sorted(ROOT.glob("*.md")),
         *sorted((ROOT / "docs").rglob("*.md")),

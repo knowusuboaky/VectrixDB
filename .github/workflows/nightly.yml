@@ -50,23 +50,38 @@ jobs:
 
   mutation:
     name: Mutation testing (weekly)
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * *'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      # The schedule is nightly and this job is weekly: it goes on by hand, or
+      # on Sunday's run. Comparing the cron string held on every night.
+      - id: day
+        run: |
+          if [ "${{ github.event_name }}" = workflow_dispatch ] || [ "$(date -u +%u)" = 7 ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.day.outputs.go == 'true'
+        uses: actions/checkout@v4
         with:
           lfs: true
-      - uses: actions/setup-python@v5
+      - if: steps.day.outputs.go == 'true'
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: |
+      # mutmut 3 reads a different [tool.mutmut] (lists, not strings) and
+      # stops on this one, which continue-on-error then hid.
+      - if: steps.day.outputs.go == 'true'
+        run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]" mutmut
+          python -m pip install -e ".[dev]" "mutmut<3"
       # The small pure modules only: their tests run in seconds, so a mutant
       # costs seconds. Configuration is in pyproject [tool.mutmut].
-      - run: mutmut run
-      - run: mutmut results
+      - if: steps.day.outputs.go == 'true'
+        run: mutmut run
+      - if: steps.day.outputs.go == 'true'
+        run: mutmut results
 
   opensearch-live:
     name: OpenSearch contract, live
@@ -213,6 +228,25 @@ jobs:
         run: python scripts/shard_bench.py --vectors 20000 --dims 128 --queries 200 --shards 1 10 50
       - name: The same with a fifth of the documents deleted
         run: python scripts/shard_bench.py --vectors 20000 --dims 128 --queries 100 --shards 1 10 --deleted 0.2
+
+  model-releases:
+    name: Model release assets exist
+    # vectrixdb download-models fetches each model from a GitHub release
+    # before falling back to HuggingFace. The tags are named in the code and
+    # none has been released yet, so the fallback has never worked. This
+    # reports which assets answer, and does not gate anything: publishing
+    # them is a maintainer's act (scripts/publish_models.py says how).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - run: python scripts/check_model_releases.py
 
   audit:
     name: dependency audit

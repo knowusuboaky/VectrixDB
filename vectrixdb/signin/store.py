@@ -88,13 +88,31 @@ LOCAL_METHODS = ("email", "passkey")
 
 # The kinds of record.
 PERSON, SESSION, LINK, ATTEMPT, PASSKEY, CHALLENGE, APIKEY, RATE, EMERGENCY = (
-    "person", "session", "link", "attempt", "passkey", "challenge", "apikey", "rate", "emergency",
+    "person",
+    "session",
+    "link",
+    "attempt",
+    "passkey",
+    "challenge",
+    "apikey",
+    "rate",
+    "emergency",
 )
 #: How many times a change is tried again when another server changed the same record first.
 _TRIES = 8
 #: The tables a file from before records kept.
 #: "visibility" is dropped without being read: who may search a collection is its record's policy now.
-_OLD_TABLES = ("people", "sessions", "links", "recovery", "attempts", "passkeys", "challenges", "api_keys", "visibility")
+_OLD_TABLES = (
+    "people",
+    "sessions",
+    "links",
+    "recovery",
+    "attempts",
+    "passkeys",
+    "challenges",
+    "api_keys",
+    "visibility",
+)
 
 
 # ============================================================================
@@ -255,16 +273,31 @@ def _collections_for_a_key(collections: Optional[Sequence[str]]) -> Tuple[str, .
         if name not in out:
             out.append(name)
     if len(out) > 64:
-        raise ConfigurationError("A key is scoped to at most 64 collections. Leave it unscoped instead")
+        raise ConfigurationError(
+            "A key is scoped to at most 64 collections. Leave it unscoped instead"
+        )
     return tuple(out)
 
 
 def _new_person(role: str, principal: Optional[dict], grants: Optional[list]) -> dict:
     return {
-        "role": role, "principal": dict(principal or {}), "grants": list(grants or []), "created_at": time.time(),
-        "last_sign_in": None, "disabled": False, "totp_secret": None, "totp_confirmed": False, "last_step": None,
-        "totp_pending": None, "totp_set_at": None, "totp_used_at": None, "password_hash": None, "password_set_at": None,
-        "user_handle": None, "passkeys": [], "recovery": {},
+        "role": role,
+        "principal": dict(principal or {}),
+        "grants": list(grants or []),
+        "created_at": time.time(),
+        "last_sign_in": None,
+        "disabled": False,
+        "totp_secret": None,
+        "totp_confirmed": False,
+        "last_step": None,
+        "totp_pending": None,
+        "totp_set_at": None,
+        "totp_used_at": None,
+        "password_hash": None,
+        "password_set_at": None,
+        "user_handle": None,
+        "passkeys": [],
+        "recovery": {},
     }
 
 
@@ -339,7 +372,9 @@ class SignInStore:
                 return False
             if self._records.replace(record):
                 return True if outcome is None else outcome
-        raise VectrixError(f"another server kept changing the same sign-in {kind} record. Try again")
+        raise VectrixError(
+            f"another server kept changing the same sign-in {kind} record. Try again"
+        )
 
     # ------------------------------------------------------------ signing ---
 
@@ -366,10 +401,16 @@ class SignInStore:
                 from cryptography.fernet import Fernet, MultiFernet
             except ImportError as exc:  # pragma: no cover - exercised only without the extra
                 raise DependencyError("cryptography", "signin") from exc
-            current = [Fernet(base64.urlsafe_b64encode(derive(s, "sealing"))) for s in self._secrets]
+            current = [
+                Fernet(base64.urlsafe_b64encode(derive(s, "sealing"))) for s in self._secrets
+            ]
             # How secrets were sealed at first, so a store from then still opens.
             legacy = [
-                Fernet(base64.urlsafe_b64encode(hashlib.sha256(b"vectrixdb authenticator secrets|" + s.encode()).digest()))
+                Fernet(
+                    base64.urlsafe_b64encode(
+                        hashlib.sha256(b"vectrixdb authenticator secrets|" + s.encode()).digest()
+                    )
+                )
                 for s in self._secrets
             ]
             self._primary = current[0]
@@ -381,7 +422,12 @@ class SignInStore:
 
         Refuses, changing nothing anywhere, when one cannot be opened with any secret configured.
         """
-        sealed = [(record, column) for record in people for column in ("totp_secret", "totp_pending") if record.data.get(column)]
+        sealed = [
+            (record, column)
+            for record in people
+            for column in ("totp_secret", "totp_pending")
+            if record.data.get(column)
+        ]
         if not sealed:
             return []
         cipher = self._cipher()
@@ -433,7 +479,10 @@ class SignInStore:
         connection = getattr(self._records, "sqlite_connection", None)
         if connection is None:
             return
-        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        tables = {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
         old = [t for t in _OLD_TABLES if t in tables]
         if not old:
             return
@@ -455,7 +504,10 @@ class SignInStore:
                 kept.chmod(0o600)
             except OSError:  # pragma: no cover - a file system without modes
                 pass
-            logger.warning("The sign-in file was copied into its new form. The file as it was is kept at %s: delete it once people can sign in.", kept)
+            logger.warning(
+                "The sign-in file was copied into its new form. The file as it was is kept at %s: delete it once people can sign in.",
+                kept,
+            )
         self._records.load(records, drop=old)  # type: ignore[attr-defined]
 
     # ------------------------------------------------------------- people ---
@@ -488,7 +540,13 @@ class SignInStore:
         found = [self._person(r) for r in self._records.query(PERSON)]
         return sorted((p for p in found if p is not None), key=lambda p: p.email)
 
-    def put_person(self, email: str, role: str, principal: Optional[dict] = None, grants: Optional[Sequence[str]] = None) -> Person:
+    def put_person(
+        self,
+        email: str,
+        role: str,
+        principal: Optional[dict] = None,
+        grants: Optional[Sequence[str]] = None,
+    ) -> Person:
         """Add somebody, or change their role or what they were given. Their ways to sign in are left alone."""
         email = normalise_email(email)
         if "@" not in email or email.startswith("@") or email.endswith("@"):
@@ -504,13 +562,16 @@ class SignInStore:
             if wanted is not None:
                 data["grants"] = wanted
 
-        if self._change(PERSON, email, change) is None and not self._records.create(Record(PERSON, email, _new_person(role, principal, wanted))):
+        if self._change(PERSON, email, change) is None and not self._records.create(
+            Record(PERSON, email, _new_person(role, principal, wanted))
+        ):
             self._change(PERSON, email, change)  # added by another server at the same moment
         # A change of role ends the sessions that carried the old one, and so does a change in what they were given.
         for record in self._records.query(SESSION, ix1=email):
             data = record.data
             if (data.get("method") in LOCAL_METHODS or data.get("listed")) and (
-                data.get("role") != role or (wanted is not None and roles.clean_grants(data.get("grants") or []) != wanted)
+                data.get("role") != role
+                or (wanted is not None and roles.clean_grants(data.get("grants") or []) != wanted)
             ):
                 self._records.delete(SESSION, record.key)
         found = self.person(email)
@@ -543,7 +604,11 @@ class SignInStore:
         return gone
 
     def admins(self) -> int:
-        return sum(1 for r in self._records.query(PERSON) if r.data.get("role") == roles.ADMIN and not r.data.get("disabled"))
+        return sum(
+            1
+            for r in self._records.query(PERSON)
+            if r.data.get("role") == roles.ADMIN and not r.data.get("disabled")
+        )
 
     def seed(self, entries: Sequence[tuple[str, str]]) -> int:
         """People named in configuration who are not here yet. Nobody already here is changed."""
@@ -572,19 +637,27 @@ class SignInStore:
         if record is None or not record.data.get("totp_secret"):
             return None, None, False
         data = record.data
-        return self._open(data["totp_secret"]), data.get("last_step"), bool(data.get("totp_confirmed"))
+        return (
+            self._open(data["totp_secret"]),
+            data.get("last_step"),
+            bool(data.get("totp_confirmed")),
+        )
 
     def pending_secret(self, email: str) -> Optional[str]:
         secret, _, confirmed = self._secret_of(email)
         return None if confirmed else secret
 
-    def check_code(self, email: str, code: str, *, confirming: bool = False, now: Optional[float] = None) -> bool:
+    def check_code(
+        self, email: str, code: str, *, confirming: bool = False, now: Optional[float] = None
+    ) -> bool:
         """Whether the code is right, now, and unused. A right code is spent by this call, on every server at once."""
 
         def spend(data: dict) -> Any:
             if not data.get("totp_secret") or bool(data.get("totp_confirmed")) == confirming:
                 return False
-            step = totp.verify(self._open(data["totp_secret"]), code, last_step=data.get("last_step"), now=now)
+            step = totp.verify(
+                self._open(data["totp_secret"]), code, last_step=data.get("last_step"), now=now
+            )
             if step is None:
                 return False
             stamp = time.time()
@@ -607,9 +680,13 @@ class SignInStore:
     def _spent(data: dict, mark: str, now: float) -> bool:
         if mark in (data.get("spent") or []):
             return True
-        return data.get("mark") == mark and (bool(data.get("closed")) or float(data.get("until") or 0.0) < now)
+        return data.get("mark") == mark and (
+            bool(data.get("closed")) or float(data.get("until") or 0.0) < now
+        )
 
-    def use_emergency(self, admin: str, mark: str, until: float, *, now: Optional[float] = None) -> bool:
+    def use_emergency(
+        self, admin: str, mark: str, until: float, *, now: Optional[float] = None
+    ) -> bool:
         """The emergency password has just been given, right. False when it was used in an emergency that is over.
 
         A password works for one emergency. Its first use is written down with
@@ -624,10 +701,22 @@ class SignInStore:
             data = dict(record.data) if record is not None else {}
             spent = [str(m) for m in (data.get("spent") or [])]
             allowed = not self._spent(data, mark, moment)
-            if data.get("mark") and (data.get("mark") != mark or not allowed) and data["mark"] not in spent:
+            if (
+                data.get("mark")
+                and (data.get("mark") != mark or not allowed)
+                and data["mark"] not in spent
+            ):
                 spent.append(str(data["mark"]))
             if allowed:
-                data = {"mark": mark, "until": max(float(until), float(data.get("until") or 0.0) if data.get("mark") == mark else 0.0), "closed": False, "used_at": moment}
+                data = {
+                    "mark": mark,
+                    "until": max(
+                        float(until),
+                        float(data.get("until") or 0.0) if data.get("mark") == mark else 0.0,
+                    ),
+                    "closed": False,
+                    "used_at": moment,
+                }
             else:
                 data = {"mark": None, "until": 0.0, "closed": True, "used_at": data.get("used_at")}
             # The last fifty are remembered, which is years of emergencies.
@@ -684,7 +773,13 @@ class SignInStore:
             step = totp.verify(self._open(pending), code, now=now)
             if step is None:
                 return False
-            data.update(totp_secret=pending, totp_pending=None, totp_confirmed=True, last_step=step, totp_set_at=time.time())
+            data.update(
+                totp_secret=pending,
+                totp_pending=None,
+                totp_confirmed=True,
+                last_step=step,
+                totp_set_at=time.time(),
+            )
             return True
 
         return self._change(PERSON, normalise_email(email), swap) is True
@@ -695,7 +790,14 @@ class SignInStore:
         def change(data: dict) -> Any:
             if not data.get("totp_confirmed") and not data.get("totp_pending"):
                 return False
-            data.update(totp_secret=None, totp_pending=None, totp_confirmed=False, last_step=None, totp_set_at=None, totp_used_at=None)
+            data.update(
+                totp_secret=None,
+                totp_pending=None,
+                totp_confirmed=False,
+                last_step=None,
+                totp_set_at=None,
+                totp_used_at=None,
+            )
             return True
 
         return self._change(PERSON, normalise_email(email), change) is True
@@ -717,8 +819,16 @@ class SignInStore:
         def change(data: dict) -> None:
             dropped[:] = data.get("passkeys") or []
             data.update(
-                totp_secret=None, totp_pending=None, totp_confirmed=False, last_step=None, totp_set_at=None, totp_used_at=None,
-                password_hash=None, password_set_at=None, passkeys=[], recovery={},
+                totp_secret=None,
+                totp_pending=None,
+                totp_confirmed=False,
+                last_step=None,
+                totp_set_at=None,
+                totp_used_at=None,
+                password_hash=None,
+                password_set_at=None,
+                passkeys=[],
+                recovery={},
             )
 
         self._change(PERSON, email, change)
@@ -736,9 +846,18 @@ class SignInStore:
         data = record.data
         return {
             "passkeys": self._passkeys_of(data),
-            "authenticator": {"set_up_at": data.get("totp_set_at"), "used_at": data.get("totp_used_at")} if data.get("totp_confirmed") else None,
-            "recovery_codes_left": sum(1 for used in (data.get("recovery") or {}).values() if used is None),
-            "password": {"set_at": data.get("password_set_at")} if data.get("password_hash") else None,
+            "authenticator": {
+                "set_up_at": data.get("totp_set_at"),
+                "used_at": data.get("totp_used_at"),
+            }
+            if data.get("totp_confirmed")
+            else None,
+            "recovery_codes_left": sum(
+                1 for used in (data.get("recovery") or {}).values() if used is None
+            ),
+            "password": {"set_at": data.get("password_set_at")}
+            if data.get("password_hash")
+            else None,
         }
 
     # ---------------------------------------------------------- passwords ---
@@ -753,7 +872,9 @@ class SignInStore:
 
     def check_password(self, email: str, password: Optional[str]) -> bool:
         record = self._records.get(PERSON, normalise_email(email))
-        return passwords.check(password, record.data.get("password_hash") if record is not None else None)
+        return passwords.check(
+            password, record.data.get("password_hash") if record is not None else None
+        )
 
     # ------------------------------------------------------------ passkeys ---
 
@@ -771,7 +892,16 @@ class SignInStore:
                 return _unb64(record.data["user_handle"])
         raise VectrixError("another server kept changing the same sign-in person record. Try again")
 
-    def add_passkey(self, email: str, credential_id: bytes, public_key: bytes, alg: int, sign_count: int, transports: Sequence[str], name: str) -> dict:
+    def add_passkey(
+        self,
+        email: str,
+        credential_id: bytes,
+        public_key: bytes,
+        alg: int,
+        sign_count: int,
+        transports: Sequence[str],
+        name: str,
+    ) -> dict:
         email = normalise_email(email)
         key = _b64(credential_id)
         data = {
@@ -793,7 +923,12 @@ class SignInStore:
         if self._change(PERSON, email, listed) is None:
             self._records.delete(PASSKEY, key)
             raise PasskeyRefused("Nobody on this server's list has that address.")
-        return {"id": key, "name": data["name"], "created_at": data["created_at"], "last_used": None}
+        return {
+            "id": key,
+            "name": data["name"],
+            "created_at": data["created_at"],
+            "last_used": None,
+        }
 
     def _passkeys_of(self, person: dict) -> list[dict]:
         found = []
@@ -801,7 +936,14 @@ class SignInStore:
             record = self._records.get(PASSKEY, key)
             if record is not None:
                 data = record.data
-                found.append({"id": key, "name": data["name"], "created_at": data["created_at"], "last_used": data.get("last_used")})
+                found.append(
+                    {
+                        "id": key,
+                        "name": data["name"],
+                        "created_at": data["created_at"],
+                        "last_used": data.get("last_used"),
+                    }
+                )
         return sorted(found, key=lambda k: k["created_at"])
 
     def passkeys(self, email: str) -> list[dict]:
@@ -821,7 +963,12 @@ class SignInStore:
         if owner is None or key not in (owner.data.get("passkeys") or []):
             return None
         data = record.data
-        return {"email": data["email"], "public_key": base64.b64decode(data["public_key"]), "sign_count": data["sign_count"], "name": data["name"]}
+        return {
+            "email": data["email"],
+            "public_key": base64.b64decode(data["public_key"]),
+            "sign_count": data["sign_count"],
+            "name": data["name"],
+        }
 
     def touch_passkey(self, credential_id: str, sign_count: int) -> None:
         def change(data: dict) -> None:
@@ -850,7 +997,11 @@ class SignInStore:
     def new_challenge(self, purpose: str, email: str = "") -> bytes:
         challenge = secrets.token_bytes(32)
         self._records.purge()
-        record = Record(CHALLENGE, hashlib.sha256(challenge).hexdigest(), {"purpose": purpose, "email": normalise_email(email)})
+        record = Record(
+            CHALLENGE,
+            hashlib.sha256(challenge).hexdigest(),
+            {"purpose": purpose, "email": normalise_email(email)},
+        )
         record.expires = time.time() + CHALLENGE_SECONDS
         self._records.create(record)
         return challenge
@@ -893,7 +1044,11 @@ class SignInStore:
 
     def recovery_codes_left(self, email: str) -> int:
         record = self._records.get(PERSON, normalise_email(email))
-        return 0 if record is None else sum(1 for used in (record.data.get("recovery") or {}).values() if used is None)
+        return (
+            0
+            if record is None
+            else sum(1 for used in (record.data.get("recovery") or {}).values() if used is None)
+        )
 
     # --------------------------------------------------------------- links ---
 
@@ -903,7 +1058,9 @@ class SignInStore:
         for record in self._records.query(LINK, ix1=email):
             if record.data.get("purpose") == purpose:
                 self._records.delete(LINK, record.key)
-        link = Record(LINK, _hash(token), {"email": email, "purpose": purpose, "used_at": None}, ix1=email)
+        link = Record(
+            LINK, _hash(token), {"email": email, "purpose": purpose, "used_at": None}, ix1=email
+        )
         link.expires = time.time() + minutes * 60
         self._records.create(link)
         return token
@@ -949,7 +1106,11 @@ class SignInStore:
             now = time.time()
             record = self._records.get(ATTEMPT, key)
             data = record.data if record is not None else {}
-            count, first_at, level = data.get("count", 0), data.get("first_at", now), data.get("level", 0)
+            count, first_at, level = (
+                data.get("count", 0),
+                data.get("first_at", now),
+                data.get("level", 0),
+            )
             last_lock = data.get("locked_until")
             if last_lock and now - last_lock > LOCK_STEPS[-1]:
                 level = 0
@@ -958,10 +1119,16 @@ class SignInStore:
             count += 1
             shut = count >= limit
             if shut:
-                last_lock = now + (LOCK_STEPS[min(level, len(LOCK_STEPS) - 1)] if escalate else LOCK_STEPS[0])
+                last_lock = now + (
+                    LOCK_STEPS[min(level, len(LOCK_STEPS) - 1)] if escalate else LOCK_STEPS[0]
+                )
                 level = level + 1 if escalate else level
                 count, first_at = 0, now
-            fresh = Record(ATTEMPT, key, {"count": count, "first_at": first_at, "locked_until": last_lock, "level": level})
+            fresh = Record(
+                ATTEMPT,
+                key,
+                {"count": count, "first_at": first_at, "locked_until": last_lock, "level": level},
+            )
             # Forgotten a day after the last lock ends, which is when it would start again anyway.
             fresh.expires = max(now, last_lock or 0.0) + LOCK_STEPS[-1] + 60
             if record is None:
@@ -1033,10 +1200,21 @@ class SignInStore:
             SESSION,
             _hash(sid),
             {
-                "subject": session.subject, "email": session.email, "name": session.name, "role": session.role,
-                "principal": session.principal, "method": session.method, "csrf": session.csrf, "created_at": now,
-                "last_seen": now, "expires_at": session.expires_at, "grants": session.grants, "verified_at": now,
-                "user_agent": (user_agent or "")[:300] or None, "address": address, "groups": session.groups,
+                "subject": session.subject,
+                "email": session.email,
+                "name": session.name,
+                "role": session.role,
+                "principal": session.principal,
+                "method": session.method,
+                "csrf": session.csrf,
+                "created_at": now,
+                "last_seen": now,
+                "expires_at": session.expires_at,
+                "grants": session.grants,
+                "verified_at": now,
+                "user_agent": (user_agent or "")[:300] or None,
+                "address": address,
+                "groups": session.groups,
                 "listed": bool(listed),
             },
             expires=session.expires_at,
@@ -1059,12 +1237,20 @@ class SignInStore:
         Their sessions are ended when that changes; asking again here means one
         opened on another server at the same moment is not missed.
         """
-        if (data.get("method") not in LOCAL_METHODS and not data.get("listed")) or not data.get("email"):
+        if (data.get("method") not in LOCAL_METHODS and not data.get("listed")) or not data.get(
+            "email"
+        ):
             return True
         person = self._records.get(PERSON, data["email"])
-        if person is None or person.data.get("disabled") or person.data.get("role") != data.get("role"):
+        if (
+            person is None
+            or person.data.get("disabled")
+            or person.data.get("role") != data.get("role")
+        ):
             return False
-        return roles.clean_grants(person.data.get("grants") or []) == roles.clean_grants(data.get("grants") or [])
+        return roles.clean_grants(person.data.get("grants") or []) == roles.clean_grants(
+            data.get("grants") or []
+        )
 
     def session(self, sid: Optional[str], *, idle_minutes: float = 120) -> Optional[Session]:
         """The session this id names, if it is still good. Looking it up counts as activity."""
@@ -1081,7 +1267,9 @@ class SignInStore:
             return None
         if now - data["last_seen"] > 60:
             data["last_seen"] = now
-            self._records.replace(record)  # losing this race only means another request stamped it first
+            self._records.replace(
+                record
+            )  # losing this race only means another request stamped it first
         return Session(
             subject=data["subject"],
             email=data.get("email"),
@@ -1116,16 +1304,32 @@ class SignInStore:
 
     def sessions_of(self, subject: str) -> list[dict]:
         """Where this person is signed in, newest first. Nothing that could be replayed."""
-        found = sorted(self._records.query(SESSION, ix2=subject), key=lambda r: r.data.get("last_seen") or 0.0, reverse=True)
+        found = sorted(
+            self._records.query(SESSION, ix2=subject),
+            key=lambda r: r.data.get("last_seen") or 0.0,
+            reverse=True,
+        )
         return [
-            {"id": r.key[:16], "method": r.data["method"], "created_at": r.data["created_at"], "last_seen": r.data["last_seen"],
-             "user_agent": r.data.get("user_agent"), "address": r.data.get("address")}
+            {
+                "id": r.key[:16],
+                "method": r.data["method"],
+                "created_at": r.data["created_at"],
+                "last_seen": r.data["last_seen"],
+                "user_agent": r.data.get("user_agent"),
+                "address": r.data.get("address"),
+            }
             for r in found
         ]
 
-    def close_sessions_of(self, subject: str, *, only: Optional[str] = None, keep: Optional[str] = None) -> int:
+    def close_sessions_of(
+        self, subject: str, *, only: Optional[str] = None, keep: Optional[str] = None
+    ) -> int:
         """End one of this person's sessions by its listed id, or all of them but ``keep``."""
-        doomed = [r.key for r in self._records.query(SESSION, ix2=subject) if (only is None or r.key[:16] == only) and r.key[:16] != keep]
+        doomed = [
+            r.key
+            for r in self._records.query(SESSION, ix2=subject)
+            if (only is None or r.key[:16] == only) and r.key[:16] != keep
+        ]
         for key in doomed:
             self._records.delete(SESSION, key)
         return len(doomed)
@@ -1151,7 +1355,9 @@ class SignInStore:
         does not outlive it.
         """
         if role not in roles.KEY_ROLES:
-            raise ConfigurationError(f"{role!r} is not a role a key can have. Keys can be {', '.join(roles.KEY_ROLES)}")
+            raise ConfigurationError(
+                f"{role!r} is not a role a key can have. Keys can be {', '.join(roles.KEY_ROLES)}"
+            )
         name = str(name or "").strip()[:60]
         if not name:
             raise ConfigurationError("Give the key a name, so it is clear later what uses it")
@@ -1159,24 +1365,46 @@ class SignInStore:
         if expires_at is not None:
             expires_at = float(expires_at)
             if expires_at <= time.time():
-                raise ConfigurationError("A key that has already expired is no use. Give a time in the future, or none at all")
+                raise ConfigurationError(
+                    "A key that has already expired is no use. Give a time in the future, or none at all"
+                )
         if per_minute is not None:
             per_minute = int(per_minute)
             if per_minute < 1:
-                raise ConfigurationError("A key that may make no requests is no key. Give a number of requests a minute, or none at all")
+                raise ConfigurationError(
+                    "A key that may make no requests is no key. Give a number of requests a minute, or none at all"
+                )
         key_id = secrets.token_hex(4)
         key = f"vx_{key_id}_{secrets.token_urlsafe(32)}"
         made = ApiKey(
-            key_id=key_id, name=name, role=role, prefix=key[:11], created_by=created_by,
-            created_at=time.time(), last_used=None, collections=scope, expires_at=expires_at, per_minute=per_minute,
+            key_id=key_id,
+            name=name,
+            role=role,
+            prefix=key[:11],
+            created_by=created_by,
+            created_at=time.time(),
+            last_used=None,
+            collections=scope,
+            expires_at=expires_at,
+            per_minute=per_minute,
         )
         self._records.create(
             Record(
                 APIKEY,
                 _hash(key),
-                {"key_id": key_id, "name": name, "role": role, "prefix": made.prefix, "created_by": created_by,
-                 "created_at": made.created_at, "last_used": None, "revoked_at": None,
-                 "collections": list(scope), "expires_at": expires_at, "per_minute": per_minute},
+                {
+                    "key_id": key_id,
+                    "name": name,
+                    "role": role,
+                    "prefix": made.prefix,
+                    "created_by": created_by,
+                    "created_at": made.created_at,
+                    "last_used": None,
+                    "revoked_at": None,
+                    "collections": list(scope),
+                    "expires_at": expires_at,
+                    "per_minute": per_minute,
+                },
             )
         )
         return made, key
@@ -1186,9 +1414,16 @@ class SignInStore:
         # A record written before keys could be scoped has neither field, and
         # reads as what it was: every collection, and no expiry.
         return ApiKey(
-            data["key_id"], data["name"], data["role"], data["prefix"], data.get("created_by"),
-            data["created_at"], last_used,
-            tuple(data.get("collections") or ()), data.get("expires_at"), data.get("per_minute"),
+            data["key_id"],
+            data["name"],
+            data["role"],
+            data["prefix"],
+            data.get("created_by"),
+            data["created_at"],
+            last_used,
+            tuple(data.get("collections") or ()),
+            data.get("expires_at"),
+            data.get("per_minute"),
         )
 
     # ---------------------------------------------------------- rate limit ---
@@ -1245,7 +1480,10 @@ class SignInStore:
 
     def keys(self) -> list[ApiKey]:
         live = [r.data for r in self._records.query(APIKEY) if not r.data.get("revoked_at")]
-        return [self._key(d, d.get("last_used")) for d in sorted(live, key=lambda d: d["created_at"], reverse=True)]
+        return [
+            self._key(d, d.get("last_used"))
+            for d in sorted(live, key=lambda d: d["created_at"], reverse=True)
+        ]
 
     def revoke_key(self, key_id: str) -> Optional[str]:
         """Revoke a key. Its name, or None when there was no such key."""
@@ -1259,7 +1497,11 @@ class SignInStore:
                 data["revoked_at"] = time.time()
                 return True
 
-            return str(record.data["name"]) if self._change(APIKEY, record.key, revoke) is True else None
+            return (
+                str(record.data["name"])
+                if self._change(APIKEY, record.key, revoke) is True
+                else None
+            )
         return None
 
     # ---------------------------------------------------- the collection store ---
@@ -1307,40 +1549,140 @@ def _records_from_tables(connection: sqlite3.Connection, tables: set) -> list[Re
     out: list[Record] = []
     for p in rows("people"):
         email = p["email"]
-        data = _new_person(p["role"], json.loads(p.get("principal") or "{}"), json.loads(p.get("grants") or "[]"))
+        data = _new_person(
+            p["role"], json.loads(p.get("principal") or "{}"), json.loads(p.get("grants") or "[]")
+        )
         data.update(
-            created_at=p.get("created_at") or 0.0, last_sign_in=p.get("last_sign_in"), disabled=bool(p.get("disabled")),
-            totp_secret=p.get("totp_secret"), totp_confirmed=bool(p.get("totp_confirmed")), last_step=p.get("last_step"),
-            totp_pending=p.get("totp_pending"), totp_set_at=p.get("totp_set_at"), totp_used_at=p.get("totp_used_at"),
-            password_hash=p.get("password_hash"), password_set_at=p.get("password_set_at"), user_handle=p.get("user_handle"),
-            passkeys=[k["credential_id"] for k in sorted(passkeys, key=lambda k: k["created_at"]) if k["email"] == email],
+            created_at=p.get("created_at") or 0.0,
+            last_sign_in=p.get("last_sign_in"),
+            disabled=bool(p.get("disabled")),
+            totp_secret=p.get("totp_secret"),
+            totp_confirmed=bool(p.get("totp_confirmed")),
+            last_step=p.get("last_step"),
+            totp_pending=p.get("totp_pending"),
+            totp_set_at=p.get("totp_set_at"),
+            totp_used_at=p.get("totp_used_at"),
+            password_hash=p.get("password_hash"),
+            password_set_at=p.get("password_set_at"),
+            user_handle=p.get("user_handle"),
+            passkeys=[
+                k["credential_id"]
+                for k in sorted(passkeys, key=lambda k: k["created_at"])
+                if k["email"] == email
+            ],
             recovery={r["code_hash"]: r.get("used_at") for r in recovery if r["email"] == email},
         )
         out.append(Record(PERSON, email, data))
     for s in rows("sessions"):
         if s["expires_at"] > now:
-            data = {k: s.get(k) for k in ("subject", "email", "name", "role", "method", "csrf", "created_at", "last_seen", "expires_at",
-                                          "verified_at", "user_agent", "address")}
-            data.update(principal=json.loads(s.get("principal") or "{}"), grants=json.loads(s.get("grants") or "[]"))
+            data = {
+                k: s.get(k)
+                for k in (
+                    "subject",
+                    "email",
+                    "name",
+                    "role",
+                    "method",
+                    "csrf",
+                    "created_at",
+                    "last_seen",
+                    "expires_at",
+                    "verified_at",
+                    "user_agent",
+                    "address",
+                )
+            }
+            data.update(
+                principal=json.loads(s.get("principal") or "{}"),
+                grants=json.loads(s.get("grants") or "[]"),
+            )
             data["verified_at"] = data["verified_at"] or 0.0
-            out.append(Record(SESSION, s["sid_hash"], data, expires=s["expires_at"], ix1=s.get("email"), ix2=s["subject"]))
+            out.append(
+                Record(
+                    SESSION,
+                    s["sid_hash"],
+                    data,
+                    expires=s["expires_at"],
+                    ix1=s.get("email"),
+                    ix2=s["subject"],
+                )
+            )
     for link in rows("links"):
         if link["expires_at"] > now:
-            out.append(Record(LINK, link["token_hash"], {"email": link["email"], "purpose": link["purpose"], "used_at": link.get("used_at")},
-                              expires=link["expires_at"], ix1=link["email"]))
+            out.append(
+                Record(
+                    LINK,
+                    link["token_hash"],
+                    {
+                        "email": link["email"],
+                        "purpose": link["purpose"],
+                        "used_at": link.get("used_at"),
+                    },
+                    expires=link["expires_at"],
+                    ix1=link["email"],
+                )
+            )
     for a in rows("attempts"):
         lock = a.get("locked_until")
-        out.append(Record(ATTEMPT, a["key"], {"count": a["count"], "first_at": a["first_at"], "locked_until": lock, "level": a.get("level") or 0},
-                          expires=max(now, lock or 0.0) + LOCK_STEPS[-1] + 60))
+        out.append(
+            Record(
+                ATTEMPT,
+                a["key"],
+                {
+                    "count": a["count"],
+                    "first_at": a["first_at"],
+                    "locked_until": lock,
+                    "level": a.get("level") or 0,
+                },
+                expires=max(now, lock or 0.0) + LOCK_STEPS[-1] + 60,
+            )
+        )
     for k in passkeys:
-        out.append(Record(PASSKEY, k["credential_id"], {
-            "email": k["email"], "public_key": k["public_key"], "alg": k["alg"], "sign_count": k.get("sign_count") or 0,
-            "transports": json.loads(k.get("transports") or "[]"), "name": k["name"], "created_at": k["created_at"], "last_used": k.get("last_used"),
-        }, ix1=k["email"]))
+        out.append(
+            Record(
+                PASSKEY,
+                k["credential_id"],
+                {
+                    "email": k["email"],
+                    "public_key": k["public_key"],
+                    "alg": k["alg"],
+                    "sign_count": k.get("sign_count") or 0,
+                    "transports": json.loads(k.get("transports") or "[]"),
+                    "name": k["name"],
+                    "created_at": k["created_at"],
+                    "last_used": k.get("last_used"),
+                },
+                ix1=k["email"],
+            )
+        )
     for c in rows("challenges"):
         if c["expires_at"] > now:
-            out.append(Record(CHALLENGE, c["challenge_hash"], {"purpose": c["purpose"], "email": c["email"]}, expires=c["expires_at"]))
+            out.append(
+                Record(
+                    CHALLENGE,
+                    c["challenge_hash"],
+                    {"purpose": c["purpose"], "email": c["email"]},
+                    expires=c["expires_at"],
+                )
+            )
     for k in rows("api_keys"):
-        out.append(Record(APIKEY, k["key_hash"], {key: k.get(key) for key in (
-            "key_id", "name", "role", "prefix", "created_by", "created_at", "last_used", "revoked_at")}))
+        out.append(
+            Record(
+                APIKEY,
+                k["key_hash"],
+                {
+                    key: k.get(key)
+                    for key in (
+                        "key_id",
+                        "name",
+                        "role",
+                        "prefix",
+                        "created_by",
+                        "created_at",
+                        "last_used",
+                        "revoked_at",
+                    )
+                },
+            )
+        )
     return out

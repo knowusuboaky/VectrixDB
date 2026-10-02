@@ -63,13 +63,17 @@ def env_secret(env: Mapping[str, str], name: str) -> Optional[str]:
     inline = str(env.get(name, "") or "").strip()
     file_name = str(env.get(name + "_FILE", "") or "").strip()
     if inline and file_name:
-        raise ConfigurationError(f"{name} and {name}_FILE are both set. Keep one, so there is no doubt which is meant")
+        raise ConfigurationError(
+            f"{name} and {name}_FILE are both set. Keep one, so there is no doubt which is meant"
+        )
     if not file_name:
         return inline or None
     try:
         value = Path(file_name).read_text(encoding="utf-8").strip()
     except OSError as exc:
-        raise ConfigurationError(f"{name}_FILE names {file_name}, which cannot be read: {exc}") from exc
+        raise ConfigurationError(
+            f"{name}_FILE names {file_name}, which cannot be read: {exc}"
+        ) from exc
     if not value:
         raise ConfigurationError(f"{name}_FILE names {file_name}, which is empty")
     return value

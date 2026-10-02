@@ -133,10 +133,17 @@ class TestSearchAcrossShards:
         sharded = _collection(tmp_path / "sharded", name="s", shard_size=6)
         _fill(sharded, vectors)
 
-        for query in vectors[:5]:
-            want = [r.id for r in plain.search(query=query, limit=5).results]
-            got = [r.id for r in sharded.search(query=query, limit=5).results]
-            assert got == want
+        # Both are held to the exact answer. A collection this small is
+        # searched exactly (EXACT_SEARCH_BELOW); before that, the plain HNSW
+        # index missed a true neighbour about one query in twenty, and a test
+        # comparing the two directly failed whenever it was the one that did.
+        unit = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+        for query, row in zip(vectors[:5], unit[:5]):
+            exact = {f"d{i}" for i in np.argsort(-(unit @ row))[:5]}
+            want = {r.id for r in plain.search(query=query, limit=5).results}
+            got = {r.id for r in sharded.search(query=query, limit=5).results}
+            assert got == exact
+            assert want == exact
 
     def test_metadata_comes_back_with_a_sharded_hit(self, tmp_path):
         vectors = _vectors(12)
@@ -188,6 +195,41 @@ class TestDeleteAndUpsert:
         collection.add(ids=[ids[0]], vectors=vectors[0:1], metadata=[{"i": 0}])
         found = [r.id for r in collection.search(query=vectors[0], limit=1).results]
         assert found == [ids[0]]
+
+    @staticmethod
+    def _sealed_then_readded(tmp_path):
+        """Key 0 sits sealed at e0 and has been re-added, far away, to the head."""
+        from vectrixdb.core.sharded_index import ShardedIndex
+
+        index = ShardedIndex(
+            dimension=DIMS,
+            metric="cos",
+            connectivity=16,
+            expansion_add=200,
+            expansion_search=50,
+            shard_size=4,
+            directory=tmp_path,
+            stem="stale",
+        )
+        eye = np.eye(DIMS, dtype=np.float32)
+        vectors = eye[:5].copy()
+        vectors[4] = 0.9 * eye[0] + 0.1 * eye[1]  # the head's nearest to e0
+        index.add(np.arange(5, dtype=np.uint64), vectors)  # seals keys 0-3
+        index.remove(0)
+        index.add(np.array([0], dtype=np.uint64), eye[7:8])
+        return index, eye
+
+    def test_a_readded_key_never_answers_with_its_sealed_copy(self, tmp_path):
+        index, eye = self._sealed_then_readded(tmp_path)
+        found = index.search(eye[0], 1)
+        # Key 0 is now e7. Key 0 first, at distance 0, is its stale copy.
+        assert found.keys.tolist() == [4]
+
+    def test_removing_a_readded_key_does_not_resurrect_its_sealed_copy(self, tmp_path):
+        index, eye = self._sealed_then_readded(tmp_path)
+        index.remove(0)
+        assert not index.contains(0)
+        assert 0 not in index.search(eye[0], 8).keys.tolist()
 
 
 class TestPersistence:

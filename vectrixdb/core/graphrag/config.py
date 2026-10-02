@@ -350,9 +350,7 @@ class GraphRAGConfig:
         self.llm_api_key = api_key
         return self
 
-    def with_bedrock(
-        self, model: str = "amazon.nova-lite-v1:0"
-    ) -> "GraphRAGConfig":
+    def with_bedrock(self, model: str = "amazon.nova-lite-v1:0") -> "GraphRAGConfig":
         """Configure for AWS Bedrock."""
         self.llm_provider = LLMProvider.AWS_BEDROCK
         self.llm_model = model

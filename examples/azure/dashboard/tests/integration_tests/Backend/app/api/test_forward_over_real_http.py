@@ -89,7 +89,9 @@ def service() -> FastAPI:
         await socket.accept()
         # What the handshake carried, so the test can see who the service was
         # told is watching, then an event of the kind the pages refresh on.
-        await socket.send_json({"cookie": socket.headers.get("cookie"), "key": socket.headers.get("api-key")})
+        await socket.send_json(
+            {"cookie": socket.headers.get("cookie"), "key": socket.headers.get("api-key")}
+        )
         await socket.send_json({"event": "collection_created", "data": {"collection": "financial"}})
         while True:
             try:
@@ -117,7 +119,9 @@ class Running:
 
     def __init__(self, app: FastAPI) -> None:
         self.port = free_port()
-        config = uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="warning", access_log=False)
+        config = uvicorn.Config(
+            app, host="127.0.0.1", port=self.port, log_level="warning", access_log=False
+        )
         self.server = uvicorn.Server(config)
         self.thread = threading.Thread(target=self.server.run, daemon=True)
 
@@ -145,7 +149,9 @@ def upstream() -> Iterator[Running]:
 
 
 def reader(upstream: Running, **settings) -> TestClient:
-    where = Settings(upstream=upstream.url, site=Path(__file__).parent / "no-build-here", **settings)
+    where = Settings(
+        upstream=upstream.url, site=Path(__file__).parent / "no-build-here", **settings
+    )
     return TestClient(build(where))
 
 
@@ -182,19 +188,25 @@ class TestWhatTheHopDoesNotChange:
 
     def test_the_caller_is_who_the_service_sees(self, upstream):
         with reader(upstream, key="ours") as browser:
-            mine = browser.post("/api/v1/echo", content=b"", headers={"user-agent": "a browser"}).json()
+            mine = browser.post(
+                "/api/v1/echo", content=b"", headers={"user-agent": "a browser"}
+            ).json()
             theirs = browser.post("/api/v1/echo", content=b"", headers={"api-key": "theirs"}).json()
         assert mine["key"] == "ours", "our key when they sent none"
         assert mine["agent"] == "a browser", "who is calling reaches the service's access log"
         assert mine["te"] is None, "a header about the browser's hop stopped here"
-        assert theirs["key"] == "theirs", "their key when they have one, because the policy is about them"
+        assert theirs["key"] == "theirs", (
+            "their key when they have one, because the policy is about them"
+        )
 
 
 class TestAServiceThatIsTooSlow:
     def test_a_service_slower_than_our_ceiling_is_a_bad_gateway(self, upstream):
         with reader(upstream, timeout=0.5) as browser:
             got = browser.get("/api/v1/slow")
-        assert got.status_code == 502, "not a five hundred: this service is up, the other one is late"
+        assert got.status_code == 502, (
+            "not a five hundred: this service is up, the other one is late"
+        )
         assert "did not answer" in got.json()["detail"]
 
 
@@ -205,7 +217,10 @@ class TestTheLiveSocket:
         with reader(upstream) as browser:
             with browser.websocket_connect("/ws") as socket:
                 socket.receive_json()  # the handshake's own report, checked below
-                assert socket.receive_json() == {"event": "collection_created", "data": {"collection": "financial"}}
+                assert socket.receive_json() == {
+                    "event": "collection_created",
+                    "data": {"collection": "financial"},
+                }
                 socket.send_text("still here")
                 assert socket.receive_text() == "heard still here"
 
@@ -213,5 +228,7 @@ class TestTheLiveSocket:
         with reader(upstream, key="ours") as browser:
             with browser.websocket_connect("/ws", headers={"cookie": "vx_sid=abc"}) as socket:
                 seen = socket.receive_json()
-        assert seen["cookie"] == "vx_sid=abc", "the socket is the caller's, so the service reads their session"
+        assert seen["cookie"] == "vx_sid=abc", (
+            "the socket is the caller's, so the service reads their session"
+        )
         assert seen["key"] == "ours", "our key travels on the handshake as it does on a call"

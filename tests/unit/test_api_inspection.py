@@ -87,7 +87,11 @@ class TestBuildsQualityProvenance:
         data = client.get("/api/v1/collections/plain/builds").json()["data"]
         assert data["current"]
         (build,) = data["builds"]
-        assert {k: build[k] for k in ("build_id", "chunks", "current")} == {"build_id": data["current"], "chunks": 2, "current": True}
+        assert {k: build[k] for k in ("build_id", "chunks", "current")} == {
+            "build_id": data["current"],
+            "chunks": 2,
+            "current": True,
+        }
         # Since 2.2 a build also says when it first wrote and how its chunks read.
         assert build["written_at"] and isinstance(build["low"], int) and "quality" in build
 
@@ -107,10 +111,16 @@ class TestBuildsQualityProvenance:
 
     def test_the_lowest_chunks_page_with_an_offset(self, client):
         first = client.get("/api/v1/collections/plain/quality?worst=1&text=false").json()["data"]
-        second = client.get("/api/v1/collections/plain/quality?worst=1&offset=1&text=false").json()["data"]
+        second = client.get("/api/v1/collections/plain/quality?worst=1&offset=1&text=false").json()[
+            "data"
+        ]
         assert first["offset"] == 0 and second["offset"] == 1
-        assert first["worst"][0]["quality"] == 0.31 and second["worst"][0]["quality"] == 0.93, "the page after the lowest is the next lowest"
-        assert first["below"] == second["below"], "the count under the line is the whole collection's, whatever the page"
+        assert first["worst"][0]["quality"] == 0.31 and second["worst"][0]["quality"] == 0.93, (
+            "the page after the lowest is the next lowest"
+        )
+        assert first["below"] == second["below"], (
+            "the count under the line is the whole collection's, whatever the page"
+        )
 
     @pytest.mark.parametrize("route", ["builds", "quality", "provenance/x"])
     def test_a_policied_collection_is_refused(self, client, route):
@@ -210,14 +220,26 @@ class TestAudit:
         data = client.get("/api/v1/audit", headers={"api-key": "k"}).json()["data"]
         assert data["available"] is False and "VECTRIXDB_AUDIT_JSONL" in data["reason"]
 
-    def test_records_come_back_newest_first_without_the_sensitive_fields(self, client, tmp_path, monkeypatch):
+    def test_records_come_back_newest_first_without_the_sensitive_fields(
+        self, client, tmp_path, monkeypatch
+    ):
         monkeypatch.setenv("VECTRIXDB_API_KEY", "k")
         monkeypatch.setenv("VECTRIXDB_AUDIT_JSONL", str(self._records(tmp_path)))
         data = client.get("/api/v1/audit", headers={"api-key": "k"}).json()["data"]
         assert data["available"] is True
-        assert [r.get("decision_id") or r.get("ingestion_id") for r in data["records"]] == ["ing_1", "dec_2", "dec_1"]
+        assert [r.get("decision_id") or r.get("ingestion_id") for r in data["records"]] == [
+            "ing_1",
+            "dec_2",
+            "dec_1",
+        ]
         first = data["records"][-1]
         assert first["withheld_disclosable"] == 1 and first["query_fingerprint"] == "3b0e"
         for banned in ("principal_snapshot", "result_ids", "withheld_undisclosable"):
             assert banned not in first
-        assert data["counts"] == {"decisions": 2, "ingestions": 1, "denied": 0, "undecidable": 1, "refused": 0}
+        assert data["counts"] == {
+            "decisions": 2,
+            "ingestions": 1,
+            "denied": 0,
+            "undecidable": 1,
+            "refused": 0,
+        }

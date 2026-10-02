@@ -36,13 +36,21 @@ class FakeAppendContainer:
         self.made: list = []
 
     def get_container_properties(self):
-        return {"has_immutability_policy": self.locked, "has_legal_hold": False, "immutable_storage_with_versioning_enabled": False}
+        return {
+            "has_immutability_policy": self.locked,
+            "has_legal_hold": False,
+            "immutable_storage_with_versioning_enabled": False,
+        }
 
     def get_blob_client(self, name):
         return _Blob(self, name)
 
     def list_blobs(self, name_starts_with=""):
-        return [types.SimpleNamespace(name=name) for name in sorted(self.blobs) if name.startswith(name_starts_with)]
+        return [
+            types.SimpleNamespace(name=name)
+            for name in sorted(self.blobs)
+            if name.startswith(name_starts_with)
+        ]
 
 
 class _Blob:
@@ -51,7 +59,9 @@ class _Blob:
         self.name = name
 
     def create_append_blob(self, **conditions):
-        assert conditions, "made without a condition, a blob made a moment ago by another server would be emptied"
+        assert conditions, (
+            "made without a condition, a blob made a moment ago by another server would be emptied"
+        )
         if self.name in self.container.blobs:
             raise BlobError(409, "BlobAlreadyExists")
         self.container.blobs[self.name] = bytearray()

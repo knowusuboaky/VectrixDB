@@ -31,7 +31,16 @@ BACKEND = Path(__file__).resolve().parents[2]
 #:
 #: /brand.json, /brand.css and /brand/ are the company's name, colours and
 #: logo, set once on the retrieval service and shown by both dashboards.
-FORWARDED: Tuple[str, ...] = ("/api", "/auth", "/health", "/docs", "/openapi.json", "/brand.json", "/brand.css", "/brand")
+FORWARDED: Tuple[str, ...] = (
+    "/api",
+    "/auth",
+    "/health",
+    "/docs",
+    "/openapi.json",
+    "/brand.json",
+    "/brand.css",
+    "/brand",
+)
 
 
 def forwardable(path: str, prefixes: Tuple[str, ...] = FORWARDED) -> bool:
@@ -61,7 +70,9 @@ def gateway_paths(value: str) -> Dict[str, str]:
         route, equals, where = entry.partition("=")
         name, path = _names(route, "a route")[1:], _names(where, "a gateway path")
         if not equals or not name or not path:
-            raise ValueError(f"UPSTREAM_GATEWAY_PATHS: a gateway path is route=path with both given, not {entry.strip()!r}")
+            raise ValueError(
+                f"UPSTREAM_GATEWAY_PATHS: a gateway path is route=path with both given, not {entry.strip()!r}"
+            )
         if name in paths:
             raise ValueError(f"UPSTREAM_GATEWAY_PATHS: {name} is given two gateway paths")
         paths[name] = path
@@ -108,7 +119,10 @@ class Settings:
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "Settings":
         """The settings as the environment and the .env file give them."""
-        source: dict = {**_from_file(BACKEND / ".env"), **(os.environ if env is None else dict(env))}
+        source: dict = {
+            **_from_file(BACKEND / ".env"),
+            **(os.environ if env is None else dict(env)),
+        }
         settings = cls(
             upstream=str(source.get("UPSTREAM", "")).strip().rstrip("/"),
             key=str(source.get("UPSTREAM_KEY", "")).strip(),
@@ -128,7 +142,9 @@ class Settings:
     def upstream_path(self, path: str) -> str:
         """Where a route is on the retrieval service, as its gateway publishes it: the route's gateway path, the prefix, the route."""
         bare = path.split("?", 1)[0].strip("/")
-        name = max((n for n in self.paths if bare == n or bare.startswith(n + "/")), key=len, default=None)
+        name = max(
+            (n for n in self.paths if bare == n or bare.startswith(n + "/")), key=len, default=None
+        )
         return f"{self.paths[name] if name else ''}{self.prefix}{path}"
 
     @property

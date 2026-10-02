@@ -96,7 +96,9 @@ class AzureTranslator:
         return f"{type(self).__name__}({self.endpoint!r}, region={self.region!r})"
 
     @classmethod
-    def from_environment(cls, env: Optional[Mapping[str, str]] = None, **kwargs: Any) -> Optional["AzureTranslator"]:
+    def from_environment(
+        cls, env: Optional[Mapping[str, str]] = None, **kwargs: Any
+    ) -> Optional["AzureTranslator"]:
         """One built from ``AZURE_TRANSLATOR_KEY``, ``_REGION`` and ``_ENDPOINT``, or None without a key."""
         found = os.environ if env is None else env
         key = str(found.get("AZURE_TRANSLATOR_KEY") or "").strip()
@@ -111,7 +113,9 @@ class AzureTranslator:
 
     # -- the three calls
 
-    def translate(self, texts: Texts, to: Union[str, Sequence[str]], *, source: Optional[str] = None) -> List[Dict[str, Any]]:
+    def translate(
+        self, texts: Texts, to: Union[str, Sequence[str]], *, source: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Each text in each language asked for, in the order given.
 
         ``to`` is one language code or several. ``source`` is the language
@@ -119,22 +123,28 @@ class AzureTranslator:
         it decided in ``detected``, which is worth reading, because a short
         text is easy to mistake.
         """
-        items = self._texts(texts)
         targets = [to] if isinstance(to, str) else list(to)
         if not targets or not all(isinstance(t, str) and t.strip() for t in targets):
             raise ValueError("to is a language code, like 'fr', or a list of them")
+        items = self._texts(texts, len(targets))
         query: List[Any] = [("to", t.strip()) for t in targets]
         if source:
             query.append(("from", source.strip()))
         out: List[Dict[str, Any]] = []
-        for batch in self._batches(items):
+        for batch in self._batches(items, len(targets)):
             for answer in self._post("translate", query, batch):
                 found: Dict[str, Any] = {
-                    "translations": {str(t.get("to")): str(t.get("text") or "") for t in answer.get("translations") or []}
+                    "translations": {
+                        str(t.get("to")): str(t.get("text") or "")
+                        for t in answer.get("translations") or []
+                    }
                 }
                 detected = answer.get("detectedLanguage")
                 if detected:
-                    found["detected"] = {"language": detected.get("language"), "score": detected.get("score")}
+                    found["detected"] = {
+                        "language": detected.get("language"),
+                        "score": detected.get("score"),
+                    }
                 out.append(found)
         return out
 
@@ -149,7 +159,8 @@ class AzureTranslator:
                     "translatable": bool(answer.get("isTranslationSupported")),
                 }
                 alternatives = [
-                    {"language": a.get("language"), "score": a.get("score")} for a in answer.get("alternatives") or []
+                    {"language": a.get("language"), "score": a.get("score")}
+                    for a in answer.get("alternatives") or []
                 ]
                 if alternatives:
                     found["alternatives"] = alternatives
@@ -164,39 +175,55 @@ class AzureTranslator:
         wants.
         """
         status, _headers, body = self._send(
-            "GET", f"{self.endpoint}/languages?api-version={self.API}&scope={scope}", {"Accept": "application/json"}, b""
+            "GET",
+            f"{self.endpoint}/languages?api-version={self.API}&scope={scope}",
+            {"Accept": "application/json"},
+            b"",
         )
         payload = self._read(status, body, "languages")
         found = payload.get(scope) or {}
         return {
-            str(code): {"name": info.get("name"), "native": info.get("nativeName"), "direction": info.get("dir", "ltr")}
+            str(code): {
+                "name": info.get("name"),
+                "native": info.get("nativeName"),
+                "direction": info.get("dir", "ltr"),
+            }
             for code, info in sorted(found.items())
         }
 
     # -- the requests
 
-    @staticmethod
-    def _texts(texts: Texts) -> List[str]:
+    @classmethod
+    def _most_characters(cls, targets: int = 1) -> int:
+        """The characters one request may carry. The service counts the
+        limit once per target language, so three targets leave a third."""
+        return cls.MOST_CHARACTERS // max(1, int(targets))
+
+    @classmethod
+    def _texts(cls, texts: Texts, targets: int = 1) -> List[str]:
         items = [texts] if isinstance(texts, str) else list(texts)
         if not items:
             raise ValueError("there is nothing to translate: texts is empty")
+        most = cls._most_characters(targets)
         for text in items:
             if not isinstance(text, str):
                 raise TypeError(f"each text is a string, got {type(text).__name__}")
-            if len(text) > AzureTranslator.MOST_CHARACTERS:
+            if len(text) > most:
+                into = f" into {targets} languages" if targets > 1 else ""
                 raise ValueError(
                     f"one text is {len(text):,} characters and the service takes "
-                    f"{AzureTranslator.MOST_CHARACTERS:,} at most; split it where a sentence ends"
+                    f"{most:,} at most{into}; split it where a sentence ends"
                 )
         return items
 
     @classmethod
-    def _batches(cls, items: Iterable[str]) -> Iterable[List[str]]:
+    def _batches(cls, items: Iterable[str], targets: int = 1) -> Iterable[List[str]]:
         """The texts in as few requests as the service's limits allow, in order."""
         batch: List[str] = []
         characters = 0
+        most = cls._most_characters(targets)
         for text in items:
-            if batch and (len(batch) >= cls.MOST_TEXTS or characters + len(text) > cls.MOST_CHARACTERS):
+            if batch and (len(batch) >= cls.MOST_TEXTS or characters + len(text) > most):
                 yield batch
                 batch, characters = [], 0
             batch.append(text)
@@ -207,7 +234,8 @@ class AzureTranslator:
     def _post(self, path: str, query: List[Any], batch: List[str]) -> List[Dict[str, Any]]:
         if not self._key:
             raise TranslationError(
-                f"{path} needs a key: set AZURE_TRANSLATOR_KEY, or pass key= to AzureTranslator", route=path
+                f"{path} needs a key: set AZURE_TRANSLATOR_KEY, or pass key= to AzureTranslator",
+                route=path,
             )
         from urllib.parse import urlencode
 
@@ -229,7 +257,10 @@ class AzureTranslator:
             status, reply_headers, reply = self._send("POST", url, headers, body)
         answers = self._read(status, reply, path)
         if not isinstance(answers, list) or len(answers) != len(batch):
-            raise TranslationError(f"{path} answered {len(answers) if isinstance(answers, list) else 'something'} for {len(batch)} texts", route=path)
+            raise TranslationError(
+                f"{path} answered {len(answers) if isinstance(answers, list) else 'something'} for {len(batch)} texts",
+                route=path,
+            )
         return answers
 
     @staticmethod
@@ -259,7 +290,11 @@ class AzureTranslator:
             payload = None
         if 200 <= int(status) < 300:
             if payload is None:
-                raise TranslationError(f"{route} answered {status} with something that is not JSON", route=route, status=int(status))
+                raise TranslationError(
+                    f"{route} answered {status} with something that is not JSON",
+                    route=route,
+                    status=int(status),
+                )
             return payload
         reason = ""
         if isinstance(payload, dict):
@@ -270,5 +305,7 @@ class AzureTranslator:
             403: " The resource has no quota left, or this operation is not in its tier.",
         }.get(int(status), "")
         raise TranslationError(
-            f"{route} was refused, {status}{': ' + reason if reason else ''}.{hint}", route=route, status=int(status)
+            f"{route} was refused, {status}{': ' + reason if reason else ''}.{hint}",
+            route=route,
+            status=int(status),
         )

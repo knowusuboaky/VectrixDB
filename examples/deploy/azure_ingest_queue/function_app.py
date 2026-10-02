@@ -77,18 +77,28 @@ def worker() -> IngestWorker:
     """Opened once for the life of the process: the models load once, not once a file."""
     global _worker
     if _worker is None:
-        blobs = BlobServiceClient(os.environ["INGEST_BLOB_ACCOUNT"], credential=DefaultAzureCredential())
+        blobs = BlobServiceClient(
+            os.environ["INGEST_BLOB_ACCOUNT"], credential=DefaultAzureCredential()
+        )
         reader: Any = None
         if os.environ.get("EXTRACTION_URL"):
             reader = HttpExtractor(
                 os.environ["EXTRACTION_URL"],
-                {".pdf": "/ocr/pdf", ".png": "/ocr/image", ".jpg": "/ocr/image", ".wav": "/asr/audio", ".mp3": "/asr/audio"},
+                {
+                    ".pdf": "/ocr/pdf",
+                    ".png": "/ocr/image",
+                    ".jpg": "/ocr/image",
+                    ".wav": "/asr/audio",
+                    ".mp3": "/asr/audio",
+                },
                 body="raw",
                 headers={"api-key": os.environ.get("EXTRACTION_API_KEY", "")},
                 # The queue gives the function an hour; the reader gets most of it.
                 timeout=3000.0,
             )
-        store = VectrixDB.with_azure_search(os.environ["AZURE_SEARCH_ENDPOINT"], key=os.environ.get("AZURE_SEARCH_KEY"))
+        store = VectrixDB.with_azure_search(
+            os.environ["AZURE_SEARCH_ENDPOINT"], key=os.environ.get("AZURE_SEARCH_KEY")
+        )
         db = Vectrix(
             os.environ["INGEST_COLLECTION"],
             storage_backend=store,
@@ -103,7 +113,9 @@ def worker() -> IngestWorker:
     return _worker
 
 
-@app.queue_trigger(arg_name="message", queue_name="%INGEST_QUEUE%", connection="AzureWebJobsStorage")
+@app.queue_trigger(
+    arg_name="message", queue_name="%INGEST_QUEUE%", connection="AzureWebJobsStorage"
+)
 def ingest_one(message: func.QueueMessage) -> None:
     events = events_in(message.get_body())
     if not events:
@@ -114,4 +126,6 @@ def ingest_one(message: func.QueueMessage) -> None:
         log.info("%s (try %s)", outcome_line(outcome), message.dequeue_count)
     failed = [o for o in outcomes if should_go_round_again(o)]
     if failed:
-        raise ExtractionError(f"{len(failed)} of {len(outcomes)} did not read: {outcome_line(failed[0])}")
+        raise ExtractionError(
+            f"{len(failed)} of {len(outcomes)} did not read: {outcome_line(failed[0])}"
+        )

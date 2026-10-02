@@ -45,7 +45,9 @@ Words = Tuple[Tuple[str, ...], Tuple[int, ...], Tuple[int, ...], Dict[str, List[
 
 
 def _pieces(quote: str) -> List[List[str]]:
-    return [p for p in ([w for w, _, _ in _words(piece)] for piece in _ELLIPSIS.split(str(quote))) if p]
+    return [
+        p for p in ([w for w, _, _ in _words(piece)] for piece in _ELLIPSIS.split(str(quote))) if p
+    ]
 
 
 def usable(quote: Any) -> bool:
@@ -115,7 +117,11 @@ def holds(text: str, quote: str, share: float = 0.5) -> bool:
     for j in range(0, len(wanted) - need + 1):
         for i in where.get(wanted[j], ()):
             run = 0
-            while j + run < len(wanted) and i + run < len(folded) and folded[i + run] == wanted[j + run]:
+            while (
+                j + run < len(wanted)
+                and i + run < len(folded)
+                and folded[i + run] == wanted[j + run]
+            ):
                 run += 1
             if run >= need:
                 return True
@@ -143,7 +149,9 @@ def _page_start(doc: Any, page: int) -> Optional[int]:
     return None
 
 
-def _placed(quote: str, expected: Iterable[Any], docs: Mapping[str, Any]) -> Optional[Tuple[str, int, int]]:
+def _placed(
+    quote: str, expected: Iterable[Any], docs: Mapping[str, Any]
+) -> Optional[Tuple[str, int, int]]:
     """The document a quote is in and where: on the page its row names when it is there, else anywhere in that document."""
     from .evaluation import _where
 
@@ -191,7 +199,9 @@ def _covered(spans: Sequence[Tuple[int, int]], start: int, end: int) -> bool:
     return reach >= end
 
 
-def evidence_found(question: Any, handed: Sequence[Tuple[Any, str]], docs: Mapping[str, Any]) -> Optional[bool]:
+def evidence_found(
+    question: Any, handed: Sequence[Tuple[Any, str]], docs: Mapping[str, Any]
+) -> Optional[bool]:
     """Whether what was handed over holds every quote of a question's evidence; None when it has no usable quote, so its pages decide.
 
     A quote is found where it is in its document, and counts as handed over
@@ -207,7 +217,13 @@ def evidence_found(question: Any, handed: Sequence[Tuple[Any, str]], docs: Mappi
         placed = _placed(quote, expected, docs)
         if placed is not None:
             name, start, end = placed
-            spans = [(s, e) for s_doc, s, e in (o for o in (_offsets(hit, text) for hit, text in handed) if o is not None) if s_doc == name]
+            spans = [
+                (s, e)
+                for s_doc, s, e in (
+                    o for o in (_offsets(hit, text) for hit, text in handed) if o is not None
+                )
+                if s_doc == name
+            ]
             if _covered(spans, start, end):
                 continue
         if any(evidence_span(quote, text) is not None for _, text in handed):

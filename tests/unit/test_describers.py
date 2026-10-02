@@ -18,7 +18,14 @@ import logging
 import pytest
 
 from vectrixdb.exceptions import DependencyError
-from vectrixdb.extract.describers import INSTRUCTION, ChatDescriber, Fallback, WordsOnly, _picture, describer_from_environment
+from vectrixdb.extract.describers import (
+    INSTRUCTION,
+    ChatDescriber,
+    Fallback,
+    WordsOnly,
+    _picture,
+    describer_from_environment,
+)
 from vectrixdb.ingest import LoadedDocument, describe_figures, prepare_document
 
 AZURE = "https://o.openai.azure.com/"
@@ -48,13 +55,26 @@ def png(width=60, height=40, noisy=False):
     import os
 
     buffer = io.BytesIO()
-    picture = Image.frombytes("RGB", (width, height), os.urandom(width * height * 3)) if noisy else Image.new("RGB", (width, height), (20, 120, 60))
+    picture = (
+        Image.frombytes("RGB", (width, height), os.urandom(width * height * 3))
+        if noisy
+        else Image.new("RGB", (width, height), (20, 120, 60))
+    )
     picture.save(buffer, "PNG")
     return buffer.getvalue()
 
 
 def completion(content, status=200, headers=None):
-    body = {"choices": [{"message": {"role": "assistant", "content": content if isinstance(content, str) else json.dumps(content)}}]}
+    body = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": content if isinstance(content, str) else json.dumps(content),
+                }
+            }
+        ]
+    }
     return status, headers or {}, json.dumps(body).encode()
 
 
@@ -66,7 +86,9 @@ class Service:
         self.requests = []
 
     def __call__(self, method, url, headers, body, timeout):
-        self.requests.append({"method": method, "url": url, "headers": dict(headers), "body": json.loads(body)})
+        self.requests.append(
+            {"method": method, "url": url, "headers": dict(headers), "body": json.loads(body)}
+        )
         answer = self.answers.pop(0)
         if isinstance(answer, Exception):
             raise answer
@@ -78,7 +100,9 @@ def refused(message, status=400, headers=None):
 
 
 def asking(service, **options):
-    return ChatDescriber.azure_openai(AZURE, "gpt-4o", key="the-key", transport=service, max_wait=0, **options)
+    return ChatDescriber.azure_openai(
+        AZURE, "gpt-4o", key="the-key", transport=service, max_wait=0, **options
+    )
 
 
 # ================================================================ the request ===
@@ -89,31 +113,54 @@ class TestWhatTheModelIsSent:
         service = Service(completion(DETAILED))
         asking(service)(png(), CONTEXT)
         sent = service.requests[0]
-        assert sent["url"] == "https://o.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-10-21"
+        assert (
+            sent["url"]
+            == "https://o.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-10-21"
+        )
         assert sent["headers"]["api-key"] == "the-key" and "Authorization" not in sent["headers"]
         body = sent["body"]
         assert "model" not in body, "the deployment is the model"
-        assert (body["temperature"], body["response_format"], body["max_tokens"]) == (0, {"type": "json_object"}, 1500)
+        assert (body["temperature"], body["response_format"], body["max_tokens"]) == (
+            0,
+            {"type": "json_object"},
+            1500,
+        )
         system, user = body["messages"]
         assert system["role"] == "system" and "Never say who a person is" in system["content"]
         text, image = user["content"]
-        assert image["image_url"]["url"].startswith("data:image/png;base64,") and image["image_url"]["detail"] == "high"
-        for said in ("File: td-annual-report-2025.pdf", "Page: 4, printed as 2", "Section: Group President", "Caption in the document: none", "Dear shareholders"):
+        assert (
+            image["image_url"]["url"].startswith("data:image/png;base64,")
+            and image["image_url"]["detail"] == "high"
+        )
+        for said in (
+            "File: td-annual-report-2025.pdf",
+            "Page: 4, printed as 2",
+            "Section: Group President",
+            "Caption in the document: none",
+            "Dear shareholders",
+        ):
             assert said in text["text"], said
 
     def test_any_openai_style_route(self):
         service = Service(completion(DETAILED))
-        ChatDescriber("http://localhost:11434/v1/chat/completions", model="llava", key="k", transport=service)(png(), CONTEXT)
+        ChatDescriber(
+            "http://localhost:11434/v1/chat/completions", model="llava", key="k", transport=service
+        )(png(), CONTEXT)
         sent = service.requests[0]
         assert sent["headers"]["Authorization"] == "Bearer k" and sent["body"]["model"] == "llava"
 
     def test_a_managed_identity_sends_a_fresh_token(self):
         tokens = iter(["first", "second"])
         service = Service(completion(DETAILED), completion(DETAILED))
-        describer = ChatDescriber.azure_openai(AZURE, "gpt-4o", token=lambda: next(tokens), transport=service)
+        describer = ChatDescriber.azure_openai(
+            AZURE, "gpt-4o", token=lambda: next(tokens), transport=service
+        )
         describer(png(), CONTEXT)
         describer(png(), CONTEXT)
-        assert [r["headers"]["Authorization"] for r in service.requests] == ["Bearer first", "Bearer second"]
+        assert [r["headers"]["Authorization"] for r in service.requests] == [
+            "Bearer first",
+            "Bearer second",
+        ]
         assert all("api-key" not in r["headers"] for r in service.requests)
 
     def test_the_key_is_not_in_its_repr(self):
@@ -125,7 +172,14 @@ class TestWhatTheModelIsSent:
         assert service.requests[0]["body"]["messages"][0]["content"].endswith("Write in French.")
 
     def test_the_instruction_asks_for_the_whole_checklist(self):
-        for asked in ('"words"', '"table"', '"decorative"', "every person", "for a chart", "exactly as written"):
+        for asked in (
+            '"words"',
+            '"table"',
+            '"decorative"',
+            "every person",
+            "for a chart",
+            "exactly as written",
+        ):
             assert asked in INSTRUCTION, asked
 
 
@@ -139,11 +193,16 @@ class TestWhatComesBack:
             "A colour photograph, landscape, taken outdoors. A man in a dark navy suit, a white shirt and a green tie "
             "stands at the left, smiling.\nWords in the picture: TD."
         )
-        assert said["caption"] == "Portrait of a smiling man in a navy suit in front of a green TD sign"
+        assert (
+            said["caption"]
+            == "Portrait of a smiling man in a navy suit in front of a green TD sign"
+        )
         assert said["by"] == "gpt-4o" and "table" not in said
 
     def test_the_documents_own_caption_is_kept(self):
-        said = asking(Service(completion(DETAILED)))(png(), {**CONTEXT, "caption": "Figure 3: Our leadership"})
+        said = asking(Service(completion(DETAILED)))(
+            png(), {**CONTEXT, "caption": "Figure 3: Our leadership"}
+        )
         assert "caption" not in said
 
     def test_a_chart_comes_back_with_its_values_as_rows(self):
@@ -152,11 +211,25 @@ class TestWhatComesBack:
             "caption": "Donut chart of revenue by business segment",
             "description": "A donut chart in four segments.",
             "words": ["37%", "26%"],
-            "table": [["Segment", "Share of revenue"], ["Canadian Personal & Commercial Banking", "37%"], ["Wealth Management & Insurance", 26], ["", None]],
+            "table": [
+                ["Segment", "Share of revenue"],
+                ["Canadian Personal & Commercial Banking", "37%"],
+                ["Wealth Management & Insurance", 26],
+                ["", None],
+            ],
         }
         said = asking(Service(completion(chart)))(png(), CONTEXT)
-        assert said["table"] == [["Segment", "Share of revenue"], ["Canadian Personal & Commercial Banking", "37%"], ["Wealth Management & Insurance", "26"]]
-        rows = asking(Service(completion({**chart, "table": [["a", "b"], *[[str(i), "x"] for i in range(100)]]})), max_rows=5)(png(), CONTEXT)["table"]
+        assert said["table"] == [
+            ["Segment", "Share of revenue"],
+            ["Canadian Personal & Commercial Banking", "37%"],
+            ["Wealth Management & Insurance", "26"],
+        ]
+        rows = asking(
+            Service(
+                completion({**chart, "table": [["a", "b"], *[[str(i), "x"] for i in range(100)]]})
+            ),
+            max_rows=5,
+        )(png(), CONTEXT)["table"]
         assert len(rows) == 6, "the header and five rows"
 
     def test_a_chart_row_with_no_value_is_left_out_and_a_tables_is_kept(self):
@@ -164,56 +237,104 @@ class TestWhatComesBack:
             "kind": "chart",
             "caption": "Dividend history bar chart",
             "description": "Bars rising from 2016 to 2025, only the first and last labelled.",
-            "table": [["Year", "Dividend"], ["2016", "$2.16"], ["2017", ""], ["2018", None], ["2025", "$4.20"]],
+            "table": [
+                ["Year", "Dividend"],
+                ["2016", "$2.16"],
+                ["2017", ""],
+                ["2018", None],
+                ["2025", "$4.20"],
+            ],
         }
         said = asking(Service(completion(chart)))(png(), CONTEXT)
-        assert said["table"] == [["Year", "Dividend"], ["2016", "$2.16"], ["2025", "$4.20"]], "a year with no value printed says nothing"
+        assert said["table"] == [["Year", "Dividend"], ["2016", "$2.16"], ["2025", "$4.20"]], (
+            "a year with no value printed says nothing"
+        )
         nothing = {**chart, "table": [["Year", "Dividend"], ["2017", ""], ["2018", ""]]}
         assert "table" not in asking(Service(completion(nothing)))(png(), CONTEXT)
-        table = {**chart, "kind": "table", "table": [["Item", "2025"], ["Current assets", ""], ["Cash", "120"]]}
+        table = {
+            **chart,
+            "kind": "table",
+            "table": [["Item", "2025"], ["Current assets", ""], ["Cash", "120"]],
+        }
         kept = asking(Service(completion(table)))(png(), CONTEXT)["table"]
-        assert kept == [["Item", "2025"], ["Current assets", ""], ["Cash", "120"]], "in a table, a label alone heads the rows under it"
+        assert kept == [["Item", "2025"], ["Current assets", ""], ["Cash", "120"]], (
+            "in a table, a label alone heads the rows under it"
+        )
 
     def test_a_chart_value_the_model_says_it_guessed_is_no_value(self):
         chart = {
             "kind": "chart",
             "description": "Two bars for each segment, 2025 higher.",
-            "table": [["Series", "2024", "2025"], ["Net income", "about 7,100", "approximately 7,200"], ["Deposits", "310", "~450"]],
+            "table": [
+                ["Series", "2024", "2025"],
+                ["Net income", "about 7,100", "approximately 7,200"],
+                ["Deposits", "310", "~450"],
+            ],
         }
         said = asking(Service(completion(chart)))(png(), CONTEXT)
-        assert said["table"] == [["Series", "2024", "2025"], ["Deposits", "310", "~450"]], "a sign may be printed; a word says it was guessed"
+        assert said["table"] == [["Series", "2024", "2025"], ["Deposits", "310", "~450"]], (
+            "a sign may be printed; a word says it was guessed"
+        )
 
     def test_empty_chart_rows_do_not_crowd_out_the_real_ones(self):
-        rows = [["Year", "Value"]] + [[str(2000 + i), ""] for i in range(50)] + [["2050", "7"], ["2051", "9"]]
-        said = asking(Service(completion({"kind": "chart", "description": "A long chart.", "table": rows})), max_rows=5)(png(), CONTEXT)
+        rows = (
+            [["Year", "Value"]]
+            + [[str(2000 + i), ""] for i in range(50)]
+            + [["2050", "7"], ["2051", "9"]]
+        )
+        said = asking(
+            Service(completion({"kind": "chart", "description": "A long chart.", "table": rows})),
+            max_rows=5,
+        )(png(), CONTEXT)
         assert said["table"] == [["Year", "Value"], ["2050", "7"], ["2051", "9"]]
 
     def test_a_decorative_picture_is_said_to_be(self):
-        assert asking(Service(completion({"decorative": True, "caption": "a line"})))(png(), CONTEXT) == {"decorative": True, "by": "gpt-4o"}
+        assert asking(Service(completion({"decorative": True, "caption": "a line"})))(
+            png(), CONTEXT
+        ) == {"decorative": True, "by": "gpt-4o"}
 
     def test_prose_in_place_of_json_is_still_a_description(self):
         said = asking(Service(completion("A bar chart of revenue\nby region.")))(png(), CONTEXT)
         assert said == {"description": "A bar chart of revenue by region.", "by": "gpt-4o"}
 
     def test_json_in_a_fence_is_read(self):
-        said = asking(Service(completion("Here it is:\n```json\n" + json.dumps(DETAILED) + "\n```")))(png(), CONTEXT)
+        said = asking(
+            Service(completion("Here it is:\n```json\n" + json.dumps(DETAILED) + "\n```"))
+        )(png(), CONTEXT)
         assert said["caption"].startswith("Portrait")
 
     def test_a_long_one_is_cut_after_a_sentence(self):
         long = {**DETAILED, "description": "The sky is blue. " * 200, "words": ["TD"]}
         said = asking(Service(completion(long)), max_chars=300)(png(), CONTEXT)
         assert len(said["description"]) <= 300
-        assert said["description"].endswith("Words in the picture: TD."), "the words survive the cut"
+        assert said["description"].endswith("Words in the picture: TD."), (
+            "the words survive the cut"
+        )
         assert said["description"].split("\n")[0].endswith("blue.")
 
     def test_a_refusal_is_no_description(self):
         """Not even when the apology comes back as content: written under a figure it would be searchable, and wrong."""
         for content in (None, "I'm sorry, I can't help with that."):
-            refusal = (200, {}, json.dumps({"choices": [{"message": {"content": content, "refusal": "I cannot help with that."}}]}).encode())
+            refusal = (
+                200,
+                {},
+                json.dumps(
+                    {
+                        "choices": [
+                            {"message": {"content": content, "refusal": "I cannot help with that."}}
+                        ]
+                    }
+                ).encode(),
+            )
             assert asking(Service(refusal))(png(), CONTEXT) is None
 
     def test_an_answer_with_nothing_in_it_is_no_description(self):
-        assert asking(Service(completion({"kind": "other", "description": "", "words": []})))(png(), CONTEXT) is None
+        assert (
+            asking(Service(completion({"kind": "other", "description": "", "words": []})))(
+                png(), CONTEXT
+            )
+            is None
+        )
 
 
 # ================================================================ when the service says no ===
@@ -236,7 +357,9 @@ class TestWhenTheServiceSaysNo:
         service = Service(refused("busy", 503), refused("busy", 503), refused("busy", 503))
         with caplog.at_level(logging.WARNING):
             assert asking(service)(png(), CONTEXT) is None
-        assert len(service.requests) == 3 and "gpt-4o did not describe a picture: 503" in caplog.text
+        assert (
+            len(service.requests) == 3 and "gpt-4o did not describe a picture: 503" in caplog.text
+        )
 
     def test_no_answer_at_all_is_waited_for_too(self):
         service = Service(ConnectionError("reset"), completion(DETAILED))
@@ -249,7 +372,10 @@ class TestWhenTheServiceSaysNo:
         describer(png(), CONTEXT)
         describer(png(), CONTEXT)
         assert "max_tokens" in service.requests[0]["body"]
-        assert [("max_tokens" in r["body"], r["body"].get("max_completion_tokens")) for r in service.requests[1:]] == [(False, 1500), (False, 1500)]
+        assert [
+            ("max_tokens" in r["body"], r["body"].get("max_completion_tokens"))
+            for r in service.requests[1:]
+        ] == [(False, 1500), (False, 1500)]
 
     def test_calls_made_side_by_side_are_all_asked_again_with_the_setting_put_right(self):
         """Four pages read at once all go out with max_tokens; the first refusal back fixes it for all four, not one."""
@@ -280,12 +406,19 @@ class TestWhenTheServiceSaysNo:
         assert "temperature" not in service.requests[1]["body"]
 
     def test_a_server_that_takes_no_response_format_is_asked_without_one(self):
-        service = Service(refused("response_format is not supported by this server"), completion(json.dumps(DETAILED)))
+        service = Service(
+            refused("response_format is not supported by this server"),
+            completion(json.dumps(DETAILED)),
+        )
         assert asking(service)(png(), CONTEXT)["caption"].startswith("Portrait")
         assert "response_format" not in service.requests[1]["body"]
 
     def test_a_filtered_picture_is_not_asked_about_again(self):
-        service = Service(refused("The response was filtered due to the prompt triggering the content management policy."))
+        service = Service(
+            refused(
+                "The response was filtered due to the prompt triggering the content management policy."
+            )
+        )
         assert asking(service)(png(), CONTEXT) is None and len(service.requests) == 1
 
     def test_a_host_with_no_identity_to_give_is_no_answer_not_an_error(self):
@@ -293,7 +426,9 @@ class TestWhenTheServiceSaysNo:
             raise RuntimeError("DefaultAzureCredential failed to retrieve a token")
 
         service = Service()
-        describer = ChatDescriber.azure_openai(AZURE, "gpt-4o", token=no_identity, transport=service, max_wait=0)
+        describer = ChatDescriber.azure_openai(
+            AZURE, "gpt-4o", token=no_identity, transport=service, max_wait=0
+        )
         assert describer(png(), CONTEXT) is None and service.requests == []
 
 
@@ -359,7 +494,10 @@ class Reader:
 class TestTheWordsAlone:
     def test_the_words_are_the_description(self):
         said = WordsOnly(Reader())(png(), CONTEXT)
-        assert said == {"description": "The words in it read: Revenue; Q1 2025.", "by": "ocr:azure-document-intelligence"}
+        assert said == {
+            "description": "The words in it read: Revenue; Q1 2025.",
+            "by": "ocr:azure-document-intelligence",
+        }
 
     def test_a_picture_with_no_words_gets_no_description(self):
         assert WordsOnly(Reader(text="  \n"))(png(), CONTEXT) is None
@@ -392,17 +530,27 @@ class Says:
 
 class TestTheChain:
     def test_the_first_with_an_answer_describes_it(self):
-        model, vision = Says("gpt-4o", {"description": "Detailed."}), Says("azure-image-analysis", {"description": "Plain."})
-        assert Fallback(model, vision)(png(), CONTEXT) == {"description": "Detailed.", "by": "gpt-4o"}
+        model, vision = (
+            Says("gpt-4o", {"description": "Detailed."}),
+            Says("azure-image-analysis", {"description": "Plain."}),
+        )
+        assert Fallback(model, vision)(png(), CONTEXT) == {
+            "description": "Detailed.",
+            "by": "gpt-4o",
+        }
         assert vision.asked == 0
 
     def test_one_with_nothing_to_say_hands_it_on(self):
-        said = Fallback(Says("gpt-4o", None), Says("azure-image-analysis", {"caption": "a man"}))(png(), CONTEXT)
+        said = Fallback(Says("gpt-4o", None), Says("azure-image-analysis", {"caption": "a man"}))(
+            png(), CONTEXT
+        )
         assert said == {"caption": "a man", "by": "azure-image-analysis"}
 
     def test_one_that_fails_hands_it_on_and_the_log_says_so(self, caplog):
         with caplog.at_level(logging.WARNING):
-            said = Fallback(Says("gpt-4o", fail=RuntimeError("quota")), Says("azure-image-analysis", "Plain."))(png(), CONTEXT)
+            said = Fallback(
+                Says("gpt-4o", fail=RuntimeError("quota")), Says("azure-image-analysis", "Plain.")
+            )(png(), CONTEXT)
         assert said == {"description": "Plain.", "by": "azure-image-analysis"}
         assert "gpt-4o could not describe p4-fig1.jp2: quota" in caplog.text
 
@@ -410,7 +558,9 @@ class TestTheChain:
         assert Fallback(Says("a", None), Says("b", "  "))(png(), CONTEXT) is None
 
     def test_a_decorative_answer_is_an_answer(self):
-        assert Fallback(Says("gpt-4o", {"decorative": True}), Says("azure-image-analysis", "Plain."))(png(), CONTEXT)["decorative"]
+        assert Fallback(
+            Says("gpt-4o", {"decorative": True}), Says("azure-image-analysis", "Plain.")
+        )(png(), CONTEXT)["decorative"]
 
     def test_the_ones_that_see(self):
         chain = Fallback(Says("gpt-4o"), None, Says("azure-image-analysis"), WordsOnly(Reader()))
@@ -420,27 +570,47 @@ class TestTheChain:
 
 
 class TestBuiltFromTheSettings:
-    VISION = {"AZURE_VISION_ENDPOINT": "https://v.cognitiveservices.azure.com", "AZURE_VISION_KEY": "k"}
-    MODEL = {"AZURE_OPENAI_ENDPOINT": "https://o.openai.azure.com", "AZURE_OPENAI_KEY": "k", "AZURE_OPENAI_VISION_DEPLOYMENT": "gpt-4o"}
+    VISION = {
+        "AZURE_VISION_ENDPOINT": "https://v.cognitiveservices.azure.com",
+        "AZURE_VISION_KEY": "k",
+    }
+    MODEL = {
+        "AZURE_OPENAI_ENDPOINT": "https://o.openai.azure.com",
+        "AZURE_OPENAI_KEY": "k",
+        "AZURE_OPENAI_VISION_DEPLOYMENT": "gpt-4o",
+    }
 
     def test_best_first(self):
         chain = describer_from_environment({**self.VISION, **self.MODEL}, reader=Reader())
         assert chain.labels == ["gpt-4o", "azure-image-analysis", "ocr:azure-document-intelligence"]
 
     def test_vision_and_the_words_as_today(self):
-        assert describer_from_environment(self.VISION, reader=Reader()).labels == ["azure-image-analysis", "ocr:azure-document-intelligence"]
+        assert describer_from_environment(self.VISION, reader=Reader()).labels == [
+            "azure-image-analysis",
+            "ocr:azure-document-intelligence",
+        ]
 
     def test_nothing_that_sees_is_none_and_no_picture_is_opened(self):
         assert describer_from_environment({}, reader=Reader()) is None
 
     def test_any_openai_style_route(self):
         made = ChatDescriber.from_environment(
-            {"VECTRIXDB_DESCRIBER_URL": "http://localhost:8000/v1/chat/completions", "VECTRIXDB_DESCRIBER_MODEL": "qwen2-vl", "VECTRIXDB_DESCRIBER_KEY": "k"}
+            {
+                "VECTRIXDB_DESCRIBER_URL": "http://localhost:8000/v1/chat/completions",
+                "VECTRIXDB_DESCRIBER_MODEL": "qwen2-vl",
+                "VECTRIXDB_DESCRIBER_KEY": "k",
+            }
         )
-        assert made.label == "qwen2-vl" and made.model == "qwen2-vl" and made._auth() == {"Authorization": "Bearer k"}
+        assert (
+            made.label == "qwen2-vl"
+            and made.model == "qwen2-vl"
+            and made._auth() == {"Authorization": "Bearer k"}
+        )
 
     def test_a_deployment_with_its_own_api_version(self):
-        made = ChatDescriber.from_environment({**self.MODEL, "AZURE_OPENAI_API_VERSION": "2025-04-01-preview"})
+        made = ChatDescriber.from_environment(
+            {**self.MODEL, "AZURE_OPENAI_API_VERSION": "2025-04-01-preview"}
+        )
         assert made.url.endswith("?api-version=2025-04-01-preview")
 
 
@@ -450,7 +620,10 @@ class TestBuiltFromTheSettings:
 def with_a_picture(caption="p4-fig1.jp2", src="p4-fig1.jp2"):
     text = f"Dear shareholders.\n\n[Figure: {caption}]\n\nFinancial performance."
     doc = LoadedDocument(
-        text=text, pages=[(0, 4)], metadata={"filename": "report.pdf"}, page_labels={4: "2"},
+        text=text,
+        pages=[(0, 4)],
+        metadata={"filename": "report.pdf"},
+        page_labels={4: "2"},
         figures=[(text.index("[Figure"), {"caption": caption, "src": src, "described": False})],
     )
     doc.images = {src: png(120, 90, noisy=True)}
@@ -461,7 +634,15 @@ class TestInTheDocument:
     def test_a_file_name_is_no_caption_and_the_describers_takes_its_place(self):
         seen = []
         described = describe_figures(
-            with_a_picture(), lambda data, context: seen.append(dict(context)) or {"caption": "Portrait of a smiling man", "description": "A photograph.", "by": "gpt-4o"}
+            with_a_picture(),
+            lambda data, context: (
+                seen.append(dict(context))
+                or {
+                    "caption": "Portrait of a smiling man",
+                    "description": "A photograph.",
+                    "by": "gpt-4o",
+                }
+            ),
         )
         assert seen[0]["caption"] == "" and seen[0]["src"] == "p4-fig1.jp2"
         assert (seen[0]["page"], seen[0]["page_label"]) == (4, "2")
@@ -473,10 +654,16 @@ class TestInTheDocument:
             with_a_picture(caption="Figure 3: Our leadership"),
             lambda data, context: seen.append(dict(context)) or {"description": "A photograph."},
         )
-        assert seen[0]["caption"] == "Figure 3: Our leadership" and "[Figure: Figure 3: Our leadership]" in described.text
+        assert (
+            seen[0]["caption"] == "Figure 3: Our leadership"
+            and "[Figure: Figure 3: Our leadership]" in described.text
+        )
 
     def test_who_described_it_is_recorded(self):
-        described = describe_figures(with_a_picture(), Fallback(Says("gpt-4o", None), Says("azure-image-analysis", {"description": "Plain."})))
+        described = describe_figures(
+            with_a_picture(),
+            Fallback(Says("gpt-4o", None), Says("azure-image-analysis", {"description": "Plain."})),
+        )
         assert described.figures[0][1]["described_by"] == "azure-image-analysis"
         assert described.metadata["figures_described_by"] == {"azure-image-analysis": 1}
 
@@ -486,8 +673,12 @@ class TestInTheDocument:
         assert "[Figure: p4-fig1.jp2]" in described.text
 
     def test_the_count_is_about_the_document_and_not_on_every_chunk(self):
-        described = describe_figures(with_a_picture(), Says("gpt-4o", {"description": "A photograph."}))
-        prepared = prepare_document(described, "report.pdf", chunk="recursive", chunk_size=1000, overlap=0)
+        described = describe_figures(
+            with_a_picture(), Says("gpt-4o", {"description": "A photograph."})
+        )
+        prepared = prepare_document(
+            described, "report.pdf", chunk="recursive", chunk_size=1000, overlap=0
+        )
         assert all("figures_described_by" not in m for m in prepared.metadata)
 
     def test_pieces_of_a_long_file_add_their_counts_up(self):
@@ -510,21 +701,34 @@ class TestTheExtractionApp:
         from vectrixdb.api.extraction import ExtractionService
 
         reader = Reader()
-        service = ExtractionService.from_environment({**self.VISION, **self.MODEL}, image=reader, jobs=None)
-        assert service.describer.labels == ["gpt-4o", "azure-image-analysis", "ocr:azure-document-intelligence"]
+        service = ExtractionService.from_environment(
+            {**self.VISION, **self.MODEL}, image=reader, jobs=None
+        )
+        assert service.describer.labels == [
+            "gpt-4o",
+            "azure-image-analysis",
+            "ocr:azure-document-intelligence",
+        ]
         assert service.describer.describers[-1].reader is reader
 
     def test_a_describer_it_is_given_is_the_one_it_uses(self):
         from vectrixdb.api.extraction import ExtractionService
 
         mine = Says("mine", "Mine.")
-        assert ExtractionService.from_environment({**self.VISION}, image=Reader(), describer=mine, jobs=None).describer is mine
+        assert (
+            ExtractionService.from_environment(
+                {**self.VISION}, image=Reader(), describer=mine, jobs=None
+            ).describer
+            is mine
+        )
 
     def test_an_image_file_is_not_read_for_its_words_twice(self):
         from vectrixdb.api.extraction import ExtractionService
 
         reader = Reader(text="Total assets 1200")
-        service = ExtractionService(image=reader, describer=Fallback(Says("gpt-4o", None), WordsOnly(reader)))
+        service = ExtractionService(
+            image=reader, describer=Fallback(Says("gpt-4o", None), WordsOnly(reader))
+        )
         doc = service.read_image(png(), "scan.png")
         assert reader.names == ["scan.png"], "the words-only last resort was not asked"
         assert doc.text == "Total assets 1200"
@@ -543,10 +747,23 @@ class TestTheExtractionApp:
         buffer = io.BytesIO()
         document.save(buffer)
         service = Service(completion(DETAILED))
-        app = TestClient(create_extraction_app(ExtractionService(describer=Fallback(asking(service))), allow_open=True))
-        body = app.post("/extract/docx", content=buffer.getvalue(), headers={"X-Filename": "report.docx", "Accept": "application/json"}).json()
-        assert "[Figure: Portrait of a smiling man in a navy suit in front of a green TD sign]" in body["text"]
+        app = TestClient(
+            create_extraction_app(
+                ExtractionService(describer=Fallback(asking(service))), allow_open=True
+            )
+        )
+        body = app.post(
+            "/extract/docx",
+            content=buffer.getvalue(),
+            headers={"X-Filename": "report.docx", "Accept": "application/json"},
+        ).json()
+        assert (
+            "[Figure: Portrait of a smiling man in a navy suit in front of a green TD sign]"
+            in body["text"]
+        )
         assert "Words in the picture: TD." in body["text"]
         assert body["metadata"]["figures_described_by"] == {"gpt-4o": 1}
         assert "images" not in body, "descriptions travel, pictures do not"
-        assert [info["described_by"] for _at, info in body["figures"]] == ["gpt-4o"], "and who wrote each"
+        assert [info["described_by"] for _at, info in body["figures"]] == ["gpt-4o"], (
+            "and who wrote each"
+        )

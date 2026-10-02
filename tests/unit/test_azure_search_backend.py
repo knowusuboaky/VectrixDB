@@ -78,6 +78,21 @@ class TestSchema:
         index = storage._collection_index("docs", 4)
         assert index.semantic_search.configurations[0].name == SEMANTIC_CONFIG
 
+    def test_the_catalog_index_is_made_with_the_first_collection_and_not_on_connect(self):
+        """connect() used to create the catalog index at once, so a handle opened with the wrong or an
+        empty prefix left an empty vectrix-collections in the service that nothing used. Until a
+        collection is created there is no catalog, and a missing one reads as no collections."""
+        storage = fake_storage(prefix="wrong")
+        fake = storage._index_client
+        assert fake.indexes == {}, "connect() made nothing"
+        assert storage.list_collections() == []
+        assert storage.get_collection_config("docs") is None
+        storage.delete_collection("docs")
+        assert fake.indexes == {}
+        storage.create_collection("docs", {"dimension": 8})
+        assert set(fake.indexes) == {"wrong-collections", "wrong-docs"}
+        assert storage.list_collections() == ["docs"]
+
     def test_create_records_the_config_and_dimension(self):
         storage = fake_storage()
         storage.create_collection("docs", {"mode": "hybrid", "dimension": 8})

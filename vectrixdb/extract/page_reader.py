@@ -114,7 +114,10 @@ def _words(text: str) -> Set[str]:
 
 
 #: A number said to be a guess, in words or by a sign: "about 7,100", "≈450", "~300".
-_GUESSED = re.compile(r"(?:\b(?:about|approximately|approx\.?|around|roughly|nearly|almost|circa|estimated|est\.)|≈|~)\s*[$€£¥]?\s*\(?(\d[\d,]*(?:\.\d+)?)", re.IGNORECASE)
+_GUESSED = re.compile(
+    r"(?:\b(?:about|approximately|approx\.?|around|roughly|nearly|almost|circa|estimated|est\.)|≈|~)\s*[$€£¥]?\s*\(?(\d[\d,]*(?:\.\d+)?)",
+    re.IGNORECASE,
+)
 
 
 def guessed(text: str) -> Set[float]:
@@ -150,7 +153,9 @@ def scale_in(text: str) -> Set[float]:
     while start < len(values) - 3:
         step = values[start + 1] - values[start]
         end = start + 1
-        while end + 1 < len(values) and abs((values[end + 1] - values[end]) - step) <= 1e-9 * max(1.0, abs(step)):
+        while end + 1 < len(values) and abs((values[end + 1] - values[end]) - step) <= 1e-9 * max(
+            1.0, abs(step)
+        ):
             end += 1
         run = values[start : end + 1]
         if len(run) >= 4 and 0.0 in run and round_step(abs(step)):
@@ -173,7 +178,9 @@ def _cells(line: str) -> List[str]:
     return parts
 
 
-def held_to_the_page(reading: str, layer: str, ticks: Iterable[float] = ()) -> Optional[Tuple[str, Dict[str, int]]]:
+def held_to_the_page(
+    reading: str, layer: str, ticks: Iterable[float] = ()
+) -> Optional[Tuple[str, Dict[str, int]]]:
     """A reading with what the page does not print taken out, and what was checked; None when it is not to be taken.
 
     A sentence holding a number the page does not print goes; in a table, the
@@ -228,7 +235,9 @@ def held_to_the_page(reading: str, layer: str, ticks: Iterable[float] = ()) -> O
             # A row of values: the ones the page does not print go, and a
             # row left with its label alone goes with them.
             parts = stripped.split("; ")
-            found = [flaws(part, part.rsplit(": ", 1)[1] if ": " in part else None) for part in parts]
+            found = [
+                flaws(part, part.rsplit(": ", 1)[1] if ": " in part else None) for part in parts
+            ]
             if not any(sum(f) for f in found):
                 kept.append(bare)
                 continue
@@ -248,14 +257,22 @@ def held_to_the_page(reading: str, layer: str, ticks: Iterable[float] = ()) -> O
         if sentences:
             kept.append(" ".join(sentences))
     if invented >= 3 and invented > MOST_UNPRINTED * max(checked, 1):
-        logger.info("a reading was not taken: %d of its %d numbers are not printed on the page", invented, checked)
+        logger.info(
+            "a reading was not taken: %d of its %d numbers are not printed on the page",
+            invented,
+            checked,
+        )
         return None
     page_words = _words(layer)
     written = "\n".join(kept)
     if page_words and len(page_words & _words(written)) < LEAST_KEPT * len(page_words):
         logger.info("a reading was not taken: it keeps too few of the page's own words")
         return None
-    return written.strip(), {"numbers_checked": checked, "numbers_dropped": invented, "guesses_dropped": guesses}
+    return written.strip(), {
+        "numbers_checked": checked,
+        "numbers_dropped": invented,
+        "guesses_dropped": guesses,
+    }
 
 
 # ============================================================================
@@ -282,7 +299,12 @@ class PageReader(ChatRoute):
 
     label = "page-reader"
     _AZURE_DEPLOYMENT = "AZURE_OPENAI_VISION_DEPLOYMENT"
-    _ROUTE = ("VECTRIXDB_DESCRIBER_URL", "VECTRIXDB_DESCRIBER_KEY", "VECTRIXDB_DESCRIBER_MODEL", "VECTRIXDB_DESCRIBER_KEY_HEADER")
+    _ROUTE = (
+        "VECTRIXDB_DESCRIBER_URL",
+        "VECTRIXDB_DESCRIBER_KEY",
+        "VECTRIXDB_DESCRIBER_MODEL",
+        "VECTRIXDB_DESCRIBER_KEY_HEADER",
+    )
     _FAILED = "did not read a page"
     _WITHOUT = "pages are read by the rules alone"
 
@@ -321,7 +343,9 @@ class PageReader(ChatRoute):
         self.asked = 0
 
     @classmethod
-    def from_environment(cls, env: Optional[Mapping[str, str]] = None, **kwargs: Any) -> Optional["PageReader"]:
+    def from_environment(
+        cls, env: Optional[Mapping[str, str]] = None, **kwargs: Any
+    ) -> Optional["PageReader"]:
         """One from the settings, or None when they name none.
 
         ``AZURE_OPENAI_PAGE_DEPLOYMENT`` names a deployment for pages alone, a
@@ -340,10 +364,17 @@ class PageReader(ChatRoute):
         """The page in Markdown, or None."""
         ready = _picture(image, self.max_side)
         if ready is None:
-            logger.info("%s was not sent page %s: not a picture it can read", self.label, context.get("page"))
+            logger.info(
+                "%s was not sent page %s: not a picture it can read",
+                self.label,
+                context.get("page"),
+            )
             return None
         data, mime = ready
-        about = [f"File: {context['name']}" if context.get("name") else "", f"Page: {context['page']}" if context.get("page") else ""]
+        about = [
+            f"File: {context['name']}" if context.get("name") else "",
+            f"Page: {context['page']}" if context.get("page") else "",
+        ]
         text = "\n".join(line for line in about if line) + f'\n\nText layer:\n"""\n{layer}\n"""'
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": INSTRUCTION},
@@ -351,7 +382,13 @@ class PageReader(ChatRoute):
                 "role": "user",
                 "content": [
                     {"type": "text", "text": text.strip()},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}", "detail": self.detail}},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}",
+                            "detail": self.detail,
+                        },
+                    },
                 ],
             },
         ]

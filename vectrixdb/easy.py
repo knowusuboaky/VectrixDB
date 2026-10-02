@@ -61,7 +61,19 @@ import uuid
 from datetime import datetime
 from ._ranking import apply_score_gap, fit_to_budget
 from .core import relevance as _relevance
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union, Literal
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    Literal,
+)
 from collections.abc import Mapping
 import re
 from dataclasses import dataclass, field, replace
@@ -148,7 +160,9 @@ def _verdict(candidate: Dict[str, Any]) -> Dict[str, Any]:
         relevance, kind = candidate["judged"], "reranker"
     else:
         relevance, kind = candidate.get("similarity"), candidate.get("similarity_kind")
-    measured = candidate.get("similarity") if candidate.get("similarity_kind") == "similarity" else None
+    measured = (
+        candidate.get("similarity") if candidate.get("similarity_kind") == "similarity" else None
+    )
     return {
         "relevance": relevance,
         "relevance_kind": kind if relevance is not None else None,
@@ -1070,7 +1084,9 @@ class Vectrix:
         self._named_specs: List[Any] = []
         if isinstance(dense_model, (list, tuple)):
             if not dense_model:
-                raise ConfigurationError("dense_model is a model name, or a list that starts with one")
+                raise ConfigurationError(
+                    "dense_model is a model name, or a list that starts with one"
+                )
             self._named_specs = list(dense_model[1:])
             dense_model = dense_model[0]
             if dense_model is not None and not isinstance(dense_model, str):
@@ -1081,14 +1097,29 @@ class Vectrix:
         if image_embedder is not None:
             for method in ("embed_images", "embed_texts"):
                 if not callable(getattr(image_embedder, method, None)):
-                    raise TypeError(f"image_embedder has {method}(a list) returning one vector each, and this one has no {method}")
-            if not isinstance(getattr(image_embedder, "dimension", None), int) or image_embedder.dimension < 1:
-                raise TypeError("image_embedder has a dimension, the length of its vectors, as a whole number")
-            if any(spec == IMAGE_VECTOR or (isinstance(spec, (list, tuple)) and spec and spec[0] == IMAGE_VECTOR) for spec in self._named_specs):
-                raise ConfigurationError(f"{IMAGE_VECTOR!r} names the vectors image_embedder makes, so no dense model can be called that")
+                    raise TypeError(
+                        f"image_embedder has {method}(a list) returning one vector each, and this one has no {method}"
+                    )
+            if (
+                not isinstance(getattr(image_embedder, "dimension", None), int)
+                or image_embedder.dimension < 1
+            ):
+                raise TypeError(
+                    "image_embedder has a dimension, the length of its vectors, as a whole number"
+                )
+            if any(
+                spec == IMAGE_VECTOR
+                or (isinstance(spec, (list, tuple)) and spec and spec[0] == IMAGE_VECTOR)
+                for spec in self._named_specs
+            ):
+                raise ConfigurationError(
+                    f"{IMAGE_VECTOR!r} names the vectors image_embedder makes, so no dense model can be called that"
+                )
             # The words of a question go through the model's text side, which is
             # what makes a sentence comparable with a picture at all.
-            self._named_specs.append((IMAGE_VECTOR, image_embedder.embed_texts, image_embedder.dimension))
+            self._named_specs.append(
+                (IMAGE_VECTOR, image_embedder.embed_texts, image_embedder.dimension)
+            )
         self._named: Dict[str, "Vectrix"] = {}
         self._named_scope = threading.local()
         self._home_scope = threading.local()
@@ -1179,17 +1210,25 @@ class Vectrix:
         # with embeddings="azure", where the index holds a deployment's
         # vectors and nothing else.
         store_fn = getattr(self._vector_store(), "default_embed_fn", None)
-        if store_fn is not None and all(x is None for x in (model, dense_model, embed_fn, model_path)):
+        if store_fn is not None and all(
+            x is None for x in (model, dense_model, embed_fn, model_path)
+        ):
             self.embed_fn = store_fn
             config = self._vector_store().config
             if getattr(config, "opensearch_embeddings", "vectrixdb") == "bedrock":
                 fn = config.opensearch_embed_fn
-                dimension = dimension or config.opensearch_embed_dimensions or getattr(fn, "dimensions", None)
+                dimension = (
+                    dimension
+                    or config.opensearch_embed_dimensions
+                    or getattr(fn, "dimensions", None)
+                )
                 model = str(getattr(fn, "label", "bedrock"))
             else:
                 spec = getattr(config, "azure_search_vectorizer", None) or {}
                 dimension = dimension or spec.get("dimensions")
-                model = "azure-openai:" + str(spec.get("model") or spec.get("deployment") or "custom")
+                model = "azure-openai:" + str(
+                    spec.get("model") or spec.get("deployment") or "custom"
+                )
 
         # Parse model identifier (for dense model)
         self._parse_model(model or dense_model, dimension)
@@ -1355,10 +1394,29 @@ class Vectrix:
         try:
             urllib.request.urlretrieve(url, zip_path)
         except Exception as e:
-            raise RuntimeError(f"Failed to download model from {url}: {e}")
+            from .exceptions import ModelDownloadError
+            from .models.downloader import publish_commands
+
+            # The one source a "github:" name has. A 404 is a release nobody
+            # has made, not a network fault, and the message says which.
+            missing = getattr(e, "code", None) == 404
+            lines = [
+                f"Could not fetch the {model_type} model from the GitHub release {release_tag!r}. Sources tried:",
+                f"  1. {url}",
+                f"     {'HTTP 404: this release, or its asset, does not exist' if missing else e}",
+            ]
+            if missing:
+                lines.append("A maintainer publishes it with:")
+                lines += [f"  {command}" for command in publish_commands(model_type, release_tag)]
+            raise ModelDownloadError("\n".join(lines)) from e
 
         # Extract zip file
+        from .models.downloader import _inside
+
         with zipfile.ZipFile(zip_path, "r") as zf:
+            # Every entry inside the cache directory, or none extracted.
+            for member in zf.namelist():
+                _inside(cache_dir, member)
             zf.extractall(cache_dir)
 
         # Clean up zip
@@ -1672,6 +1730,16 @@ class Vectrix:
                 # insists on engine-side filtering is the caller's to say, and
                 # is deliberately not part of what a collection remembers.
                 stored.require_pushdown = policy.require_pushdown
+                # A policy stored before its role key was persisted lacks it;
+                # record the one given, since the collection reads that row.
+                if stored.db_role_key is None and policy.db_role_key is not None:
+                    stored.db_role_key = policy.db_role_key
+                    if not self.readonly:
+                        try:
+                            _coll(self).set_meta("entitlement_policy", json.dumps(stored.to_dict()))
+                            _coll(self)._policy_loaded = False
+                        except Exception:  # pragma: no cover - read-only media
+                            pass
             self._require_pushdown_if_asked()
             _coll(self)._policy_enforced = True
             return
@@ -2118,7 +2186,9 @@ class Vectrix:
         self._documents = open_store(
             getattr(self, "_keep_source", None), base / f"{self.name}.documents" if base else None
         )
-        self._chunk_files = open_chunks(getattr(self, "_keep_chunks", None), base / f"{self.name}.chunks" if base else None)
+        self._chunk_files = open_chunks(
+            getattr(self, "_keep_chunks", None), base / f"{self.name}.chunks" if base else None
+        )
         if getattr(self, "_markdown_first", False) and self._documents is None:
             raise ConfigurationError(
                 f"Collection {self.name!r} was asked to keep each document's Markdown first, and keeps none: "
@@ -2307,9 +2377,17 @@ class Vectrix:
             isinstance(source, str)
             and len(source) < 4096
             and "\n" not in source
-            and Path(source).is_file()
+            # os.path.isfile, not Path.is_file: a long line of text is not a
+            # file name, and on Linux Path.is_file raises ENAMETOOLONG for it.
+            and os.path.isfile(source)
         ):
-            doc = load(source, kind=kind, extractors=self._extractors, images=self.wants_images(), ocr=self.page_ocr)
+            doc = load(
+                source,
+                kind=kind,
+                extractors=self._extractors,
+                images=self.wants_images(),
+                ocr=self.page_ocr,
+            )
         else:
             # A string gets what a markdown file gets: its images become
             # figure lines and its tables become rows.
@@ -2319,15 +2397,26 @@ class Vectrix:
 
             # Decorative images go, and the rest are described, before the
             # text is cut: a description is part of what gets chunked.
-            doc = _describe(doc, self._describe_figures, name=str(doc.metadata.get("filename") or ""))
+            doc = _describe(
+                doc, self._describe_figures, name=str(doc.metadata.get("filename") or "")
+            )
         if not doc.text.strip():
             self.last_add_report = AddReport(added=[], skipped=[])
             return 0
 
         front_id = doc.metadata.get("doc_id")
-        doc_id = doc_id or (front_id if isinstance(front_id, str) and front_id else None) or self._generate_id(doc.text)
-        asked = {"chunk": chunk, "chunk_size": chunk_size, "overlap": overlap, "parent_size": parent_size,
-                 "embed_heading": embed_heading}
+        doc_id = (
+            doc_id
+            or (front_id if isinstance(front_id, str) and front_id else None)
+            or self._generate_id(doc.text)
+        )
+        asked = {
+            "chunk": chunk,
+            "chunk_size": chunk_size,
+            "overlap": overlap,
+            "parent_size": parent_size,
+            "embed_heading": embed_heading,
+        }
         # A model's note and late embedding change the chunks as the index
         # holds them, so they are recorded too, or a document cut with a note
         # reads the same as one cut without.
@@ -2353,7 +2442,9 @@ class Vectrix:
                 or kept.get("source_version") != source_version
                 or kept.get("chunking")
             ):
-                self._documents.put(doc_id, doc, source_version=source_version, user_metadata=dict(metadata or {}))
+                self._documents.put(
+                    doc_id, doc, source_version=source_version, user_metadata=dict(metadata or {})
+                )
             self.last_add_report = AddReport(added=[], skipped=[])
             return 0
         if self._markdown_first and self._documents is not None and not rechunking:
@@ -2370,7 +2461,11 @@ class Vectrix:
                 or kept.get("source_version") != source_version
             ):
                 self._documents.put(
-                    doc_id, doc, source_version=source_version, chunking=asked, user_metadata=dict(metadata or {})
+                    doc_id,
+                    doc,
+                    source_version=source_version,
+                    chunking=asked,
+                    user_metadata=dict(metadata or {}),
                 )
             doc = self._documents.get(doc_id, images=True)
         prepared = prepare_document(
@@ -2399,7 +2494,11 @@ class Vectrix:
             why = late_ready(model)
             if why:
                 raise ConfigurationError(why)
-            vectors = late_vectors(model, prepared.doc.text, [(m["_vx_start"], m["_vx_end"]) for m in prepared.metadata])
+            vectors = late_vectors(
+                model,
+                prepared.doc.text,
+                [(m["_vx_start"], m["_vx_end"]) for m in prepared.metadata],
+            )
             for m in prepared.metadata:
                 # Read in its document, not alone: reembed() would embed it alone.
                 m["_vx_late"] = True
@@ -2420,7 +2519,12 @@ class Vectrix:
             )
         for parent_id, parent_text, parent_meta in prepared.parents:
             self._parents.put(parent_id, parent_text, parent_meta)
-        texts, metas, ids, version = prepared.texts, prepared.metadata, prepared.ids, prepared.version
+        texts, metas, ids, version = (
+            prepared.texts,
+            prepared.metadata,
+            prepared.ids,
+            prepared.version,
+        )
         if self._chunk_files is not None:
             # The chunks as cut, a line each, before anything embeds them.
             self._chunk_files.put(doc_id, ids, texts, metas)
@@ -2432,7 +2536,9 @@ class Vectrix:
             "chunking": prepared.chunking,
         }
         try:
-            self.add(texts, metadata=metas, ids=ids, dedupe=dedupe, progress=progress, vectors=vectors)
+            self.add(
+                texts, metadata=metas, ids=ids, dedupe=dedupe, progress=progress, vectors=vectors
+            )
         finally:
             self._ingestion_provenance = None
         self._embed_figure_images(doc, texts, metas, ids)
@@ -2442,7 +2548,11 @@ class Vectrix:
             # raises before this line. With markdown_first it was kept first,
             # on purpose, and a later failure leaves it for the next try.
             self._documents.put(
-                doc_id, doc, source_version=source_version, chunking=asked, user_metadata=dict(metadata or {})
+                doc_id,
+                doc,
+                source_version=source_version,
+                chunking=asked,
+                user_metadata=dict(metadata or {}),
             )
         return len(self.last_add_report.added) if self.last_add_report else len(ids)
 
@@ -2474,7 +2584,9 @@ class Vectrix:
         """
         return self._describe_figures is not None or self._image_embedder is not None
 
-    def _embed_figure_images(self, doc: Any, texts: Sequence[str], metas: Sequence[Dict[str, Any]], ids: Sequence[str]) -> None:
+    def _embed_figure_images(
+        self, doc: Any, texts: Sequence[str], metas: Sequence[Dict[str, Any]], ids: Sequence[str]
+    ) -> None:
         """Embed each figure's picture into the image index, under the figure chunk's own id.
 
         Only figures whose image is at hand: a figure line in Markdown that
@@ -2491,7 +2603,9 @@ class Vectrix:
         found = [
             (chunk_id, text, meta, images[str(meta.get("figure_src"))])
             for chunk_id, text, meta in zip(ids, texts, metas)
-            if meta.get("figure_src") and str(meta.get("figure_src")) in images and chunk_id in written
+            if meta.get("figure_src")
+            and str(meta.get("figure_src")) in images
+            and chunk_id in written
         ]
         # A chunk id written again as something else, a paragraph where a figure
         # was, must not keep the old figure's picture under it.
@@ -2502,11 +2616,16 @@ class Vectrix:
         if not found:
             return
         try:
-            vectors = np.asarray(self._image_embedder.embed_images([data for _, _, _, data in found]), dtype=np.float32)
+            vectors = np.asarray(
+                self._image_embedder.embed_images([data for _, _, _, data in found]),
+                dtype=np.float32,
+            )
         except Exception as exc:
             from .exceptions import ExtractionError
 
-            raise ExtractionError(f"embedding the figures of {doc.metadata.get('filename') or 'a document'} failed: {exc}") from exc
+            raise ExtractionError(
+                f"embedding the figures of {doc.metadata.get('filename') or 'a document'} failed: {exc}"
+            ) from exc
         if vectors.shape != (len(found), self._image_embedder.dimension):
             raise ConfigurationError(
                 f"image_embedder.embed_images returned {vectors.shape} for {len(found)} images; "
@@ -2567,7 +2686,8 @@ class Vectrix:
                 label, options = str(spec[0]), {"embed_fn": spec[1], "dimension": int(spec[2])}
             else:
                 raise ConfigurationError(
-                    "an extra dense model is a model name, or (label, embed_fn, dimension), got " + repr(spec)
+                    "an extra dense model is a model name, or (label, embed_fn, dimension), got "
+                    + repr(spec)
                 )
             if label in labels or label in ("both", "all", "own"):
                 raise ConfigurationError(f"{label!r} cannot name a dense vector here: it is taken")
@@ -2630,12 +2750,16 @@ class Vectrix:
         runs: Dict[str, List[Result]] = {}
         primary: Optional[Results] = None
         if "own" in chosen:
-            primary = self.search(**{**call, "limit": wide, "token_budget": None, "score_gap": None, "parents": False})
+            primary = self.search(
+                **{**call, "limit": wide, "token_budget": None, "score_gap": None, "parents": False}
+            )
             runs["own"] = list(primary.items)
         for label in chosen:
             if label == "own":
                 continue
-            side = self._named[label].search(call["query"], limit=wide, mode="dense", filter=call.get("filter"))
+            side = self._named[label].search(
+                call["query"], limit=wide, mode="dense", filter=call.get("filter")
+            )
             runs[label] = list(side.items)
         fused: Dict[str, float] = {}
         ranks: Dict[str, Dict[str, int]] = {}
@@ -2656,11 +2780,21 @@ class Vectrix:
             explain = dict(base.explain or {}) if call.get("explain") else None
             if explain is not None:
                 explain["vector_ranks"] = ranks[doc_id]
-            items.append(Result(id=doc_id, text=base.text, score=round(fused[doc_id], 6), metadata=base.metadata, explain=explain))
+            items.append(
+                Result(
+                    id=doc_id,
+                    text=base.text,
+                    score=round(fused[doc_id], 6),
+                    metadata=base.metadata,
+                    explain=explain,
+                )
+            )
         if call.get("parents"):
             items = self._to_parents(items)
         items = apply_score_gap(items, call.get("score_gap"), lambda r: r.score)
-        items, cut, tokens = fit_to_budget(items, call.get("token_budget"), lambda r: r.text, self.token_counter)
+        items, cut, tokens = fit_to_budget(
+            items, call.get("token_budget"), lambda r: r.text, self.token_counter
+        )
         return Results(
             items=items,
             query=call["query"],
@@ -2730,7 +2864,12 @@ class Vectrix:
 
         started = time.time()
         limit = call["limit"]
-        wide = {"limit": max(limit * 3, 30), "token_budget": None, "score_gap": None, "parents": False}
+        wide = {
+            "limit": max(limit * 3, 30),
+            "token_budget": None,
+            "score_gap": None,
+            "parents": False,
+        }
         try:
             from_store = ask("store", **wide)
         except (ValueError, TypeError, ConfigurationError):
@@ -2760,11 +2899,15 @@ class Vectrix:
             explain = None
             if call.get("explain"):
                 explain = {**(known[doc_id].explain or {}), "home_ranks": ranks[doc_id]}
-            items.append(dataclasses.replace(known[doc_id], score=round(fused[doc_id], 6), explain=explain))
+            items.append(
+                dataclasses.replace(known[doc_id], score=round(fused[doc_id], 6), explain=explain)
+            )
         if call.get("parents"):
             items = self._to_parents(items)
         items = apply_score_gap(items, call.get("score_gap"), lambda r: r.score)
-        items, cut, tokens = fit_to_budget(items, call.get("token_budget"), lambda r: r.text, self.token_counter)
+        items, cut, tokens = fit_to_budget(
+            items, call.get("token_budget"), lambda r: r.text, self.token_counter
+        )
         return Results(
             items=items,
             query=call["query"],
@@ -2799,7 +2942,9 @@ class Vectrix:
                     cache.put_many(label, [texts[i] for i in missing], fresh)
                 for i, vector in zip(missing, fresh):
                     found[i] = vector
-            store.stage_named_vectors({name: {i: [float(x) for x in v] for i, v in zip(ids, found)}})
+            store.stage_named_vectors(
+                {name: {i: [float(x) for x in v] for i, v in zip(ids, found)}}
+            )
 
     def with_figures(self, results: "Results") -> "Results":
         """The same results, with the figures their text refers to brought along.
@@ -2814,10 +2959,16 @@ class Vectrix:
         out: List[Result] = []
         for item in results.items:
             out.append(item)
-            wanted = [i for i in (item.metadata or {}).get("_vx_refers_to") or [] if i not in present]
+            wanted = [
+                i for i in (item.metadata or {}).get("_vx_refers_to") or [] if i not in present
+            ]
             for figure in self.get(wanted) if wanted else []:
                 present.add(figure.id)
-                out.append(Result(id=figure.id, text=figure.text, score=item.score, metadata=figure.metadata))
+                out.append(
+                    Result(
+                        id=figure.id, text=figure.text, score=item.score, metadata=figure.metadata
+                    )
+                )
         return replace(results, items=out)
 
     @staticmethod
@@ -2880,7 +3031,9 @@ class Vectrix:
             return None
         return self._documents.figure_bytes(doc_id, src)
 
-    def rechunk(self, doc_id: Optional[Union[str, List[str]]] = None, where: Any = None, **options: Any) -> int:
+    def rechunk(
+        self, doc_id: Optional[Union[str, List[str]]] = None, where: Any = None, **options: Any
+    ) -> int:
         """Cut kept documents again and re-index them. Returns the chunks written.
 
         Reads the kept Markdown and never calls an extractor, so a new chunk
@@ -2899,8 +3052,21 @@ class Vectrix:
 
         store = self._store()
         wanted = [doc_id] if isinstance(doc_id, str) else doc_id
-        allowed = ("chunk", "chunk_size", "overlap", "parent_size", "embed_heading", "dedupe", "threshold",
-                   "on_low_quality", "quality_threshold", "progress", "cut_with", "context_with", "late")
+        allowed = (
+            "chunk",
+            "chunk_size",
+            "overlap",
+            "parent_size",
+            "embed_heading",
+            "dedupe",
+            "threshold",
+            "on_low_quality",
+            "quality_threshold",
+            "progress",
+            "cut_with",
+            "context_with",
+            "late",
+        )
         unknown = sorted(set(options) - set(allowed))
         if unknown:
             raise TypeError(f"rechunk() does not take {', '.join(unknown)}")
@@ -2912,29 +3078,44 @@ class Vectrix:
             doc = store.get(one, images=True)
             # What it was cut with before, as add_document takes it: a model's
             # note was recorded as a flag and cannot be called again from one.
-            kept = {k: v for k, v in (entry.get("chunking") or {}).items() if v is not None and k != "context"}
+            kept = {
+                k: v
+                for k, v in (entry.get("chunking") or {}).items()
+                if v is not None and k != "context"
+            }
             settings = {**kept, **options}
             self._rechunking = True
             try:
                 self.delete_document(one)
                 written += self.add_document(
-                    doc, doc_id=one, metadata=entry.get("user_metadata") or None,
-                    source_version=entry.get("source_version"), **settings,
+                    doc,
+                    doc_id=one,
+                    metadata=entry.get("user_metadata") or None,
+                    source_version=entry.get("source_version"),
+                    **settings,
                 )
             finally:
                 self._rechunking = False
-            recorded = {k: settings.get(k) for k in ("chunk", "chunk_size", "overlap", "parent_size", "embed_heading")}
+            recorded = {
+                k: settings.get(k)
+                for k in ("chunk", "chunk_size", "overlap", "parent_size", "embed_heading")
+            }
             if settings.get("context_with") is not None:
                 recorded["context"] = True
             if settings.get("late"):
                 recorded["late"] = True
             store.put(
-                one, doc, source_version=entry.get("source_version"), chunking=recorded,
+                one,
+                doc,
+                source_version=entry.get("source_version"),
+                chunking=recorded,
                 user_metadata=entry.get("user_metadata") or {},
             )
         return written
 
-    def reextract(self, where: Any = None, fetcher: Any = None, doc_id: Optional[Union[str, List[str]]] = None) -> int:
+    def reextract(
+        self, where: Any = None, fetcher: Any = None, doc_id: Optional[Union[str, List[str]]] = None
+    ) -> int:
         """Read originals again, for the documents ``where`` picks. Returns how many.
 
         For when the reader got better: ``where=lambda e: e.get("extractor") !=
@@ -2962,22 +3143,34 @@ class Vectrix:
             data = fetch.fetch(source)
             name = entry.get("filename") or str(source).replace("\\", "/").rsplit("/", 1)[-1]
             doc = load_bytes(
-                data, name, extractors=self._extractors, source=source, images=self.wants_images(), ocr=self.page_ocr
+                data,
+                name,
+                extractors=self._extractors,
+                source=source,
+                images=self.wants_images(),
+                ocr=self.page_ocr,
             )
             done += 1
             if hashlib.sha256(doc.text.encode()).hexdigest()[:16] == entry.get("version"):
                 continue
             # What it was cut with before, as add_document takes it: a model's
             # note was recorded as a flag and cannot be called again from one.
-            kept = {k: v for k, v in (entry.get("chunking") or {}).items() if v is not None and k != "context"}
+            kept = {
+                k: v
+                for k, v in (entry.get("chunking") or {}).items()
+                if v is not None and k != "context"
+            }
             self._rechunking = True
             try:
                 self.delete_document(one)
             finally:
                 self._rechunking = False
             self.add_document(
-                doc, doc_id=one, metadata=entry.get("user_metadata") or None,
-                source_version=entry.get("source_version"), **kept,
+                doc,
+                doc_id=one,
+                metadata=entry.get("user_metadata") or None,
+                source_version=entry.get("source_version"),
+                **kept,
             )
         return done
 
@@ -3606,7 +3799,12 @@ class Vectrix:
         for label, side in self._named.items():
             if label == IMAGE_VECTOR:
                 continue  # figures only, and from their pictures: add_document fills it
-            side.add(list(texts), metadata=[dict(m or {}) for m in metadata], ids=list(ids), progress=False)
+            side.add(
+                list(texts),
+                metadata=[dict(m or {}) for m in metadata],
+                ids=list(ids),
+                progress=False,
+            )
 
         # Store texts for retrieval
         for id_, text in zip(ids, texts):
@@ -4289,7 +4487,9 @@ class Vectrix:
         rerank_candidates = rerank is not False
         # Azure's semantic ranker, for this search: asked for, turned down
         # (no reranking, or MiniLM instead), or left to how the store was opened.
-        semantic: Optional[bool] = True if rerank == "semantic" else False if rerank in (False, "cross-encoder") else None
+        semantic: Optional[bool] = (
+            True if rerank == "semantic" else False if rerank in (False, "cross-encoder") else None
+        )
         if mode == "graph":
             results = self._graph_search(
                 query,
@@ -4320,7 +4520,9 @@ class Vectrix:
         elif mode == "dense":
             results = self._dense_search(query_vector, limit, filter, explain=explain)
         elif mode == "sparse":
-            results = self._sparse_search(query, limit, filter, explain=explain, use_backend=use_backend, semantic=semantic)
+            results = self._sparse_search(
+                query, limit, filter, explain=explain, use_backend=use_backend, semantic=semantic
+            )
         elif mode == "hybrid":
             results = self._hybrid_search(
                 query,
@@ -4436,7 +4638,11 @@ class Vectrix:
         stays safe.
         """
         results = self._collection.search(
-            query=query_vector, limit=limit, filter=filter, principal=self._principal, **self._home_kwargs()
+            query=query_vector,
+            limit=limit,
+            filter=filter,
+            principal=self._principal,
+            **self._home_kwargs(),
         )
         if self._policy_counts is not None:
             self._policy_counts.update(
@@ -4478,7 +4684,10 @@ class Vectrix:
         """
         home = self._home()
         storage = self._backend_storage() if use_backend and home != "local" else None
-        if storage is None or type(storage).__name__ not in ("AzureSearchStorage", "OpenSearchStorage"):
+        if storage is None or type(storage).__name__ not in (
+            "AzureSearchStorage",
+            "OpenSearchStorage",
+        ):
             return None
         if not hasattr(storage, "text_search"):
             return None
@@ -4541,7 +4750,13 @@ class Vectrix:
         return out
 
     def _store_keyword_search(
-        self, storage: Any, query: str, limit: int, filter: Optional[Dict], explain: bool, semantic: Optional[bool]
+        self,
+        storage: Any,
+        query: str,
+        limit: int,
+        filter: Optional[Dict],
+        explain: bool,
+        semantic: Optional[bool],
     ) -> List[Dict]:
         """The service's own keyword search, with Azure's semantic ranker when it is asked for."""
         engine_filter = self._collection._engine_filter(filter, self._policy, self._principal)
@@ -4567,7 +4782,11 @@ class Vectrix:
                 item["similarity"] = round(float(score) / top, 6)
                 item["similarity_kind"] = "relative"
             if explain:
-                item["explain"] = {"semantic": data["_semantic_score"]} if data.get("_semantic_score") is not None else {"bm25": float(score)}
+                item["explain"] = (
+                    {"semantic": data["_semantic_score"]}
+                    if data.get("_semantic_score") is not None
+                    else {"bm25": float(score)}
+                )
             candidates.append(item)
         return self._decide_backend_candidates(candidates, filter)[:limit]
 
@@ -4615,7 +4834,9 @@ class Vectrix:
             e["rrf_dense"] = 1.0 / (k + rank + 1)
             e["dense"] = r.score
             e.update(_judgement(r))
-            e["found_by"] = ["meaning"] if rank < nearest and (r.relevance is None or r.relevance > 0.0) else []
+            e["found_by"] = (
+                ["meaning"] if rank < nearest and (r.relevance is None or r.relevance > 0.0) else []
+            )
         for rank, r in enumerate(sparse):
             e = entry(r)
             e["rrf_sparse"] = 1.0 / (k + rank + 1)
@@ -4663,7 +4884,9 @@ class Vectrix:
                 e["explain"] = parts
         return scores
 
-    def _candidates(self, scores: Dict[str, Dict], take: int, explain: bool, query_vector: Any = None) -> List[Dict]:
+    def _candidates(
+        self, scores: Dict[str, Dict], take: int, explain: bool, query_vector: Any = None
+    ) -> List[Dict]:
         ordered = sorted(scores, key=lambda d: scores[d]["combined"], reverse=True)[:take]
         out = []
         for doc_id in ordered:
@@ -4681,7 +4904,11 @@ class Vectrix:
                     item[key] = e[key]
             if item.get("similarity") is None:
                 # Only the keywords found it, so nothing measured its meaning. Measure it.
-                exact = self._collection._similarity_of(query_vector, doc_id) if query_vector is not None else None
+                exact = (
+                    self._collection._similarity_of(query_vector, doc_id)
+                    if query_vector is not None
+                    else None
+                )
                 if exact is not None:
                     item["similarity"], item["similarity_kind"] = exact, "similarity"
             if explain:
@@ -4718,7 +4945,11 @@ class Vectrix:
                 undisclosable += 1
         if self._policy_counts is not None:
             self._policy_counts.update(
-                {"examined": len(candidates), "disclosable": disclosable, "undisclosable": undisclosable}
+                {
+                    "examined": len(candidates),
+                    "disclosable": disclosable,
+                    "undisclosable": undisclosable,
+                }
             )
         return kept
 
@@ -4746,12 +4977,16 @@ class Vectrix:
             if external is not None:
                 out = []
                 judged = list(external.rerank(query, docs, top=limit))[:limit]
-                for (idx, score), verdict in zip(judged, _relevance.from_reranker(s for _, s in judged)):
+                for (idx, score), verdict in zip(
+                    judged, _relevance.from_reranker(s for _, s in judged)
+                ):
                     item = candidates[int(idx)]
                     item["judged"] = verdict
                     if explain:
                         item.setdefault("explain", {})["rerank"] = float(score)
-                        item["explain"]["reranker"] = str(getattr(external, "label", type(external).__name__))
+                        item["explain"]["reranker"] = str(
+                            getattr(external, "label", type(external).__name__)
+                        )
                     out.append(item)
                 return out
             reranker = self.reranker
@@ -4927,7 +5162,9 @@ class Vectrix:
                 and hasattr(storage, "hybrid_search")
             ):
                 engine_filter = coll._engine_filter(filter, self._policy, self._principal)
-                extra: Dict[str, Any] = {"filter": engine_filter} if engine_filter is not None else {}
+                extra: Dict[str, Any] = (
+                    {"filter": engine_filter} if engine_filter is not None else {}
+                )
                 if semantic is not None and storage_class == "AzureSearchStorage":
                     extra["semantic"] = semantic
                 # The service holds what it holds. The local count is only
@@ -4948,7 +5185,12 @@ class Vectrix:
                 # say, so an explanation asks each vector on its own.
                 ranks: Dict[str, Dict[str, int]] = {}
                 if explain and len(getattr(storage, "vector_names", lambda: ())()) > 1:
-                    ranks = storage.vector_ranks(self.name, query_vector, limit=prefetch_limit, **({"filter": engine_filter} if engine_filter is not None else {}))
+                    ranks = storage.vector_ranks(
+                        self.name,
+                        query_vector,
+                        limit=prefetch_limit,
+                        **({"filter": engine_filter} if engine_filter is not None else {}),
+                    )
                 # Backends store the caller's metadata flattened into the row
                 # beside the standard fields; a nested "metadata" key is what
                 # was read here before, so OpenSearch results carried none.
@@ -4962,7 +5204,9 @@ class Vectrix:
                     }
                     if r[1].get("_vx_relevance") is not None:
                         item["similarity"] = float(r[1]["_vx_relevance"])
-                        item["similarity_kind"] = str(r[1].get("_vx_relevance_kind") or "similarity")
+                        item["similarity_kind"] = str(
+                            r[1].get("_vx_relevance_kind") or "similarity"
+                        )
                     if r[1].get("_vx_relevances"):
                         item["similarities"] = dict(r[1]["_vx_relevances"])
                     if r[1].get("_vx_matched_by"):
@@ -4975,7 +5219,11 @@ class Vectrix:
                 candidates = self._decide_backend_candidates(candidates, filter)
                 # A service that reranked already has done the rerank stage;
                 # the cross-encoder on top would be a second, weaker pass.
-                reranked = bool(semantic) if semantic is not None else bool(getattr(storage, "reranks", False))
+                reranked = (
+                    bool(semantic)
+                    if semantic is not None
+                    else bool(getattr(storage, "reranks", False))
+                )
                 return self._cross_encode(
                     query, candidates, limit, explain, enabled=rerank_candidates and not reranked
                 )
@@ -5226,6 +5474,10 @@ class Vectrix:
         # The list of named vectors belongs to the collection, not to what was in it.
         if self._named:
             _coll(self).set_meta("named_dense_vectors", json.dumps(list(self._named)))
+        # So do its model and its policy. Without them a reopen picks another
+        # model, and the documents added next are open to every caller.
+        _coll(self).set_meta("embedding_model", self.model_name)
+        self._setup_policy_from_meta(self._policy)
         self._stamp_build()
         return self
 
@@ -5571,7 +5823,11 @@ def quick_search(texts: List[str], query: str, limit: int = 5) -> Results:
         ... )
         >>> print(results.top.text)
     """
-    db = Vectrix("_quick_search")
-    db.clear()
-    db.add(texts)
-    return db.search(query, limit=limit)
+    # In memory and closed after: nothing written to the working directory,
+    # and two calls at once no longer clear each other's collection.
+    db = Vectrix("_quick_search", path=None)  # type: ignore[arg-type]
+    try:
+        db.add(texts)
+        return db.search(query, limit=limit)
+    finally:
+        db.close()

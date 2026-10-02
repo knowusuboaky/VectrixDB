@@ -99,7 +99,9 @@ def _now() -> str:
 def _is_token(policy: Mapping[str, Any]) -> bool:
     """Whether a policy as written reads as the token method, its earlier spelling included."""
     method = str(policy.get("method") or "").strip().lower()
-    return method == "token" or (method == "groups" and str(policy.get("source") or "").strip().lower() != "store")
+    return method == "token" or (
+        method == "groups" and str(policy.get("source") or "").strip().lower() != "store"
+    )
 
 
 @dataclass
@@ -126,11 +128,15 @@ class CollectionRecord:
             self.path = str(self.path).strip()
             last = self.path.strip("/").split("/")[-1] if self.path.strip("/") else ""
             if last != self.name:
-                raise ConfigurationError(f"{self.name}: its path ends in {last or 'nothing'!r}, and the last folder is the collection: raw/{self.name}/")
+                raise ConfigurationError(
+                    f"{self.name}: its path ends in {last or 'nothing'!r}, and the last folder is the collection: raw/{self.name}/"
+                )
         if self.policy is not None:
             # An empty policy is not "nobody yet", it is a mistake: None says nobody.
             if not isinstance(self.policy, Mapping) or not self.policy.get("method"):
-                raise ConfigurationError(f"{self.name}: a policy names a method, store or token, and who it allows; null is nobody yet")
+                raise ConfigurationError(
+                    f"{self.name}: a policy names a method, store or token, and who it allows; null is nobody yet"
+                )
             # Built once, here, so a record that cannot become a policy is refused
             # where it is written rather than at the first search.
             self._policy = AccessPolicy.from_dict(self.policy)
@@ -168,10 +174,16 @@ class CollectionRecord:
         """
         policy = data.get("policy")
         if isinstance(policy, Mapping) and "rules" in policy and "method" not in policy:
-            log.warning("%s: its record carries a per-document policy, which records no longer hold; it reads as nobody yet", name)
+            log.warning(
+                "%s: its record carries a per-document policy, which records no longer hold; it reads as nobody yet",
+                name,
+            )
             policy = None
         if isinstance(policy, Mapping) and _is_token(policy) and not policy.get("people"):
-            log.warning("%s: its policy names security groups and no list of people; it reads as nobody yet until people are added", name)
+            log.warning(
+                "%s: its policy names security groups and no list of people; it reads as nobody yet until people are added",
+                name,
+            )
             policy = None
         return cls(
             name=name,
@@ -196,14 +208,18 @@ class CollectionRecord:
         ``financial.json`` holding only the rules is enough.
         """
         name_from_file = None
-        if isinstance(source, Path) or (isinstance(source, str) and source.strip().endswith(".json") and Path(source).is_file()):
+        if isinstance(source, Path) or (
+            isinstance(source, str) and source.strip().endswith(".json") and Path(source).is_file()
+        ):
             path = Path(source)
             name_from_file = path.stem
             source = path.read_text(encoding="utf-8")
         data = json.loads(source) if isinstance(source, str) else dict(source)
         name = str(data.get("name") or data.get("id") or name_from_file or "")
         if name_from_file and name and name != name_from_file:
-            raise ConfigurationError(f"{name_from_file}.json says it is the record for {name!r}; one of the two is wrong")
+            raise ConfigurationError(
+                f"{name_from_file}.json says it is the record for {name!r}; one of the two is wrong"
+            )
         return cls.from_data(name, data)
 
 
@@ -227,7 +243,9 @@ class CollectionRecords:
     record read is used before the store is asked again.
     """
 
-    def __init__(self, records: Any, *, fresh_for: float = 30.0, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self, records: Any, *, fresh_for: float = 30.0, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         self._records = records
         self._fresh_for = float(fresh_for)
         self._clock = clock
@@ -235,11 +253,15 @@ class CollectionRecords:
         self._held: Dict[str, Tuple[float, Optional[CollectionRecord]]] = {}
 
     @classmethod
-    def open(cls, where: Any, *, key: Optional[str] = None, fresh_for: float = 30.0) -> "CollectionRecords":
+    def open(
+        cls, where: Any, *, key: Optional[str] = None, fresh_for: float = 30.0
+    ) -> "CollectionRecords":
         """Open the store at ``where``: an address, a path, or a records store already made."""
         from .signin.records import Records, open_records
 
-        records = where if isinstance(where, Records) else open_records(where, key=key, setting=STORE_ENV)
+        records = (
+            where if isinstance(where, Records) else open_records(where, key=key, setting=STORE_ENV)
+        )
         return cls(records, fresh_for=fresh_for)
 
     # ------------------------------------------------------------ reading ---
@@ -260,7 +282,12 @@ class CollectionRecords:
             found = self._records.get(KIND, name)
         except Exception as exc:  # the store's own error, whatever database it is
             if held is not None:
-                log.warning("collection records at %s could not be read (%s); using %s's record from earlier", self.describe(), type(exc).__name__, name)
+                log.warning(
+                    "collection records at %s could not be read (%s); using %s's record from earlier",
+                    self.describe(),
+                    type(exc).__name__,
+                    name,
+                )
                 return held[1]
             raise CollectionStoreUnavailable(name, self.describe(), exc) from exc
         record = CollectionRecord.from_data(name, found.data) if found is not None else None
@@ -307,11 +334,15 @@ class CollectionRecords:
             self._held[name] = (self._clock(), None)
         return bool(gone)
 
-    def _change(self, name: str, by: Optional[str], generation: Optional[str], **changes: Any) -> CollectionRecord:
+    def _change(
+        self, name: str, by: Optional[str], generation: Optional[str], **changes: Any
+    ) -> CollectionRecord:
         record = self.get(name) or CollectionRecord(name=name, generation=generation or _now())
         return self.put(replace(record, **changes), by=by)
 
-    def set_policy(self, name: str, policy: Any, *, by: Optional[str] = None, generation: Optional[str] = None) -> CollectionRecord:
+    def set_policy(
+        self, name: str, policy: Any, *, by: Optional[str] = None, generation: Optional[str] = None
+    ) -> CollectionRecord:
         """Say who may search a collection, an ``AccessPolicy`` or its dict, or nobody yet with None."""
         as_dict = policy.to_dict() if hasattr(policy, "to_dict") else policy
         return self._change(name, by, generation, policy=as_dict)
@@ -348,4 +379,8 @@ def open_collection_store(where: Any, *, key: Optional[str] = None) -> Optional[
 
 def describe_collection_store(store: Optional[CollectionRecords]) -> str:
     """Where a server keeps collection records, for its log: 'none' when nothing is gated."""
-    return store.describe() if store is not None else "none, every collection is served as it always was"
+    return (
+        store.describe()
+        if store is not None
+        else "none, every collection is served as it always was"
+    )

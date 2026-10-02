@@ -237,6 +237,27 @@ def test_nested_zip_is_flattened(fake_urlopen, models_dir, capsys):
     assert "Flattening nested folder: dense/" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("escape", ["../../escaped.txt", "sub/../../escaped.txt"])
+def test_a_zip_entry_cannot_escape_the_model_directory(fake_urlopen, models_dir, escape):
+    """Flattening joined each entry to the model directory as it came, so a
+    nested "../" wrote outside it; now nothing is written at all."""
+    fake_urlopen.serve(make_zip({"model.onnx": ONNX_BYTES, escape: b"pwned"}, root="dense"))
+    target = models_dir / "a" / "dense"
+    with pytest.raises(ModelDownloadError, match="outside"):
+        ModelDownloader(progress=False)._download_from_github(
+            "dense", target, {"github_release": "v1"}
+        )
+    assert not (models_dir / "escaped.txt").exists()
+    assert not (target / "model.onnx").exists()
+
+
+def test_the_inside_check_refuses_absolute_and_parent_names(tmp_path):
+    assert downloader_mod._inside(tmp_path, "ok/model.onnx") == tmp_path / "ok" / "model.onnx"
+    for name in ("../x", "/etc/passwd", "a/../../x"):
+        with pytest.raises(ModelDownloadError):
+            downloader_mod._inside(tmp_path, name)
+
+
 def test_mixed_root_zip_is_not_flattened(fake_urlopen, models_dir):
     # One entry sits outside the folder, so the folder is kept as-is.
     buf = io.BytesIO()
@@ -461,8 +482,233 @@ def test_github_only_models_succeed(fake_urlopen, models_dir, model_type, folder
 @pytest.mark.parametrize("model_type", ["reranker_en", "late_interaction_en"])
 def test_github_only_models_fail_loudly(fake_urlopen, models_dir, model_type):
     fake_urlopen.fail(_http_error(404))
-    with pytest.raises(RuntimeError, match="Failed to download"):
+    with pytest.raises(ModelDownloadError, match="(?s)Could not fetch.*no HuggingFace fallback"):
         ModelDownloader(progress=False).download(model_type)
+
+
+# --- when every source fails, the error says which, and what to do -------------------
+
+
+@pytest.mark.parametrize(
+    "model_type, asset, export_name",
+    [
+        ("dense_en", "dense_en", "_manual_dense_export"),
+        ("bge_base_en", "bge_base_en", "_manual_dense_export"),
+        ("reranker_en", "reranker_en", None),
+        ("late_interaction_en", "colbert", None),
+    ],
+)
+def test_a_missing_release_is_named_with_its_publishing_command(
+    fake_urlopen, models_dir, monkeypatch, model_type, asset, export_name
+):
+    """No release tag has been published, so the GitHub fallback answers 404 to
+    everyone, and dense_en is not in the wheel either. The error used to say
+    "check your internet connection"; it now lists the sources tried, says the
+    release does not exist, and names the command that creates it."""
+    fake_urlopen.fail(_http_error(404))
+    dl = ModelDownloader(progress=False)
+    if export_name:
+        monkeypatch.setattr(
+            dl, export_name, lambda *a, **k: (_ for _ in ()).throw(OSError("no torch"))
+        )
+    with pytest.raises(ModelDownloadError) as exc:
+        dl.download(model_type)
+    text = str(exc.value)
+    tag = MODEL_CONFIG[model_type]["github_release"]
+    assert f"1. GitHub release {tag}, asset {asset}.zip" in text
+    assert f"{GITHUB_RELEASE_BASE}/{tag}/{asset}.zip" in text
+    assert "HTTP 404: this release, or its asset, does not exist" in text
+    assert "has not been published yet" in text
+    assert f"python scripts/publish_models.py {model_type}" in text
+    assert f"gh release create {tag} dist/models/{asset}.zip" in text
+    if export_name:
+        assert f"2. HuggingFace {MODEL_CONFIG[model_type]['huggingface_id']}" in text
+        assert "no torch" in text
+        assert f"--type {model_type}" in text
+    else:
+        assert "no HuggingFace fallback" in text
+        assert "pip install --force-reinstall vectrixdb" in text
+    if model_type == "dense_en":
+        assert 'dense_model="bge-small").reembed()' in text
+
+
+def test_a_network_fault_is_not_called_a_missing_release(fake_urlopen, models_dir, monkeypatch):
+    fake_urlopen.fail(URLError("name resolution failed"))
+    dl = ModelDownloader(progress=False)
+    monkeypatch.setattr(
+        dl, "_manual_dense_export", lambda *a, **k: (_ for _ in ()).throw(OSError("no torch"))
+    )
+    with pytest.raises(ModelDownloadError) as exc:
+        dl.download("dense_en")
+    text = str(exc.value)
+    assert "unreachable: name resolution failed" in text
+    assert "Check the network or the proxy" in text
+    assert "has not been published" not in text and "gh release" not in text
+
+
+def test_the_easy_api_names_a_missing_release_too(tmp_path, monkeypatch):
+    import urllib.request
+
+    from vectrixdb.easy import Vectrix
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    def gone(url, dest):
+        raise _http_error(404)
+
+    monkeypatch.setattr(urllib.request, "urlretrieve", gone)
+    with pytest.raises(ModelDownloadError) as exc:
+        Vectrix._download_github_model(object.__new__(Vectrix), "github:my-tag", "reranker")
+    text = str(exc.value)
+    assert f"{GITHUB_RELEASE_BASE}/my-tag/reranker.zip" in text
+    assert "does not exist" in text
+    assert "gh release create my-tag dist/models/reranker.zip" in text
+
+
+@pytest.mark.parametrize("model_type", sorted(downloader_mod.RELEASE_ASSETS))
+def test_the_release_url_is_the_one_the_downloader_asks_for(fake_urlopen, models_dir, model_type):
+    """release_asset_url, which the publish and check scripts read, must name
+    the URL download() requests, or a maintainer would publish the wrong zip."""
+    fake_urlopen.fail(_http_error(404))
+    dl = ModelDownloader(progress=False)
+    for name in (
+        "_manual_dense_export",
+        "_manual_reranker_export",
+        "_manual_colbert_export",
+        "_manual_late_interaction_export",
+        "_manual_rebel_export",
+    ):
+        setattr(dl, name, lambda *a, **k: (_ for _ in ()).throw(OSError("offline")))
+    for mod in ("optimum", "optimum.onnxruntime"):
+        sys.modules.pop(mod, None)
+    sys.modules["optimum"] = types.ModuleType(
+        "optimum"
+    )  # ImportError on the submodule: manual export
+    try:
+        with pytest.raises(ModelDownloadError):
+            dl.download(model_type)
+    finally:
+        sys.modules.pop("optimum", None)
+    requested = fake_urlopen.requests[0][0].full_url
+    assert requested == downloader_mod.release_asset_url(model_type)
+    asset, folder = downloader_mod.RELEASE_ASSETS[model_type]
+    assert requested.endswith(f"/{asset}.zip")
+    assert (models_dir / folder).is_dir()
+
+
+# --- scripts/publish_models.py and scripts/check_model_releases.py ----------------------
+
+
+def _script(name: str):
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / name
+    spec = importlib.util.spec_from_file_location(name[:-3], path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_publish_models_zips_what_the_downloader_accepts(
+    fake_urlopen, models_dir, tmp_path, monkeypatch, capsys
+):
+    """The zip the script makes is flat, leaves backups out, and comes back
+    through _download_from_github with its checksums verified."""
+    publish = _script("publish_models.py")
+    source = models_dir / "dense_en"
+    source.mkdir()
+    (source / "model.onnx").write_bytes(ONNX_BYTES)
+    (source / "tokenizer.json").write_bytes(TOKENIZER)
+    (source / "model.onnx.backup").write_bytes(b"old")
+    expected = {
+        "model.onnx": hashlib.sha256(ONNX_BYTES).hexdigest(),
+        "tokenizer.json": hashlib.sha256(TOKENIZER).hexdigest(),
+    }
+    monkeypatch.setattr(checksums, "load_manifest", lambda path=None: {"dense_en": expected})
+
+    out = tmp_path / "dist"
+    assert publish.main(["dense_en", "--out", str(out)]) == 0
+    printed = capsys.readouterr().out
+    assert f"gh release create dense-en {out / 'dense_en.zip'}" in printed
+    assert "gh release upload dense-en" in printed
+    with zipfile.ZipFile(out / "dense_en.zip") as zf:
+        assert sorted(zf.namelist()) == ["model.onnx", "tokenizer.json"]
+
+    fake_urlopen.serve((out / "dense_en.zip").read_bytes())
+    target = models_dir / "fetched"
+    assert ModelDownloader(progress=False)._download_from_github(
+        "dense_en", target, MODEL_CONFIG["dense_en"]
+    )
+    assert (target / "model.onnx").read_bytes() == ONNX_BYTES
+
+
+def test_publish_models_refuses_what_it_cannot_publish(models_dir, tmp_path, capsys):
+    publish = _script("publish_models.py")
+    with pytest.raises(SystemExit, match="not a type the downloader fetches"):
+        publish.main(["bge_small_en", "--out", str(tmp_path)])
+    with pytest.raises(SystemExit, match="no model at"):
+        publish.main(["rebel", "--out", str(tmp_path)])
+    assert publish.main([]) == 0
+    listing = capsys.readouterr().out
+    assert "dense_en" in listing and "dense-en" in listing and "dense_en.zip" in listing
+
+
+def test_publish_models_warns_when_checksums_are_not_on_record(models_dir, tmp_path, capsys):
+    publish = _script("publish_models.py")
+    (models_dir / "rebel").mkdir()
+    (models_dir / "rebel" / "model.onnx").write_bytes(ONNX_BYTES)
+    assert publish.main(["rebel", "--out", str(tmp_path)]) == 1
+    assert "model_checksums.py --write rebel" in capsys.readouterr().out
+
+
+def test_check_model_releases_reports_the_missing_ones(monkeypatch, capsys):
+    check = _script("check_model_releases.py")
+    seen = []
+
+    def head(url, timeout=30.0):
+        seen.append(url)
+        return "ok" if "/dense-en/" in url else "missing (HTTP 404)"
+
+    monkeypatch.setattr(check, "head", head)
+    assert check.main([]) == 1
+    out = capsys.readouterr().out
+    assert "dense_en             ok" in out
+    assert (
+        "cannot be fetched" in out
+        and "rebel" in out
+        and "dense_en," not in out.split("cannot be fetched")[1]
+    )
+    assert "colbert" not in [u.rsplit("/", 1)[1] for u in seen if "/colbert-en/" not in u]
+    assert set(seen) == {
+        downloader_mod.release_asset_url(t) for t in downloader_mod.RELEASE_ASSETS if t != "colbert"
+    }
+
+    assert check.main(["dense_en"]) == 0
+    assert "all 1 release assets are there" in capsys.readouterr().out
+
+
+def test_check_model_releases_reads_the_status(monkeypatch):
+    check = _script("check_model_releases.py")
+    monkeypatch.setattr(
+        check, "urlopen", lambda req, timeout=None: (_ for _ in ()).throw(_http_error(404))
+    )
+    assert check.head("http://x") == "missing (HTTP 404)"
+    monkeypatch.setattr(
+        check, "urlopen", lambda req, timeout=None: (_ for _ in ()).throw(URLError("down"))
+    )
+    assert check.head("http://x") == "unreachable: down"
+
+    class Ok:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(check, "urlopen", lambda req, timeout=None: Ok())
+    assert check.head("http://x") == "ok"
 
 
 # --- BGE / ColBERT v2: GitHub then manual export ---------------------------------------
@@ -522,7 +768,7 @@ def test_bge_family_wraps_export_failure(
         raise OSError("no torch")
 
     monkeypatch.setattr(dl, export_name, boom)
-    with pytest.raises(RuntimeError, match=f"(?s)no torch.*--type {model_type}"):
+    with pytest.raises(ModelDownloadError, match=f"(?s)no torch.*--type {model_type}"):
         dl.download(model_type)
 
 
@@ -648,7 +894,7 @@ def test_hf_optimum_failure_raises(
     fake_urlopen.fail(_http_error(404))
     _fake_optimum(monkeypatch, [], raise_exc=OSError("hub unreachable"))
     _fake_transformers(monkeypatch)
-    with pytest.raises(RuntimeError, match="both GitHub and HuggingFace"):
+    with pytest.raises(ModelDownloadError, match=r"(?s)1\. GitHub release.*2\. HuggingFace"):
         ModelDownloader(progress=False).download(model_type)
     assert "hub unreachable" in capsys.readouterr().out
 
@@ -694,7 +940,7 @@ def test_manual_export_failure_raises(
     _no_optimum(monkeypatch)
     _plant(monkeypatch, "torch", None)
     _plant(monkeypatch, "transformers", None)
-    with pytest.raises(RuntimeError, match="both GitHub and HuggingFace"):
+    with pytest.raises(ModelDownloadError, match=r"(?s)1\. GitHub release.*2\. HuggingFace"):
         ModelDownloader(progress=False).download(model_type)
     assert "Manual export failed" in capsys.readouterr().out
 
@@ -748,7 +994,10 @@ def test_rebel_all_sources_fail(fake_urlopen, models_dir, monkeypatch):
     fake_urlopen.fail(_http_error(404))
     _fake_optimum(monkeypatch, [], raise_exc=OSError("no hub"))
     _fake_transformers(monkeypatch)
-    with pytest.raises(RuntimeError, match="mREBEL"):
+    with pytest.raises(
+        ModelDownloadError,
+        match=r"(?s)mrebel-base-int8 model \(rebel\).*no hub.*publish_models\.py rebel",
+    ):
         ModelDownloader(progress=False).download("rebel")
 
 
@@ -871,3 +1120,20 @@ def test_cli_rejects_unknown_type(monkeypatch, cli_recorder, capsys):
     assert exc.value.code == 2
     assert cli_recorder == []
     assert "invalid choice" in capsys.readouterr().err
+
+
+def test_the_easy_api_github_download_is_contained_too(tmp_path, monkeypatch):
+    """Vectrix._download_github_model extracted a release zip with no check."""
+    import urllib.request
+
+    from vectrixdb.easy import Vectrix
+
+    body = make_zip({"model.onnx": ONNX_BYTES, "../../escaped.txt": b"pwned"})
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(
+        urllib.request, "urlretrieve", lambda url, dest: Path(dest).write_bytes(body)
+    )
+    with pytest.raises(ModelDownloadError, match="outside"):
+        Vectrix._download_github_model(object.__new__(Vectrix), "github:v1", "reranker")
+    assert not list(tmp_path.rglob("escaped.txt"))
+    assert not list(tmp_path.rglob("model.onnx"))

@@ -73,12 +73,18 @@ def measure(report: Path) -> float:
         text=True,
     )
     # The run's own summary, so the job log says what the percentage came from.
-    summary = [line for line in run.stdout.splitlines() if " passed" in line or " failed" in line or " error" in line]
+    summary = [
+        line
+        for line in run.stdout.splitlines()
+        if " passed" in line or " failed" in line or " error" in line
+    ]
     if summary:
         print(summary[-1])
     if run.returncode != 0:
         print(run.stdout[-4000:])
-        raise SystemExit(f"the test run failed (exit {run.returncode}), so its coverage is not a number to compare")
+        raise SystemExit(
+            f"the test run failed (exit {run.returncode}), so its coverage is not a number to compare"
+        )
     return read(report)
 
 

@@ -239,9 +239,13 @@ def public_key_from_cose(cose: Any) -> tuple[int, Any]:
     try:
         if alg == ES256 and kty == 2 and cose.get(-1) == 1:
             x, y = cose.get(-2), cose.get(-3)
-            if not (isinstance(x, bytes) and isinstance(y, bytes) and len(x) == 32 and len(y) == 32):
+            if not (
+                isinstance(x, bytes) and isinstance(y, bytes) and len(x) == 32 and len(y) == 32
+            ):
                 raise PasskeyRefused()
-            numbers = ec.EllipticCurvePublicNumbers(int.from_bytes(x, "big"), int.from_bytes(y, "big"), ec.SECP256R1())
+            numbers = ec.EllipticCurvePublicNumbers(
+                int.from_bytes(x, "big"), int.from_bytes(y, "big"), ec.SECP256R1()
+            )
             return ES256, numbers.public_key()
         if alg == EDDSA and kty == 1 and cose.get(-1) == 6:
             x = cose.get(-2)
@@ -252,7 +256,9 @@ def public_key_from_cose(cose: Any) -> tuple[int, Any]:
             n, e = cose.get(-1), cose.get(-2)
             if not (isinstance(n, bytes) and isinstance(e, bytes)) or len(n) * 8 < 2048:
                 raise PasskeyRefused()
-            return RS256, rsa.RSAPublicNumbers(int.from_bytes(e, "big"), int.from_bytes(n, "big")).public_key()
+            return RS256, rsa.RSAPublicNumbers(
+                int.from_bytes(e, "big"), int.from_bytes(n, "big")
+            ).public_key()
     except ValueError as exc:  # a point not on the curve, and the like
         raise PasskeyRefused() from exc
     raise PasskeyRefused("That passkey uses a kind of key this server does not accept.")
@@ -341,7 +347,14 @@ def parse_auth_data(raw: Any) -> AuthData:
 
 
 def creation_options(
-    *, rp_id: str, rp_name: str, user_id: bytes, user_name: str, display_name: str, challenge: bytes, exclude: Sequence[bytes] = ()
+    *,
+    rp_id: str,
+    rp_name: str,
+    user_id: bytes,
+    user_name: str,
+    display_name: str,
+    challenge: bytes,
+    exclude: Sequence[bytes] = (),
 ) -> dict:
     """What ``navigator.credentials.create`` is given, with binary values as base64url."""
     return {
@@ -351,7 +364,11 @@ def creation_options(
         "pubKeyCredParams": [{"type": "public-key", "alg": alg} for alg in ALGORITHMS],
         "timeout": TIMEOUT_MS,
         "attestation": "none",
-        "authenticatorSelection": {"residentKey": "required", "requireResidentKey": True, "userVerification": "required"},
+        "authenticatorSelection": {
+            "residentKey": "required",
+            "requireResidentKey": True,
+            "userVerification": "required",
+        },
         "excludeCredentials": [{"type": "public-key", "id": b64u(c)} for c in exclude],
     }
 
@@ -388,7 +405,11 @@ class NewPasskey:
 
 
 def _response(credential: Any) -> dict:
-    if not isinstance(credential, dict) or credential.get("type") != "public-key" or not isinstance(credential.get("response"), dict):
+    if (
+        not isinstance(credential, dict)
+        or credential.get("type") != "public-key"
+        or not isinstance(credential.get("response"), dict)
+    ):
         raise PasskeyRefused()
     return credential["response"]
 
@@ -412,27 +433,54 @@ def _checked(auth: AuthData, rp_id: str) -> None:
     if not hmac.compare_digest(auth.rp_id_hash, hashlib.sha256(rp_id.encode("utf-8")).digest()):
         raise PasskeyRefused("That passkey belongs to a different site.")
     if not auth.user_present or not auth.user_verified:
-        raise PasskeyRefused("Your device did not check that it was you. Use a passkey that asks for a PIN.")
+        raise PasskeyRefused(
+            "Your device did not check that it was you. Use a passkey that asks for a PIN."
+        )
 
 
-def verify_registration(credential: Any, *, challenge: bytes, origin: str, rp_id: str) -> NewPasskey:
+def verify_registration(
+    credential: Any, *, challenge: bytes, origin: str, rp_id: str
+) -> NewPasskey:
     response = _response(credential)
     _client_data(response.get("clientDataJSON"), "webauthn.create", challenge, origin)
     attestation = cbor_decode(unb64u(response.get("attestationObject")))
-    if not isinstance(attestation, dict) or not isinstance(attestation.get("authData"), bytes) or not isinstance(attestation.get("fmt"), str):
+    if (
+        not isinstance(attestation, dict)
+        or not isinstance(attestation.get("authData"), bytes)
+        or not isinstance(attestation.get("fmt"), str)
+    ):
         raise PasskeyRefused()
     auth = parse_auth_data(attestation["authData"])
     _checked(auth, rp_id)
     if not auth.credential_id or not auth.public_key:
         raise PasskeyRefused()
-    if credential.get("rawId") is not None and unb64u(credential.get("rawId")) != auth.credential_id:
+    if (
+        credential.get("rawId") is not None
+        and unb64u(credential.get("rawId")) != auth.credential_id
+    ):
         raise PasskeyRefused()
     alg, _ = public_key_from_cose(cbor_decode(auth.public_key))
-    transports = [t for t in response.get("transports") or [] if isinstance(t, str) and len(t) < 20][:8]
-    return NewPasskey(credential_id=auth.credential_id, public_key=auth.public_key, alg=alg, sign_count=auth.sign_count, transports=transports)
+    transports = [
+        t for t in response.get("transports") or [] if isinstance(t, str) and len(t) < 20
+    ][:8]
+    return NewPasskey(
+        credential_id=auth.credential_id,
+        public_key=auth.public_key,
+        alg=alg,
+        sign_count=auth.sign_count,
+        transports=transports,
+    )
 
 
-def verify_assertion(credential: Any, *, challenge: bytes, origin: str, rp_id: str, public_key: bytes, sign_count: int) -> int:
+def verify_assertion(
+    credential: Any,
+    *,
+    challenge: bytes,
+    origin: str,
+    rp_id: str,
+    public_key: bytes,
+    sign_count: int,
+) -> int:
     """Check a sign-in with a stored passkey. Returns the new signature count to keep."""
     response = _response(credential)
     client_raw = _client_data(response.get("clientDataJSON"), "webauthn.get", challenge, origin)

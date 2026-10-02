@@ -244,7 +244,12 @@ JSON:"""
 
         reply = post_json(
             f"{self._endpoint}/api/generate",
-            {"model": self.model, "prompt": prompt, "stream": False, "options": {"temperature": self.temperature}},
+            {
+                "model": self.model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": self.temperature},
+            },
         )
         return reply["response"]
 

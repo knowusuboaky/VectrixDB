@@ -33,13 +33,10 @@ jobs:
       - name: Ruff (lint)
         run: ruff check .
 
-      # Advisory until the codebase is formatted once. `ruff format` currently
-      # rewrites 74 of 92 files; doing that is a single large commit that makes
-      # every blame and diff noisier, so it is a deliberate decision rather than
-      # something CI should force. Run `ruff format vectrixdb tests` to take it.
-      - name: Ruff (format check, advisory)
-        continue-on-error: true
-        run: ruff format --check vectrixdb tests
+      # The codebase was formatted once before 2.2 shipped, so this is a gate:
+      # `ruff format vectrixdb tests scripts examples` before committing.
+      - name: Ruff (format check)
+        run: ruff format --check vectrixdb tests scripts examples
 
       # The package type-checks clean as of 2.2, so this is a cliff again: any
       # new error fails the build. The ratchet below stays as the second gate
@@ -167,6 +164,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true # without the models the wheel-size check measures pointers
 
       - uses: actions/setup-python@v5
         with:

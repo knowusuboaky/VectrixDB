@@ -15,6 +15,7 @@ Author: Kwadwo Daddy Nyame Owusu - Boakye
 
 import heapq
 import json
+import os
 import pickle
 import sqlite3
 import threading
@@ -328,50 +329,103 @@ class SparseIndex:
         return docs_memory + index_memory
 
     def save(self) -> None:
-        """Save index to disk."""
+        """Save index to disk.
+
+        Written as ``sparse_index.npz``: the documents' ids, their indices and
+        values laid flat with offsets, and their norms, plus a JSON line of
+        the counts. NumPy reads it with ``allow_pickle=False``, so a file that
+        arrived in a snapshot from somewhere else is data and never code.
+        The inverted index is derived from the documents and rebuilt on load.
+        """
         if not self.path:
             return
 
         self.path.mkdir(parents=True, exist_ok=True)
 
         with self._lock:
-            # Save using pickle for efficiency
-            data = {
-                "inverted_index": dict(self._inverted_index),
-                "docs": {
-                    doc_id: {"indices": sv.indices, "values": sv.values}
-                    for doc_id, sv in self._docs.items()
-                },
-                "norms": self._norms,
-                "count": self._count,
-                "total_nnz": self._total_nnz,
-                "normalize": self.normalize,
-            }
+            doc_ids = list(self._docs)
+            lengths = [len(self._docs[doc_id].indices) for doc_id in doc_ids]
+            indptr = np.zeros(len(doc_ids) + 1, dtype=np.int64)
+            if lengths:
+                indptr[1:] = np.cumsum(lengths)
+            indices = np.array(
+                [i for doc_id in doc_ids for i in self._docs[doc_id].indices], dtype=np.int64
+            )
+            values = np.array(
+                [v for doc_id in doc_ids for v in self._docs[doc_id].values], dtype=np.float64
+            )
+            norms = np.array([self._norms.get(doc_id, 0.0) for doc_id in doc_ids], dtype=np.float64)
+            meta = json.dumps(
+                {"count": self._count, "total_nnz": self._total_nnz, "normalize": self.normalize}
+            )
 
-            with open(self.path / "sparse_index.pkl", "wb") as f:
-                pickle.dump(data, f)
+            # Beside the target and renamed over it, so a crash mid-write
+            # leaves the last good file rather than a truncated one.
+            target = self.path / "sparse_index.npz"
+            tmp = self.path / "sparse_index.npz.tmp"
+            with open(tmp, "wb") as f:
+                np.savez(
+                    f,
+                    doc_ids=np.array(doc_ids, dtype=str),
+                    indptr=indptr,
+                    indices=indices,
+                    values=values,
+                    norms=norms,
+                    meta=np.array(meta),
+                )
+            os.replace(tmp, target)
+            # The pickle this index was read from, if any, is now out of date
+            # and the one file here that could run code: gone with it.
+            old = self.path / "sparse_index.pkl"
+            if old.exists():
+                old.unlink()
 
     def _load(self) -> None:
-        """Load index from disk."""
+        """Load index from disk: the ``.npz``, or the ``.pkl`` an older
+        version wrote, read once so the collection opens and replaced by the
+        ``.npz`` on the next save."""
         if not self.path:
             return
 
+        npz_path = self.path / "sparse_index.npz"
         pkl_path = self.path / "sparse_index.pkl"
-        if not pkl_path.exists():
+        if npz_path.exists():
+            with np.load(npz_path, allow_pickle=False) as data:
+                doc_ids = [str(d) for d in data["doc_ids"]]
+                indptr, indices, values, norms = (
+                    data["indptr"],
+                    data["indices"],
+                    data["values"],
+                    data["norms"],
+                )
+                meta = json.loads(str(data["meta"]))
+            docs = {
+                doc_id: SparseVector(
+                    indices=[int(i) for i in indices[indptr[n] : indptr[n + 1]]],
+                    values=[float(v) for v in values[indptr[n] : indptr[n + 1]]],
+                )
+                for n, doc_id in enumerate(doc_ids)
+            }
+            self._norms = {doc_id: float(norms[n]) for n, doc_id in enumerate(doc_ids)}
+        elif pkl_path.exists():
+            with open(pkl_path, "rb") as f:
+                meta = pickle.load(f)  # noqa: S301 - the format before 2.2, read for migration only
+            docs = {
+                doc_id: SparseVector(indices=sv["indices"], values=sv["values"])
+                for doc_id, sv in meta["docs"].items()
+            }
+            self._norms = dict(meta["norms"])
+        else:
             return
 
-        with open(pkl_path, "rb") as f:
-            data = pickle.load(f)
-
-        self._inverted_index = defaultdict(list, data["inverted_index"])
-        self._docs = {
-            doc_id: SparseVector(indices=sv["indices"], values=sv["values"])
-            for doc_id, sv in data["docs"].items()
-        }
-        self._norms = data["norms"]
-        self._count = data["count"]
-        self._total_nnz = data["total_nnz"]
-        self.normalize = data.get("normalize", False)
+        self._docs = docs
+        self._inverted_index = defaultdict(list)
+        for doc_id, sv in docs.items():
+            for idx, val in zip(sv.indices, sv.values):
+                self._inverted_index[idx].append((doc_id, val))
+        self._count = int(meta["count"])
+        self._total_nnz = int(meta["total_nnz"])
+        self.normalize = bool(meta.get("normalize", False))
 
     def clear(self) -> None:
         """Clear all data from index."""

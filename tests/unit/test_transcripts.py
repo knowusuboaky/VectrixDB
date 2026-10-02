@@ -13,7 +13,11 @@ import pytest
 from vectrixdb.extract.engines import Whisper, _clock, segments_to_document, transcript_markdown
 from vectrixdb.ingest import LoadedDocument, describe_figures
 
-PHRASES = [(0.0, 4.2, "Welcome to the quarterly results."), (4.2, 9.0, "Revenue grew in every region."), (61.0, 65.5, "Costs were flat.")]
+PHRASES = [
+    (0.0, 4.2, "Welcome to the quarterly results."),
+    (4.2, 9.0, "Revenue grew in every region."),
+    (61.0, 65.5, "Costs were flat."),
+]
 
 
 class TestEveryPhraseKeepsItsTime:
@@ -24,7 +28,10 @@ class TestEveryPhraseKeepsItsTime:
     def test_the_text_a_collection_chunks_is_unchanged(self):
         """Still a paragraph a minute: that is what a chunk and a citation want."""
         doc = segments_to_document(PHRASES, 60.0)
-        assert doc.text == "Welcome to the quarterly results. Revenue grew in every region.\n\nCosts were flat."
+        assert (
+            doc.text
+            == "Welcome to the quarterly results. Revenue grew in every region.\n\nCosts were flat."
+        )
         assert doc.pages == [(0, 1), (65, 2)]
 
     def test_silence_and_stray_spaces_are_not_phrases(self):
@@ -62,7 +69,16 @@ class TestTheyAreKept:
 class TestTheClock:
     @pytest.mark.parametrize(
         "seconds, shown",
-        [(0, "0:00"), (4.2, "0:04"), (59.9, "0:59"), (61, "1:01"), (3599, "59:59"), (3600, "1:00:00"), (3725, "1:02:05"), (None, "0:00")],
+        [
+            (0, "0:00"),
+            (4.2, "0:04"),
+            (59.9, "0:59"),
+            (61, "1:01"),
+            (3599, "59:59"),
+            (3600, "1:00:00"),
+            (3725, "1:02:05"),
+            (None, "0:00"),
+        ],
     )
     def test_minutes_and_seconds_then_hours(self, seconds, shown):
         assert _clock(seconds) == shown
@@ -75,7 +91,9 @@ class TestTheTranscriptAPersonReads:
         return doc
 
     def test_a_youtube_video_is_headed_by_its_title(self):
-        said = transcript_markdown(self.recording(kind="youtube", title="Quarterly results, explained"))
+        said = transcript_markdown(
+            self.recording(kind="youtube", title="Quarterly results, explained")
+        )
         assert said.startswith("# YouTube: Quarterly results, explained\n")
 
     def test_any_other_recording_by_its_file(self):

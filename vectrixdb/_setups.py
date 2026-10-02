@@ -128,12 +128,27 @@ def _own_model(db: Any) -> Dict[str, str]:
     kind_of = str(getattr(db, "model_type", "") or "")
     name = str(getattr(db, "embedding_model", None) or getattr(db, "model_name", None) or "")
     if kind_of == "embedded":
-        return {"key": "builtin", "label": "Built in", "name": name or "bge-small-en-v1.5", "kind": "builtin"}
+        return {
+            "key": "builtin",
+            "label": "Built in",
+            "name": name or "bge-small-en-v1.5",
+            "kind": "builtin",
+        }
     if kind_of in ("fastembed", "sentence-transformers") or "/" in name:
         return {"key": "hf", "label": "Hugging Face", "name": name, "kind": "hf"}
     if name.startswith("azure-openai:"):
-        return {"key": "azure-openai", "label": "Azure OpenAI", "name": name.split(":", 1)[1], "kind": "service"}
-    return {"key": "own", "label": "Your model", "name": name if name not in ("", "custom") else "an embed_fn", "kind": "service"}
+        return {
+            "key": "azure-openai",
+            "label": "Azure OpenAI",
+            "name": name.split(":", 1)[1],
+            "kind": "service",
+        }
+    return {
+        "key": "own",
+        "label": "Your model",
+        "name": name if name not in ("", "custom") else "an embed_fn",
+        "kind": "service",
+    }
 
 
 def _store_model(storage: Any, vector: str) -> Dict[str, str]:
@@ -149,7 +164,9 @@ def _store_model(storage: Any, vector: str) -> Dict[str, str]:
     return {"key": _slug(vector), "label": vector, "name": vector, "kind": "service"}
 
 
-def _vector_choices(db: Any, relabel: Optional[Dict[str, Dict[str, str]]]) -> List[Tuple[Optional[str], List[Dict[str, str]]]]:
+def _vector_choices(
+    db: Any, relabel: Optional[Dict[str, Dict[str, str]]]
+) -> List[Tuple[Optional[str], List[Dict[str, str]]]]:
     """``(vectors=, models)`` pairs: each vector alone, then all of them fused."""
     relabel = relabel or {}
     storage = _storage_of(db)
@@ -166,11 +183,18 @@ def _vector_choices(db: Any, relabel: Optional[Dict[str, Dict[str, str]]]) -> Li
             return own
         if storage is not None:
             return _store_model(storage, name)
-        return {"key": _slug(name), "label": name, "name": name, "kind": "hf" if "/" in name or "-" in name else "service"}
+        return {
+            "key": _slug(name),
+            "label": name,
+            "name": name,
+            "kind": "hf" if "/" in name or "-" in name else "service",
+        }
 
     if len(names) <= 1:
         return [(None, [model(names[0] if names else "vectrixdb")])]
-    choices: List[Tuple[Optional[str], List[Dict[str, str]]]] = [(name, [model(name)]) for name in names]
+    choices: List[Tuple[Optional[str], List[Dict[str, str]]]] = [
+        (name, [model(name)]) for name in names
+    ]
     choices.append(("both", [model(name) for name in names]))
     return choices
 
@@ -209,7 +233,9 @@ def _methods(db: Any, engine_kind: str) -> List[str]:
         out.append("hybrid")
         external = getattr(db, "_external_reranker", None)
         if external is not None:
-            bedrock = "bedrock" in (type(external).__name__ + str(getattr(external, "label", ""))).lower()
+            bedrock = (
+                "bedrock" in (type(external).__name__ + str(getattr(external, "label", ""))).lower()
+            )
             out.append("hybrid_bedrock" if bedrock else "hybrid_reranked")
         elif getattr(db, "reranker_model_name", None):
             out.append("hybrid_reranked")
@@ -250,9 +276,13 @@ def search_of(way: str) -> Dict[str, Any]:
     """
     method, _, vectors = str(way or "").strip().partition(".")
     if method not in METHODS:
-        raise ValueError(f"{way!r} is no way of searching. The methods are {', '.join(METHODS)}, then .<vectors> for any but keyword")
+        raise ValueError(
+            f"{way!r} is no way of searching. The methods are {', '.join(METHODS)}, then .<vectors> for any but keyword"
+        )
     if vectors and method in ("keyword", "keyword_semantic"):
-        raise ValueError(f"{way!r}: keyword search reads the words and no vectors, so it is {method} alone")
+        raise ValueError(
+            f"{way!r}: keyword search reads the words and no vectors, so it is {method} alone"
+        )
     search = _search_kwargs(method)
     if vectors:
         search["vectors"] = vectors
@@ -318,7 +348,9 @@ def setups_of(target: Target) -> List[Dict[str, Any]]:
     for method in _methods(db, kind):
         label, ranker, _level = METHODS[method]
         if method in ("keyword", "keyword_semantic"):
-            choices: List[Tuple[Optional[str], List[Dict[str, str]]]] = [("own" if local_list else None, [])]
+            choices: List[Tuple[Optional[str], List[Dict[str, str]]]] = [
+                ("own" if local_list else None, [])
+            ]
         else:
             choices = _vector_choices(db, target.models)
             if local_list and method != "dense":
@@ -331,16 +363,18 @@ def setups_of(target: Target) -> List[Dict[str, Any]]:
             if vectors is not None:
                 search["vectors"] = vectors
             models_key = "+".join(sorted(m["key"] for m in models)) or "words"
-            out.append({
-                "key": f"{_slug(name)}.{method}.{models_key}",
-                "target": name,
-                "engine": engine,
-                "engine_short": short,
-                "engine_kind": kind,
-                "method": method,
-                "method_label": label,
-                "ranker": ranker,
-                "models": [dict(m) for m in models],
-                "search": search,
-            })
+            out.append(
+                {
+                    "key": f"{_slug(name)}.{method}.{models_key}",
+                    "target": name,
+                    "engine": engine,
+                    "engine_short": short,
+                    "engine_kind": kind,
+                    "method": method,
+                    "method_label": label,
+                    "ranker": ranker,
+                    "models": [dict(m) for m in models],
+                    "search": search,
+                }
+            )
     return out

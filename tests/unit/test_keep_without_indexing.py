@@ -41,14 +41,24 @@ def open_db(tmp_path, **options):
 
 
 def keeping(tmp_path, **options):
-    return open_db(tmp_path, keep_source=DocumentStore(LocalFiles(tmp_path / "markdown")), markdown_first=True, **options)
+    return open_db(
+        tmp_path,
+        keep_source=DocumentStore(LocalFiles(tmp_path / "markdown")),
+        markdown_first=True,
+        **options,
+    )
 
 
 class TestKeptNotCut:
     def test_the_markdown_is_kept_with_its_metadata_and_nothing_is_indexed(self, tmp_path):
         db = keeping(tmp_path)
         try:
-            assert db.add_document(CONTRACT, doc_id="acme/msa.md", metadata={"client_id": "td"}, index=False) == 0
+            assert (
+                db.add_document(
+                    CONTRACT, doc_id="acme/msa.md", metadata={"client_id": "td"}, index=False
+                )
+                == 0
+            )
             assert db.count() == 0 and list(db._collection._iter_documents_raw()) == []
             entry = db.documents.entry("acme/msa.md")
             assert entry["user_metadata"] == {"client_id": "td"}
@@ -85,12 +95,22 @@ class TestKeptNotCut:
         scan = tmp_path / "scan.pdf"
         scan.write_bytes(b"%PDF the bytes")
         db = Vectrix(
-            "inbox", path=str(tmp_path / "db"), embed_fn=embed, dimension=8,
-            extractors={".pdf": lambda data, name: read.append(name) or "The covenant is tested every quarter."},
-            keep_source=DocumentStore(LocalFiles(tmp_path / "markdown")), markdown_first=True,
+            "inbox",
+            path=str(tmp_path / "db"),
+            embed_fn=embed,
+            dimension=8,
+            extractors={
+                ".pdf": lambda data, name: (
+                    read.append(name) or "The covenant is tested every quarter."
+                )
+            },
+            keep_source=DocumentStore(LocalFiles(tmp_path / "markdown")),
+            markdown_first=True,
         )
         try:
-            worker = IngestWorker(db, LocalFetcher(), doc_id_of=lambda uri: uri.rsplit("/", 1)[-1], index=False)
+            worker = IngestWorker(
+                db, LocalFetcher(), doc_id_of=lambda uri: uri.rsplit("/", 1)[-1], index=False
+            )
             event = IngestEvent("created", scan.as_uri(), version="0x1")
             assert worker.handle(event).chunks == 0
             assert worker.handle(event).chunks == 0
@@ -105,10 +125,20 @@ class TestCutLater:
         db = keeping(tmp_path)
         try:
             db.add_document(CONTRACT, doc_id="msa.md", metadata={"client_id": "td"}, index=False)
-            written = db.rechunk("msa.md", chunk="markdown", chunk_size=200, overlap=40, embed_heading=True)
+            written = db.rechunk(
+                "msa.md", chunk="markdown", chunk_size=200, overlap=40, embed_heading=True
+            )
             assert written > 0 and db.count() == written
-            assert all(m.get("client_id") == "td" for _, _, m in db._collection._iter_documents_raw()), "the metadata it came with"
-            assert db.documents.entry("msa.md")["chunking"] == {"chunk": "markdown", "chunk_size": 200, "overlap": 40, "parent_size": None, "embed_heading": True}
+            assert all(
+                m.get("client_id") == "td" for _, _, m in db._collection._iter_documents_raw()
+            ), "the metadata it came with"
+            assert db.documents.entry("msa.md")["chunking"] == {
+                "chunk": "markdown",
+                "chunk_size": 200,
+                "overlap": 40,
+                "parent_size": None,
+                "embed_heading": True,
+            }
         finally:
             db.close()
 
@@ -116,11 +146,19 @@ class TestCutLater:
         db = keeping(tmp_path)
         try:
             db.add_document(CONTRACT, doc_id="msa.md", index=False)
-            db.rechunk("msa.md", chunk="markdown", chunk_size=200, overlap=40, context_with=lambda text, doc, start, end: "A contract's terms.")
+            db.rechunk(
+                "msa.md",
+                chunk="markdown",
+                chunk_size=200,
+                overlap=40,
+                context_with=lambda text, doc, start, end: "A contract's terms.",
+            )
             assert db.documents.entry("msa.md")["chunking"]["context"] is True
             # Cut again with nothing new asked: the flag is not handed back as an option.
             assert db.rechunk("msa.md") > 0
-            assert "context" not in db.documents.entry("msa.md")["chunking"], "no note this time, and none recorded"
+            assert "context" not in db.documents.entry("msa.md")["chunking"], (
+                "no note this time, and none recorded"
+            )
         finally:
             db.close()
 
@@ -129,12 +167,33 @@ class TestCutLater:
 
         db = keeping(tmp_path)
         try:
-            doc = LoadedDocument(text="# Notes\n\nCall [PHONE] about the account.", metadata={"filename": "notes.md", "kind": "markdown", "masking": {"counts": {"phone": 1}, "score": 0.5, "engine": "language", "language": "en", "regex_only": False}})
+            doc = LoadedDocument(
+                text="# Notes\n\nCall [PHONE] about the account.",
+                metadata={
+                    "filename": "notes.md",
+                    "kind": "markdown",
+                    "masking": {
+                        "counts": {"phone": 1},
+                        "score": 0.5,
+                        "engine": "language",
+                        "language": "en",
+                        "regex_only": False,
+                    },
+                },
+            )
             db.add_document(doc, doc_id="notes.md", index=False)
             entry = db.documents.entry("notes.md")
-            assert entry["masking"] == {"counts": {"phone": 1}, "score": 0.5, "engine": "language", "language": "en", "regex_only": False}, "counts and the score, in the front matter, for a status page to count"
+            assert entry["masking"] == {
+                "counts": {"phone": 1},
+                "score": 0.5,
+                "engine": "language",
+                "language": "en",
+                "regex_only": False,
+            }, "counts and the score, in the front matter, for a status page to count"
             db.add_document(CONTRACT, doc_id="msa.md", index=False)
-            assert "masking" not in db.documents.entry("msa.md"), "a document nobody masked says nothing"
+            assert "masking" not in db.documents.entry("msa.md"), (
+                "a document nobody masked says nothing"
+            )
         finally:
             db.close()
 

@@ -43,14 +43,54 @@ _N, _R, _P = 2**15, 8, 1
 #: Long enough to pass the length rule and still the first thing anybody tries.
 _COMMON = frozenset(
     {
-        "password1234", "password12345", "password123456", "passw0rd1234", "p@ssw0rd1234", "p@ssword1234",
-        "123456789012", "1234567890123", "12345678901234", "123456789abc", "1234567890ab", "123123123123",
-        "qwertyuiop12", "qwertyuiopas", "qwerty123456", "1qaz2wsx3edc", "1q2w3e4r5t6y", "zaq12wsxcde3",
-        "iloveyou1234", "letmein12345", "welcome12345", "welcome123456", "changeme1234", "administrator",
-        "admin1234567", "adminadmin12", "trustno12345", "monkey123456", "dragon123456", "football1234",
-        "baseball1234", "superman1234", "sunshine1234", "princess1234", "abcdefghijkl", "abcd12345678",
-        "abc123456789", "aaaaaaaaaaaa", "111111111111", "000000000000", "passwordpassword", "correcthorsebatterystaple",
-        "vectrixdb123", "vectrixdb1234", "summer202412", "winter202412", "spring202412", "autumn202412",
+        "password1234",
+        "password12345",
+        "password123456",
+        "passw0rd1234",
+        "p@ssw0rd1234",
+        "p@ssword1234",
+        "123456789012",
+        "1234567890123",
+        "12345678901234",
+        "123456789abc",
+        "1234567890ab",
+        "123123123123",
+        "qwertyuiop12",
+        "qwertyuiopas",
+        "qwerty123456",
+        "1qaz2wsx3edc",
+        "1q2w3e4r5t6y",
+        "zaq12wsxcde3",
+        "iloveyou1234",
+        "letmein12345",
+        "welcome12345",
+        "welcome123456",
+        "changeme1234",
+        "administrator",
+        "admin1234567",
+        "adminadmin12",
+        "trustno12345",
+        "monkey123456",
+        "dragon123456",
+        "football1234",
+        "baseball1234",
+        "superman1234",
+        "sunshine1234",
+        "princess1234",
+        "abcdefghijkl",
+        "abcd12345678",
+        "abc123456789",
+        "aaaaaaaaaaaa",
+        "111111111111",
+        "000000000000",
+        "passwordpassword",
+        "correcthorsebatterystaple",
+        "vectrixdb123",
+        "vectrixdb1234",
+        "summer202412",
+        "winter202412",
+        "spring202412",
+        "autumn202412",
     }
 )
 
@@ -80,7 +120,9 @@ def _unpack(text: str) -> bytes:
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
-    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=_N, r=_R, p=_P, dklen=32, maxmem=_MAXMEM)
+    digest = hashlib.scrypt(
+        password.encode("utf-8"), salt=salt, n=_N, r=_R, p=_P, dklen=32, maxmem=_MAXMEM
+    )
     return f"scrypt${_N}${_R}${_P}${_pack(salt)}${_pack(digest)}"
 
 
@@ -92,7 +134,15 @@ def check(password: Optional[str], stored: Optional[str]) -> bool:
         return False
     try:
         _, n, r, p, salt, digest = stored.split("$")
-        given = hashlib.scrypt(str(password or "").encode("utf-8"), salt=_unpack(salt), n=int(n), r=int(r), p=int(p), dklen=32, maxmem=_MAXMEM)
+        given = hashlib.scrypt(
+            str(password or "").encode("utf-8"),
+            salt=_unpack(salt),
+            n=int(n),
+            r=int(r),
+            p=int(p),
+            dklen=32,
+            maxmem=_MAXMEM,
+        )
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(given, _unpack(digest)) and bool(password)
@@ -111,6 +161,9 @@ def problem_with(password: str, email: Optional[str] = None) -> Optional[str]:
     local = (email or "").split("@")[0].lower()
     if len(local) >= 4 and local in folded:
         return "Leave your email address out of your password."
-    if folded in "01234567890123456789" or folded in "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz":
+    if (
+        folded in "01234567890123456789"
+        or folded in "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+    ):
         return "That password is a run of letters or numbers. Choose another."
     return None

@@ -38,7 +38,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from collections_of import CHUNKS, CONTAINER, MARKDOWN, RAW, collection_of
 from ingest_queue import events_in
 
-__all__ = ["FAILED", "clear_failure", "drop", "file_of", "poison_queue_name", "poison_rows", "record_failure", "retry", "take_message", "why_in_words"]
+__all__ = [
+    "FAILED",
+    "clear_failure",
+    "drop",
+    "file_of",
+    "poison_queue_name",
+    "poison_rows",
+    "record_failure",
+    "retry",
+    "take_message",
+    "why_in_words",
+]
 
 #: The folder beside raw/, markdown/ and chunks/: one JSON record a file that would not read.
 FAILED = "failed"
@@ -53,7 +64,7 @@ def file_of(uri: str, collection: str) -> str:
     """The file's name inside ``raw/<collection>/``, from the blob's address."""
     marker = f"/{RAW}/{collection}/"
     at = uri.find(marker)
-    return uri[at + len(marker):] if at >= 0 else uri.rsplit("/", 1)[-1]
+    return uri[at + len(marker) :] if at >= 0 else uri.rsplit("/", 1)[-1]
 
 
 def _failed(blobs: Any) -> Any:
@@ -75,16 +86,50 @@ def why_in_words(error: str, file: str) -> Tuple[str, str]:
     low = (error or "").lower()
     suffix = file.rsplit(".", 1)[-1].lower() if "." in file.rsplit("/", 1)[-1] else ""
     if "timed out" in low or "timeout" in low or "out of time" in low or "time limit" in low:
-        return "Ran out of time", "the file is too long for one try: split it, or raise the queue's time limit"
-    if "no reader" in low or "unsupported" in low or "does not read" in low or "no extractor" in low or "not read" in low:
-        return (f"No reader for .{suffix}" if suffix else "No reader for this file"), "export it as a PDF and drop it again"
-    if "0 of" in low or "no text" in low or "nothing to read" in low or "empty" in low or "0 pages" in low:
-        return "Nothing could be read from it", "the file may be an image with no text layer, or empty; OCR found nothing on it"
+        return (
+            "Ran out of time",
+            "the file is too long for one try: split it, or raise the queue's time limit",
+        )
+    if (
+        "no reader" in low
+        or "unsupported" in low
+        or "does not read" in low
+        or "no extractor" in low
+        or "not read" in low
+    ):
+        return (
+            f"No reader for .{suffix}" if suffix else "No reader for this file"
+        ), "export it as a PDF and drop it again"
+    if (
+        "0 of" in low
+        or "no text" in low
+        or "nothing to read" in low
+        or "empty" in low
+        or "0 pages" in low
+    ):
+        return (
+            "Nothing could be read from it",
+            "the file may be an image with no text layer, or empty; OCR found nothing on it",
+        )
     if "429" in low or "too many" in low or "busy" in low or "rate" in low:
-        return "The reader was busy every time", "the extraction service refused all five tries; retry when it is quiet"
-    if "503" in low or "unavailable" in low or "connection" in low or "unreachable" in low or "refused" in low:
-        return "The reader could not be reached", "the extraction app was down or unreachable; retry once its /health answers"
-    said = (error or "").strip().splitlines()[0][:160] if (error or "").strip() else "Reading failed"
+        return (
+            "The reader was busy every time",
+            "the extraction service refused all five tries; retry when it is quiet",
+        )
+    if (
+        "503" in low
+        or "unavailable" in low
+        or "connection" in low
+        or "unreachable" in low
+        or "refused" in low
+    ):
+        return (
+            "The reader could not be reached",
+            "the extraction app was down or unreachable; retry once its /health answers",
+        )
+    said = (
+        (error or "").strip().splitlines()[0][:160] if (error or "").strip() else "Reading failed"
+    )
     return said, "retry, and if it fails again the file needs a look"
 
 
@@ -97,7 +142,9 @@ def why_in_words(error: str, file: str) -> Tuple[str, str]:
 #         the file reads
 
 
-def record_failure(blobs: Any, outcome: Any, tries: int, *, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+def record_failure(
+    blobs: Any, outcome: Any, tries: int, *, now: Optional[float] = None
+) -> Optional[Dict[str, Any]]:
     """Keep what stopped a file, for the page to say: the error, how many tries, when. None for a blob in no collection."""
     uri = str(getattr(outcome, "uri", "") or "")
     collection = collection_of(uri) if uri else None
@@ -107,10 +154,18 @@ def record_failure(blobs: Any, outcome: Any, tries: int, *, now: Optional[float]
     error = str(getattr(outcome, "error", "") or "read failed")
     said, why = why_in_words(error, file)
     record = {
-        "uri": uri, "collection": collection, "file": file, "error": error, "said": said, "why": why,
-        "tries": int(tries or 0), "last_tried": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+        "uri": uri,
+        "collection": collection,
+        "file": file,
+        "error": error,
+        "said": said,
+        "why": why,
+        "tries": int(tries or 0),
+        "last_tried": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
     }
-    _failed(blobs).write(f"{collection}/{file}.json", json.dumps(record, ensure_ascii=False).encode("utf-8"))
+    _failed(blobs).write(
+        f"{collection}/{file}.json", json.dumps(record, ensure_ascii=False).encode("utf-8")
+    )
     return record
 
 
@@ -166,13 +221,26 @@ def poison_rows(messages: Any, blobs: Any) -> List[Dict[str, Any]]:
         when = (record or {}).get("last_tried")
         if not when:
             inserted = getattr(message, "inserted_on", None)
-            when = inserted.isoformat() if hasattr(inserted, "isoformat") else (str(inserted) if inserted else None)
-        rows.append({
-            "id": str(getattr(message, "id", "")), "file": file, "collection": collection, "uri": uri,
-            "error": error, "said": said, "why": why,
-            "tries": int((record or {}).get("tries") or getattr(message, "dequeue_count", 0) or 0),
-            "last_tried": when,
-        })
+            when = (
+                inserted.isoformat()
+                if hasattr(inserted, "isoformat")
+                else (str(inserted) if inserted else None)
+            )
+        rows.append(
+            {
+                "id": str(getattr(message, "id", "")),
+                "file": file,
+                "collection": collection,
+                "uri": uri,
+                "error": error,
+                "said": said,
+                "why": why,
+                "tries": int(
+                    (record or {}).get("tries") or getattr(message, "dequeue_count", 0) or 0
+                ),
+                "last_tried": when,
+            }
+        )
     return rows
 
 
@@ -190,13 +258,20 @@ def retry(poison: Any, ingest: Any, message: Any) -> None:
     poison.delete_message(message)
 
 
-def drop(blobs: Any, poison: Any, message: Any, collection: Optional[str], file: str) -> Dict[str, int]:
+def drop(
+    blobs: Any, poison: Any, message: Any, collection: Optional[str], file: str
+) -> Dict[str, int]:
     """The file and everything of it gone: what was uploaded, its Markdown, its chunks, its record, and the message. How many of each."""
     from vectrixdb.documents import BlobFiles
 
     gone: Dict[str, int] = {}
     if collection:
-        for folder, rel in ((RAW, file), (MARKDOWN, f"{file}.md"), (CHUNKS, f"{file}.jsonl"), (FAILED, f"{file}.json")):
+        for folder, rel in (
+            (RAW, file),
+            (MARKDOWN, f"{file}.md"),
+            (CHUNKS, f"{file}.jsonl"),
+            (FAILED, f"{file}.json"),
+        ):
             files = BlobFiles(blobs, CONTAINER, prefix=f"{folder}/{collection}")
             count = 0
             try:

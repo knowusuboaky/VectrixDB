@@ -72,7 +72,11 @@ def serve(tmp_path, monkeypatch):
         root = tmp_path / f"db{len(built)}"
         config = SignInConfig.from_env(root, env=env(**over))
         config.sender = Mail()
-        client = TestClient(create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC, follow_redirects=False)
+        client = TestClient(
+            create_app(db_path=str(root), enable_dashboard=False, signin=config),
+            base_url=PUBLIC,
+            follow_redirects=False,
+        )
         client.__enter__()
         built.append(client)
         return client, config
@@ -91,9 +95,14 @@ def methods(client):
 def enrolled(client, config, email=ADA):
     """Through the emailed link to an authenticator app. Its secret."""
     assert client.post("/auth/email/begin", json={"email": email}).status_code == 200
-    begun = client.post("/auth/email/enrol/begin", json={"token": config.sender.token()}).json()["data"]
+    begun = client.post("/auth/email/enrol/begin", json={"token": config.sender.token()}).json()[
+        "data"
+    ]
     assert not begun.get("passkey_only")
-    done = client.post("/auth/email/enrol/confirm", json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())})
+    done = client.post(
+        "/auth/email/enrol/confirm",
+        json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())},
+    )
     assert done.status_code == 200, done.text
     return begun["secret"]
 
@@ -103,29 +112,66 @@ def csrf(client):
 
 
 class TestTheSettings:
-    def test_single_sign_on_alone_with_nothing_named_starts_with_email_and_no_passkeys(self, tmp_path):
+    def test_single_sign_on_alone_with_nothing_named_starts_with_email_and_no_passkeys(
+        self, tmp_path
+    ):
         config = SignInConfig.from_env(tmp_path, env=env())
         assert config.sso_pending and config.oidc is None
         assert config.methods == ("email",) and not config.own_passkeys and config.email_stands_in
 
-    def test_with_both_ways_asked_the_email_way_is_drawn_from_the_start_and_still_no_passkeys(self, tmp_path):
+    def test_with_both_ways_asked_the_email_way_is_drawn_from_the_start_and_still_no_passkeys(
+        self, tmp_path
+    ):
         config = SignInConfig.from_env(tmp_path, env=env(VECTRIXDB_SIGNIN="oidc,email"))
-        assert config.sso_pending and config.methods == ("email",) and not config.own_passkeys and not config.email_stands_in
+        assert (
+            config.sso_pending
+            and config.methods == ("email",)
+            and not config.own_passkeys
+            and not config.email_stands_in
+        )
 
     def test_with_the_provider_named_it_is_single_sign_on_alone_again(self, tmp_path):
-        config = SignInConfig.from_env(tmp_path, env=env(VECTRIXDB_OIDC_ISSUER=ISSUER, VECTRIXDB_OIDC_CLIENT_ID="vectrixdb", VECTRIXDB_OIDC_DEFAULT_ROLE="viewer"))
-        assert not config.sso_pending and config.methods == ("oidc",) and config.oidc is not None and not config.own_passkeys
+        config = SignInConfig.from_env(
+            tmp_path,
+            env=env(
+                VECTRIXDB_OIDC_ISSUER=ISSUER,
+                VECTRIXDB_OIDC_CLIENT_ID="vectrixdb",
+                VECTRIXDB_OIDC_DEFAULT_ROLE="viewer",
+            ),
+        )
+        assert (
+            not config.sso_pending
+            and config.methods == ("oidc",)
+            and config.oidc is not None
+            and not config.own_passkeys
+        )
 
-    @pytest.mark.parametrize("half", [{"VECTRIXDB_OIDC_ISSUER": ISSUER}, {"VECTRIXDB_OIDC_CLIENT_ID": "vectrixdb"}])
+    @pytest.mark.parametrize(
+        "half", [{"VECTRIXDB_OIDC_ISSUER": ISSUER}, {"VECTRIXDB_OIDC_CLIENT_ID": "vectrixdb"}]
+    )
     def test_one_without_the_other_is_a_mistake_said_at_start(self, tmp_path, half):
-        with pytest.raises(ConfigurationError, match="VECTRIXDB_OIDC_ISSUER and VECTRIXDB_OIDC_CLIENT_ID"):
+        with pytest.raises(
+            ConfigurationError, match="VECTRIXDB_OIDC_ISSUER and VECTRIXDB_OIDC_CLIENT_ID"
+        ):
             SignInConfig.from_env(tmp_path, env=env(**half))
 
     def test_the_label_is_kept_for_the_button(self, tmp_path):
-        assert SignInConfig.from_env(tmp_path, env=env(VECTRIXDB_OIDC_LABEL="Continue with Northwind")).sso_label == "Continue with Northwind"
+        assert (
+            SignInConfig.from_env(
+                tmp_path, env=env(VECTRIXDB_OIDC_LABEL="Continue with Northwind")
+            ).sso_label
+            == "Continue with Northwind"
+        )
 
     def test_what_leans_on_single_sign_on_waits_for_it(self, tmp_path):
-        config = SignInConfig.from_env(tmp_path, env=env(VECTRIXDB_SIGNIN="oidc,email", VECTRIXDB_ADMINS_USE_SSO="on", VECTRIXDB_SSO_RECHECK_DAYS="30"))
+        config = SignInConfig.from_env(
+            tmp_path,
+            env=env(
+                VECTRIXDB_SIGNIN="oidc,email",
+                VECTRIXDB_ADMINS_USE_SSO="on",
+                VECTRIXDB_SSO_RECHECK_DAYS="30",
+            ),
+        )
         assert not config.admins_use_sso, "or no admin could sign in at all"
         assert config.sso_recheck_days is None, "nobody can have signed in with it lately"
 
@@ -152,10 +198,17 @@ class TestTheServer:
         client, config = serve()
         secret = enrolled(client, config)
         told = client.get("/auth/me").json()["data"]
-        assert told["person"]["email"] == ADA and told["passkeys"] is False and told["sso_pending"] is True
+        assert (
+            told["person"]["email"] == ADA
+            and told["passkeys"] is False
+            and told["sso_pending"] is True
+        )
         again = TestClient(client.app, base_url=PUBLIC, follow_redirects=False)
         assert again.post("/auth/email/begin", json={"email": ADA}).status_code == 200
-        signed = again.post("/auth/email/verify", json={"email": ADA, "code": totp.code_at(secret, totp.step_now() + 1)})
+        signed = again.post(
+            "/auth/email/verify",
+            json={"email": ADA, "code": totp.code_at(secret, totp.step_now() + 1)},
+        )
         assert signed.status_code == 200, signed.text
 
     def test_the_email_offers_the_authenticator_and_no_passkey(self, serve):
@@ -166,7 +219,10 @@ class TestTheServer:
 
     def test_somebody_not_on_the_list_is_sent_nothing(self, serve):
         client, config = serve()
-        assert client.post("/auth/email/begin", json={"email": "mallory@example.com"}).status_code == 200, "one answer for every address"
+        assert (
+            client.post("/auth/email/begin", json={"email": "mallory@example.com"}).status_code
+            == 200
+        ), "one answer for every address"
         assert config.sender.sent == []
 
     def test_no_passkey_route_is_there(self, serve):
@@ -197,7 +253,11 @@ class TestTheServer:
     def test_with_both_ways_asked_the_passkey_routes_are_not_there_either(self, serve):
         client, _ = serve(VECTRIXDB_SIGNIN="oidc,email")
         told = methods(client)
-        assert told["oidc"]["pending"] is True and told["email"]["passkeys"] is False and "stands_in" not in told["email"]
+        assert (
+            told["oidc"]["pending"] is True
+            and told["email"]["passkeys"] is False
+            and "stands_in" not in told["email"]
+        )
         assert client.post("/auth/passkey/begin").status_code == 404
 
     def test_the_settings_check_says_so(self, tmp_path, monkeypatch):
@@ -206,7 +266,12 @@ class TestTheServer:
         for name in [n for n in os.environ if n.startswith("VECTRIXDB_")]:
             monkeypatch.delenv(name)
         found = check.run(str(tmp_path), env=env())
-        assert any("Single sign-on is asked for and not set up" in f.text and "nobody keeps a passkey" in f.text for f in found if f.level == "warn")
+        assert any(
+            "Single sign-on is asked for and not set up" in f.text
+            and "nobody keeps a passkey" in f.text
+            for f in found
+            if f.level == "warn"
+        )
 
 
 class TestThePage:
@@ -217,29 +282,54 @@ class TestThePage:
         assert "const pending = !!(m.oidc && m.oidc.pending);" in self.GATE
         assert "${on('click', ['pressSso'])}" in self.GATE
         assert "return m.oidc && m.oidc.pending ? checkSso() : startSso();" in JS
-        assert "class=\"btn${pending && state.pastSsoCheck ? ' primary' : ''}\" type=\"submit\">Continue with email" in self.GATE, "once opened, the email way is the one in colour"
-        assert "not configured" not in self.GATE and "isn't set up" not in self.GATE and "disabled" not in self.GATE.split("const passkey")[0]
+        assert (
+            "class=\"btn${pending && state.pastSsoCheck ? ' primary' : ''}\" type=\"submit\">Continue with email"
+            in self.GATE
+        ), "once opened, the email way is the one in colour"
+        assert (
+            "not configured" not in self.GATE
+            and "isn't set up" not in self.GATE
+            and "disabled" not in self.GATE.split("const passkey")[0]
+        )
 
     def test_pressing_it_checks_says_so_and_opens_the_email_way(self):
-        assert self.CHECK.index("Checking single sign-on") < self.CHECK.index("Single sign-on not configured") < self.CHECK.index("Opening email sign-in")
+        assert (
+            self.CHECK.index("Checking single sign-on")
+            < self.CHECK.index("Single sign-on not configured")
+            < self.CHECK.index("Opening email sign-in")
+        )
         assert self.CHECK.count('class="spin"') == 2 and "setTimeout(openEmailWay" in self.CHECK
         assert "state.pastSsoCheck = true" in self.CHECK and "showGate()" in self.CHECK
-        assert "'checkSso'" in JS[JS.index("const ACTIONS = new Set([") :][:400] and "'openEmailWay'" in JS[JS.index("const ACTIONS = new Set([") :][:400]
+        assert (
+            "'checkSso'" in JS[JS.index("const ACTIONS = new Set([") :][:400]
+            and "'openEmailWay'" in JS[JS.index("const ACTIONS = new Set([") :][:400]
+        )
 
     def test_single_sign_on_alone_draws_the_email_way_only_once_it_is_opened(self):
-        assert "const closed = pending && m.email && m.email.stands_in && !state.pastSsoCheck;" in self.GATE
+        assert (
+            "const closed = pending && m.email && m.email.stands_in && !state.pastSsoCheck;"
+            in self.GATE
+        )
         assert "let email = m.email && !closed ?" in self.GATE
 
     def test_no_passkey_button_where_none_are_kept(self):
-        assert "const passkey = m.email && m.email.passkeys !== false && window.PublicKeyCredential ?" in self.GATE
+        assert (
+            "const passkey = m.email && m.email.passkeys !== false && window.PublicKeyCredential ?"
+            in self.GATE
+        )
 
     def test_on_this_machine_the_spinner_opens_developer_access_instead(self):
         press = JS[JS.index("function pressSso()") : JS.index("function localDetected()")]
         assert press.index("if (m.developer) return localDetected();") < press.index("checkSso()")
 
     def test_the_first_visit_offers_the_authenticator_alone(self):
-        enrol = JS[JS.index("function gateEnrol(token)") : JS.index("async function gateEnrolBegin")]
-        assert "state.methods.email.passkeys === false" in enrol and "const passkeys = kept && !!window.PublicKeyCredential;" in enrol
+        enrol = JS[
+            JS.index("function gateEnrol(token)") : JS.index("async function gateEnrolBegin")
+        ]
+        assert (
+            "state.methods.email.passkeys === false" in enrol
+            and "const passkeys = kept && !!window.PublicKeyCredential;" in enrol
+        )
         assert "Set up your authenticator app" in enrol
 
     def test_how_you_sign_in_lists_no_passkeys(self):

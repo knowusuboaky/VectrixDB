@@ -74,7 +74,9 @@ class TestThePieceTable:
 
     def test_only_the_body_is_kept(self):
         """Headers and footers follow the body in the same stream; a running header is noise."""
-        word, table = document([("The body.\r", False), ("Page header\r", False)], ccp_text=len("The body.\r"))
+        word, table = document(
+            [("The body.\r", False), ("Page header\r", False)], ccp_text=len("The body.\r")
+        )
         assert _doc_text(word, table) == "The body."
 
 
@@ -164,6 +166,8 @@ class TestItIsReadLikeEveryOtherFormat:
 
         import vectrixdb
 
-        source = (Path(vectrixdb.__file__).parent / "api" / "documents.py").read_text(encoding="utf-8")
+        source = (Path(vectrixdb.__file__).parent / "api" / "documents.py").read_text(
+            encoding="utf-8"
+        )
         built_in = source.split("built_in = [")[1].split("]")[0]
         assert '".doc"' in built_in

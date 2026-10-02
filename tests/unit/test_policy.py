@@ -143,6 +143,15 @@ class TestFingerprint:
     def test_it_survives_a_round_trip(self):
         assert Policy.from_dict(LENDING.to_dict()).fingerprint == LENDING.fingerprint
 
+    def test_the_db_role_key_survives_a_round_trip_outside_the_fingerprint(self):
+        """The PostgreSQL role key has to come back from the collection's
+        metadata, or RLS is never applied after a reopen; it is not a rule,
+        so a collection stored without it keeps its fingerprint."""
+        with_role = Policy(list(LENDING.rules), db_role_key="pg_role")
+        assert Policy.from_dict(with_role.to_dict()).db_role_key == "pg_role"
+        assert with_role.fingerprint == LENDING.fingerprint
+        assert "db_role_key" not in LENDING.to_dict()
+
     def test_an_unknown_predicate_refuses_rather_than_dropping_a_rule(self):
         """A collection written by a newer version carries rules this one
         cannot evaluate. Opening it anyway would drop them."""
@@ -625,6 +634,31 @@ class TestBoundToTheCollection:
         try:
             with pytest.raises(PrincipalRequired, match="needs a principal"):
                 db.search("covenant thresholds")
+        finally:
+            db.close()
+
+    def test_clear_keeps_the_policy_and_the_model(self, tmp_path):
+        """clear() recreates the collection; the policy and the recorded
+        model belong to it, not to its documents."""
+        from vectrixdb import Vectrix
+        from vectrixdb.exceptions import PrincipalRequired
+
+        db = self._build(tmp_path, LENDING)
+        model = db.embedding_model
+        db.clear()
+        db.add([self.ROWS[0][0]], metadata=[chunk("CL-40219", 2)])
+        try:
+            with pytest.raises(PrincipalRequired):
+                db.search("covenant")
+            assert db.embedding_model == model
+        finally:
+            db.close()
+        db = Vectrix("lending", path=str(tmp_path))
+        try:
+            assert db.policy is not None
+            assert db.policy.fingerprint == LENDING.fingerprint
+            with pytest.raises(PrincipalRequired):
+                db.search("covenant")
         finally:
             db.close()
 
@@ -1941,3 +1975,28 @@ class TestAValueThePolicyCannotDecideOn:
             assert list(db.as_principal(principal).search("covenant", limit=10)) == []
         finally:
             db.close()
+
+
+def test_sparse_search_withholds_what_the_policy_withholds(tmp_path):
+    """sparse_search asked for a principal and then never applied the policy,
+    so the principal was answered with documents withheld from them, and a
+    withheld document could take a place within the limit."""
+    import json
+
+    from vectrixdb.core.database import VectrixDB
+    from vectrixdb.policy import Equals, Policy
+
+    db = VectrixDB(str(tmp_path))
+    c = db.create_collection("t", dimension=4)
+    c.add(
+        ids=["secret", "open"],
+        vectors=[[1, 0, 0, 0], [0, 1, 0, 0]],
+        metadata=[{"lob": "x"}, {"lob": "y"}],
+        sparse_vectors=[{1: 1.0}, {1: 0.5}],
+    )
+    c.set_meta("entitlement_policy", json.dumps(Policy([Equals("lob", "lob")]).to_dict()))
+    c._policy_loaded = False
+    assert [r.id for r in c.sparse_search({1: 1.0}, limit=1, principal={"lob": "y"}).results] == [
+        "open"
+    ]
+    db.close()

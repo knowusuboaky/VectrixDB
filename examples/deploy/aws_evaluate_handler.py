@@ -42,7 +42,9 @@ def targets() -> list:
             region=REGION,
             knn_engine="faiss",
             embeddings="both",
-            embed_fn=BedrockEmbedder(boto3.client("bedrock-runtime", region_name=REGION), dimensions=1024),
+            embed_fn=BedrockEmbedder(
+                boto3.client("bedrock-runtime", region_name=REGION), dimensions=1024
+            ),
         )
         handle = Vectrix(COLLECTION, storage_backend=store, path="/tmp/vectrixdb", mode="hybrid")
         _targets = [Target(handle, name="OpenSearch", collection=COLLECTION)]
@@ -60,10 +62,22 @@ def handler(event, context):
         golden = read_golden(url)
         store = report_store(os.environ.get("EVAL_REPORTS") or url.rsplit("/", 1)[0])
         # The same bytes already have a run: a second event for one save starts nothing.
-        if any((run.get("golden") or {}).get("sha256") == golden.sha256 for run in store.history(limit=5)):
+        if any(
+            (run.get("golden") or {}).get("sha256") == golden.sha256
+            for run in store.history(limit=5)
+        ):
             print(json.dumps({"golden": url, "skipped": "these bytes already have a run"}))
             continue
         report = evaluate(targets(), golden, save_to=store)
-        print(json.dumps({"golden": url, "run": report["id"], "picks": report["picks"], "missing": report["missing"]}))
+        print(
+            json.dumps(
+                {
+                    "golden": url,
+                    "run": report["id"],
+                    "picks": report["picks"],
+                    "missing": report["missing"],
+                }
+            )
+        )
         done.append(report["id"])
     return {"runs": done}

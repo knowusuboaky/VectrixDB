@@ -33,7 +33,9 @@ from starlette.types import Scope
 FOREVER = "public, max-age=31536000, immutable"
 NEVER = "no-store"
 #: The block the page carries its brand in: data, never a script that runs.
-BRAND_BLOCK = re.compile(r'(<script id="vx-brand-data" type="application/json">)(.*?)(</script>)', re.S)
+BRAND_BLOCK = re.compile(
+    r'(<script id="vx-brand-data" type="application/json">)(.*?)(</script>)', re.S
+)
 #: How long the retrieval service's answer about the brand is kept.
 BRAND_SECONDS = 60.0
 
@@ -87,7 +89,9 @@ def mount(app: FastAPI, site: Path) -> None:
         @app.get("/", include_in_schema=False)
         async def not_built() -> JSONResponse:
             return JSONResponse(
-                {"detail": f"The pages are not built. Run: cd Frontend && python run_prod.py (looked in {site})"},
+                {
+                    "detail": f"The pages are not built. Run: cd Frontend && python run_prod.py (looked in {site})"
+                },
                 status_code=503,
             )
 

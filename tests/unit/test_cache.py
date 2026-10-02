@@ -545,6 +545,14 @@ class TestVectorCache:
         assert base != vcache._hash_query([0.1, 0.2], limit=5)
         assert base != vcache._hash_query([0.2, 0.1])
 
+    def test_query_hash_changes_with_options_and_takes_set_operands(self, vcache):
+        """A score threshold or ef changes the answer, so it changes the key;
+        a set operand used to make json.dumps raise."""
+        base = vcache._hash_query([0.1, 0.2])
+        assert base != vcache._hash_query([0.1, 0.2], options={"score_threshold": 0.9})
+        a = vcache._hash_query([0.1], filter={"n": {"$in": {"x", "y", "z"}}})
+        assert a == vcache._hash_query([0.1], filter={"n": {"$in": {"z", "y", "x"}}})
+
     def test_search_results_round_trip(self, vcache):
         assert vcache.get_search_results("c", [1.0, 0.0]) is None
         vcache.set_search_results("c", [1.0, 0.0], [{"id": "a"}], ttl=30)

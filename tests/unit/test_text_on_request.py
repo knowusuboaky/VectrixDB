@@ -44,7 +44,9 @@ LONG = (
     "Disputes are raised in writing and answered within ten working days. Refunds go back to the account the payment came from. "
     "Statements are issued at the end of each quarter and kept for seven years. Nothing in these terms limits a right the law gives."
 )
-NOISE = "~~|| x9q#zz }{ ^^ kk3l@@ ]]w [[ 7h7h **%% qqqz ``` <<>> ||| ~~~ zxq9 #### $$$$ ^^^^ }}}} {{{{"
+NOISE = (
+    "~~|| x9q#zz }{ ^^ kk3l@@ ]]w [[ 7h7h **%% qqqz ``` <<>> ||| ~~~ zxq9 #### $$$$ ^^^^ }}}} {{{{"
+)
 VECTORS = {LONG: [1, 0, 0, 0], NOISE: [0, 1, 0, 0]}
 
 
@@ -62,7 +64,14 @@ def create_app(**kwargs):
 def root(tmp_path):
     base = tmp_path / "db"
     db = Vectrix("docs", path=str(base), dimension=4, embed_fn=_embed, embedding_cache=False)
-    db.add([LONG, NOISE], ids=["clean", "noisy"], metadata=[{"source": "terms.pdf", "_vx_quality": 0.97, "_vx_page": 3}, {"source": "scan.pdf", "_vx_quality": 0.21}])
+    db.add(
+        [LONG, NOISE],
+        ids=["clean", "noisy"],
+        metadata=[
+            {"source": "terms.pdf", "_vx_quality": 0.97, "_vx_page": 3},
+            {"source": "scan.pdf", "_vx_quality": 0.21},
+        ],
+    )
     db.close()
     return base
 
@@ -77,9 +86,17 @@ def open_server(root, monkeypatch):
 
 class TestAListingHasNoText:
     def test_rows_say_where_a_chunk_came_from_and_nothing_it_says(self, open_server):
-        data = open_server.get("/api/v1/collections/docs/points", params={"index": "true"}).json()["data"]
+        data = open_server.get("/api/v1/collections/docs/points", params={"index": "true"}).json()[
+            "data"
+        ]
         by_id = {row["id"]: row for row in data["rows"]}
-        assert by_id["clean"] == {"id": "clean", "quality": 0.97, "source": "terms.pdf", "document": None, "page": 3}
+        assert by_id["clean"] == {
+            "id": "clean",
+            "quality": 0.97,
+            "source": "terms.pdf",
+            "document": None,
+            "page": 3,
+        }
         assert by_id["noisy"]["source"] == "scan.pdf"
         body = json.dumps(data)
         assert "Payment" not in body and "zxq9" not in body
@@ -91,10 +108,14 @@ class TestAListingHasNoText:
 
 class TestTheQualityReport:
     def test_it_says_why_and_whether_a_chunk_is_really_below_the_line(self, open_server):
-        worst = open_server.get("/api/v1/collections/docs/quality", params={"text": "false"}).json()["data"]["worst"]
+        worst = open_server.get(
+            "/api/v1/collections/docs/quality", params={"text": "false"}
+        ).json()["data"]["worst"]
         assert [w["id"] for w in worst] == ["noisy", "clean"]
         noisy, clean = worst
-        assert noisy["below_line"] is True and clean["below_line"] is False, "the lowest of a clean collection is not bad"
+        assert noisy["below_line"] is True and clean["below_line"] is False, (
+            "the lowest of a clean collection is not bad"
+        )
         assert noisy["reasons"] and "symbols and stray glyphs" in noisy["reasons"]
         assert clean["reasons"] == []
         assert all("text" not in w for w in worst)
@@ -106,7 +127,9 @@ class TestTheQualityReport:
 
 class TestProvenance:
     def test_where_it_came_from_without_what_it_says(self, open_server):
-        data = open_server.get("/api/v1/collections/docs/provenance/clean", params={"text": "false"}).json()["data"]
+        data = open_server.get(
+            "/api/v1/collections/docs/provenance/clean", params={"text": "false"}
+        ).json()["data"]
         assert "text" not in data and data["present"] is True
         assert "text" in open_server.get("/api/v1/collections/docs/provenance/clean").json()["data"]
 
@@ -120,22 +143,34 @@ class TestSearchExcerpts:
         result = reply.json()["data"]["results"][0]
         assert result["id"] == "clean" and result["snipped"] is True
         assert len(result["text"]) <= 81 and result["text"].endswith("…")
-        assert LONG.strip() not in reply.text, "a button in the page would be decoration if the whole chunk had been sent"
+        assert LONG.strip() not in reply.text, (
+            "a button in the page would be decoration if the whole chunk had been sent"
+        )
 
     def test_without_it_a_search_returns_the_text_because_programs_want_it(self, open_server):
         result = open_server.post(self.SEARCH, json=self.QUERY).json()["data"]["results"][0]
         assert result["text"] == LONG and "snipped" not in result
 
     def test_a_chunk_that_fits_is_not_marked_cut(self, open_server):
-        result = open_server.post(self.SEARCH, params={"snippet": "2000"}, json=self.QUERY).json()["data"]["results"][0]
+        result = open_server.post(self.SEARCH, params={"snippet": "2000"}, json=self.QUERY).json()[
+            "data"
+        ]["results"][0]
         assert result["snipped"] is False and result["text"] == LONG
 
     def test_a_keyword_result_carries_highlights_and_those_are_cut_too(self, open_server):
-        result = open_server.post("/api/v1/collections/docs/keyword-search", params={"snippet": "40"}, json={"query_text": "payment invoice", "limit": 1}).json()["data"]["results"][0]
-        assert len(result["highlights"]) <= 3 and all(len(mark) <= 41 for mark in result["highlights"])
+        result = open_server.post(
+            "/api/v1/collections/docs/keyword-search",
+            params={"snippet": "40"},
+            json={"query_text": "payment invoice", "limit": 1},
+        ).json()["data"]["results"][0]
+        assert len(result["highlights"]) <= 3 and all(
+            len(mark) <= 41 for mark in result["highlights"]
+        )
 
     def test_a_number_that_is_not_one_changes_nothing(self, open_server):
-        result = open_server.post(self.SEARCH, params={"snippet": "lots"}, json=self.QUERY).json()["data"]["results"][0]
+        result = open_server.post(self.SEARCH, params={"snippet": "lots"}, json=self.QUERY).json()[
+            "data"
+        ]["results"][0]
         assert result["text"] == LONG
 
 
@@ -147,14 +182,20 @@ class TestAWholeDocumentIsItsOwnPermission:
         assert not roles.can("operator", "document.read"), "being an operator is not enough"
         assert roles.can("operator", "document.read", ["document.read"])
         assert roles.can("admin", "document.read")
-        assert not roles.can("viewer", "document.read", ["document.read"]), "a grant widens what an operator sees; it does not make a viewer into one"
-        assert roles.can("reader", "document.read"), "the read-only key has always fetched documents"
+        assert not roles.can("viewer", "document.read", ["document.read"]), (
+            "a grant widens what an operator sees; it does not make a viewer into one"
+        )
+        assert roles.can("reader", "document.read"), (
+            "the read-only key has always fetched documents"
+        )
 
     def test_only_what_may_be_given_can_be_given(self):
         assert roles.GRANTABLE == {"document.read"}
         assert not roles.can("operator", "audit.read", ["audit.read"])
         assert not roles.can("operator", "collection.delete", ["collection.delete"])
-        assert roles.clean_grants(["document.read", "audit.read", "people.manage", 7]) == ["document.read"]
+        assert roles.clean_grants(["document.read", "audit.read", "people.manage", 7]) == [
+            "document.read"
+        ]
 
     @pytest.mark.parametrize(
         "method, path, action",
@@ -184,12 +225,25 @@ class TestTheStoreKeepsWhatSomebodyWasGiven:
         store = SignInStore(tmp_path / "signin.db", [SECRET])
         store.put_person("olu@example.com", "operator", grants=["document.read", "audit.read"])
         assert store.person("olu@example.com").grants == ["document.read"]
-        sid, session = store.open_session(subject="olu", email="olu@example.com", name=None, role="operator", principal={}, method="email", hours=1, grants=["document.read"])
-        assert session.grants == ["document.read"] and store.session(sid).grants == ["document.read"]
+        sid, session = store.open_session(
+            subject="olu",
+            email="olu@example.com",
+            name=None,
+            role="operator",
+            principal={},
+            method="email",
+            hours=1,
+            grants=["document.read"],
+        )
+        assert session.grants == ["document.read"] and store.session(sid).grants == [
+            "document.read"
+        ]
         store.put_person("olu@example.com", "operator")
         assert store.session(sid) is not None, "saying nothing about grants changes nothing"
         store.put_person("olu@example.com", "operator", grants=[])
-        assert store.session(sid) is None, "a session carries what it was opened with, so taking it away ends the session"
+        assert store.session(sid) is None, (
+            "a session carries what it was opened with, so taking it away ends the session"
+        )
         store.close()
 
     def test_a_file_from_before_this_is_brought_up_to_date(self, tmp_path):
@@ -219,11 +273,21 @@ class Mail:
 def signed(root, monkeypatch):
     monkeypatch.delenv("VECTRIXDB_API_KEY", raising=False)
     config = SignInConfig(
-        methods=("email",), secrets=(SECRET,), public_url=PUBLIC, sender=Mail(),
-        users=(("ada@example.com", "admin"), ("olu@example.com", "operator"), ("vi@example.com", "viewer")),
-        store_path=root / "auth" / "signin.db", access_log=root / "auth" / "access.jsonl",
+        methods=("email",),
+        secrets=(SECRET,),
+        public_url=PUBLIC,
+        sender=Mail(),
+        users=(
+            ("ada@example.com", "admin"),
+            ("olu@example.com", "operator"),
+            ("vi@example.com", "viewer"),
+        ),
+        store_path=root / "auth" / "signin.db",
+        access_log=root / "auth" / "access.jsonl",
     )
-    with TestClient(create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC) as client:
+    with TestClient(
+        create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC
+    ) as client:
         yield client, config
 
 
@@ -235,7 +299,10 @@ def sign_in(server, email):
     browser.post("/auth/email/begin", json={"email": email})
     token = re.search(r"token=([\w-]+)", config.sender.sent[-1]).group(1)
     begun = browser.post("/auth/email/enrol/begin", json={"token": token}).json()["data"]
-    done = browser.post("/auth/email/enrol/confirm", json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())})
+    done = browser.post(
+        "/auth/email/enrol/confirm",
+        json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())},
+    )
     assert done.status_code == 200, done.text
     return browser, begun["secret"]
 
@@ -252,14 +319,35 @@ class TestSignedIn:
         olu, secret = sign_in(signed, "olu@example.com")
         assert olu.get(self.DOCUMENT).status_code == 403
         assert "document.read" not in olu.get("/auth/me").json()["data"]["actions"]
-        assert ada.get(self.DOCUMENT).status_code == 404, "an admin passes the door; there is simply no such document here"
+        assert ada.get(self.DOCUMENT).status_code == 404, (
+            "an admin passes the door; there is simply no such document here"
+        )
 
-        given = ada.post("/auth/people", json={"email": "olu@example.com", "role": "operator", "grants": ["document.read", "audit.read"]}, headers=token_of(ada))
+        given = ada.post(
+            "/auth/people",
+            json={
+                "email": "olu@example.com",
+                "role": "operator",
+                "grants": ["document.read", "audit.read"],
+            },
+            headers=token_of(ada),
+        )
         assert given.json()["data"]["grants"] == ["document.read"]
-        assert olu.get("/api/v1/collections").status_code == 401, "what they hold changed, so they sign in again"
+        assert olu.get("/api/v1/collections").status_code == 401, (
+            "what they hold changed, so they sign in again"
+        )
 
         again = TestClient(signed[0].app, base_url=PUBLIC)
-        assert again.post("/auth/email/verify", json={"email": "olu@example.com", "code": totp.code_at(secret, totp.step_now() + 1)}).status_code == 200
+        assert (
+            again.post(
+                "/auth/email/verify",
+                json={
+                    "email": "olu@example.com",
+                    "code": totp.code_at(secret, totp.step_now() + 1),
+                },
+            ).status_code
+            == 200
+        )
         assert "document.read" in again.get("/auth/me").json()["data"]["actions"]
         assert again.get(self.DOCUMENT).status_code == 404
         assert again.get("/api/v1/audit").status_code == 403, "and it gave them nothing else"
@@ -267,7 +355,10 @@ class TestSignedIn:
     def test_a_viewer_gets_the_listing_and_never_a_chunk(self, signed):
         vi, _ = sign_in(signed, "vi@example.com")
         data = vi.get("/api/v1/collections/docs/points", params={"index": "true"}).json()["data"]
-        assert {row["source"] for row in data["rows"]} == {"terms.pdf", "scan.pdf"} and "Payment" not in json.dumps(data)
+        assert {row["source"] for row in data["rows"]} == {
+            "terms.pdf",
+            "scan.pdf",
+        } and "Payment" not in json.dumps(data)
         assert vi.get("/api/v1/collections/docs/points/clean").status_code == 403
 
     def test_the_log_names_the_chunk_and_the_document_that_were_opened(self, signed):
@@ -281,5 +372,7 @@ class TestSignedIn:
         assert ("content.index", None) in opened, "a listing opens no one thing"
         olu, _ = sign_in(signed, "olu@example.com")
         olu.get(self.DOCUMENT)
-        refused = [r for r in ada.get("/api/v1/access").json()["data"]["records"] if r["event"] == "denied"]
+        refused = [
+            r for r in ada.get("/api/v1/access").json()["data"]["records"] if r["event"] == "denied"
+        ]
         assert refused[0]["who"] == "olu@example.com" and refused[0]["item"] == "terms.pdf"

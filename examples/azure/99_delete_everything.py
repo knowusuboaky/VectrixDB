@@ -24,7 +24,24 @@ blob in the container is old enough, and this says so rather than pretending.
 
 from __future__ import annotations
 
-from _common import AUDIT, STATE, Az, arguments, begin, done, finish, links, note, portal, settings, step, stop
+from _common import (
+    AUDIT,
+    OLD_CATALOG,
+    STATE,
+    Az,
+    arguments,
+    begin,
+    done,
+    finish,
+    links,
+    note,
+    portal,
+    search_indexes,
+    settings,
+    size,
+    step,
+    stop,
+)
 
 
 # ============================================================================
@@ -38,8 +55,12 @@ from _common import AUDIT, STATE, Az, arguments, begin, done, finish, links, not
 
 
 def options(parser) -> None:
-    parser.add_argument("--wait", action="store_true", help="stay until Azure says it is gone, a few minutes")
-    parser.add_argument("--yes", action="store_true", help="do not ask; for a script that knows what it is doing")
+    parser.add_argument(
+        "--wait", action="store_true", help="stay until Azure says it is gone, a few minutes"
+    )
+    parser.add_argument(
+        "--yes", action="store_true", help="do not ask; for a script that knows what it is doing"
+    )
 
 
 # ============================================================================
@@ -58,11 +79,24 @@ def options(parser) -> None:
 def let_go(az: Az, account: str, group: str, days: str) -> None:
     """Take the audit container's policy off when it is unlocked, and say so plainly when it is locked."""
     found = az(
-        "storage", "container", "immutability-policy", "show",
-        "--account-name", account, "--resource-group", group, "--container-name", AUDIT,
-        reads=True, quiet=True, allow_fail=True,
+        "storage",
+        "container",
+        "immutability-policy",
+        "show",
+        "--account-name",
+        account,
+        "--resource-group",
+        group,
+        "--container-name",
+        AUDIT,
+        reads=True,
+        quiet=True,
+        allow_fail=True,
     )
-    policy = {**((found or {}).get("properties") or {}), **{k: v for k, v in (found or {}).items() if k != "properties"}}
+    policy = {
+        **((found or {}).get("properties") or {}),
+        **{k: v for k, v in (found or {}).items() if k != "properties"},
+    }
     if int(policy.get("immutabilityPeriodSinceCreationInDays") or 0) <= 0:
         note("it has none, so nothing holds the storage account back")
         return
@@ -74,10 +108,21 @@ def let_go(az: Az, account: str, group: str, days: str) -> None:
         )
         return
     az(
-        "storage", "container", "immutability-policy", "delete",
-        "--account-name", account, "--resource-group", group, "--container-name", AUDIT,
-        "--if-match", str(policy.get("etag", "*")),
-        "--output", "none", allow_fail=True,
+        "storage",
+        "container",
+        "immutability-policy",
+        "delete",
+        "--account-name",
+        account,
+        "--resource-group",
+        group,
+        "--container-name",
+        AUDIT,
+        "--if-match",
+        str(policy.get("etag", "*")),
+        "--output",
+        "none",
+        allow_fail=True,
     )
     done("taken off, which an unlocked policy allows, so the storage account can go with the rest")
 
@@ -111,7 +156,31 @@ def main() -> int:
     inside = az("resource", "list", "--resource-group", group, reads=True, quiet=True) or []
     for one in sorted(inside, key=lambda r: r.get("type", "")):
         print(f"       {one.get('type', '?').split('/')[-1]:<22} {one.get('name')}")
-    print(f"\n  {len(inside)} resources. Deleting the group deletes every one of them, and the documents in them.")
+    print(
+        f"\n  {len(inside)} resources. Deleting the group deletes every one of them, and the documents in them."
+    )
+    # The indexes are not resources, so the list above does not show them,
+    # and an index is where the documents actually are. Each is shown with
+    # its count, so a leftover from an earlier run is visible here rather
+    # than only in the portal.
+    indexes = (
+        search_indexes(az, config)
+        if any(str(one.get("type", "")).lower().endswith("searchservices") for one in inside)
+        else None
+    )
+    if indexes:
+        print(f"\n  In the search service {config['VX_SEARCH']}:")
+        for index in indexes:
+            why = (
+                "   empty: a leftover from before the prefix was set to nothing, which 06 deletes"
+                if index["name"] == OLD_CATALOG and not index["documents"]
+                else ""
+            )
+            print(
+                f"       {'index':<22} {index['name']:<28} {index['documents']} documents, {size(index['bytes'])}{why}"
+            )
+    elif indexes is not None:
+        print(f"\n  The search service {config['VX_SEARCH']} holds no index yet.")
 
     if not args.yes and not args.dry_run:
         typed = input(f"\n  Type {group} to delete it, or anything else to stop: ").strip()
@@ -122,7 +191,16 @@ def main() -> int:
     let_go(az, config["VX_STORAGE"], group, config.get("VX_AUDIT_DAYS", "7"))
 
     step("Deleting")
-    az("group", "delete", "--name", group, "--yes", *(() if args.wait else ("--no-wait",)), "--output", "none")
+    az(
+        "group",
+        "delete",
+        "--name",
+        group,
+        "--yes",
+        *(() if args.wait else ("--no-wait",)),
+        "--output",
+        "none",
+    )
     STATE.unlink(missing_ok=True)
 
     if args.wait:

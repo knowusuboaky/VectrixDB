@@ -1282,7 +1282,11 @@ class TestLLMExtractorCallMethods:
             server.server_close()
         path, kind, payload = posts[0]
         assert path == "/api/generate" and kind == "application/json"
-        assert payload["model"] == "test-model" and payload["prompt"] == "prompt" and payload["stream"] is False
+        assert (
+            payload["model"] == "test-model"
+            and payload["prompt"] == "prompt"
+            and payload["stream"] is False
+        )
 
     def test_call_bedrock_asks_the_way_every_model_takes_and_reads_the_text(self):
         extractor = self._extractor()
@@ -1290,11 +1294,20 @@ class TestLLMExtractorCallMethods:
 
         def fake_converse(**kwargs):
             asked.append(kwargs)
-            return {"output": {"message": {"role": "assistant", "content": [{"text": "hello "}, {"text": "from bedrock"}]}}}
+            return {
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"text": "hello "}, {"text": "from bedrock"}],
+                    }
+                }
+            }
 
         extractor._client = types.SimpleNamespace(converse=fake_converse)
         assert extractor._call_bedrock("prompt") == "hello from bedrock"
-        assert asked[0]["modelId"] == extractor.model and asked[0]["messages"] == [{"role": "user", "content": [{"text": "prompt"}]}]
+        assert asked[0]["modelId"] == extractor.model and asked[0]["messages"] == [
+            {"role": "user", "content": [{"text": "prompt"}]}
+        ]
         assert set(asked[0]["inferenceConfig"]) == {"maxTokens", "temperature"}
 
     def test_call_bedrock_defaults_to_empty_string_when_missing(self):

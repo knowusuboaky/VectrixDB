@@ -38,7 +38,17 @@ __all__ = ["Breaker", "STATE", "is_transient", "state_files"]
 
 #: The folder beside raw/, markdown/, chunks/ and failed/: one JSON state a dependency.
 STATE = "state"
-_TRANSIENT = ("could not be reached", "answered 408", "answered 429", "answered 502", "answered 503", "answered 504", "timed out", "timeout", "connection")
+_TRANSIENT = (
+    "could not be reached",
+    "answered 408",
+    "answered 429",
+    "answered 502",
+    "answered 503",
+    "answered 504",
+    "timed out",
+    "timeout",
+    "connection",
+)
 
 
 def is_transient(error: Any) -> bool:
@@ -60,7 +70,15 @@ def _when(seconds: Optional[float]) -> Optional[str]:
 class Breaker:
     """Closed, open, or letting one probe through: read and written as one file, so every instance sees the same."""
 
-    def __init__(self, files: Any, name: str, *, threshold: int = 5, open_for: float = 300.0, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        files: Any,
+        name: str,
+        *,
+        threshold: int = 5,
+        open_for: float = 300.0,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
         self.files = files
         self.name = name
         self.threshold = max(1, int(threshold))
@@ -130,10 +148,17 @@ class Breaker:
         state = self._read()
         opened = state.get("opened_at")
         probe = state.get("probe_at")
-        until = (float(probe) if probe is not None else float(opened)) + self.open_for if opened else None
+        until = (
+            (float(probe) if probe is not None else float(opened)) + self.open_for
+            if opened
+            else None
+        )
         paused = bool(opened)
-        said = (f"the {self.name} has not answered since {_when(opened)}, {int(state.get('failures') or 0)} reads in a row; the next try is at {_when(until)}"
-                if paused else f"the {self.name} is answering")
+        said = (
+            f"the {self.name} has not answered since {_when(opened)}, {int(state.get('failures') or 0)} reads in a row; the next try is at {_when(until)}"
+            if paused
+            else f"the {self.name} is answering"
+        )
         return {
             "dependency": self.name,
             "paused": paused,

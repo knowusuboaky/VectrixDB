@@ -1,7 +1,8 @@
 """Ask the questions through one of the three setups the evaluation picked.
 
-The three scripts beside this one, 10, 11 and 12, are each three lines: they
-name a pick and call :func:`retrieve`. The work is here so the three cannot
+The three scripts beside this one, ``10_retrieve_finds_the_most.py``,
+``11_retrieve_best_for_balance.py`` and ``12_retrieve_best_for_time.py``, are
+each a few lines: they name a pick and call :func:`retrieve`. The work is here so the three cannot
 drift apart, and so that comparing them is comparing the setup and nothing
 else.
 
@@ -91,9 +92,17 @@ def newest_run(kept: Dict[str, Any], az: Az, config: Dict[str, str]) -> Dict[str
 
     where = f"{kept.get('blob_account', '')}/evals"
     keys = az(
-        "storage", "account", "keys", "list",
-        "--account-name", config["VX_STORAGE"], "--resource-group", config["VX_RESOURCE_GROUP"],
-        reads=True, quiet=True, allow_fail=True,
+        "storage",
+        "account",
+        "keys",
+        "list",
+        "--account-name",
+        config["VX_STORAGE"],
+        "--resource-group",
+        config["VX_RESOURCE_GROUP"],
+        reads=True,
+        quiet=True,
+        allow_fail=True,
     )
     if not keys:
         stop("Could not read a storage key. Run 01_create_resources.py first.")
@@ -110,12 +119,55 @@ def newest_run(kept: Dict[str, Any], az: Az, config: Dict[str, str]) -> Dict[str
     return store.read(runs[0]["id"] if isinstance(runs[0], dict) else runs[0])
 
 
+def server_key(az: Az, config: Dict[str, str]) -> str:
+    """The server's own key, which is what may mint another: from settings.env, or read from the query app as 06 reads it.
+
+    Minting a key is an admin's act, so an empty ``api-key`` is refused, and
+    rightly. The key is looked for in two places and never written down
+    here: ``VX_API_KEY`` in settings.env, which is also what the dashboard's
+    Backend holds as ``UPSTREAM_KEY``; else ``VECTRIXDB_API_KEY`` in the
+    query app's settings, read from Azure the way 06 reads a setting back.
+    With neither it stops and says what to set, rather than posting with
+    nothing and reading a 401 as "the server would not make a key".
+    """
+    found = str(config.get("VX_API_KEY") or "").strip()
+    if found:
+        return found
+    held = az(
+        "functionapp",
+        "config",
+        "appsettings",
+        "list",
+        "--name",
+        config["VX_QUERY_APP"],
+        "--resource-group",
+        config["VX_RESOURCE_GROUP"],
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
+    for entry in held or []:
+        if (
+            isinstance(entry, dict)
+            and entry.get("name") == "VECTRIXDB_API_KEY"
+            and entry.get("value")
+        ):
+            return str(entry["value"])
+    stop(
+        "No key to mint the setup's own key with.\n"
+        "  Set VX_API_KEY in settings.env to a key an admin made on the dashboard's Keys page, the same key\n"
+        f"  the dashboard's Backend holds as UPSTREAM_KEY; or give the query app {config['VX_QUERY_APP']} a\n"
+        "  VECTRIXDB_API_KEY setting, which this reads back from Azure and never prints."
+    )
+    return ""  # pragma: no cover - stop() raised
+
+
 def key_for(az: Az, config: Dict[str, str], name: str, port: int) -> str:
     """A key of this setup's own, so the Access page shows one row a setup."""
     made, _ = post(
         f"http://localhost:{port}/api/v1/keys",
         {"name": name, "role": "operator"},
-        key="",
+        key=server_key(az, config),
         timeout=20.0,
     )
     return made["data"]["key"]
@@ -141,17 +193,28 @@ def retrieve(
     questions: Optional[List[str]] = None,
     dry_run: bool = False,
     which: Optional[str] = None,
+    number: str = "",
 ) -> int:
-    """Ask every question through the setup this pick names, and show what came back."""
+    """Ask every question through the setup this pick names, and show what came back. ``number`` is the calling script's step."""
     config = settings()
     az = Az(dry_run)
     kept = state()
     which = which or collections(config)[0]
     asking = list(questions or QUESTIONS)
-    begin(pick[:2].upper(), f"Retrieve: {pick}", f"The questions, through the setup the last run picked as {pick}.")
+    begin(
+        number or pick[:2].upper(),
+        f"Retrieve: {pick}",
+        f"The questions, through the setup the last run picked as {pick}.",
+    )
 
     if dry_run:
-        note("a dry run reads no run and asks nothing")
+        note(
+            f"a dry run reads no run and asks nothing: it would ask {len(asking)} questions of {which} through http://localhost:{port}"
+        )
+        finish(
+            f"Nothing was asked. Without --dry-run, {pick} is read from the newest run and asked the questions.",
+            "",
+        )
         return 0
 
     step("The newest run")
@@ -159,12 +222,19 @@ def retrieve(
     chosen = (report.get("picks") or {}).get(pick)
     by_key = {s["key"]: s for s in report.get("setups") or []}
     if not chosen or chosen not in by_key:
-        stop(f"The newest run has no {pick}. It has: {', '.join(sorted((report.get('picks') or {}))) or 'no picks at all'}")
+        stop(
+            f"The newest run has no {pick}. It has: {', '.join(sorted((report.get('picks') or {}))) or 'no picks at all'}"
+        )
     setup = by_key[chosen]
     summary = setup["summary"]
-    models = " and ".join(m.get("label") or m.get("name") or "" for m in setup.get("models") or []) or "words only"
+    models = (
+        " and ".join(m.get("label") or m.get("name") or "" for m in setup.get("models") or [])
+        or "words only"
+    )
     done(f"{setup['method_label']} on {setup['engine']}, {models}")
-    print(f"       on the golden questions: {summary['found']['10']:.0%} in the top 10, {summary['median_ms']:.0f} ms a search")
+    print(
+        f"       on the golden questions: {summary['found']['10']:.0%} in the top 10, {summary['median_ms']:.0f} ms a search"
+    )
 
     route, rerank = ROUTES.get(setup["method"], ("text-search", False))
     wanted = setup.get("search") or {}
@@ -186,8 +256,9 @@ def retrieve(
     except urllib.error.HTTPError as refused:
         if refused.code in (401, 403):
             stop(
-                "The server would not make a key. It is running with sign-in on, so sign in first in the browser, "
-                "or set VX_SIGNIN=no in settings.env and start it again."
+                f"The server would not make a key: it answered {refused.code}.\n"
+                "  The key this sent is not one the server takes as an admin's. Set VX_API_KEY in settings.env to a key\n"
+                "  an admin made on the dashboard's Keys page, or the server's own VECTRIXDB_API_KEY."
             )
         raise
 
@@ -203,10 +274,16 @@ def retrieve(
         try:
             answer, took = post(url, body, key)
         except urllib.error.HTTPError as refused:
-            print(f"\n  {question}\n       refused {refused.code}: {refused.read().decode('utf-8', 'replace')[:200]}")
+            print(
+                f"\n  {question}\n       refused {refused.code}: {refused.read().decode('utf-8', 'replace')[:200]}"
+            )
             continue
         times.append(took)
-        results = answer.get("data", answer).get("results") or answer.get("data", answer).get("items") or []
+        results = (
+            answer.get("data", answer).get("results")
+            or answer.get("data", answer).get("items")
+            or []
+        )
         print(f"\n  {question}   {took:.0f} ms")
         if not results:
             print("       nothing came back")
@@ -222,15 +299,19 @@ def retrieve(
 
     if times:
         times.sort()
-        step(f"median {times[len(times) // 2]:.0f} ms over {len(times)} searches, from this machine")
+        step(
+            f"median {times[len(times) // 2]:.0f} ms over {len(times)} searches, from this machine"
+        )
         note("that is the network and this laptop too; the run's own figure is the server's alone")
+    # The dashboard's Backend serves its pages at the root, as hash routes:
+    # /#/access, not /dashboard/#/access, which is the library's own page.
     links(
-        ("who reads most, on Access", f"http://localhost:{port}/dashboard/#/access"),
-        ("searches a day, on Overview", f"http://localhost:{port}/dashboard/#/overview"),
+        ("who reads most, on Access", f"http://localhost:{port}/#/access"),
+        ("searches a day, on Overview", f"http://localhost:{port}/#/overview"),
     )
     finish(
         f"{len(times)} searches are now in the access log, under retrieve-{pick.replace('_', '-')}.",
-        "the next retrieve script, then look at Access and Overview in the dashboard",
+        f"the next retrieve script, then look at Access and Overview in the dashboard, at http://localhost:{port}/",
     )
     return 0
 
@@ -257,5 +338,9 @@ def _relevance(value: Any) -> str:
 def options(parser) -> None:
     parser.add_argument("--port", type=int, default=8000, help="where the dashboard is serving")
     parser.add_argument("--limit", type=int, default=5, help="results a question")
-    parser.add_argument("--question", action="append", default=None, help="ask your own; give it again for more")
-    parser.add_argument("--collection", default=None, help="which collection to ask; the first by default")
+    parser.add_argument(
+        "--question", action="append", default=None, help="ask your own; give it again for more"
+    )
+    parser.add_argument(
+        "--collection", default=None, help="which collection to ask; the first by default"
+    )

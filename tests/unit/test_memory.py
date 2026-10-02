@@ -57,6 +57,16 @@ class TestRemember:
         reopened.remember("three", session="a")
         assert [t.metadata[K_TURN] for t in reopened.memory.turns("a")] == [0, 1, 2]
 
+    def test_numbering_after_reopen_counts_turn_zero(self, tmp_path):
+        """Turn 0 alone in a session is still a turn; the next one is 1."""
+        first = Vectrix("chat", path=str(tmp_path))
+        first.remember("one", session="a")
+        first.close()
+
+        reopened = Vectrix("chat", path=str(tmp_path))
+        reopened.remember("two", session="a")
+        assert [t.metadata[K_TURN] for t in reopened.memory.turns("a")] == [0, 1]
+
     def test_explicit_turn_is_kept(self, db):
         db.remember("late", session="a", turn=7)
         db.remember("after", session="a")

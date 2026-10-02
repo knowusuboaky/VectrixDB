@@ -232,7 +232,11 @@ def _queue() -> Any:
     """The app's one queue, beside the blobs. Its long work waits there, because the queue trigger is the only function declared."""
     from azure.storage.queue import QueueClient
 
-    return QueueClient(queue_account(os.environ["INGEST_BLOB_ACCOUNT"]), os.environ["INGEST_QUEUE"], credential=DefaultAzureCredential())
+    return QueueClient(
+        queue_account(os.environ["INGEST_BLOB_ACCOUNT"]),
+        os.environ["INGEST_QUEUE"],
+        credential=DefaultAzureCredential(),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -240,7 +244,11 @@ def _poison_queue() -> Any:
     """Where the host moves a message after five tries: the files that would not read, which the Ingest page lists."""
     from azure.storage.queue import QueueClient
 
-    return QueueClient(queue_account(os.environ["INGEST_BLOB_ACCOUNT"]), dead_letters.poison_queue_name(os.environ["INGEST_QUEUE"]), credential=DefaultAzureCredential())
+    return QueueClient(
+        queue_account(os.environ["INGEST_BLOB_ACCOUNT"]),
+        dead_letters.poison_queue_name(os.environ["INGEST_QUEUE"]),
+        credential=DefaultAzureCredential(),
+    )
 
 
 #: What one deployment of this folder does. Both is one app doing everything, the default; ingest and query are the
@@ -253,7 +261,9 @@ def role() -> str:
     """``INGEST_ROLE``: both, ingest or query; anything else is read as both, with a warning."""
     asked = (os.environ.get("INGEST_ROLE") or "both").strip().lower()
     if asked not in APP_ROLES:
-        log.warning("INGEST_ROLE is %r, which is none of %s: running as both", asked, ", ".join(APP_ROLES))
+        log.warning(
+            "INGEST_ROLE is %r, which is none of %s: running as both", asked, ", ".join(APP_ROLES)
+        )
         return "both"
     return asked
 
@@ -262,8 +272,10 @@ def role() -> str:
 def _breaker() -> Any:
     """The circuit breaker for the extraction app, its state in the ingestion container where every instance reads it."""
     return breaker.Breaker(
-        breaker.state_files(_blobs()), "extraction app",
-        threshold=int(os.environ.get("INGEST_BREAKER_FAILURES") or 5), open_for=float(os.environ.get("INGEST_BREAKER_SECONDS") or 300),
+        breaker.state_files(_blobs()),
+        "extraction app",
+        threshold=int(os.environ.get("INGEST_BREAKER_FAILURES") or 5),
+        open_for=float(os.environ.get("INGEST_BREAKER_SECONDS") or 300),
     )
 
 
@@ -386,15 +398,25 @@ def handle_events(message: func.QueueMessage) -> None:
     gate = _breaker()
     if not gate.allow():
         body = message.get_body()
-        _queue().send_message(body.decode("utf-8") if isinstance(body, (bytes, bytearray)) else str(body), visibility_timeout=int(gate.open_for))
-        log.info("ingestion paused: %s; message %s waits %ss", gate.status()["said"], message.id, int(gate.open_for))
+        _queue().send_message(
+            body.decode("utf-8") if isinstance(body, (bytes, bytearray)) else str(body),
+            visibility_timeout=int(gate.open_for),
+        )
+        log.info(
+            "ingestion paused: %s; message %s waits %ss",
+            gate.status()["said"],
+            message.id,
+            int(gate.open_for),
+        )
         return
 
     # Step six's cut, read once a message, so a new pick reaches the next
     # file without a restart.
     cut = chunking()
     if cut.get("index") is False:
-        log.info("no cut is in force yet, so the Markdown is kept and nothing is indexed: GET /api/v1/picks says why")
+        log.info(
+            "no cut is in force yet, so the Markdown is kept and nothing is indexed: GET /api/v1/picks says why"
+        )
     failed, read = [], 0
     for name, theirs in by_collection.items():
         outcomes = worker(name, cut).handle_all(theirs)
@@ -427,10 +449,16 @@ def _note_dependency(outcomes: Any) -> None:
     """What the reads said about the extraction app: one that could not reach it counts against it, one that got through clears the count."""
     try:
         gate = _breaker()
-        unreachable = [o for o in outcomes if should_go_round_again(o) and breaker.is_transient(getattr(o, "error", ""))]
+        unreachable = [
+            o
+            for o in outcomes
+            if should_go_round_again(o) and breaker.is_transient(getattr(o, "error", ""))
+        ]
         if unreachable:
             gate.record_failure(getattr(unreachable[0], "error", ""))
-        elif any(str(getattr(o, "action", "")) in ("created", "updated", "unchanged") for o in outcomes):
+        elif any(
+            str(getattr(o, "action", "")) in ("created", "updated", "unchanged") for o in outcomes
+        ):
             gate.record_success()
     except Exception as exc:  # noqa: BLE001 - bookkeeping never stops a read
         log.warning("could not note the extraction app's state: %s", exc)
@@ -572,7 +600,11 @@ def golden_questions() -> Dict[str, Any]:
     document, at least one a part, so a two hundred page report is asked
     about all the way through and a lone picture still gets its question.
     """
-    return {"n": 100, "mix": {"search": 20, "fact": 30, "why": 20, "two_page": 15, "long": 15}, "evolve": 1}
+    return {
+        "n": 100,
+        "mix": {"search": 20, "fact": 30, "why": 20, "two_page": 15, "long": 15},
+        "evolve": 1,
+    }
 
 
 def golden_writer() -> Optional[ChatWriter]:
@@ -683,7 +715,15 @@ def write_golden_dataset(asked: Dict[str, Any]) -> None:
         if not handles:
             folder.status("failed", message=NOTHING_KEPT)
             return
-        written = write_golden(handles, drafts, writer=writer, examples=folder.examples(), cache=answers, progress=progress, **plan)
+        written = write_golden(
+            handles,
+            drafts,
+            writer=writer,
+            examples=folder.examples(),
+            cache=answers,
+            progress=progress,
+            **plan,
+        )
     except WriterUnavailable as exc:
         folder.keep_answers(answers)
         folder.status("failed", message=str(exc))
@@ -691,7 +731,10 @@ def write_golden_dataset(asked: Dict[str, Any]) -> None:
         return
     except Exception as exc:
         folder.keep_answers(answers)
-        folder.status("failed", message=f"{type(exc).__name__}: {exc}. The queue tries again, from the answers kept.")
+        folder.status(
+            "failed",
+            message=f"{type(exc).__name__}: {exc}. The queue tries again, from the answers kept.",
+        )
         raise
     finally:
         for db in opened:
@@ -700,7 +743,13 @@ def write_golden_dataset(asked: Dict[str, Any]) -> None:
     folder.keep_answers(answers)
     with open(drafts, "rb") as made:
         folder.write(GOLDEN, made.read(), overwrite=False)
-    folder.status("done", written=len(written.rows), wanted=written.wanted, file=folder.url(GOLDEN), summary=written.summary().splitlines())
+    folder.status(
+        "done",
+        written=len(written.rows),
+        wanted=written.wanted,
+        file=folder.url(GOLDEN),
+        summary=written.summary().splitlines(),
+    )
     log.info("the golden dataset: %s", written.summary().splitlines()[0])
 
 
@@ -830,7 +879,16 @@ def compare_techniques(asked: Dict[str, Any]) -> None:
     that refuses is said, and anything else is said and not raised, so the
     queue does not start a comparison again on its own.
     """
-    from vectrixdb.evaluation import WriterUnavailable, answer_with, check_golden, chunking_report, chunking_store, judge_with, plan_chunking, run_chunking_build
+    from vectrixdb.evaluation import (
+        WriterUnavailable,
+        answer_with,
+        check_golden,
+        chunking_report,
+        chunking_store,
+        judge_with,
+        plan_chunking,
+        run_chunking_build,
+    )
 
     folder = _golden_folder()
     where = asked.get("golden") or os.environ.get("EVAL_GOLDEN_URL") or folder.url(GOLDEN)
@@ -864,7 +922,15 @@ def compare_techniques(asked: Dict[str, Any]) -> None:
                 documents.update(_kept_markdown(names))
             try:
                 return run_chunking_build(
-                    documents, gold.labelled, one, budget=rules["budget"], answer=answer, judge=judge, workdir=scratch, cut_with=cut_with, context_with=context_with
+                    documents,
+                    gold.labelled,
+                    one,
+                    budget=rules["budget"],
+                    answer=answer,
+                    judge=judge,
+                    workdir=scratch,
+                    cut_with=cut_with,
+                    context_with=context_with,
                 )
             except WriterUnavailable:
                 raise
@@ -873,27 +939,56 @@ def compare_techniques(asked: Dict[str, Any]) -> None:
                 return {**one, "questions": 0, "error": f"{type(exc).__name__}: {exc}"}
 
         def finish(results: List[Dict[str, Any]]) -> Dict[str, Any]:
-            report = chunking_report(results, gold.describe(), budget=rules["budget"], skipped=skipped)
-            chunking_store(os.environ["VECTRIXDB_EVALUATIONS"]).save(report, golden=gold.raw or None)
+            report = chunking_report(
+                results, gold.describe(), budget=rules["budget"], skipped=skipped
+            )
+            chunking_store(os.environ["VECTRIXDB_EVALUATIONS"]).save(
+                report, golden=gold.raw or None
+            )
             # Said in the status rather than saved in the run: what it did to the cut in force.
-            return {**report, "picked": _pick_a_cut(folder, results, report, drafts=gold.drafts, compared=names)}
+            return {
+                **report,
+                "picked": _pick_a_cut(folder, results, report, drafts=gold.drafts, compared=names),
+            }
 
-        said = chunking_turn(folder, asked, plan, build=build, finish=finish, send=_queue().send_message)
+        said = chunking_turn(
+            folder, asked, plan, build=build, finish=finish, send=_queue().send_message
+        )
     except WriterUnavailable as exc:
-        folder.status("failed", into=CHUNKING_STATUS, golden=where, job=asked.get("job"), message=str(exc))
+        folder.status(
+            "failed", into=CHUNKING_STATUS, golden=where, job=asked.get("job"), message=str(exc)
+        )
         log.warning("the chunking comparison stopped: %s", exc)
         return
     except Exception as exc:
         # Said, and not raised: the builds made are kept, and a comparison
         # asked for again once it is put right starts afresh.
-        folder.status("failed", into=CHUNKING_STATUS, golden=where, job=asked.get("job"), message=f"{type(exc).__name__}: {exc}. Ask again once it is put right.")
+        folder.status(
+            "failed",
+            into=CHUNKING_STATUS,
+            golden=where,
+            job=asked.get("job"),
+            message=f"{type(exc).__name__}: {exc}. Ask again once it is put right.",
+        )
         log.exception("the chunking comparison stopped")
         return
     if said["state"] == "done":
-        log.info("chunking compared, run %s: %s best; %s", said.get("run"), said.get("best"), (said.get("picked") or {}).get("why"))
+        log.info(
+            "chunking compared, run %s: %s best; %s",
+            said.get("run"),
+            said.get("best"),
+            (said.get("picked") or {}).get("why"),
+        )
 
 
-def _pick_a_cut(folder: GoldenFolder, results: List[Dict[str, Any]], report: Dict[str, Any], *, drafts: int, compared: List[str]) -> Dict[str, Any]:
+def _pick_a_cut(
+    folder: GoldenFolder,
+    results: List[Dict[str, Any]],
+    report: Dict[str, Any],
+    *,
+    drafts: int,
+    compared: List[str],
+) -> Dict[str, Any]:
     """What a finished run does to the cut in force.
 
     INPUT
@@ -924,23 +1019,42 @@ def _pick_a_cut(folder: GoldenFolder, results: List[Dict[str, Any]], report: Dic
     if setting != AUTO:
         return {"state": "pinned", "why": f"INGEST_CHUNKING pins {setting}, so no run moves it"}
     if drafts:
-        return {"state": "not moved", "why": f"{drafts} of the golden questions are drafts nobody checked, so the run moves no cut"}
+        return {
+            "state": "not moved",
+            "why": f"{drafts} of the golden questions are drafts nobody checked, so the run moves no cut",
+        }
     missing = [name for name in named() if name not in compared]
     if missing:
-        return {"state": "not moved", "why": f"{', '.join(missing)} were not compared, and the cut is every collection's"}
+        return {
+            "state": "not moved",
+            "why": f"{', '.join(missing)} were not compared, and the cut is every collection's",
+        }
     picks = folder.read_picks()
     current = chunking_in_force(AUTO, picks)["key"]
     choice = chunking_choice(results, current)
     if not choice["switch"] or not choice["pick"]:
         return {"state": "kept", "key": current, "why": choice["why"]}
-    folder.write_picks(with_chunking_pick(picks, key=choice["pick"], run=report.get("id"), why=choice["why"], questions=int(report.get("questions") or 0)))
+    folder.write_picks(
+        with_chunking_pick(
+            picks,
+            key=choice["pick"],
+            run=report.get("id"),
+            why=choice["why"],
+            questions=int(report.get("questions") or 0),
+        )
+    )
     log.info("the cut in force is now %s: %s", choice["pick"], choice["why"])
     moved = {"state": "switched", "key": choice["pick"], "was": current, "why": choice["why"]}
     try:
         _queue().send_message(apply_message(choice["pick"], named()))
     except Exception as exc:  # noqa: BLE001 - the pick is made; applying it can be asked for again
-        return {**moved, "apply": f"not queued, {type(exc).__name__}: {exc}. POST /api/v1/chunking/apply asks again."}
-    folder.status("asked", into=APPLY_STATUS, key=choice["pick"], collections=named(), run=report.get("id"))
+        return {
+            **moved,
+            "apply": f"not queued, {type(exc).__name__}: {exc}. POST /api/v1/chunking/apply asks again.",
+        }
+    folder.status(
+        "asked", into=APPLY_STATUS, key=choice["pick"], collections=named(), run=report.get("id")
+    )
     return moved
 
 
@@ -1011,7 +1125,9 @@ def _cutting(key: str) -> Dict[str, Any]:
         return chunking_options(build)
     chat = golden_writer()
     if chat is None:
-        raise ConfigurationError(f"{key} is cut with a model, and none is named: set AZURE_OPENAI_WRITER_DEPLOYMENT, or pin a cut that needs none")
+        raise ConfigurationError(
+            f"{key} is cut with a model, and none is named: set AZURE_OPENAI_WRITER_DEPLOYMENT, or pin a cut that needs none"
+        )
     from vectrixdb.chunk_models import context_writer, llm_cutter
 
     return chunking_options(build, cut_with=llm_cutter(chat), context_with=context_writer(chat))
@@ -1074,7 +1190,14 @@ def apply_the_cut(asked: Dict[str, Any]) -> None:
                 if time.monotonic() - began > APPLY_SECONDS:
                     # Handed on rather than cut off: the next message starts where this one stopped.
                     _queue().send_message(apply_message(key, names))
-                    folder.status("running", into=APPLY_STATUS, key=key, cut=cut, failed=failed[:20], message="the rest go on in the next message")
+                    folder.status(
+                        "running",
+                        into=APPLY_STATUS,
+                        key=key,
+                        cut=cut,
+                        failed=failed[:20],
+                        message="the rest go on in the next message",
+                    )
                     return
                 try:
                     db.rechunk(doc_id, **options)
@@ -1083,22 +1206,49 @@ def apply_the_cut(asked: Dict[str, Any]) -> None:
                     raise
                 except Exception as exc:  # noqa: BLE001 - one document that will not cut leaves the others to be cut
                     failed.append(f"{name}/{doc_id}: {type(exc).__name__}: {exc}")
-                folder.status("running", into=APPLY_STATUS, key=key, collection=name, cut=cut, last=doc_id, failed=failed[:20])
+                folder.status(
+                    "running",
+                    into=APPLY_STATUS,
+                    key=key,
+                    collection=name,
+                    cut=cut,
+                    last=doc_id,
+                    failed=failed[:20],
+                )
     except (WriterUnavailable, ConfigurationError) as exc:
         folder.status("failed", into=APPLY_STATUS, key=key, cut=cut, message=str(exc))
         log.warning("the cut %s was not applied: %s", key, exc)
         return
     except Exception as exc:
-        folder.status("failed", into=APPLY_STATUS, key=key, cut=cut, message=f"{type(exc).__name__}: {exc}. The queue tries again from where it stopped.")
+        folder.status(
+            "failed",
+            into=APPLY_STATUS,
+            key=key,
+            cut=cut,
+            message=f"{type(exc).__name__}: {exc}. The queue tries again from where it stopped.",
+        )
         raise
     if failed:
-        folder.status("failed", into=APPLY_STATUS, key=key, cut=cut, failed=failed[:20], message=f"{len(failed)} did not cut. The queue tries them again.")
+        folder.status(
+            "failed",
+            into=APPLY_STATUS,
+            key=key,
+            cut=cut,
+            failed=failed[:20],
+            message=f"{len(failed)} did not cut. The queue tries them again.",
+        )
         raise RuntimeError(f"{len(failed)} documents did not cut the way {key} says: {failed[0]}")
     folder.status("done", into=APPLY_STATUS, key=key, cut=cut, collections=names)
     log.info("every kept document is cut the way %s says; %s were cut now", key, cut)
     if folder.exists(GOLDEN) and not folder.busy(into=EVALUATION_STATUS):
         _queue().send_message(evaluation_message(folder.url(GOLDEN), named()))
-        folder.status("asked", into=EVALUATION_STATUS, golden=folder.url(GOLDEN), collections=named(), because=f"the cut is now {key}")
+        folder.status(
+            "asked",
+            into=EVALUATION_STATUS,
+            golden=folder.url(GOLDEN),
+            collections=named(),
+            because=f"the cut is now {key}",
+        )
 
 
 # ============================================================================
@@ -1132,7 +1282,9 @@ def embedding_models() -> Dict[str, Any]:
     can compare all three ways of asking. Both are made at once, so step ten
     can follow any of them without anything being embedded again.
     """
-    if not (os.environ.get("AZURE_OPENAI_ENDPOINT") and os.environ.get("AZURE_OPENAI_EMBED_DEPLOYMENT")):
+    if not (
+        os.environ.get("AZURE_OPENAI_ENDPOINT") and os.environ.get("AZURE_OPENAI_EMBED_DEPLOYMENT")
+    ):
         return {"embeddings": "vectrixdb", "azure_embedding": None}
     return {
         "embeddings": "both",
@@ -1276,7 +1428,14 @@ def evaluate_collections(asked: Dict[str, Any]) -> None:
     """
     import warnings
 
-    from vectrixdb.evaluation import Golden, MissingDocumentsWarning, Target, check_golden, evaluate, missing_documents
+    from vectrixdb.evaluation import (
+        Golden,
+        MissingDocumentsWarning,
+        Target,
+        check_golden,
+        evaluate,
+        missing_documents,
+    )
 
     folder = _golden_folder()
     where = asked.get("golden") or os.environ.get("EVAL_GOLDEN_URL") or folder.url(GOLDEN)
@@ -1305,15 +1464,37 @@ def evaluate_collections(asked: Dict[str, Any]) -> None:
             elsewhere = {str(q) for q in gone.get("questions") or []}
             own = [q for q in gold.labelled if str(q.id) not in elsewhere]
             if not own:
-                runs.append({"collection": name, "questions": 0, "left_out": len(elsewhere), "note": "no golden question names a document it holds"})
+                runs.append(
+                    {
+                        "collection": name,
+                        "questions": 0,
+                        "left_out": len(elsewhere),
+                        "note": "no golden question names a document it holds",
+                    }
+                )
                 continue
 
             def progress(setup: Dict[str, Any], number: int, of: int, name: str = name) -> None:
-                folder.status("running", into=EVALUATION_STATUS, golden=where, collection=name, setup=number, of=of, done=runs)
+                folder.status(
+                    "running",
+                    into=EVALUATION_STATUS,
+                    golden=where,
+                    collection=name,
+                    setup=number,
+                    of=of,
+                    done=runs,
+                )
 
             report = evaluate(
                 [target],
-                Golden(questions=own, source=gold.source, sha256=gold.sha256, unfilled=gold.unfilled, drafts=gold.drafts, raw=gold.raw),
+                Golden(
+                    questions=own,
+                    source=gold.source,
+                    sha256=gold.sha256,
+                    unfilled=gold.unfilled,
+                    drafts=gold.drafts,
+                    raw=gold.raw,
+                ),
                 save_to=os.environ.get("VECTRIXDB_EVALUATIONS") or None,
                 fetcher=BlobFetcher(_blobs()),
                 progress=progress,
@@ -1327,22 +1508,42 @@ def evaluate_collections(asked: Dict[str, Any]) -> None:
                     "questions": len(own),
                     "left_out": len(elsewhere),
                     "setups": len(report["setups"]),
-                    "picks": {p: _said(by_key[k]) for p, k in (report.get("picks") or {}).items() if k in by_key},
-                    "step_ten": _pick_a_way(folder, name, report, questions=len(own), drafts=gold.drafts),
+                    "picks": {
+                        p: _said(by_key[k])
+                        for p, k in (report.get("picks") or {}).items()
+                        if k in by_key
+                    },
+                    "step_ten": _pick_a_way(
+                        folder, name, report, questions=len(own), drafts=gold.drafts
+                    ),
                 }
             )
-            log.info("evaluated %s setups over %s questions on %s, %s left out", len(report["setups"]), len(own), name, len(elsewhere))
+            log.info(
+                "evaluated %s setups over %s questions on %s, %s left out",
+                len(report["setups"]),
+                len(own),
+                name,
+                len(elsewhere),
+            )
     except Exception as exc:
         # Said, and not raised: a run tried again would run every collection
         # again, and one that failed for a reason is asked for again once it
         # is put right.
-        folder.status("failed", into=EVALUATION_STATUS, golden=where, done=runs, message=f"{type(exc).__name__}: {exc}. Ask again once it is put right.")
+        folder.status(
+            "failed",
+            into=EVALUATION_STATUS,
+            golden=where,
+            done=runs,
+            message=f"{type(exc).__name__}: {exc}. Ask again once it is put right.",
+        )
         log.exception("the evaluation stopped")
         return
     folder.status("done", into=EVALUATION_STATUS, golden=where, runs=runs)
 
 
-def _pick_a_way(folder: GoldenFolder, name: str, report: Dict[str, Any], *, questions: int, drafts: int) -> Dict[str, Any]:
+def _pick_a_way(
+    folder: GoldenFolder, name: str, report: Dict[str, Any], *, questions: int, drafts: int
+) -> Dict[str, Any]:
     """What a finished run does to how step ten searches one collection.
 
     INPUT
@@ -1368,10 +1569,17 @@ def _pick_a_way(folder: GoldenFolder, name: str, report: Dict[str, Any], *, ques
     if setting not in (AUTO, *ROLES):
         return {"state": "pinned", "why": f"RETRIEVAL_SETUP pins {setting}, so no run moves it"}
     if drafts:
-        return {"state": "not moved", "why": f"{drafts} of the golden questions are drafts nobody checked, so the run moves no pick"}
+        return {
+            "state": "not moved",
+            "why": f"{drafts} of the golden questions are drafts nobody checked, so the run moves no pick",
+        }
     folder.write_picks(with_retrieval_picks(folder.read_picks(), name, report, questions))
     role = AUTO_ROLE if setting == AUTO else setting
-    return {"state": "followed", "role": role, "why": f"step ten searches {name} the way this run names {role}"}
+    return {
+        "state": "followed",
+        "role": role,
+        "why": f"step ten searches {name} the way this run names {role}",
+    }
 
 
 # ============================================================================
@@ -1410,7 +1618,9 @@ def the_way(name: str, picks: Optional[Mapping[str, Any]] = None) -> Dict[str, A
     return retrieval_in_force(setting, picks, name)
 
 
-def retrieve(name: str, question: str, principal: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def retrieve(
+    name: str, question: str, principal: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """A question of one collection, searched the way in force, and answered from what was found.
 
     INPUT
@@ -1452,15 +1662,21 @@ def retrieve(name: str, question: str, principal: Optional[Dict[str, Any]] = Non
     try:
         cut, way = the_cut(), the_way(name)
     except ValueError as exc:
-        raise ConfigurationError(f"INGEST_CHUNKING or RETRIEVAL_SETUP names no pick: {exc}") from exc
+        raise ConfigurationError(
+            f"INGEST_CHUNKING or RETRIEVAL_SETUP names no pick: {exc}"
+        ) from exc
     if cut["key"] is None:
         raise NothingIsCut(cut["why"])
     db: Any = collection(name)
     if db.policy is not None:
         if principal is None:
-            raise PolicyError(f"collection {name!r} carries an entitlement policy, so a question of it needs somebody who signed in")
+            raise PolicyError(
+                f"collection {name!r} carries an entitlement policy, so a question of it needs somebody who signed in"
+            )
         db = db.as_principal(principal)
-    handed = handed_over(db, question, cut["key"], budget=retrieval_rules()["budget"], search=way.get("search"))
+    handed = handed_over(
+        db, question, cut["key"], budget=retrieval_rules()["budget"], search=way.get("search")
+    )
     answer: Optional[str] = None
     why: Optional[str] = None
     chat = golden_writer()
@@ -1478,7 +1694,11 @@ def retrieve(name: str, question: str, principal: Optional[Dict[str, Any]] = Non
         "sources": [_source(hit, text) for hit, text in handed],
         "searched": {
             "cut": {k: cut.get(k) for k in ("key", "by", "run")},
-            "way": {k: way.get(k) for k in ("setup", "by", "role", "run", "search", "why") if way.get(k) is not None},
+            "way": {
+                k: way.get(k)
+                for k in ("setup", "by", "role", "run", "search", "why")
+                if way.get(k) is not None
+            },
         },
     }
 
@@ -1627,7 +1847,9 @@ def _api() -> Any:
             collection_store=_collection_store(),
         )
         _ours(api)
-        log.info("serving the library's API, dashboard %s", os.environ.get("VECTRIXDB_DASHBOARD", "yes"))
+        log.info(
+            "serving the library's API, dashboard %s", os.environ.get("VECTRIXDB_DASHBOARD", "yes")
+        )
         return api
     except Exception as exc:  # noqa: BLE001 - whatever it is, ingestion carries on
         log.exception("the API could not be built, so only ingestion is running")
@@ -1644,12 +1866,44 @@ def _lean() -> Any:
 
     api = FastAPI(title="VectrixDB ingest app", docs_url=None, redoc_url=None)
 
+    @api.middleware("http")
+    async def the_key_is_asked_for(request: Any, call_next: Any) -> Any:
+        """The library's key layer is the query app's, not this one's, so the
+        routes _ours adds (a collection's delete among them) were open to
+        anyone who found the address. The server's own key is asked for here,
+        as the library asks for it: in api-key, or as a Bearer token."""
+        import hashlib
+        import hmac
+
+        from fastapi.responses import JSONResponse
+        from vectrixdb.api.signin import _hashed, get_api_key
+
+        key, key_sha = get_api_key(), _hashed("VECTRIXDB_API_KEY_SHA256")
+        if request.url.path in ("/health", "/health/wiring") or not (key or key_sha):
+            return await call_next(request)
+        given = request.headers.get("api-key") or ""
+        bearer = request.headers.get("authorization") or ""
+        if not given and bearer.lower().startswith("bearer "):
+            given = bearer[7:].strip()
+        if given and (
+            (key and hmac.compare_digest(given.encode(), key.encode()))
+            or (
+                key_sha and hmac.compare_digest(hashlib.sha256(given.encode()).hexdigest(), key_sha)
+            )
+        ):
+            return await call_next(request)
+        return JSONResponse(
+            {"ok": False, "message": "API key required", "data": None}, status_code=401
+        )
+
     @api.get("/health", tags=["about"], summary="Is the ingest app up")
     async def health() -> Dict[str, Any]:
         return {"status": "ok", "role": "ingest"}
 
     _ours(api)
-    log.info("serving the ingest app's health and its own routes; the API and the dashboard are the query app's")
+    log.info(
+        "serving the ingest app's health and its own routes; the API and the dashboard are the query app's"
+    )
     return api
 
 
@@ -1716,7 +1970,10 @@ def _ours(api: Any) -> None:
         return refusal(
             400,
             f"{check.summary().splitlines()[0]}. Nothing was run.",
-            data={"problems": [str(p) for p in check.errors], "notes": [str(p) for p in check.warnings]},
+            data={
+                "problems": [str(p) for p in check.errors],
+                "notes": [str(p) for p in check.warnings],
+            },
         )
 
     def misconfigured(exc: Exception) -> Any:
@@ -1762,7 +2019,10 @@ def _ours(api: Any) -> None:
             # extraction app reads them: what to compare with its own routes.
             "routes": dict(sorted(service.routes.items())) if service is not None else None,
             # What steps six and ten were told to follow; GET /api/v1/picks says what that comes to.
-            "picks": {"INGEST_CHUNKING": _setting("INGEST_CHUNKING"), "RETRIEVAL_SETUP": _setting("RETRIEVAL_SETUP")},
+            "picks": {
+                "INGEST_CHUNKING": _setting("INGEST_CHUNKING"),
+                "RETRIEVAL_SETUP": _setting("RETRIEVAL_SETUP"),
+            },
             "wired": {
                 "search": given("AZURE_SEARCH_ENDPOINT"),
                 "blobs": given("INGEST_BLOB_ACCOUNT"),
@@ -1785,9 +2045,18 @@ def _ours(api: Any) -> None:
             },
         }
 
-    @api.post("/api/v1/golden/write", tags=["evaluations"], summary="Draft the golden dataset with a model")
+    @api.post(
+        "/api/v1/golden/write",
+        tags=["evaluations"],
+        summary="Draft the golden dataset with a model",
+    )
     async def ask_for_the_golden_dataset(
-        n: int = Query(0, ge=0, le=MOST, description="how many questions; the hundred of step four when left out"),
+        n: int = Query(
+            0,
+            ge=0,
+            le=MOST,
+            description="how many questions; the hundred of step four when left out",
+        ),
     ) -> Any:
         """Queue step four: questions drafted from every collection's kept Markdown into evals/golden_dataset/golden.jsonl.
 
@@ -1803,25 +2072,50 @@ def _ours(api: Any) -> None:
         if folder.exists(GOLDEN):
             return refusal(409, THERE_ALREADY)
         if folder.busy():
-            return refusal(409, "A golden dataset is being written already.", data={"status": folder.read_status()})
+            return refusal(
+                409,
+                "A golden dataset is being written already.",
+                data={"status": folder.read_status()},
+            )
         wanted = n or golden_questions()["n"]
         _queue().send_message(golden_message(wanted))
         folder.status("asked", wanted=wanted)
         log.info("the golden dataset was asked for: %s questions", wanted)
         return JSONResponse(
-            {"message": f"Writing {wanted} questions into {folder.url(GOLDEN)}. It takes ten to twenty minutes.", "status": "GET /api/v1/golden/write"},
+            {
+                "message": f"Writing {wanted} questions into {folder.url(GOLDEN)}. It takes ten to twenty minutes.",
+                "status": "GET /api/v1/golden/write",
+            },
             202,
         )
 
-    @api.get("/api/v1/golden/write", tags=["evaluations"], summary="How the golden dataset's writing is going")
+    @api.get(
+        "/api/v1/golden/write",
+        tags=["evaluations"],
+        summary="How the golden dataset's writing is going",
+    )
     async def golden_dataset_status() -> Any:
         """What golden.status.json says: asked, writing so many of so many, done, refused or failed, and why."""
-        return _golden_folder().read_status() or {"state": "not asked", "message": "POST /api/v1/golden/write asks for it."}
+        return _golden_folder().read_status() or {
+            "state": "not asked",
+            "message": "POST /api/v1/golden/write asks for it.",
+        }
 
-    @api.post("/api/v1/chunking/run", tags=["evaluations"], summary="Compare the ways of cutting the documents")
+    @api.post(
+        "/api/v1/chunking/run",
+        tags=["evaluations"],
+        summary="Compare the ways of cutting the documents",
+    )
     async def run_chunking(
-        golden: str = Query("", description="the blob address of the golden questions; evals/golden_dataset/golden.jsonl when left out"),
-        collection_name: str = Query("", alias="collection", description="which collection's documents to cut; every one when left out"),
+        golden: str = Query(
+            "",
+            description="the blob address of the golden questions; evals/golden_dataset/golden.jsonl when left out",
+        ),
+        collection_name: str = Query(
+            "",
+            alias="collection",
+            description="which collection's documents to cut; every one when left out",
+        ),
     ) -> Any:
         """Queue step five: the kept Markdown cut every way, each handing the model the same characters, and one picked.
 
@@ -1843,13 +2137,28 @@ def _ours(api: Any) -> None:
         if not check.ok:
             return refused(check)
         if folder.busy(into=CHUNKING_STATUS):
-            return refusal(409, "A chunking comparison is running already.", data={"status": folder.read_status(CHUNKING_STATUS)})
+            return refusal(
+                409,
+                "A chunking comparison is running already.",
+                data={"status": folder.read_status(CHUNKING_STATUS)},
+            )
         plan, skipped, _, _ = plan_chunking(chat=golden_writer())
         builds, budget, job = len(plan), chunking_rules()["budget"], chunking_job()
         _queue().send_message(chunking_message(where, names, job))
-        folder.status("asked", into=CHUNKING_STATUS, golden=where, collections=names, job=job, of=builds)
-        judged = "each answer written and judged by step four's model" if golden_writer() is not None else "no model is named, so it counts what was found in them"
-        log.info("a chunking comparison was asked for: %s builds over %s questions, %s", builds, check.ready, ", ".join(names))
+        folder.status(
+            "asked", into=CHUNKING_STATUS, golden=where, collections=names, job=job, of=builds
+        )
+        judged = (
+            "each answer written and judged by step four's model"
+            if golden_writer() is not None
+            else "no model is named, so it counts what was found in them"
+        )
+        log.info(
+            "a chunking comparison was asked for: %s builds over %s questions, %s",
+            builds,
+            check.ready,
+            ", ".join(names),
+        )
         return JSONResponse(
             {
                 "message": f"Cutting the documents of {', '.join(names)} {builds} ways, each handing the model {budget:,} characters for each of {check.ready} questions, {judged}. One build a message, so it takes a while.",
@@ -1860,12 +2169,23 @@ def _ours(api: Any) -> None:
             202,
         )
 
-    @api.get("/api/v1/chunking/run/status", tags=["evaluations"], summary="How the chunking comparison is going")
+    @api.get(
+        "/api/v1/chunking/run/status",
+        tags=["evaluations"],
+        summary="How the chunking comparison is going",
+    )
     async def chunking_status() -> Any:
         """What chunking.status.json says: asked, running build so many of so many, done with what it did to the cut, refused or failed."""
-        return _golden_folder().read_status(CHUNKING_STATUS) or {"state": "not asked", "message": "POST /api/v1/chunking/run asks for it."}
+        return _golden_folder().read_status(CHUNKING_STATUS) or {
+            "state": "not asked",
+            "message": "POST /api/v1/chunking/run asks for it.",
+        }
 
-    @api.post("/api/v1/chunking/apply", tags=["evaluations"], summary="Cut every kept document the way in force")
+    @api.post(
+        "/api/v1/chunking/apply",
+        tags=["evaluations"],
+        summary="Cut every kept document the way in force",
+    )
     async def apply_cut() -> Any:
         """Queue THE CUT APPLIED for the cut in force: after a new one is pinned with INGEST_CHUNKING, say.
 
@@ -1882,7 +2202,11 @@ def _ours(api: Any) -> None:
         if cut["key"] is None:
             return refusal(409, cut["why"])
         if folder.busy(into=APPLY_STATUS):
-            return refusal(409, "A cut is being applied already.", data={"status": folder.read_status(APPLY_STATUS)})
+            return refusal(
+                409,
+                "A cut is being applied already.",
+                data={"status": folder.read_status(APPLY_STATUS)},
+            )
         _queue().send_message(apply_message(cut["key"], named()))
         folder.status("asked", into=APPLY_STATUS, key=cut["key"], collections=named())
         log.info("the cut %s was asked to be applied", cut["key"])
@@ -1894,15 +2218,31 @@ def _ours(api: Any) -> None:
             202,
         )
 
-    @api.get("/api/v1/chunking/apply/status", tags=["evaluations"], summary="How applying the cut is going")
+    @api.get(
+        "/api/v1/chunking/apply/status",
+        tags=["evaluations"],
+        summary="How applying the cut is going",
+    )
     async def apply_status() -> Any:
         """What apply.status.json says: asked, running so many documents in, done, or failed and which."""
-        return _golden_folder().read_status(APPLY_STATUS) or {"state": "not asked", "message": "POST /api/v1/chunking/apply asks for it."}
+        return _golden_folder().read_status(APPLY_STATUS) or {
+            "state": "not asked",
+            "message": "POST /api/v1/chunking/apply asks for it.",
+        }
 
-    @api.post("/api/v1/evaluations/run", tags=["evaluations"], summary="Run the golden questions every way")
+    @api.post(
+        "/api/v1/evaluations/run",
+        tags=["evaluations"],
+        summary="Run the golden questions every way",
+    )
     async def run_evaluation(
-        golden: str = Query("", description="the blob address of the golden questions; evals/golden_dataset/golden.jsonl when left out"),
-        collection_name: str = Query("", alias="collection", description="which collection to ask; every one when left out"),
+        golden: str = Query(
+            "",
+            description="the blob address of the golden questions; evals/golden_dataset/golden.jsonl when left out",
+        ),
+        collection_name: str = Query(
+            "", alias="collection", description="which collection to ask; every one when left out"
+        ),
     ) -> Any:
         """Queue step nine: each collection asked its own golden questions every way, and three named.
 
@@ -1924,7 +2264,11 @@ def _ours(api: Any) -> None:
         if not check.ok:
             return refused(check)
         if folder.busy(into=EVALUATION_STATUS):
-            return refusal(409, "An evaluation is running already.", data={"status": folder.read_status(EVALUATION_STATUS)})
+            return refusal(
+                409,
+                "An evaluation is running already.",
+                data={"status": folder.read_status(EVALUATION_STATUS)},
+            )
         _queue().send_message(evaluation_message(where, names))
         folder.status("asked", into=EVALUATION_STATUS, golden=where, collections=names)
         log.info("an evaluation was asked for: %s questions, %s", check.ready, ", ".join(names))
@@ -1937,33 +2281,57 @@ def _ours(api: Any) -> None:
             202,
         )
 
-    @api.get("/api/v1/evaluations/run/status", tags=["evaluations"], summary="How the evaluation is going")
+    @api.get(
+        "/api/v1/evaluations/run/status",
+        tags=["evaluations"],
+        summary="How the evaluation is going",
+    )
     async def evaluation_status() -> Any:
         """What evaluation.status.json says: asked, running a collection's setups, done with each run's picks, refused or failed, and why."""
-        return _golden_folder().read_status(EVALUATION_STATUS) or {"state": "not asked", "message": "POST /api/v1/evaluations/run asks for it."}
+        return _golden_folder().read_status(EVALUATION_STATUS) or {
+            "state": "not asked",
+            "message": "POST /api/v1/evaluations/run asks for it.",
+        }
 
-    @api.get("/api/v1/picks", tags=["evaluations"], summary="The cut and the ways of searching in force, and why")
+    @api.get(
+        "/api/v1/picks",
+        tags=["evaluations"],
+        summary="The cut and the ways of searching in force, and why",
+    )
     async def picks_in_force() -> Any:
         """What steps six and ten use, and why: each pick's setting, whether it follows the runs or is pinned, and the run that chose it.
 
-            {"chunking": {"setting": "auto", "key": "markdown-1000-h", "by": "auto", "run": ..., "why": ...},
-             "retrieval": {"financial": {"setting": "auto", "setup": ..., "by": "auto", "role": "best_for_balance",
-                                         "run": ..., "search": {...}}, ...}}
+        {"chunking": {"setting": "auto", "key": "markdown-1000-h", "by": "auto", "run": ..., "why": ...},
+         "retrieval": {"financial": {"setting": "auto", "setup": ..., "by": "auto", "role": "best_for_balance",
+                                     "run": ..., "search": {...}}, ...}}
         """
         picks = _golden_folder().read_picks()
         try:
             return {
                 "chunking": {"setting": _setting("INGEST_CHUNKING"), **the_cut(picks)},
-                "retrieval": {name: {"setting": _setting("RETRIEVAL_SETUP"), **the_way(name, picks)} for name in named()},
+                "retrieval": {
+                    name: {"setting": _setting("RETRIEVAL_SETUP"), **the_way(name, picks)}
+                    for name in named()
+                },
             }
         except ValueError as exc:
             return misconfigured(exc)
 
-    @api.post("/api/v1/collections/{name}/search/answer", tags=["search"], summary="Ask a question, searched the way in force and answered")
+    @api.post(
+        "/api/v1/collections/{name}/search/answer",
+        tags=["search"],
+        summary="Ask a question, searched the way in force and answered",
+    )
     async def search_and_answer(
         name: str,
         request: Request,
-        question: str = Body(..., embed=True, min_length=1, max_length=2000, description="the question, as a person asks it"),
+        question: str = Body(
+            ...,
+            embed=True,
+            min_length=1,
+            max_length=2000,
+            description="the question, as a person asks it",
+        ),
     ) -> Any:
         """Step ten: the question searched the way in force for this collection, and answered from what was found, with its sources."""
         from vectrixdb.api.signin import principal_of
@@ -1975,7 +2343,9 @@ def _ours(api: Any) -> None:
         try:
             return await run_in_threadpool(retrieve, name, question, principal)
         except NothingIsCut as exc:
-            return refusal(409, f"{exc}. POST /api/v1/chunking/run picks one, or INGEST_CHUNKING pins one.")
+            return refusal(
+                409, f"{exc}. POST /api/v1/chunking/run picks one, or INGEST_CHUNKING pins one."
+            )
         except ConfigurationError as exc:
             return refusal(500, str(exc))
 
@@ -2006,9 +2376,19 @@ def _ours(api: Any) -> None:
         runtime, caller = runtime_of(request), caller_of(request)
         if runtime is None:
             return
-        runtime.access.record(event, who=caller.who if caller else None, role=caller.role if caller else None, method=caller.method if caller else None, **line)
+        runtime.access.record(
+            event,
+            who=caller.who if caller else None,
+            role=caller.role if caller else None,
+            method=caller.method if caller else None,
+            **line,
+        )
 
-    @api.post("/api/v1/collections/{name}/setup", tags=["collections"], summary="Make a collection the way the app makes one: its policy first")
+    @api.post(
+        "/api/v1/collections/{name}/setup",
+        tags=["collections"],
+        summary="Make a collection the way the app makes one: its policy first",
+    )
     async def setup_collection(name: str, request: Request, body: SetupRequest) -> Any:
         """A new collection: its record, with who may retrieve from it, then its index. Files come next, through /files."""
         from vectrixdb.collection_access import AccessPolicy
@@ -2016,17 +2396,27 @@ def _ours(api: Any) -> None:
 
         records = _collection_store()
         if records is None:
-            return refusal(500, "This app keeps no collection records: set VECTRIXDB_COLLECTION_STORE, then this can make a collection.")
+            return refusal(
+                500,
+                "This app keeps no collection records: set VECTRIXDB_COLLECTION_STORE, then this can make a collection.",
+            )
         try:
             name = collection_setup.check_name(name)
             if body.policy is None:
-                raise ConfigurationError(f"Who may retrieve from {name} is required. Without it, nobody can.")
+                raise ConfigurationError(
+                    f"Who may retrieve from {name} is required. Without it, nobody can."
+                )
             policy = AccessPolicy.from_dict(body.policy)
         except ConfigurationError as exc:
             return refusal(400, str(exc))
         if records.get(name) is not None:
             return refusal(409, f"There is a collection called {name} already.")
-        record = CollectionRecord(name=name, generation=collection_setup.now(), path=f"raw/{name}/", policy=policy.to_dict())
+        record = CollectionRecord(
+            name=name,
+            generation=collection_setup.now(),
+            path=f"raw/{name}/",
+            policy=policy.to_dict(),
+        )
         records.put(record, by=_who(request))
         _log(request, "policy_changed", collection=name, reason=policy.describe(), by=_who(request))
         # The index, so the collection is there to see before its first file is read.
@@ -2034,35 +2424,64 @@ def _ours(api: Any) -> None:
         try:
             await run_in_threadpool(collection, name)
         except Exception as exc:  # noqa: BLE001 - said in the reply; the first file makes it otherwise
-            log.warning("%s: the index could not be made now (%s); the first file makes it", name, exc)
+            log.warning(
+                "%s: the index could not be made now (%s); the first file makes it", name, exc
+            )
             made = False
         _log(request, "write", action="collection.create", collection=name)
-        return {"name": name, "path": record.path, "policy": record.policy, "index": "made" if made else "with the first file",
-                "status": f"/api/v1/collections/{name}/setup/status"}
+        return {
+            "name": name,
+            "path": record.path,
+            "policy": record.policy,
+            "index": "made" if made else "with the first file",
+            "status": f"/api/v1/collections/{name}/setup/status",
+        }
 
-    @api.post("/api/v1/collections/{name}/files", tags=["collections"], summary="Drop a file, or typed text, into raw/<name>/")
+    @api.post(
+        "/api/v1/collections/{name}/files",
+        tags=["collections"],
+        summary="Drop a file, or typed text, into raw/<name>/",
+    )
     async def add_file(name: str, request: Request) -> Any:
         """One file a request, as its bytes with the name in X-Filename, or JSON {title, text} kept as Markdown. Event Grid does the rest."""
         records = _collection_store()
         if records is None or records.get(name) is None:
-            return refusal(404, f"There is no collection called {name}. Make it first, with who may retrieve from it.")
+            return refusal(
+                404,
+                f"There is no collection called {name}. Make it first, with who may retrieve from it.",
+            )
         try:
-            if (request.headers.get("content-type") or "").split(";")[0].strip().lower() == "application/json":
+            if (request.headers.get("content-type") or "").split(";")[
+                0
+            ].strip().lower() == "application/json":
                 typed = TypedText(**(await request.json()))
                 filename = collection_setup.file_name(None, title=typed.title, typed=True)
                 data = typed.text.encode("utf-8")
             else:
-                filename = collection_setup.file_name(unquote(request.headers.get("x-filename") or ""))
+                filename = collection_setup.file_name(
+                    unquote(request.headers.get("x-filename") or "")
+                )
                 data = await request.body()
-            blob = await run_in_threadpool(collection_setup.put_file, _blobs(), name, filename, data)
+            blob = await run_in_threadpool(
+                collection_setup.put_file, _blobs(), name, filename, data
+            )
         except ConfigurationError as exc:
             return refusal(400, str(exc))
         except (TypeError, ValueError) as exc:
             return refusal(400, f"Typed text is JSON with text, and a title if you like: {exc}")
         _log(request, "write", action="content.write", collection=name, item=filename)
-        return {"collection": name, "file": filename, "blob": blob, "then": "Event Grid puts a message on the queue, and the function reads it"}
+        return {
+            "collection": name,
+            "file": filename,
+            "blob": blob,
+            "then": "Event Grid puts a message on the queue, and the function reads it",
+        }
 
-    @api.get("/api/v1/collections/{name}/setup/status", tags=["collections"], summary="Where a new collection is, as the spinner says it")
+    @api.get(
+        "/api/v1/collections/{name}/setup/status",
+        tags=["collections"],
+        summary="Where a new collection is, as the spinner says it",
+    )
     async def setup_status(name: str) -> Any:
         """One step and one line, from what is there: the record, the files, their Markdown, the chunks, and the jobs."""
         from vectrixdb.api import chunk_source
@@ -2081,7 +2500,11 @@ def _ours(api: Any) -> None:
         def chunks() -> int:
             if name not in _open:
                 return 0
-            return chunk_source.count(_open[name]._collection) if chunk_source.shared(_open[name]._collection) is not None else _open[name]._count_all()
+            return (
+                chunk_source.count(_open[name]._collection)
+                if chunk_source.shared(_open[name]._collection) is not None
+                else _open[name]._count_all()
+            )
 
         held = collection_setup.count_or_zero(chunks)
         try:
@@ -2095,7 +2518,16 @@ def _ours(api: Any) -> None:
             "apply": folder.read_status(APPLY_STATUS),
             "evaluation": folder.read_status(EVALUATION_STATUS),
         }
-        return collection_setup.progress(name, record=record, files=files, read=read, chunks=held, cut=cut, jobs=jobs, masking=masking)
+        return collection_setup.progress(
+            name,
+            record=record,
+            files=files,
+            read=read,
+            chunks=held,
+            cut=cut,
+            jobs=jobs,
+            masking=masking,
+        )
 
     def _writer_only(request: Request) -> Any:
         """The files that would not read are the business of whoever may write: a viewer neither retries nor drops."""
@@ -2106,26 +2538,50 @@ def _ours(api: Any) -> None:
             return refusal(403, "Your role does not allow this")
         return None
 
-    @api.get("/api/v1/ingest/state", tags=["collections"], summary="Whether ingestion is paused because the extraction app is down")
+    @api.get(
+        "/api/v1/ingest/state",
+        tags=["collections"],
+        summary="Whether ingestion is paused because the extraction app is down",
+    )
     async def ingest_state(request: Request) -> Any:
         """The breaker's state in words: paused since when, the next try, how many reads in a row could not reach the extraction app."""
         refused = _writer_only(request)
         if refused is not None:
             return refused
-        return {"ingestion": await run_in_threadpool(_breaker().status), "queue": os.environ["INGEST_QUEUE"]}
+        return {
+            "ingestion": await run_in_threadpool(_breaker().status),
+            "queue": os.environ["INGEST_QUEUE"],
+        }
 
-    @api.get("/api/v1/ingest/failed", tags=["collections"], summary="The files that would not read: the poison queue, in words")
+    @api.get(
+        "/api/v1/ingest/failed",
+        tags=["collections"],
+        summary="The files that would not read: the poison queue, in words",
+    )
     async def failed_files(request: Request, limit: int = 10, offset: int = 0) -> Any:
         """Each message on the poison queue as one row: the file, what stopped it and why, how many tries, when; newest first, ten a page."""
         refused = _writer_only(request)
         if refused is not None:
             return refused
-        rows = await run_in_threadpool(lambda: dead_letters.poison_rows(_poison_queue().peek_messages(max_messages=32), _blobs()))
+        rows = await run_in_threadpool(
+            lambda: dead_letters.poison_rows(
+                _poison_queue().peek_messages(max_messages=32), _blobs()
+            )
+        )
         rows.sort(key=lambda r: r.get("last_tried") or "", reverse=True)
         limit, offset = max(1, min(int(limit), 32)), max(0, int(offset))
-        return {"files": rows[offset:offset + limit], "total": len(rows), "offset": offset, "queue": dead_letters.poison_queue_name(os.environ["INGEST_QUEUE"])}
+        return {
+            "files": rows[offset : offset + limit],
+            "total": len(rows),
+            "offset": offset,
+            "queue": dead_letters.poison_queue_name(os.environ["INGEST_QUEUE"]),
+        }
 
-    @api.post("/api/v1/ingest/failed/{message_id}/retry", tags=["collections"], summary="Put a file that would not read back on the ingest queue")
+    @api.post(
+        "/api/v1/ingest/failed/{message_id}/retry",
+        tags=["collections"],
+        summary="Put a file that would not read back on the ingest queue",
+    )
     async def retry_failed(message_id: str, request: Request) -> Any:
         """The message goes back as it was; the worker starts from the Markdown when there is one. Logged under your name."""
         refused = _writer_only(request)
@@ -2136,10 +2592,25 @@ def _ours(api: Any) -> None:
             return refusal(404, "That file is no longer on the poison queue")
         row = dead_letters.poison_rows([message], _blobs())[0]
         await run_in_threadpool(dead_letters.retry, _poison_queue(), _queue(), message)
-        _log(request, "write", action="content.write", collection=row["collection"], item=row["file"], reason="retry")
-        return {"retried": row["file"], "collection": row["collection"], "then": "the message is back on the ingest queue; the function reads it again, from the Markdown when there is one"}
+        _log(
+            request,
+            "write",
+            action="content.write",
+            collection=row["collection"],
+            item=row["file"],
+            reason="retry",
+        )
+        return {
+            "retried": row["file"],
+            "collection": row["collection"],
+            "then": "the message is back on the ingest queue; the function reads it again, from the Markdown when there is one",
+        }
 
-    @api.post("/api/v1/ingest/failed/{message_id}/drop", tags=["collections"], summary="Drop a file that would not read, and everything of it")
+    @api.post(
+        "/api/v1/ingest/failed/{message_id}/drop",
+        tags=["collections"],
+        summary="Drop a file that would not read, and everything of it",
+    )
     async def drop_failed(message_id: str, request: Request) -> Any:
         """The file, its Markdown, its chunks and its record are deleted, and the message with them. Nothing of it stays. Logged under your name."""
         refused = _writer_only(request)
@@ -2149,11 +2620,24 @@ def _ours(api: Any) -> None:
         if message is None:
             return refusal(404, "That file is no longer on the poison queue")
         row = dead_letters.poison_rows([message], _blobs())[0]
-        gone = await run_in_threadpool(dead_letters.drop, _blobs(), _poison_queue(), message, row["collection"], row["file"])
-        _log(request, "write", action="content.write", collection=row["collection"], item=row["file"], reason="drop")
+        gone = await run_in_threadpool(
+            dead_letters.drop, _blobs(), _poison_queue(), message, row["collection"], row["file"]
+        )
+        _log(
+            request,
+            "write",
+            action="content.write",
+            collection=row["collection"],
+            item=row["file"],
+            reason="drop",
+        )
         return {"dropped": row["file"], "collection": row["collection"], "gone": gone}
 
-    @api.post("/api/v1/collections/{name}/delete", tags=["collections"], summary="Delete a collection and everything of it")
+    @api.post(
+        "/api/v1/collections/{name}/delete",
+        tags=["collections"],
+        summary="Delete a collection and everything of it",
+    )
     async def delete_everything(name: str, request: Request) -> Any:
         """Its record first, so nothing more lands as its; then every file of it; then the index and its records. No copy is kept."""
         from vectrixdb.api.server import get_db
@@ -2180,8 +2664,19 @@ def _ours(api: Any) -> None:
         if runtime is not None:
             runtime.forget(name)
         steps = collection_setup.steps_of_delete(gone, had_index, had_record)
-        _log(request, "write", action="collection.delete", collection=name, reason=f"{gone.get('raw', 0)} files, index {'removed' if had_index else 'none'}")
-        return {"collection": name, "deleted": had_record or had_index or any(gone.values()), "removed": gone, "steps": steps}
+        _log(
+            request,
+            "write",
+            action="collection.delete",
+            collection=name,
+            reason=f"{gone.get('raw', 0)} files, index {'removed' if had_index else 'none'}",
+        )
+        return {
+            "collection": name,
+            "deleted": had_record or had_index or any(gone.values()),
+            "removed": gone,
+            "steps": steps,
+        }
 
 
 def _said(setup: Any) -> str:
@@ -2213,12 +2708,17 @@ def _explaining(reason: str) -> Any:
                 elif message["type"] == "lifespan.shutdown":
                     await send({"type": "lifespan.shutdown.complete"})
                     return
-        body = json.dumps({"status": "no api", "reason": reason, "ingestion": "still running"}, indent=2).encode()
+        body = json.dumps(
+            {"status": "no api", "reason": reason, "ingestion": "still running"}, indent=2
+        ).encode()
         await send(
             {
                 "type": "http.response.start",
                 "status": 503,
-                "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
             }
         )
         await send({"type": "http.response.body", "body": body})
@@ -2258,7 +2758,13 @@ def collection(name: str) -> Vectrix:
                 on_retrieval=_audit_sink(),
             )
             rules = _open[name].policy
-            log.info("%s %s", name, f"carries the policy {rules.version or rules.fingerprint}" if rules is not None else "carries no policy")
+            log.info(
+                "%s %s",
+                name,
+                f"carries the policy {rules.version or rules.fingerprint}"
+                if rules is not None
+                else "carries no policy",
+            )
             log.info("%s keeps its parent sections in %s", name, _open[name].parents_are_at)
         return _open[name]
 
@@ -2307,7 +2813,9 @@ def worker(name: str, cut: Dict[str, Any]) -> IngestWorker:
 app = func.AsgiFunctionApp(app=_api(), http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
-@app.queue_trigger(arg_name="message", queue_name="%INGEST_QUEUE%", connection="AzureWebJobsStorage")
+@app.queue_trigger(
+    arg_name="message", queue_name="%INGEST_QUEUE%", connection="AzureWebJobsStorage"
+)
 def ingest_one(message: func.QueueMessage) -> None:
     """Each message on the ingest queue: one of the jobs asked for, or a file that arrived.
 
@@ -2325,8 +2833,14 @@ def ingest_one(message: func.QueueMessage) -> None:
     if role() == "query":
         # The query app never reads a file. Step 06 disables this trigger on it with AzureWebJobs.ingest_one.Disabled;
         # should a message reach it anyway, it goes back for the ingest app rather than being lost or tried here.
-        _queue().send_message(body.decode("utf-8") if isinstance(body, (bytes, bytearray)) else str(body), visibility_timeout=60)
-        log.error("message %s reached the query app: set AzureWebJobs.ingest_one.Disabled=true on it; the message is back on the queue", message.id)
+        _queue().send_message(
+            body.decode("utf-8") if isinstance(body, (bytes, bytearray)) else str(body),
+            visibility_timeout=60,
+        )
+        log.error(
+            "message %s reached the query app: set AzureWebJobs.ingest_one.Disabled=true on it; the message is back on the queue",
+            message.id,
+        )
         return
     asked = golden_request(body)
     if asked is not None:
