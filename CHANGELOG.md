@@ -403,6 +403,13 @@ may change at any time.
 
 ### Fixed
 
+- **The README's pictures showed as broken images.** Both pointed at
+  `raw.githubusercontent.com` on main, where they had never been pushed, and
+  a private repository's raw addresses do not load anyway. They are relative
+  paths now, which show on every branch. The PyPI page gets the pictures and
+  the relative links rewritten to addresses on main at build time, through
+  `hatch-fancy-pypi-readme`, a build dependency only.
+
 - **The docs no longer describe what left with visibility.** The dashboard
   page gave a collection six tabs and showed its Settings tab, the sign-in
   page had an admin share a collection from there, the gateway and
