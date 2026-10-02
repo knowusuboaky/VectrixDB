@@ -33,7 +33,9 @@ def npm() -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--clean", action="store_true", help="remove dist/ before building")
     args = parser.parse_args()
 

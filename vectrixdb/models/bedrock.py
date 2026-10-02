@@ -106,12 +106,18 @@ class BedrockReranker:
 
     MAX_SOURCES = 100
 
-    def __init__(self, client: Any, region: str = "us-east-1", model_arn: Optional[str] = None) -> None:
+    def __init__(
+        self, client: Any, region: str = "us-east-1", model_arn: Optional[str] = None
+    ) -> None:
         self.client = client
-        self.model_arn = model_arn or f"arn:aws:bedrock:{region}::foundation-model/amazon.rerank-v1:0"
+        self.model_arn = (
+            model_arn or f"arn:aws:bedrock:{region}::foundation-model/amazon.rerank-v1:0"
+        )
         self.label = "bedrock-rerank"
 
-    def rerank(self, query: str, texts: Sequence[str], top: Optional[int] = None) -> List[Tuple[int, float]]:
+    def rerank(
+        self, query: str, texts: Sequence[str], top: Optional[int] = None
+    ) -> List[Tuple[int, float]]:
         """``(index into texts, relevance)`` pairs, best first."""
         scored: List[Tuple[int, float]] = []
         for start in range(0, len(texts), self.MAX_SOURCES):
@@ -120,7 +126,13 @@ class BedrockReranker:
                 reply = self.client.rerank(
                     queries=[{"type": "TEXT", "textQuery": {"text": query}}],
                     sources=[
-                        {"type": "INLINE", "inlineDocumentSource": {"type": "TEXT", "textDocument": {"text": t or " "}}}
+                        {
+                            "type": "INLINE",
+                            "inlineDocumentSource": {
+                                "type": "TEXT",
+                                "textDocument": {"text": t or " "},
+                            },
+                        }
                         for t in batch
                     ],
                     rerankingConfiguration={

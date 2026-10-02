@@ -31,8 +31,16 @@ from vectrixdb.ingest import (
 
 class TestWhereATableStartsAndWhatHeadsIt:
     def test_a_title_above_a_table_is_text_and_the_header_is_found_under_it(self):
-        rows = [["Quarterly Sales Report", None, None], [None, None, None], ["Region", "Year", "Revenue"], ["EMEA", 2024, 1200]]
-        assert _sheet_lines(rows) == ["Quarterly Sales Report", "Region: EMEA; Year: 2024; Revenue: 1200"]
+        rows = [
+            ["Quarterly Sales Report", None, None],
+            [None, None, None],
+            ["Region", "Year", "Revenue"],
+            ["EMEA", 2024, 1200],
+        ]
+        assert _sheet_lines(rows) == [
+            "Quarterly Sales Report",
+            "Region: EMEA; Year: 2024; Revenue: 1200",
+        ]
 
     def test_two_tables_on_one_sheet_each_keep_their_own_header(self):
         rows = [["Region", "Revenue"], ["EMEA", 1200], [], ["Employee", "Salary"], ["Ana", 70000]]
@@ -43,19 +51,35 @@ class TestWhereATableStartsAndWhatHeadsIt:
         assert _sheet_lines(rows) == ["Region: EMEA; Revenue: 1200", "Product: Laptop; Units: 40"]
 
     def test_a_header_over_two_rows_is_joined_per_column(self):
-        rows = [["Region", "2023", None, "2024", None], [None, "H1", "H2", "H1", "H2"], ["EMEA", 500, 600, 700, 800]]
-        assert _sheet_lines(rows) == ["Region: EMEA; 2023 H1: 500; 2023 H2: 600; 2024 H1: 700; 2024 H2: 800"]
+        rows = [
+            ["Region", "2023", None, "2024", None],
+            [None, "H1", "H2", "H1", "H2"],
+            ["EMEA", 500, 600, 700, 800],
+        ]
+        assert _sheet_lines(rows) == [
+            "Region: EMEA; 2023 H1: 500; 2023 H2: 600; 2024 H1: 700; 2024 H2: 800"
+        ]
 
     def test_years_written_as_numbers_head_their_columns(self):
-        assert _sheet_lines([["Region", 2023, 2024], ["EMEA", 1100, 1200]]) == ["Region: EMEA; 2023: 1100; 2024: 1200"]
+        assert _sheet_lines([["Region", 2023, 2024], ["EMEA", 1100, 1200]]) == [
+            "Region: EMEA; 2023: 1100; 2024: 1200"
+        ]
 
     def test_a_csv_with_no_header_is_not_given_one(self):
         rows = [["EMEA", "2024", "1200"], ["APAC", "2024", "950"]]
         assert _sheet_lines(rows) == ["EMEA; 2024; 1200", "APAC; 2024; 950"]
 
     def test_a_form_of_two_columns_is_keys_and_values(self):
-        rows = [["Applicant name", "Jane Doe"], ["Date of birth", "1980-04-02"], ["Account number", "12345678"]]
-        assert _sheet_lines(rows) == ["Applicant name: Jane Doe", "Date of birth: 1980-04-02", "Account number: 12345678"]
+        rows = [
+            ["Applicant name", "Jane Doe"],
+            ["Date of birth", "1980-04-02"],
+            ["Account number", "12345678"],
+        ]
+        assert _sheet_lines(rows) == [
+            "Applicant name: Jane Doe",
+            "Date of birth: 1980-04-02",
+            "Account number: 12345678",
+        ]
 
     def test_a_table_that_goes_on_after_a_blank_line_keeps_its_header(self):
         rows = [["A", "B"], [], ["1", "2"], [None, None], [], ["3", "4"]]
@@ -70,8 +94,14 @@ class TestWhereATableStartsAndWhatHeadsIt:
         from vectrixdb.ingest import markdown_document
 
         text = "| 2025 | 2024 |\n|---|---|\n| Personal banking | $ 14,500 | $ 13,828 |\n| Total | $ 20,686 | $ 19,790 |"
-        assert markdown_document(text).text == "Personal banking; 2025: $ 14,500; 2024: $ 13,828\nTotal; 2025: $ 20,686; 2024: $ 19,790"
-        assert markdown_document("| Region | Revenue |\n|---|---|\n| EMEA | 1200 |").text == "Region: EMEA; Revenue: 1200"
+        assert (
+            markdown_document(text).text
+            == "Personal banking; 2025: $ 14,500; 2024: $ 13,828\nTotal; 2025: $ 20,686; 2024: $ 19,790"
+        )
+        assert (
+            markdown_document("| Region | Revenue |\n|---|---|\n| EMEA | 1200 |").text
+            == "Region: EMEA; Revenue: 1200"
+        )
 
 
 class TestAValueAsTheSheetShowsIt:
@@ -82,7 +112,7 @@ class TestAValueAsTheSheetShowsIt:
             (1234.5, '"$"#,##0.00', "$1,234.50"),
             (-250, "#,##0.00;(#,##0.00)", "(250.00)"),
             (1200000, "#,##0", "1,200,000"),
-            (99.9, '#,##0.00 [$€-x-euro2]', "99.90 €"),
+            (99.9, "#,##0.00 [$€-x-euro2]", "99.90 €"),
             (0.0000123, "0.00E+00", "1.23E-05"),
             (42, "General", 42),
         ],
@@ -134,7 +164,9 @@ class TestAWorkbookAsItReads:
             sheet.append(["Item", "Qty", "Price", "Total"])
             sheet.append(["Pen", 3, 1.5, "=B2*C2"])
 
-        assert "Item: Pen; Qty: 3; Price: 1.5; Total: =B2*C2" in load(workbook(tmp_path, build)).text
+        assert (
+            "Item: Pen; Qty: 3; Price: 1.5; Total: =B2*C2" in load(workbook(tmp_path, build)).text
+        )
 
     def test_a_charts_title_is_read(self, tmp_path):
         def build(book):
@@ -157,10 +189,10 @@ class TestAChartsNumbers:
         '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
         'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart>'
         "<c:title><c:tx><c:rich><a:p><a:r><a:t>Share by region</a:t></a:r></a:p></c:rich></c:tx></c:title>"
-        "<c:plotArea><c:pieChart><c:ser><c:tx><c:strRef><c:strCache><c:pt idx=\"0\"><c:v>FY2024</c:v></c:pt></c:strCache></c:strRef></c:tx>"
-        "<c:cat><c:strRef><c:strCache><c:pt idx=\"0\"><c:v>EMEA</c:v></c:pt><c:pt idx=\"1\"><c:v>APAC</c:v></c:pt></c:strCache></c:strRef></c:cat>"
-        "<c:val><c:numRef><c:numCache><c:formatCode>0.0%</c:formatCode><c:pt idx=\"0\"><c:v>0.417</c:v></c:pt>"
-        "<c:pt idx=\"1\"><c:v>0.283</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser></c:pieChart></c:plotArea></c:chart></c:chartSpace>"
+        '<c:plotArea><c:pieChart><c:ser><c:tx><c:strRef><c:strCache><c:pt idx="0"><c:v>FY2024</c:v></c:pt></c:strCache></c:strRef></c:tx>'
+        '<c:cat><c:strRef><c:strCache><c:pt idx="0"><c:v>EMEA</c:v></c:pt><c:pt idx="1"><c:v>APAC</c:v></c:pt></c:strCache></c:strRef></c:cat>'
+        '<c:val><c:numRef><c:numCache><c:formatCode>0.0%</c:formatCode><c:pt idx="0"><c:v>0.417</c:v></c:pt>'
+        '<c:pt idx="1"><c:v>0.283</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser></c:pieChart></c:plotArea></c:chart></c:chartSpace>'
     ).encode()
 
     def test_a_chart_is_its_title_and_a_row_a_category(self):
@@ -198,15 +230,24 @@ def deck(tmp_path, slides, name="deck.pptx"):
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("[Content_Types].xml", "<Types/>")
         ids = "".join(f'<p:sldId id="{256 + n}" r:id="rId{n}"/>' for n in range(1, len(slides) + 1))
-        archive.writestr("ppt/presentation.xml", f"<p:presentation {P_NS}><p:sldIdLst>{ids}</p:sldIdLst></p:presentation>")
+        archive.writestr(
+            "ppt/presentation.xml",
+            f"<p:presentation {P_NS}><p:sldIdLst>{ids}</p:sldIdLst></p:presentation>",
+        )
         rels = "".join(
             f'<Relationship Id="rId{n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide{n}.xml"/>'
             for n in range(1, len(slides) + 1)
         )
-        archive.writestr("ppt/_rels/presentation.xml.rels", f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>')
+        archive.writestr(
+            "ppt/_rels/presentation.xml.rels",
+            f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>',
+        )
         for n, (body, show) in enumerate(slides, start=1):
             hidden = ' show="0"' if not show else ""
-            archive.writestr(f"ppt/slides/slide{n}.xml", f"<p:sld {P_NS}{hidden}><p:cSld><p:spTree>{body}</p:spTree></p:cSld></p:sld>")
+            archive.writestr(
+                f"ppt/slides/slide{n}.xml",
+                f"<p:sld {P_NS}{hidden}><p:cSld><p:spTree>{body}</p:spTree></p:cSld></p:sld>",
+            )
     return path
 
 
@@ -220,13 +261,25 @@ class TestASlideAsItReads:
             + shape(para(["2. Options"]), 0, 2000000)
         )
         text = load(deck(tmp_path, [(body, True)])).text
-        assert text.index("1. Introduction") < text.index("2. Options") < text.index("3. Risks") < text.index("4. Conclusion")
+        assert (
+            text.index("1. Introduction")
+            < text.index("2. Options")
+            < text.index("3. Risks")
+            < text.index("4. Conclusion")
+        )
         assert text.startswith("# Slide 1: Next steps")
 
     def test_bullet_levels_line_breaks_and_no_footer_date_or_number(self, tmp_path):
         body = (
             shape(para(["Strategy"]), 0, 0, "title")
-            + shape(para(["Grow deposits"], 0, True) + para(["Retail"], 1, True) + para(["Close 4 branches", "\n", "Merge back office"], 0, True), 0, 1000000, "body")
+            + shape(
+                para(["Grow deposits"], 0, True)
+                + para(["Retail"], 1, True)
+                + para(["Close 4 branches", "\n", "Merge back office"], 0, True),
+                0,
+                1000000,
+                "body",
+            )
             + shape(para(["Confidential - internal"]), 0, 6000000, "ftr")
             + shape(para(["3/4/2025"]), 0, 6000000, "dt")
             + shape(para(["7"]), 0, 6000000, "sldNum")
@@ -236,16 +289,27 @@ class TestASlideAsItReads:
         assert "Confidential" not in text and "3/4/2025" not in text
 
     def test_a_hidden_slide_is_named_and_not_read(self, tmp_path):
-        doc = load(deck(tmp_path, [(shape(para(["Shown"]), 0, 0, "title"), True), (shape(para(["Draft only"]), 0, 0, "title"), False)]))
+        doc = load(
+            deck(
+                tmp_path,
+                [
+                    (shape(para(["Shown"]), 0, 0, "title"), True),
+                    (shape(para(["Draft only"]), 0, 0, "title"), False),
+                ],
+            )
+        )
         assert "Draft only" not in doc.text and doc.metadata["slides_hidden"] == [2]
 
     def test_a_pictures_alt_text_and_a_title_in_a_plain_box(self, tmp_path):
         picture = (
             '<p:pic><p:nvPicPr><p:cNvPr id="4" name="Picture 3" descr="Map of 42 branch locations across Ontario"/>'
-            "<p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:spPr><a:xfrm><a:off x=\"0\" y=\"2000000\"/></a:xfrm></p:spPr></p:pic>"
+            '<p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:spPr><a:xfrm><a:off x="0" y="2000000"/></a:xfrm></p:spPr></p:pic>'
         )
         text = load(deck(tmp_path, [(shape(para(["Branch network"]), 0, 0) + picture, True)])).text
-        assert text.startswith("# Slide 1: Branch network") and "[Figure: Map of 42 branch locations across Ontario]" in text
+        assert (
+            text.startswith("# Slide 1: Branch network")
+            and "[Figure: Map of 42 branch locations across Ontario]" in text
+        )
 
 
 # ============================================================ word ===
@@ -276,9 +340,17 @@ def with_body(data, body_xml):
 
 class TestWordAsWordShowsIt:
     def test_list_numbers_as_printed(self):
-        lists = {"7": {0: ("decimal", 1, "%1.", False), 1: ("decimal", 1, "%1.%2", False), 2: ("lowerLetter", 1, "(%3)", False)}}
+        lists = {
+            "7": {
+                0: ("decimal", 1, "%1.", False),
+                1: ("decimal", 1, "%1.%2", False),
+                2: ("lowerLetter", 1, "(%3)", False),
+            }
+        }
         counters: dict = {}
-        shown = [_list_marker(("7", level), lists, counters).strip() for level in (0, 1, 1, 2, 2, 0, 1)]
+        shown = [
+            _list_marker(("7", level), lists, counters).strip() for level in (0, 1, 1, 2, 2, 0, 1)
+        ]
         assert shown == ["1.", "1.1", "1.2", "(a)", "(b)", "2.", "2.1"]
         roman = {"9": {0: ("upperRoman", 1, "Article %1 -", False)}}
         assert _list_marker(("9", 0), roman, {}).strip() == "Article I -"
@@ -318,21 +390,38 @@ class TestWordAsWordShowsIt:
 
     def test_the_rows_word_marks_as_the_header_head_the_table(self, tmp_path):
         row = lambda cells, head=False: (  # noqa: E731
-            "<w:tr>" + ("<w:trPr><w:tblHeader/></w:trPr>" if head else "")
-            + "".join(f"<w:tc><w:p><w:r><w:t>{c}</w:t></w:r></w:p></w:tc>" for c in cells) + "</w:tr>"
+            "<w:tr>"
+            + ("<w:trPr><w:tblHeader/></w:trPr>" if head else "")
+            + "".join(f"<w:tc><w:p><w:r><w:t>{c}</w:t></w:r></w:p></w:tc>" for c in cells)
+            + "</w:tr>"
         )
-        body = "<w:tbl>" + row(["Region", "Revenue"], True) + row(["", "2025"], True) + row(["EMEA", "100"]) + "</w:tbl>"
+        body = (
+            "<w:tbl>"
+            + row(["Region", "Revenue"], True)
+            + row(["", "2025"], True)
+            + row(["EMEA", "100"])
+            + "</w:tbl>"
+        )
         (tmp_path / "r.docx").write_bytes(with_body(document_bytes(lambda d: None), body))
         assert "Region: EMEA; Revenue 2025: 100" in load(tmp_path / "r.docx").text
 
     def test_a_form_table_is_keys_and_values(self, tmp_path):
         def build(document):
             table = document.add_table(rows=3, cols=2)
-            for row, (key, value) in zip(table.rows, [("Applicant name", "Jane Doe"), ("Date of birth", "1980-04-02"), ("Account number", "12345678")]):
+            for row, (key, value) in zip(
+                table.rows,
+                [
+                    ("Applicant name", "Jane Doe"),
+                    ("Date of birth", "1980-04-02"),
+                    ("Account number", "12345678"),
+                ],
+            ):
                 row.cells[0].text, row.cells[1].text = key, value
 
         (tmp_path / "f.docx").write_bytes(document_bytes(build))
-        assert "Applicant name: Jane Doe\nDate of birth: 1980-04-02" in load(tmp_path / "f.docx").text
+        assert (
+            "Applicant name: Jane Doe\nDate of birth: 1980-04-02" in load(tmp_path / "f.docx").text
+        )
 
     def test_headers_and_footers_are_the_documents_and_not_its_text(self, tmp_path):
         def build(document):
@@ -341,10 +430,16 @@ class TestWordAsWordShowsIt:
             section.footer.paragraphs[0].text = "CONFIDENTIAL"
             document.add_paragraph("Liquidity remained strong through the quarter.")
 
-        doc = load(tmp_path / "hf.docx") if (tmp_path / "hf.docx").write_bytes(document_bytes(build)) else None
+        doc = (
+            load(tmp_path / "hf.docx")
+            if (tmp_path / "hf.docx").write_bytes(document_bytes(build))
+            else None
+        )
         assert doc.metadata["page_header"] == "Board Pack Q3 2025: Liquidity Review"
         assert doc.metadata["page_footer"] == "CONFIDENTIAL"
-        assert doc.metadata["title"] == "Board Pack Q3 2025: Liquidity Review", "no title of its own and no heading: its header"
+        assert doc.metadata["title"] == "Board Pack Q3 2025: Liquidity Review", (
+            "no title of its own and no heading: its header"
+        )
         assert "CONFIDENTIAL" not in doc.text
 
     def test_an_equation_in_a_line_and_a_comment_kept(self, tmp_path):
@@ -374,14 +469,31 @@ class TestMarkdownAsCommonMarkReadsIt:
         assert [h[1] for h in _markdown_headings(text)] == ["Install", "Configure"]
 
     def test_closing_hashes_need_a_space_and_a_bare_hash_is_nothing(self):
-        assert [h[1] for h in _markdown_headings("# Why C#\n\n## F# and C# compared ##\n\n#\nOrphan line\n\n#hashtag\n")] == ["Why C#", "F# and C# compared"]
+        assert [
+            h[1]
+            for h in _markdown_headings(
+                "# Why C#\n\n## F# and C# compared ##\n\n#\nOrphan line\n\n#hashtag\n"
+            )
+        ] == ["Why C#", "F# and C# compared"]
 
     @pytest.mark.parametrize(
         "raw,title,headings",
         [
-            ("Annual Report\n=============\n\nIntro.\n\nRevenue\n-------\n\nGrew.\n", "Annual Report", ["Annual Report", "Revenue"]),
-            ("<h1>From HTML</h1>\n\nText.\n\n<h2>Part <b>two</b></h2>\n\nMore.\n", "From HTML", ["From HTML", "Part two"]),
-            ('+++\ntitle = "TOML Front"\n+++\n\n# Real Heading\n\nBody.\n', "TOML Front", ["Real Heading"]),
+            (
+                "Annual Report\n=============\n\nIntro.\n\nRevenue\n-------\n\nGrew.\n",
+                "Annual Report",
+                ["Annual Report", "Revenue"],
+            ),
+            (
+                "<h1>From HTML</h1>\n\nText.\n\n<h2>Part <b>two</b></h2>\n\nMore.\n",
+                "From HTML",
+                ["From HTML", "Part two"],
+            ),
+            (
+                '+++\ntitle = "TOML Front"\n+++\n\n# Real Heading\n\nBody.\n',
+                "TOML Front",
+                ["Real Heading"],
+            ),
         ],
         ids=["setext", "html headings", "toml front matter"],
     )
@@ -398,6 +510,8 @@ class TestMarkdownAsCommonMarkReadsIt:
         (tmp_path / "l.md").write_text(raw, encoding="utf-8")
         doc = load(tmp_path / "l.md")
         assert "[Figure: build badge]" in doc.text and "](https://ci.example.test)" not in doc.text
-        assert "[Figure: Chart]" in doc.text and "final" not in doc.text.replace("[Figure: Chart]", "")
+        assert "[Figure: Chart]" in doc.text and "final" not in doc.text.replace(
+            "[Figure: Chart]", ""
+        )
         assert "[Figure: Ref image]" in doc.text and "[imgref]:" not in doc.text
         assert "Line with\nbreak and bold." in doc.text

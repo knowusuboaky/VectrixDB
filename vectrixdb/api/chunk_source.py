@@ -82,7 +82,11 @@ def point(collection: Any, point_id: str, principal: Optional[dict] = None) -> A
     """One chunk as ``principal`` may see it, or None. A denial and a miss are the same answer, as in ``Collection.get``."""
     store = shared(collection)
     if store is None:
-        return collection.get(point_id, principal=principal) if principal is not None else collection.get(point_id)
+        return (
+            collection.get(point_id, principal=principal)
+            if principal is not None
+            else collection.get(point_id)
+        )
     found = store.get(point_id)
     policy = collection.policy
     if policy is None or found is None:
@@ -94,7 +98,9 @@ def point(collection: Any, point_id: str, principal: Optional[dict] = None) -> A
     return found if policy.decide(principal, found.metadata or {}).allowed else None
 
 
-def find(collection: Any, q: str, limit: int, offset: int, principal: Optional[dict] = None) -> Tuple[List[str], int]:
+def find(
+    collection: Any, q: str, limit: int, offset: int, principal: Optional[dict] = None
+) -> Tuple[List[str], int]:
     """The page of ids holding ``q`` in the id or, where the chunks are kept, in the source, and how many match in all.
 
     A find reads every id, so it costs what a policied listing costs; a page
@@ -104,7 +110,11 @@ def find(collection: Any, q: str, limit: int, offset: int, principal: Optional[d
     store = shared(collection)
     matched: List[str] = []
     if store is None:
-        every = collection.list_ids(limit=1_000_000, offset=0, principal=principal) if principal is not None else collection.list_ids(limit=1_000_000, offset=0)
+        every = (
+            collection.list_ids(limit=1_000_000, offset=0, principal=principal)
+            if principal is not None
+            else collection.list_ids(limit=1_000_000, offset=0)
+        )
         matched = [i for i in every if needle in str(i).lower()]
     else:
         policy = collection.policy
@@ -115,18 +125,25 @@ def find(collection: Any, q: str, limit: int, offset: int, principal: Optional[d
         for point_id, metadata in store.each():
             if policy is not None and not policy.decide(principal, metadata).allowed:
                 continue
-            source = " ".join(str((metadata or {}).get(k) or "") for k in ("_vx_citation", "_vx_source", "source", "_vx_doc"))
+            source = " ".join(
+                str((metadata or {}).get(k) or "")
+                for k in ("_vx_citation", "_vx_source", "source", "_vx_doc")
+            )
             if needle in str(point_id).lower() or needle in source.lower():
                 matched.append(point_id)
     return matched[offset : offset + limit], len(matched)
 
 
-def page(collection: Any, limit: int, offset: int, principal: Optional[dict] = None) -> Tuple[List[str], int]:
+def page(
+    collection: Any, limit: int, offset: int, principal: Optional[dict] = None
+) -> Tuple[List[str], int]:
     """A page of ids and how many there are in all, as ``principal`` may see them."""
     store = shared(collection)
     if store is None:
         if principal is not None:
-            return collection.list_ids(limit=limit, offset=offset, principal=principal), collection.count(principal=principal)
+            return collection.list_ids(
+                limit=limit, offset=offset, principal=principal
+            ), collection.count(principal=principal)
         return collection.list_ids(limit=limit, offset=offset), collection.count()
     policy = collection.policy
     if policy is None:
@@ -153,4 +170,8 @@ def document_chunks(collection: Any, doc_id: str) -> List[str]:
     store = shared(collection)
     if store is not None:
         return list(store.of_document(doc_id))
-    return [i for i, _text, metadata in collection._iter_documents_raw() if metadata.get("_vx_doc") == doc_id]
+    return [
+        i
+        for i, _text, metadata in collection._iter_documents_raw()
+        if metadata.get("_vx_doc") == doc_id
+    ]

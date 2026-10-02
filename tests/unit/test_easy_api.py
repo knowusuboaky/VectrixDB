@@ -206,6 +206,27 @@ class TestConvenienceFunctions:
         assert db2 is not None
         db2.close()
 
+    @requires_models
+    def test_quick_search_keeps_nothing(self, tmp_path):
+        """Documented as keeping nothing: it wrote ./vectrixdb_data, and
+        concurrent calls cleared each other's collection."""
+        import threading
+
+        from vectrixdb.easy import quick_search
+
+        found = []
+
+        def run(i):
+            found.append(quick_search([f"note {i} about cats", "Rust is fast"], "cats").top.text)
+
+        threads = [threading.Thread(target=run, args=(i,)) for i in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert sorted(found) == [f"note {i} about cats" for i in range(3)]
+        assert list(tmp_path.iterdir()) == []
+
 
 class TestRecordedModelNames:
     """A collection an older server wrote records the embedder's key where

@@ -62,12 +62,16 @@ class TestBytesReadTheWayAFileIs:
         path.write_bytes(data)
         from_bytes, from_file = load_bytes(data, "chart.pdf", images=True), load(path, images=True)
         assert len(from_bytes.figures) == 1, "this was nought before the fix, from a bucket"
-        assert [f[1].get("src") for f in from_bytes.figures] == [f[1].get("src") for f in from_file.figures]
+        assert [f[1].get("src") for f in from_bytes.figures] == [
+            f[1].get("src") for f in from_file.figures
+        ]
         assert list(from_bytes.images) == list(from_file.images) and all(from_bytes.images.values())
 
     def test_left_off_it_costs_nothing_and_keeps_nothing(self, tmp_path):
         plain = load_bytes(a_pdf_with_a_picture_in_it(), "chart.pdf")
-        assert not plain.images and not plain.figures, "off by default: a decode of every picture is not free"
+        assert not plain.images and not plain.figures, (
+            "off by default: a decode of every picture is not free"
+        )
 
     def test_a_markdown_files_pictures_are_its_neighbours_and_bytes_have_none(self, tmp_path):
         """Its figure lines survive; the pictures cannot, and that is not this fix's to give."""
@@ -78,7 +82,9 @@ class TestBytesReadTheWayAFileIs:
         path = tmp_path / "q3.md"
         path.write_text(REPORT, encoding="utf-8")
         from_bytes = load_bytes(path.read_bytes(), "q3.md", images=True)
-        assert [f[1].get("src") for f in from_bytes.figures] == ["charts/bars.png"], "the figure line is still a figure"
+        assert [f[1].get("src") for f in from_bytes.figures] == ["charts/bars.png"], (
+            "the figure line is still a figure"
+        )
         assert not from_bytes.images, "and the picture is a file this fetch never saw"
         assert load(path, images=True).images, "read from its folder, it is there"
 
@@ -89,13 +95,25 @@ def a_deck_with_a_chart_on_every_page(pages: int = 5) -> bytes:
     from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
     chart = pypdf.PdfReader(io.BytesIO(a_pdf_with_a_picture_in_it())).pages[0]
-    font = DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"), NameObject("/BaseFont"): NameObject("/Helvetica")})
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
     writer = pypdf.PdfWriter()
     for p in range(1, pages + 1):
         page = writer.add_blank_page(width=612, height=792)
         stream = DecodedStreamObject()
-        stream.set_data(f"BT /F1 12 Tf 72 720 Td (Slide {p} says something of its own about the quarter.) Tj ET".encode("latin-1"))
-        page[NameObject("/Resources")] = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})})
+        stream.set_data(
+            f"BT /F1 12 Tf 72 720 Td (Slide {p} says something of its own about the quarter.) Tj ET".encode(
+                "latin-1"
+            )
+        )
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})}
+        )
         page.replace_contents(stream)
         page.merge_page(chart)
     buffer = io.BytesIO()
@@ -133,7 +151,14 @@ class TestTheWorkerAsksWhenItsCollectionWants:
     def collection(self, tmp_path, **options):
         from vectrixdb import Vectrix
 
-        return Vectrix("inbox", path=str(tmp_path / "db"), embed_fn=_embed, dimension=4, embedding_cache=False, **options)
+        return Vectrix(
+            "inbox",
+            path=str(tmp_path / "db"),
+            embed_fn=_embed,
+            dimension=4,
+            embedding_cache=False,
+            **options,
+        )
 
     def ingest(self, db):
         from vectrixdb.worker import IngestEvent, IngestWorker
@@ -153,11 +178,13 @@ class TestTheWorkerAsksWhenItsCollectionWants:
             assert db.wants_images() is True
             outcome = self.ingest(db)
             assert outcome.action == "created" and outcome.chunks
-            assert len(seen) == 1 and seen[0] > 0, "the describer was handed the picture, which never used to happen"
+            assert len(seen) == 1 and seen[0] > 0, (
+                "the describer was handed the picture, which never used to happen"
+            )
             written = [r for _, _, r in db._collection._iter_documents_raw()]
-            assert any("A bar chart of revenue by region." in (r.get("text") or "") for r in written) or any(
-                r.get("figure") for r in written
-            ), "and what it wrote is in the collection"
+            assert any(
+                "A bar chart of revenue by region." in (r.get("text") or "") for r in written
+            ) or any(r.get("figure") for r in written), "and what it wrote is in the collection"
         finally:
             db.close()
 
@@ -181,7 +208,9 @@ class TestTheWorkerAsksWhenItsCollectionWants:
             assert db.wants_images() is True
             self.ingest(db)
             assert len(model.images) == 1, "the picture reached the image index"
-            assert [h.metadata.get("figure_src") for h in db.search("chart", limit=3, vectors="image")] == ["p1-fig1.jpg"]
+            assert [
+                h.metadata.get("figure_src") for h in db.search("chart", limit=3, vectors="image")
+            ] == ["p1-fig1.jpg"]
         finally:
             db.close()
 

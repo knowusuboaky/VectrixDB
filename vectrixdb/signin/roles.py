@@ -104,7 +104,9 @@ GRANTS: dict[str, frozenset[str]] = {
     # The read-only key is a machine's, and it has always fetched documents.
     READER: frozenset(_READ | {"document.read"}),
     SEARCHER: frozenset(_READ | {"search"}),
-    OPERATOR: frozenset(_READ | _SELF | {"search", "content.write", "collection.create", "collection.maintain"}),
+    OPERATOR: frozenset(
+        _READ | _SELF | {"search", "content.write", "collection.create", "collection.maintain"}
+    ),
     # An admin holds every action by name as well as the unnamed ones, so the
     # table reads whole.
     ADMIN: frozenset(
@@ -133,7 +135,9 @@ GRANTS: dict[str, frozenset[str]] = {
 }
 
 #: Changes that need a proof it is the person from the last ten minutes.
-STEP_UP = frozenset({"collection.delete", "collection.share", "people.manage", "keys.manage", "self.secure"})
+STEP_UP = frozenset(
+    {"collection.delete", "collection.share", "people.manage", "keys.manage", "self.secure"}
+)
 
 #: What each action is, in words, for the dashboard's Access page.
 ACTIONS: dict[str, str] = {
@@ -176,7 +180,11 @@ _ROUTES: tuple[tuple[str, str, str], ...] = (
     ("DELETE", r"/auth/me/sessions/[^/]+", "self.manage"),
     ("POST", r"/auth/me/sessions/end-others", "self.manage"),
     ("POST", r"/auth/step-up(?:/passkey/(?:begin|finish))?", "self.manage"),
-    ("*", r"/auth/me/(?:passkeys(?:/.*)?|authenticator(?:/(?:begin|confirm))?|recovery-codes|password)", "self.secure"),
+    (
+        "*",
+        r"/auth/me/(?:passkeys(?:/.*)?|authenticator(?:/(?:begin|confirm))?|recovery-codes|password)",
+        "self.secure",
+    ),
     ("*", r"/api/v1/keys(?:/[^/]+)?", "keys.manage"),
     ("GET", r"/api/v1/policies", "meta.read"),
     ("GET", r"/api/v1/about(?:/licence)?", "about.read"),
@@ -187,7 +195,12 @@ _ROUTES: tuple[tuple[str, str, str], ...] = (
     ("PUT", _C + r"/policy", "collection.share"),
     ("DELETE", r"/api/v1/cache", "cache.clear"),
     # searches are POSTs that read
-    ("POST", _C + r"/(?:search(?:/[a-z]+)?|text-search|hybrid-search|text-hybrid-search|keyword-search|sparse-search|dense-sparse-search)", "search"),
+    (
+        "POST",
+        _C
+        + r"/(?:search(?:/[a-z]+)?|text-search|hybrid-search|text-hybrid-search|keyword-search|sparse-search|dense-sparse-search)",
+        "search",
+    ),
     ("POST", _C + r"/(?:rebuild|graph/extract)", "collection.maintain"),
     ("POST", _C + r"/(?:points(?:/sparse)?|text-upsert|documents)", "content.write"),
     ("DELETE", _C + r"/(?:points|documents/.+)", "content.write"),
@@ -207,7 +220,9 @@ _ROUTES: tuple[tuple[str, str, str], ...] = (
     ("GET", r"/api(?:/v1)?/info(?:/extended)?", "meta.read"),
     ("GET", r"/api/v1/(?:models|extractors|resources|cache/stats|ws/status)", "meta.read"),
 )
-_COMPILED = tuple((method, re.compile(pattern + r"/?\Z"), action) for method, pattern, action in _ROUTES)
+_COMPILED = tuple(
+    (method, re.compile(pattern + r"/?\Z"), action) for method, pattern, action in _ROUTES
+)
 
 
 # ============================================================================
@@ -269,4 +284,7 @@ def clean_grants(grants: Optional[Iterable[str]]) -> list[str]:
 
 def table() -> list[dict]:
     """The grant table as rows, for the page that shows it."""
-    return [{"action": action, "means": means, **{role: can(role, action) for role in ROLES}} for action, means in ACTIONS.items()]
+    return [
+        {"action": action, "means": means, **{role: can(role, action) for role in ROLES}}
+        for action, means in ACTIONS.items()
+    ]

@@ -47,7 +47,9 @@ sys.path.insert(0, str(ROOT))
 DOCS = ROOT / "docs" / "reference"
 #: Actions a route also refuses to every key, the admin key included, beyond what the role table says.
 ONLY_PEOPLE = {"evaluation.golden"}
-GENERATED = "<!-- Written by scripts/make_reference.py from the code. Edit the code, then run it again. -->"
+GENERATED = (
+    "<!-- Written by scripts/make_reference.py from the code. Edit the code, then run it again. -->"
+)
 
 
 def _cell(text: Any) -> str:
@@ -84,7 +86,12 @@ def settings_page() -> str:
         "",
     ]
     for group, rows in groups.items():
-        out += [f"## {group}", "", "| Setting | What it does | Example or default |", "| --- | --- | --- |"]
+        out += [
+            f"## {group}",
+            "",
+            "| Setting | What it does | Example or default |",
+            "| --- | --- | --- |",
+        ]
         for s in rows:
             marks = []
             if s.secret:
@@ -114,15 +121,22 @@ def _usage(name: str, command: Any) -> List[str]:
     lines = []
     args = [p for p in command.params if p.param_type_name == "argument"]
     opts = [p for p in command.params if p.param_type_name == "option" and p.name != "help"]
-    shown = " ".join(f"{a.name.upper()}{'...' if a.nargs == -1 else ''}" if a.required else f"[{a.name.upper()}]" for a in args)
-    lines.append(f"```text\nvectrixdb {name}{' ' + shown if shown else ''}{' [OPTIONS]' if opts else ''}\n```")
+    shown = " ".join(
+        f"{a.name.upper()}{'...' if a.nargs == -1 else ''}" if a.required else f"[{a.name.upper()}]"
+        for a in args
+    )
+    lines.append(
+        f"```text\nvectrixdb {name}{' ' + shown if shown else ''}{' [OPTIONS]' if opts else ''}\n```"
+    )
     help_text = (command.help or "").strip().split("\n\n")[0].replace("\n", " ")
     if help_text:
         lines += ["", help_text]
     if args or opts:
         lines += ["", "| Argument or option | What it does | Default |", "| --- | --- | --- |"]
         for a in args:
-            lines.append(f"| `{a.name.upper()}` | {_cell(getattr(a, 'help', '') or '')} | {'required' if a.required else _cell(a.default)} |")
+            lines.append(
+                f"| `{a.name.upper()}` | {_cell(getattr(a, 'help', '') or '')} | {'required' if a.required else _cell(a.default)} |"
+            )
         for o in opts:
             names = ", ".join(f"`{n}`" for n in o.opts + o.secondary_opts)
             if o.is_flag:
@@ -158,9 +172,18 @@ def cli_page() -> str:
         if getattr(command, "hidden", False):
             continue
         if hasattr(command, "commands"):
-            out += [f"## {name}", "", (command.help or "").strip().split("\n\n")[0].replace("\n", " "), ""]
+            out += [
+                f"## {name}",
+                "",
+                (command.help or "").strip().split("\n\n")[0].replace("\n", " "),
+                "",
+            ]
             for sub in sorted(command.commands):
-                out += [f"### {name} {sub}", ""] + _usage(f"{name} {sub}", command.commands[sub]) + [""]
+                out += (
+                    [f"### {name} {sub}", ""]
+                    + _usage(f"{name} {sub}", command.commands[sub])
+                    + [""]
+                )
         else:
             out += [f"## {name}", ""] + _usage(name, command) + [""]
     return "\n".join(out).rstrip() + "\n"
@@ -191,7 +214,9 @@ def schema() -> Dict[str, Any]:
 
     from vectrixdb.api.server import create_app
 
-    kept = {name: os.environ.pop(name) for name in list(os.environ) if name.startswith("VECTRIXDB_")}
+    kept = {
+        name: os.environ.pop(name) for name in list(os.environ) if name.startswith("VECTRIXDB_")
+    }
     try:
         with tempfile.TemporaryDirectory() as tmp:
             return create_app(db_path=tmp, enable_dashboard=False).openapi()
@@ -215,7 +240,11 @@ def rest_page() -> str:
             return "admin (no action places it)"
         people = [r for r in roles.ROLES if roles.can(r, action)]
         # A key is nobody, so the actions about oneself are a person's alone.
-        keys = [] if action.startswith("self.") else [k for k in roles.KEY_ROLES if roles.can(k, action)]
+        keys = (
+            []
+            if action.startswith("self.")
+            else [k for k in roles.KEY_ROLES if roles.can(k, action)]
+        )
         said = ", ".join(people) if people else "nobody"
         if keys:
             said += f"; keys: {', '.join(keys)}"
@@ -231,10 +260,19 @@ def rest_page() -> str:
             method = method.upper()
             if method == "HEAD":
                 continue
-            described = next((line.strip() for line in (spec.get("description") or "").splitlines() if line.strip()), "")
+            described = next(
+                (
+                    line.strip()
+                    for line in (spec.get("description") or "").splitlines()
+                    if line.strip()
+                ),
+                "",
+            )
             summary = described or spec.get("summary", "")
             tag = str((spec.get("tags") or ["other"])[0])
-            groups.setdefault(tag, []).append(f"| `{method}` | `{path}` | {_cell(summary)} | {who(method, path)} |")
+            groups.setdefault(tag, []).append(
+                f"| `{method}` | `{path}` | {_cell(summary)} | {who(method, path)} |"
+            )
     total = sum(len(rows) for rows in groups.values())
     out = [
         GENERATED,
@@ -251,7 +289,12 @@ def rest_page() -> str:
         "",
     ]
     for tag in sorted(groups):
-        out += [f"## {tag.capitalize()}", "", "| Method | Path | What it does | Who may call it |", "| --- | --- | --- | --- |"]
+        out += [
+            f"## {tag.capitalize()}",
+            "",
+            "| Method | Path | What it does | Who may call it |",
+            "| --- | --- | --- | --- |",
+        ]
         out += groups[tag] + [""]
     return "\n".join(out).rstrip() + "\n"
 
@@ -277,7 +320,6 @@ def golden_schema_document() -> str:
     from vectrixdb.evaluation import GOLDEN_SCHEMA
 
     return json.dumps(GOLDEN_SCHEMA, indent=2, ensure_ascii=False) + "\n"
-
 
 
 # ============================================================================
@@ -327,7 +369,9 @@ def _words(node: Any, constants: Dict[str, str]) -> str:
         return str(node.value)
     if isinstance(node, ast.JoinedStr):
         return "".join(
-            str(part.value) if isinstance(part, ast.Constant) else "{" + ast.unparse(part.value) + "}"
+            str(part.value)
+            if isinstance(part, ast.Constant)
+            else "{" + ast.unparse(part.value) + "}"
             for part in node.values
         )
     if isinstance(node, ast.Name) and node.id in constants:
@@ -338,7 +382,11 @@ def _words(node: Any, constants: Dict[str, str]) -> str:
         return f"{no}, or {yes} when {test}" if yes != no else yes
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "str":
         return "the error's own words"
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id.endswith("Error"):
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id.endswith("Error")
+    ):
         return f"the error's own words, a {node.func.id}"
     printed = ast.unparse(node)
     return _EXPRESSIONS.get(printed, f"`{printed}`")
@@ -350,8 +398,14 @@ def _constants(tree: Any) -> Dict[str, str]:
 
     out: Dict[str, str] = {}
     for node in tree.body:
-        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-            if isinstance(node.value, (ast.Constant, ast.JoinedStr)) and not isinstance(getattr(node.value, "value", ""), (int, float, bool, type(None), bytes, tuple)):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            if isinstance(node.value, (ast.Constant, ast.JoinedStr)) and not isinstance(
+                getattr(node.value, "value", ""), (int, float, bool, type(None), bytes, tuple)
+            ):
                 out[node.targets[0].id] = _words(node.value, out)
     return out
 
@@ -392,7 +446,9 @@ def _site(node: Any) -> Any:
             if isinstance(key, ast.Constant) and key.value == "message":
                 status = keywords.get("status_code", node.args[1] if len(node.args) > 1 else None)
                 # A reply that says a job started carries a message too, and is not a refusal.
-                if status is not None and not (isinstance(status, ast.Constant) and int(status.value) < 400):
+                if status is not None and not (
+                    isinstance(status, ast.Constant) and int(status.value) < 400
+                ):
                     return status, value
     return None
 
@@ -428,7 +484,9 @@ def exception_classes() -> List[Tuple[str, str, str]]:
     out = []
     for node in ast.parse(source).body:
         if isinstance(node, ast.ClassDef):
-            bases = ", ".join(getattr(base, "id", getattr(base, "attr", "?")) for base in node.bases)
+            bases = ", ".join(
+                getattr(base, "id", getattr(base, "attr", "?")) for base in node.bases
+            )
             said = (ast.get_docstring(node) or "").strip().split("\n\n")[0]
             out.append((node.name, bases, " ".join(said.split())))
     return out
@@ -443,7 +501,7 @@ def errors_page() -> str:
         "",
         "Every way the server and the extraction service say no, read off "
         "the code, so a refusal added without its row fails a test. Each refusal a route sends has "
-        "the one shape, `{\"ok\": false, \"message\": ..., \"data\": ..., \"detail\": ...}`: "
+        'the one shape, `{"ok": false, "message": ..., "data": ..., "detail": ...}`: '
         "`message` is one sentence a person can act on, `detail` is what the route gave, kept for "
         "clients that read it, and `data` carries what a client needs to go on, such as `signin` "
         "when the answer is to sign in, `retry_after` on a rate limit, or `code` when a policy "
@@ -486,12 +544,28 @@ def errors_page() -> str:
             if function not in grouped[(status, message)]:
                 grouped[(status, message)].append(function)
         total += len(grouped)
-        out += [f"### {heading}", "", f"`{relative}`", "", "| Status | Message | Raised by |", "| --- | --- | --- |"]
-        for (status, message), functions in sorted(grouped.items(), key=lambda item: (item[0][0], item[0][1].lower())):
-            out.append(f"| {status} | {_cell(message)} | {', '.join(f'`{f}`' for f in functions)} |")
+        out += [
+            f"### {heading}",
+            "",
+            f"`{relative}`",
+            "",
+            "| Status | Message | Raised by |",
+            "| --- | --- | --- |",
+        ]
+        for (status, message), functions in sorted(
+            grouped.items(), key=lambda item: (item[0][0], item[0][1].lower())
+        ):
+            out.append(
+                f"| {status} | {_cell(message)} | {', '.join(f'`{f}`' for f in functions)} |"
+            )
         out.append("")
     out[out.index("## What a route can send")] = f"## What a route can send, {total} refusals"
-    out += ["## Exceptions the library raises", "", "| Exception | Derives from | What it means |", "| --- | --- | --- |"]
+    out += [
+        "## Exceptions the library raises",
+        "",
+        "| Exception | Derives from | What it means |",
+        "| --- | --- | --- |",
+    ]
     for name, bases, said in exception_classes():
         out.append(f"| `{name}` | `{bases}` | {_cell(said)} |")
     return "\n".join(out).rstrip() + "\n"
@@ -522,7 +596,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--check", action="store_true", help="fail when a page is out of date, and write nothing")
+    parser.add_argument(
+        "--check", action="store_true", help="fail when a page is out of date, and write nothing"
+    )
     args = parser.parse_args(argv)
     stale = []
     for name, build in PAGES.items():

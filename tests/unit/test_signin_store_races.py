@@ -119,7 +119,9 @@ class TestOtherPlacesThatRetry:
         one, two = store.user_handle("nobody@example.com"), store.user_handle("nobody@example.com")
         assert len(one) == 16 and one != two
 
-    def test_somebody_another_server_added_at_the_same_moment_is_changed_not_added_twice(self, store):
+    def test_somebody_another_server_added_at_the_same_moment_is_changed_not_added_twice(
+        self, store
+    ):
         """create() loses because the other server's add landed between the read and the write."""
         real = store._records
 
@@ -127,7 +129,9 @@ class TestOtherPlacesThatRetry:
             def create(self, record):
                 if record.kind == store_module.PERSON and not self.lost:
                     self.lost += 1
-                    other = store_module.Record(record.kind, record.key, dict(record.data, role="viewer"))
+                    other = store_module.Record(
+                        record.kind, record.key, dict(record.data, role="viewer")
+                    )
                     assert real.create(other)
                     return False
                 return real.create(record)

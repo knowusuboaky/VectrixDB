@@ -97,17 +97,27 @@ class Comparison:
     def to_dict(self) -> dict:
         return {
             "readings": [r.to_dict() for r in self.readings],
-            "alike": [{"file": f, "reader": a, "other": b, "alike": round(score, 4)} for (f, a, b), score in self.alike.items()],
+            "alike": [
+                {"file": f, "reader": a, "other": b, "alike": round(score, 4)}
+                for (f, a, b), score in self.alike.items()
+            ],
         }
 
     def to_markdown(self) -> str:
         """A table a person can read: one row per file and reader, then where the readers disagree."""
-        lines = ["| File | Reader | Quality | Usable | Characters | Pages | By OCR | Seconds |", "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |"]
+        lines = [
+            "| File | Reader | Quality | Usable | Characters | Pages | By OCR | Seconds |",
+            "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |",
+        ]
         for r in self.readings:
             if r.error:
-                lines.append(f"| {r.file} | {r.reader} | | failed: {r.error} | | | | {r.seconds:.2f} |")
+                lines.append(
+                    f"| {r.file} | {r.reader} | | failed: {r.error} | | | | {r.seconds:.2f} |"
+                )
             else:
-                lines.append(f"| {r.file} | {r.reader} | {r.quality:.2f} | {'yes' if r.usable else 'no'} | {r.characters:,} | {r.pages} | {r.pages_ocr} | {r.seconds:.2f} |")
+                lines.append(
+                    f"| {r.file} | {r.reader} | {r.quality:.2f} | {'yes' if r.usable else 'no'} | {r.characters:,} | {r.pages} | {r.pages_ocr} | {r.seconds:.2f} |"
+                )
         apart = self.disagreements()
         if apart:
             lines += ["", "Where the readers disagree, least alike first:", ""]
@@ -146,19 +156,43 @@ def compare_extractors(
         for reader, extractor in extractors.items():
             started = time.perf_counter()
             try:
-                doc: LoadedDocument = load_bytes(data, name) if extractor is None else coerce(extractor(data, name), name)
-            except Exception as exc:  # one reader failing on one file is a finding, not the end of the run
-                done.append(Reading(file=name, reader=reader, seconds=time.perf_counter() - started, error=f"{type(exc).__name__}: {exc}"[:200]))
+                doc: LoadedDocument = (
+                    load_bytes(data, name)
+                    if extractor is None
+                    else coerce(extractor(data, name), name)
+                )
+            except (
+                Exception
+            ) as exc:  # one reader failing on one file is a finding, not the end of the run
+                done.append(
+                    Reading(
+                        file=name,
+                        reader=reader,
+                        seconds=time.perf_counter() - started,
+                        error=f"{type(exc).__name__}: {exc}"[:200],
+                    )
+                )
                 continue
             took = time.perf_counter() - started
             scored = extraction_quality(doc.text, threshold)
-            done.append(Reading(
-                file=name, reader=reader, seconds=took, characters=len(doc.text), pages=len(doc.pages) or int(doc.metadata.get("pages") or 0),
-                pages_ocr=int(doc.metadata.get("pages_ocr") or 0), quality=scored.score, usable=scored.usable, text=doc.text,
-            ))
+            done.append(
+                Reading(
+                    file=name,
+                    reader=reader,
+                    seconds=took,
+                    characters=len(doc.text),
+                    pages=len(doc.pages) or int(doc.metadata.get("pages") or 0),
+                    pages_ocr=int(doc.metadata.get("pages_ocr") or 0),
+                    quality=scored.score,
+                    usable=scored.usable,
+                    text=doc.text,
+                )
+            )
         read = [r for r in done if r.error is None]
         for n, one in enumerate(read):
             for other in read[n + 1 :]:
-                alike[(name, one.reader, other.reader)] = difflib.SequenceMatcher(None, _words(one.text), _words(other.text), autojunk=False).ratio()
+                alike[(name, one.reader, other.reader)] = difflib.SequenceMatcher(
+                    None, _words(one.text), _words(other.text), autojunk=False
+                ).ratio()
         readings += done
     return Comparison(readings=readings, alike=alike)

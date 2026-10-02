@@ -40,7 +40,20 @@ sys.path.insert(0, os.path.dirname(__file__))
 from cryptography.hazmat.primitives.asymmetric import ec  # noqa: E402
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat  # noqa: E402
 from fake_idp import ISSUER, FakeIdp  # noqa: E402
-from fake_passkey import AT, EDDSA, ES256, RS256, UP, UV, FakePasskey, b64u, cbor, cose_key, new_key, unb64u  # noqa: E402
+from fake_passkey import (
+    AT,
+    EDDSA,
+    ES256,
+    RS256,
+    UP,
+    UV,
+    FakePasskey,
+    b64u,
+    cbor,
+    cose_key,
+    new_key,
+    unb64u,
+)  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from vectrixdb.signin import OidcConfig, SignInConfig, totp  # noqa: E402
@@ -63,7 +76,14 @@ ELEVEN_MINUTES = 11 * 60
 def created(device: FakePasskey, **forge) -> tuple[dict, bytes]:
     """A device's answer to a fresh request to make a passkey, and the challenge that request carried."""
     challenge = os.urandom(32)
-    options = pk.creation_options(rp_id=RP_ID, rp_name="VectrixDB", user_id=HANDLE, user_name=ADA, display_name=ADA, challenge=challenge)
+    options = pk.creation_options(
+        rp_id=RP_ID,
+        rp_name="VectrixDB",
+        user_id=HANDLE,
+        user_name=ADA,
+        display_name=ADA,
+        challenge=challenge,
+    )
     return device.create(options, **forge), challenge
 
 
@@ -77,7 +97,11 @@ def sign_in_check(device: FakePasskey, made: pk.NewPasskey, *, kept=None, **forg
     challenge = os.urandom(32)
     credential = device.get(pk.request_options(rp_id=RP_ID, challenge=challenge), **forge)
     return pk.verify_assertion(
-        credential, challenge=challenge, origin=PUBLIC, rp_id=RP_ID, public_key=made.public_key,
+        credential,
+        challenge=challenge,
+        origin=PUBLIC,
+        rp_id=RP_ID,
+        public_key=made.public_key,
         sign_count=made.sign_count if kept is None else kept,
     )
 
@@ -119,7 +143,12 @@ def _config(root: Path, **over) -> SignInConfig:
 
 
 def _oidc() -> OidcConfig:
-    return OidcConfig(issuer=ISSUER, client_id="vectrixdb", client_secret="s3cret", role_map={"g-admins": "admin", "g-ops": "operator"})
+    return OidcConfig(
+        issuer=ISSUER,
+        client_id="vectrixdb",
+        client_secret="s3cret",
+        role_map={"g-admins": "admin", "g-ops": "operator"},
+    )
 
 
 @pytest.fixture
@@ -128,7 +157,9 @@ def server(tmp_path, monkeypatch):
     monkeypatch.delenv("VECTRIXDB_AUDIT_JSONL", raising=False)
     root = tmp_path / "db"
     config = _config(root)
-    with TestClient(create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC) as client:
+    with TestClient(
+        create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC
+    ) as client:
         yield client, config
 
 
@@ -140,7 +171,9 @@ def both(tmp_path, monkeypatch):
     idp = FakeIdp()
     root = tmp_path / "db"
     config = _config(root, methods=("oidc", "email"), oidc=_oidc())
-    app = create_app(db_path=str(root), enable_dashboard=False, signin=config, oidc_transport=idp.transport)
+    app = create_app(
+        db_path=str(root), enable_dashboard=False, signin=config, oidc_transport=idp.transport
+    )
     with TestClient(app, base_url=PUBLIC, follow_redirects=False) as client:
         yield client, config, idp
 
@@ -168,11 +201,16 @@ def enrol_options(browser: TestClient, ticket: str) -> dict:
     return reply.json()["data"]["options"]
 
 
-def enrol_with_passkey(browser: TestClient, config: SignInConfig, email: str, device=None) -> tuple[FakePasskey, dict]:
+def enrol_with_passkey(
+    browser: TestClient, config: SignInConfig, email: str, device=None
+) -> tuple[FakePasskey, dict]:
     """The whole first visit, choosing a passkey. The device, and what the server answered."""
     device = device or FakePasskey(PUBLIC)
     ticket = set_up(browser, config, email)["ticket"]
-    done = browser.post("/auth/passkey/enrol/finish", json={"ticket": ticket, "credential": device.create(enrol_options(browser, ticket))})
+    done = browser.post(
+        "/auth/passkey/enrol/finish",
+        json={"ticket": ticket, "credential": device.create(enrol_options(browser, ticket))},
+    )
     assert done.status_code == 200, done.text
     return device, done.json()["data"]
 
@@ -180,7 +218,10 @@ def enrol_with_passkey(browser: TestClient, config: SignInConfig, email: str, de
 def enrol_with_code(browser: TestClient, config: SignInConfig, email: str) -> None:
     """The whole first visit, choosing an authenticator app."""
     begun = set_up(browser, config, email)
-    done = browser.post("/auth/email/enrol/confirm", json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())})
+    done = browser.post(
+        "/auth/email/enrol/confirm",
+        json={"ticket": begun["ticket"], "code": totp.code_at(begun["secret"], totp.step_now())},
+    )
     assert done.status_code == 200, done.text
 
 
@@ -198,8 +239,14 @@ def sign_in(browser: TestClient, device: FakePasskey, **forge):
 
 
 def add_passkey(browser: TestClient, device: FakePasskey, **extra):
-    options = browser.post("/auth/me/passkeys/begin", headers=csrf(browser)).json()["data"]["options"]
-    return browser.post("/auth/me/passkeys/finish", json={"credential": device.create(options), **extra}, headers=csrf(browser))
+    options = browser.post("/auth/me/passkeys/begin", headers=csrf(browser)).json()["data"][
+        "options"
+    ]
+    return browser.post(
+        "/auth/me/passkeys/finish",
+        json={"credential": device.create(options), **extra},
+        headers=csrf(browser),
+    )
 
 
 def remove(browser: TestClient, device: FakePasskey):
@@ -207,13 +254,21 @@ def remove(browser: TestClient, device: FakePasskey):
 
 
 def step_up(browser: TestClient, device: FakePasskey, **forge):
-    options = browser.post("/auth/step-up/passkey/begin", headers=csrf(browser)).json()["data"]["options"]
-    return browser.post("/auth/step-up/passkey/finish", json={"credential": device.get(options, **forge)}, headers=csrf(browser))
+    options = browser.post("/auth/step-up/passkey/begin", headers=csrf(browser)).json()["data"][
+        "options"
+    ]
+    return browser.post(
+        "/auth/step-up/passkey/finish",
+        json={"credential": device.get(options, **forge)},
+        headers=csrf(browser),
+    )
 
 
 def make_a_key(browser: TestClient):
     """A change that needs a fresh check: an admin making an API key."""
-    return browser.post("/api/v1/keys", json={"name": "nightly", "role": "reader"}, headers=csrf(browser))
+    return browser.post(
+        "/api/v1/keys", json={"name": "nightly", "role": "reader"}, headers=csrf(browser)
+    )
 
 
 def passkey_ids(browser: TestClient) -> set:
@@ -221,7 +276,10 @@ def passkey_ids(browser: TestClient) -> set:
 
 
 def logged(server) -> set:
-    return {(r["event"], r.get("who"), r.get("method")) for r in server[0].app.state.signin.access.recent()}
+    return {
+        (r["event"], r.get("who"), r.get("method"))
+        for r in server[0].app.state.signin.access.recent()
+    }
 
 
 def later(monkeypatch, seconds: float) -> None:
@@ -240,7 +298,9 @@ def sso_sign_in(client: TestClient, idp: FakeIdp) -> None:
     assert start.status_code == 302
     code, state = idp.authorize(start.headers["location"])
     back = client.get("/auth/oidc/callback", params={"code": code, "state": state})
-    assert back.status_code == 302 and "error" not in back.headers["location"], back.headers["location"]
+    assert back.status_code == 302 and "error" not in back.headers["location"], back.headers[
+        "location"
+    ]
 
 
 # ================================================================ the parts
@@ -251,18 +311,29 @@ class TestMakingAPasskey:
         device = FakePasskey(PUBLIC)
         made = register(device, sign_count=7)
         assert made.credential_id == device.credential_id
-        assert pk.cbor_decode(made.public_key) == device.cose_key(), "the public half, as the device wrote it"
+        assert pk.cbor_decode(made.public_key) == device.cose_key(), (
+            "the public half, as the device wrote it"
+        )
         assert made.alg == ES256 and made.sign_count == 7
         assert made.transports == ["internal", "hybrid"]
 
-    @pytest.mark.parametrize("flags", [UP | AT, UV | AT, AT], ids=["present but not verified", "verified but not present", "neither"])
+    @pytest.mark.parametrize(
+        "flags",
+        [UP | AT, UV | AT, AT],
+        ids=["present but not verified", "verified but not present", "neither"],
+    )
     def test_a_device_that_did_not_check_the_person_is_refused(self, flags):
         with pytest.raises(pk.PasskeyRefused, match="did not check that it was you"):
             register(FakePasskey(PUBLIC), flags=flags)
 
     @pytest.mark.parametrize(
         "origin",
-        ["https://evil.example.test", "http://vectors.example.test", "https://vectors.example.test:8443", "https://vectors.example.test.evil.example"],
+        [
+            "https://evil.example.test",
+            "http://vectors.example.test",
+            "https://vectors.example.test:8443",
+            "https://vectors.example.test.evil.example",
+        ],
         ids=["another site", "plain http", "another port", "a look-alike"],
     )
     def test_a_reply_from_another_address_is_refused(self, origin):
@@ -273,7 +344,9 @@ class TestMakingAPasskey:
         with pytest.raises(pk.PasskeyRefused, match="different address"):
             register(FakePasskey(PUBLIC), cross_origin=True)
 
-    @pytest.mark.parametrize("rp_id", ["evil.example.test", "example.test"], ids=["another site", "the parent domain"])
+    @pytest.mark.parametrize(
+        "rp_id", ["evil.example.test", "example.test"], ids=["another site", "the parent domain"]
+    )
     def test_a_passkey_for_another_relying_party_is_refused(self, rp_id):
         with pytest.raises(pk.PasskeyRefused, match="different site"):
             register(FakePasskey(PUBLIC), rp_id=rp_id)
@@ -297,7 +370,9 @@ class TestMakingAPasskey:
     def test_a_reply_that_is_not_a_public_key_credential_is_refused(self):
         credential, challenge = created(FakePasskey(PUBLIC))
         with pytest.raises(pk.PasskeyRefused):
-            pk.verify_registration({**credential, "type": "password"}, challenge=challenge, origin=PUBLIC, rp_id=RP_ID)
+            pk.verify_registration(
+                {**credential, "type": "password"}, challenge=challenge, origin=PUBLIC, rp_id=RP_ID
+            )
 
 
 class TestCheckingASignIn:
@@ -307,7 +382,11 @@ class TestCheckingASignIn:
         assert sign_in_check(device, made) == 1
         assert sign_in_check(device, made, kept=1) == 2
 
-    @pytest.mark.parametrize("flags", [UP, UV, 0], ids=["present but not verified", "verified but not present", "neither"])
+    @pytest.mark.parametrize(
+        "flags",
+        [UP, UV, 0],
+        ids=["present but not verified", "verified but not present", "neither"],
+    )
     def test_a_device_that_did_not_check_the_person_is_refused(self, flags):
         device = FakePasskey(PUBLIC)
         made = register(device)
@@ -357,10 +436,19 @@ class TestCheckingASignIn:
         challenge = os.urandom(32)
         options = pk.request_options(rp_id=RP_ID, challenge=challenge)
         first, second = device.get(options), device.get(options)
-        second["response"]["signature"] = first["response"]["signature"]  # good, but over the first reply's data
+        second["response"]["signature"] = first["response"][
+            "signature"
+        ]  # good, but over the first reply's data
 
         def check(credential):
-            return pk.verify_assertion(credential, challenge=challenge, origin=PUBLIC, rp_id=RP_ID, public_key=made.public_key, sign_count=0)
+            return pk.verify_assertion(
+                credential,
+                challenge=challenge,
+                origin=PUBLIC,
+                rp_id=RP_ID,
+                public_key=made.public_key,
+                sign_count=0,
+            )
 
         with pytest.raises(pk.PasskeyRefused):
             check(second)
@@ -369,7 +457,14 @@ class TestCheckingASignIn:
     @pytest.mark.parametrize(
         "kept, sent, good",
         [(0, 0, True), (0, 1, True), (5, 6, True), (5, 5, False), (5, 4, False), (5, 0, False)],
-        ids=["a device that keeps no count", "the first count", "one more", "the same again", "one less", "back to nothing"],
+        ids=[
+            "a device that keeps no count",
+            "the first count",
+            "one more",
+            "the same again",
+            "one less",
+            "back to nothing",
+        ],
     )
     def test_a_count_that_does_not_go_up_is_a_copied_key(self, kept, sent, good):
         device = FakePasskey(PUBLIC)
@@ -402,7 +497,13 @@ class TestTheKindsOfKeyAPasskeyMayUse:
 
     def test_a_kind_of_key_the_server_does_not_take_is_refused_in_words(self):
         p384 = ec.generate_private_key(ec.SECP384R1()).public_key().public_numbers()
-        es384 = {1: 2, 3: -35, -1: 2, -2: p384.x.to_bytes(48, "big"), -3: p384.y.to_bytes(48, "big")}
+        es384 = {
+            1: 2,
+            3: -35,
+            -1: 2,
+            -2: p384.x.to_bytes(48, "big"),
+            -3: p384.y.to_bytes(48, "big"),
+        }
         with pytest.raises(pk.PasskeyRefused, match="kind of key this server does not accept"):
             pk.public_key_from_cose(es384)
 
@@ -419,7 +520,22 @@ class TestReadingWhatADeviceSends:
             1: 2,
             3: -7,
             -2: bytes(32),
-            "sizes": [0, 23, 24, 255, 256, 65535, 65536, 2**32 - 1, 2**32, -1, -24, -25, -257, -(2**40)],
+            "sizes": [
+                0,
+                23,
+                24,
+                255,
+                256,
+                65535,
+                65536,
+                2**32 - 1,
+                2**32,
+                -1,
+                -24,
+                -25,
+                -257,
+                -(2**40),
+            ],
             "text": "clé",
         }
         assert pk.cbor_decode(cbor(value)) == value
@@ -437,8 +553,14 @@ class TestReadingWhatADeviceSends:
             b"",
         ],
         ids=[
-            "a byte left over", "an indefinite length", "one key twice in a map", "a length past the end",
-            "nested seventeen deep", "text that is not UTF-8", "a map key that is neither a number nor text", "nothing at all",
+            "a byte left over",
+            "an indefinite length",
+            "one key twice in a map",
+            "a length past the end",
+            "nested seventeen deep",
+            "text that is not UTF-8",
+            "a map key that is neither a number nor text",
+            "nothing at all",
         ],
     )
     def test_anything_malformed_or_left_over_is_a_refusal(self, raw):
@@ -448,7 +570,9 @@ class TestReadingWhatADeviceSends:
     def test_authenticator_data_is_read_field_by_field(self):
         device = FakePasskey(PUBLIC)
         credential, _ = created(device, sign_count=3)
-        parsed = pk.parse_auth_data(pk.cbor_decode(unb64u(credential["response"]["attestationObject"]))["authData"])
+        parsed = pk.parse_auth_data(
+            pk.cbor_decode(unb64u(credential["response"]["attestationObject"]))["authData"]
+        )
         assert parsed.rp_id_hash == hashlib.sha256(RP_ID.encode()).digest()
         assert parsed.user_present and parsed.user_verified and parsed.sign_count == 3
         assert parsed.credential_id == device.credential_id
@@ -464,8 +588,20 @@ class TestReadingWhatADeviceSends:
 
 class TestWhatTheBrowserIsAskedFor:
     def test_a_new_passkey_must_live_on_the_device_and_ask_for_its_pin(self):
-        options = pk.creation_options(rp_id=RP_ID, rp_name="VectrixDB", user_id=HANDLE, user_name=ADA, display_name=ADA, challenge=b"c" * 32, exclude=[b"had"])
-        assert options["authenticatorSelection"] == {"residentKey": "required", "requireResidentKey": True, "userVerification": "required"}
+        options = pk.creation_options(
+            rp_id=RP_ID,
+            rp_name="VectrixDB",
+            user_id=HANDLE,
+            user_name=ADA,
+            display_name=ADA,
+            challenge=b"c" * 32,
+            exclude=[b"had"],
+        )
+        assert options["authenticatorSelection"] == {
+            "residentKey": "required",
+            "requireResidentKey": True,
+            "userVerification": "required",
+        }
         assert [p["alg"] for p in options["pubKeyCredParams"]] == [ES256, EDDSA, RS256]
         assert options["attestation"] == "none" and options["rp"]["id"] == RP_ID
         assert unb64u(options["user"]["id"]) == HANDLE and unb64u(options["challenge"]) == b"c" * 32
@@ -479,13 +615,27 @@ class TestWhatTheBrowserIsAskedFor:
     @pytest.mark.parametrize(
         "public, origin, rp_id",
         [
-            ("https://vectors.example.test", "https://vectors.example.test", "vectors.example.test"),
-            ("https://vectors.example.test:443/search", "https://vectors.example.test", "vectors.example.test"),
-            ("https://Vectors.Example.test:8443", "https://vectors.example.test:8443", "vectors.example.test"),
+            (
+                "https://vectors.example.test",
+                "https://vectors.example.test",
+                "vectors.example.test",
+            ),
+            (
+                "https://vectors.example.test:443/search",
+                "https://vectors.example.test",
+                "vectors.example.test",
+            ),
+            (
+                "https://Vectors.Example.test:8443",
+                "https://vectors.example.test:8443",
+                "vectors.example.test",
+            ),
             ("http://localhost:7337", "http://localhost:7337", "localhost"),
         ],
     )
-    def test_the_origin_and_the_relying_party_come_from_the_public_address(self, public, origin, rp_id):
+    def test_the_origin_and_the_relying_party_come_from_the_public_address(
+        self, public, origin, rp_id
+    ):
         assert pk.origin_of(public) == origin and pk.rp_id_of(public) == rp_id
 
 
@@ -497,15 +647,22 @@ class TestTheChallengesTheServerKeeps:
             challenge = store.new_challenge("passkey-add", OLU)
             raw = sqlite3.connect(str(tmp_path / "auth" / "signin.db"))
             try:
-                kept = repr(raw.execute("SELECT * FROM records WHERE kind = 'challenge'").fetchall())
+                kept = repr(
+                    raw.execute("SELECT * FROM records WHERE kind = 'challenge'").fetchall()
+                )
             finally:
                 raw.close()
             assert hashlib.sha256(challenge).hexdigest() in kept
             assert challenge.hex() not in kept and b64u(challenge) not in kept
             assert store.use_challenge(challenge, "passkey-add") == OLU
             assert store.use_challenge(challenge, "passkey-add") is None, "once"
-            assert store.use_challenge(store.new_challenge("passkey-stepup", OLU), "passkey-signin") is None, "for its own purpose"
-            assert store.use_challenge(store.new_challenge("passkey-signin"), "passkey-signin") == "", "a sign-in challenge is for anybody"
+            assert (
+                store.use_challenge(store.new_challenge("passkey-stepup", OLU), "passkey-signin")
+                is None
+            ), "for its own purpose"
+            assert (
+                store.use_challenge(store.new_challenge("passkey-signin"), "passkey-signin") == ""
+            ), "a sign-in challenge is for anybody"
         finally:
             store.close()
 
@@ -514,7 +671,9 @@ class TestTheChallengesTheServerKeeps:
 
 
 class TestSettingUpWithAPasskey:
-    def test_a_person_sets_up_from_the_emailed_link_and_leaves_signed_in_with_recovery_codes(self, server):
+    def test_a_person_sets_up_from_the_emailed_link_and_leaves_signed_in_with_recovery_codes(
+        self, server
+    ):
         client, config = server
         device, done = enrol_with_passkey(client, config, OLU)
         codes = done["recovery_codes"]
@@ -527,7 +686,9 @@ class TestSettingUpWithAPasskey:
         assert ways["authenticator"] is None and ways["recovery_codes_left"] == 10
         assert {("enrolled", OLU, "passkey"), ("passkey_added", OLU, "passkey")} <= logged(server)
         client.post("/auth/email/begin", json={"email": OLU})
-        assert len(config.sender.sent) == 1, "a passkey is a way in, so no second set-up link is sent"
+        assert len(config.sender.sent) == 1, (
+            "a passkey is a way in, so no second set-up link is sent"
+        )
 
     def test_the_link_is_spent_by_the_button_and_the_ticket_by_finishing(self, server):
         client, config = server
@@ -535,12 +696,25 @@ class TestSettingUpWithAPasskey:
         token = config.sender.token()
         begun = client.post("/auth/email/enrol/begin", json={"token": token})
         assert begun.status_code == 200
-        assert client.post("/auth/email/enrol/begin", json={"token": token}).status_code == 400, "the link works once"
+        assert client.post("/auth/email/enrol/begin", json={"token": token}).status_code == 400, (
+            "the link works once"
+        )
         ticket = begun.json()["data"]["ticket"]
         enrol_options(client, ticket)
-        options = enrol_options(client, ticket)  # a closed prompt, then Try again: asking twice spends nothing
-        assert client.post("/auth/passkey/enrol/finish", json={"ticket": ticket, "credential": FakePasskey(PUBLIC).create(options)}).status_code == 200
-        again = client.post("/auth/passkey/enrol/finish", json={"ticket": ticket, "credential": FakePasskey(PUBLIC).create(options)})
+        options = enrol_options(
+            client, ticket
+        )  # a closed prompt, then Try again: asking twice spends nothing
+        assert (
+            client.post(
+                "/auth/passkey/enrol/finish",
+                json={"ticket": ticket, "credential": FakePasskey(PUBLIC).create(options)},
+            ).status_code
+            == 200
+        )
+        again = client.post(
+            "/auth/passkey/enrol/finish",
+            json={"ticket": ticket, "credential": FakePasskey(PUBLIC).create(options)},
+        )
         assert again.status_code == 400 and again.json()["data"] is None
         assert len(client.get("/auth/me/ways").json()["data"]["passkeys"]) == 1
 
@@ -550,7 +724,13 @@ class TestSettingUpWithAPasskey:
         begun = set_up(client, config, OLU)
         assert store.pending_secret(OLU) == begun["secret"]
         answered = FakePasskey(PUBLIC).create(enrol_options(client, begun["ticket"]))
-        assert client.post("/auth/passkey/enrol/finish", json={"ticket": begun["ticket"], "credential": answered}).status_code == 200
+        assert (
+            client.post(
+                "/auth/passkey/enrol/finish",
+                json={"ticket": begun["ticket"], "credential": answered},
+            ).status_code
+            == 200
+        )
         assert store.pending_secret(OLU) is None
         found = store.person(OLU)
         assert found.enrolled and found.passkeys == 1 and not found.authenticator
@@ -561,7 +741,9 @@ class TestSettingUpWithAPasskey:
         options = enrol_options(client, ticket)
         handle = unb64u(options["user"]["id"])
         assert len(handle) == 16 and OLU.encode() not in handle
-        assert unb64u(enrol_options(client, ticket)["user"]["id"]) == handle, "the same handle each time"
+        assert unb64u(enrol_options(client, ticket)["user"]["id"]) == handle, (
+            "the same handle each time"
+        )
         assert options["rp"]["id"] == RP_ID and options["user"]["name"] == OLU
         assert options["authenticatorSelection"]["userVerification"] == "required"
         assert options["excludeCredentials"] == []
@@ -570,12 +752,25 @@ class TestSettingUpWithAPasskey:
         client, config = server
         ticket = set_up(client, config, OLU)["ticket"]
         no_pin = FakePasskey(PUBLIC).create(enrol_options(client, ticket), flags=UP | AT)
-        refused = client.post("/auth/passkey/enrol/finish", json={"ticket": ticket, "credential": no_pin})
-        assert refused.status_code == 400 and "did not check that it was you" in refused.json()["message"]
+        refused = client.post(
+            "/auth/passkey/enrol/finish", json={"ticket": ticket, "credential": no_pin}
+        )
+        assert (
+            refused.status_code == 400
+            and "did not check that it was you" in refused.json()["message"]
+        )
         assert client.get("/auth/me").status_code == 401, "and nobody was signed in"
-        assert client.post("/auth/passkey/enrol/begin", json={"token": ticket}).status_code == 400, "the old ticket is spent"
+        assert (
+            client.post("/auth/passkey/enrol/begin", json={"token": ticket}).status_code == 400
+        ), "the old ticket is spent"
         fresh = refused.json()["data"]["ticket"]
-        done = client.post("/auth/passkey/enrol/finish", json={"ticket": fresh, "credential": FakePasskey(PUBLIC).create(enrol_options(client, fresh))})
+        done = client.post(
+            "/auth/passkey/enrol/finish",
+            json={
+                "ticket": fresh,
+                "credential": FakePasskey(PUBLIC).create(enrol_options(client, fresh)),
+            },
+        )
         assert done.status_code == 200, done.text
 
     def test_a_challenge_issued_to_one_person_does_not_set_up_another(self, server):
@@ -583,16 +778,28 @@ class TestSettingUpWithAPasskey:
         ada_ticket = set_up(client, config, ADA)["ticket"]
         olu_ticket = set_up(client, config, OLU)["ticket"]
         answered = FakePasskey(PUBLIC).create(enrol_options(client, ada_ticket))
-        wrong = client.post("/auth/passkey/enrol/finish", json={"ticket": olu_ticket, "credential": answered})
+        wrong = client.post(
+            "/auth/passkey/enrol/finish", json={"ticket": olu_ticket, "credential": answered}
+        )
         assert wrong.status_code == 400 and "run out" in wrong.json()["message"]
         assert client.app.state.signin.store.person(OLU).passkeys == 0
 
     def test_nobody_sets_up_without_a_ticket(self, server):
         client, _ = server
         answered = FakePasskey(PUBLIC).create({"challenge": b64u(os.urandom(32))})
-        assert client.post("/auth/passkey/enrol/begin", json={"token": "made-up"}).status_code == 400
-        assert client.post("/auth/passkey/enrol/finish", json={"ticket": "made-up", "credential": answered}).status_code == 400
-        assert client.post("/auth/passkey/enrol/finish", json={"credential": answered}).status_code == 400
+        assert (
+            client.post("/auth/passkey/enrol/begin", json={"token": "made-up"}).status_code == 400
+        )
+        assert (
+            client.post(
+                "/auth/passkey/enrol/finish", json={"ticket": "made-up", "credential": answered}
+            ).status_code
+            == 400
+        )
+        assert (
+            client.post("/auth/passkey/enrol/finish", json={"credential": answered}).status_code
+            == 400
+        )
 
 
 class TestSigningInWithAPasskey:
@@ -601,7 +808,11 @@ class TestSigningInWithAPasskey:
         device, _ = enrol_with_passkey(client, config, OLU)
         elsewhere = browser(server)
         options = elsewhere.post("/auth/passkey/begin").json()["data"]["options"]
-        assert options["rpId"] == RP_ID and options["userVerification"] == "required" and options["allowCredentials"] == []
+        assert (
+            options["rpId"] == RP_ID
+            and options["userVerification"] == "required"
+            and options["allowCredentials"] == []
+        )
         reply = elsewhere.post("/auth/passkey/finish", json={"credential": device.get(options)})
         assert reply.status_code == 200, reply.text
         me = elsewhere.get("/auth/me").json()["data"]["person"]
@@ -614,8 +825,15 @@ class TestSigningInWithAPasskey:
         client, config = server
         device, _ = enrol_with_passkey(client, config, OLU)
         options = client.post("/auth/passkey/begin").json()["data"]["options"]
-        assert browser(server).post("/auth/passkey/finish", json={"credential": device.get(options)}).status_code == 200
-        replay = browser(server).post("/auth/passkey/finish", json={"credential": device.get(options)})  # signed afresh, with a higher count
+        assert (
+            browser(server)
+            .post("/auth/passkey/finish", json={"credential": device.get(options)})
+            .status_code
+            == 200
+        )
+        replay = browser(server).post(
+            "/auth/passkey/finish", json={"credential": device.get(options)}
+        )  # signed afresh, with a higher count
         assert replay.status_code == 401 and "run out" in replay.json()["message"]
 
     def test_a_challenge_answered_just_inside_five_minutes_works(self, server, monkeypatch):
@@ -624,14 +842,21 @@ class TestSigningInWithAPasskey:
         before = time.time()
         options = client.post("/auth/passkey/begin").json()["data"]["options"]
         stop_clock(monkeypatch, before + 299)
-        assert browser(server).post("/auth/passkey/finish", json={"credential": device.get(options)}).status_code == 200
+        assert (
+            browser(server)
+            .post("/auth/passkey/finish", json={"credential": device.get(options)})
+            .status_code
+            == 200
+        )
 
     def test_a_challenge_older_than_five_minutes_is_refused(self, server, monkeypatch):
         client, config = server
         device, _ = enrol_with_passkey(client, config, OLU)
         options = client.post("/auth/passkey/begin").json()["data"]["options"]
         stop_clock(monkeypatch, time.time() + 301)
-        late = browser(server).post("/auth/passkey/finish", json={"credential": device.get(options)})
+        late = browser(server).post(
+            "/auth/passkey/finish", json={"credential": device.get(options)}
+        )
         assert late.status_code == 401 and "run out" in late.json()["message"]
 
     def test_a_copied_passkey_is_refused_when_its_count_does_not_go_up(self, server):
@@ -641,7 +866,9 @@ class TestSigningInWithAPasskey:
         assert sign_in(browser(server), device).status_code == 200
         stolen = sign_in(browser(server), copy)
         assert stolen.status_code == 401 and "copy" in stolen.json()["message"]
-        assert sign_in(browser(server), device).status_code == 200, "the device that kept counting carries on"
+        assert sign_in(browser(server), device).status_code == 200, (
+            "the device that kept counting carries on"
+        )
 
     def test_a_device_that_keeps_no_count_signs_in_every_time(self, server):
         client, config = server
@@ -659,25 +886,39 @@ class TestSigningInWithAPasskey:
             {"key": new_key()},
             {"user_handle": b"somebody else!!!"},
         ],
-        ids=["a look-alike address", "another site's passkey", "no PIN asked", "nobody there", "another key", "another person's handle"],
+        ids=[
+            "a look-alike address",
+            "another site's passkey",
+            "no PIN asked",
+            "nobody there",
+            "another key",
+            "another person's handle",
+        ],
     )
     def test_a_reply_wrong_in_any_one_way_signs_nobody_in(self, server, forge):
         client, config = server
         device, _ = enrol_with_passkey(client, config, OLU)
         elsewhere = browser(server)
         assert sign_in(elsewhere, device, **forge).status_code == 401
-        assert elsewhere.get("/auth/me").status_code == 401 and "__Host-vx_sid" not in elsewhere.cookies
+        assert (
+            elsewhere.get("/auth/me").status_code == 401
+            and "__Host-vx_sid" not in elsewhere.cookies
+        )
 
     def test_a_passkey_nobody_registered_signs_nobody_in(self, server):
         stranger = sign_in(browser(server), FakePasskey(PUBLIC))
         assert stranger.status_code == 401 and "not registered here" in stranger.json()["message"]
         assert ("signin_failed", None, "passkey") in logged(server)
 
-    def test_somebody_who_loses_their_only_passkey_gets_in_with_a_recovery_code_and_makes_a_new_one(self, server):
+    def test_somebody_who_loses_their_only_passkey_gets_in_with_a_recovery_code_and_makes_a_new_one(
+        self, server
+    ):
         client, config = server
         _, done = enrol_with_passkey(client, config, OLU)
         fresh = browser(server)
-        back = fresh.post("/auth/email/verify", json={"email": OLU, "code": done["recovery_codes"][0]})
+        back = fresh.post(
+            "/auth/email/verify", json={"email": OLU, "code": done["recovery_codes"][0]}
+        )
         assert back.status_code == 200 and back.json()["data"]["recovery_codes_left"] == 9
         replacement = FakePasskey(PUBLIC)
         assert add_passkey(fresh, replacement).status_code == 200
@@ -688,21 +929,36 @@ class TestAddingAndRemovingPasskeys:
     def test_a_signed_in_person_adds_a_second_passkey_and_either_one_signs_in(self, server):
         olu, first = person(server, OLU)
         options = olu.post("/auth/me/passkeys/begin", headers=csrf(olu)).json()["data"]["options"]
-        assert [c["id"] for c in options["excludeCredentials"]] == [b64u(first.credential_id)], "so the device that has one makes no second"
+        assert [c["id"] for c in options["excludeCredentials"]] == [b64u(first.credential_id)], (
+            "so the device that has one makes no second"
+        )
         assert unb64u(options["user"]["id"]) == first.user_handle, "one person, one handle"
         second = FakePasskey(PUBLIC)
-        added = olu.post("/auth/me/passkeys/finish", json={"credential": second.create(options), "name": "Work laptop"}, headers=csrf(olu))
+        added = olu.post(
+            "/auth/me/passkeys/finish",
+            json={"credential": second.create(options), "name": "Work laptop"},
+            headers=csrf(olu),
+        )
         assert added.status_code == 200, added.text
-        assert added.json()["data"]["id"] == b64u(second.credential_id) and added.json()["data"]["name"] == "Work laptop"
+        assert (
+            added.json()["data"]["id"] == b64u(second.credential_id)
+            and added.json()["data"]["name"] == "Work laptop"
+        )
         assert passkey_ids(olu) == {b64u(first.credential_id), b64u(second.credential_id)}
         assert sign_in(browser(server), first).status_code == 200
         assert sign_in(browser(server), second).status_code == 200
 
     def test_a_passkey_with_no_name_is_called_after_the_browser_it_was_made_in(self, server):
         olu, _ = person(server, OLU)
-        edge = {"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 Edg/126.0"}
+        edge = {
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 Edg/126.0"
+        }
         options = olu.post("/auth/me/passkeys/begin", headers=csrf(olu)).json()["data"]["options"]
-        added = olu.post("/auth/me/passkeys/finish", json={"credential": FakePasskey(PUBLIC).create(options)}, headers={**csrf(olu), **edge})
+        added = olu.post(
+            "/auth/me/passkeys/finish",
+            json={"credential": FakePasskey(PUBLIC).create(options)},
+            headers={**csrf(olu), **edge},
+        )
         assert added.json()["data"]["name"] == "Edge on Windows"
 
     def test_adding_one_needs_a_session_and_the_forgery_token(self, server):
@@ -714,7 +970,11 @@ class TestAddingAndRemovingPasskeys:
         olu, _ = person(server, OLU)
         vi, _ = person(server, VI)
         options = olu.post("/auth/me/passkeys/begin", headers=csrf(olu)).json()["data"]["options"]
-        wrong = vi.post("/auth/me/passkeys/finish", json={"credential": FakePasskey(PUBLIC).create(options)}, headers=csrf(vi))
+        wrong = vi.post(
+            "/auth/me/passkeys/finish",
+            json={"credential": FakePasskey(PUBLIC).create(options)},
+            headers=csrf(vi),
+        )
         assert wrong.status_code == 400
         assert len(passkey_ids(olu)) == 1 and len(passkey_ids(vi)) == 1
 
@@ -746,7 +1006,9 @@ class TestAddingAndRemovingPasskeys:
     def test_nobody_removes_somebody_elses_passkey(self, server):
         _, device = person(server, OLU)
         vi = browser(server)
-        enrol_with_code(vi, server[1], VI)  # an authenticator, so the only-way-in rule does not answer first
+        enrol_with_code(
+            vi, server[1], VI
+        )  # an authenticator, so the only-way-in rule does not answer first
         assert remove(vi, device).status_code == 404
         assert sign_in(browser(server), device).status_code == 200
 
@@ -757,10 +1019,18 @@ class TestConfirmingItIsYouWithAPasskey:
         later(monkeypatch, ELEVEN_MINUTES)
         asked = make_a_key(ada)
         assert asked.status_code == 403
-        assert asked.json()["data"]["step_up"] is True and asked.json()["data"]["ways"] == ["passkey"]
-        options = ada.post("/auth/step-up/passkey/begin", headers=csrf(ada)).json()["data"]["options"]
+        assert asked.json()["data"]["step_up"] is True and asked.json()["data"]["ways"] == [
+            "passkey"
+        ]
+        options = ada.post("/auth/step-up/passkey/begin", headers=csrf(ada)).json()["data"][
+            "options"
+        ]
         assert [c["id"] for c in options["allowCredentials"]] == [b64u(device.credential_id)]
-        confirmed = ada.post("/auth/step-up/passkey/finish", json={"credential": device.get(options)}, headers=csrf(ada))
+        confirmed = ada.post(
+            "/auth/step-up/passkey/finish",
+            json={"credential": device.get(options)},
+            headers=csrf(ada),
+        )
         assert confirmed.status_code == 200, confirmed.text
         assert make_a_key(ada).status_code == 200
         assert ("step_up", ADA, "passkey") in logged(server)
@@ -773,7 +1043,9 @@ class TestConfirmingItIsYouWithAPasskey:
         asked = olu.post("/auth/me/passkeys/begin", headers=csrf(olu))
         assert asked.status_code == 403 and asked.json()["data"]["ways"] == ["passkey", "code"]
 
-    def test_a_session_left_open_cannot_change_its_passkeys_without_a_fresh_check(self, server, monkeypatch):
+    def test_a_session_left_open_cannot_change_its_passkeys_without_a_fresh_check(
+        self, server, monkeypatch
+    ):
         olu, device = person(server, OLU)
         later(monkeypatch, ELEVEN_MINUTES)
         for asked in (olu.post("/auth/me/passkeys/begin", headers=csrf(olu)), remove(olu, device)):
@@ -793,11 +1065,25 @@ class TestConfirmingItIsYouWithAPasskey:
         ada, device = person(server, ADA)
         later(monkeypatch, ELEVEN_MINUTES)
         for_signing_in = browser(server).post("/auth/passkey/begin").json()["data"]["options"]
-        assert ada.post("/auth/step-up/passkey/finish", json={"credential": device.get(for_signing_in)}, headers=csrf(ada)).status_code == 401
+        assert (
+            ada.post(
+                "/auth/step-up/passkey/finish",
+                json={"credential": device.get(for_signing_in)},
+                headers=csrf(ada),
+            ).status_code
+            == 401
+        )
         assert make_a_key(ada).status_code == 403
-        for_confirming = ada.post("/auth/step-up/passkey/begin", headers=csrf(ada)).json()["data"]["options"]
+        for_confirming = ada.post("/auth/step-up/passkey/begin", headers=csrf(ada)).json()["data"][
+            "options"
+        ]
         elsewhere = browser(server)
-        assert elsewhere.post("/auth/passkey/finish", json={"credential": device.get(for_confirming)}).status_code == 401
+        assert (
+            elsewhere.post(
+                "/auth/passkey/finish", json={"credential": device.get(for_confirming)}
+            ).status_code
+            == 401
+        )
         assert elsewhere.get("/auth/me").status_code == 401
 
 
@@ -806,14 +1092,29 @@ class TestPasskeysAreForPeopleOnTheList:
         monkeypatch.delenv("VECTRIXDB_API_KEY", raising=False)
         root = tmp_path / "db"
         config = _config(root, methods=("oidc",), oidc=_oidc(), users=((ADA, "admin"),))
-        app = create_app(db_path=str(root), enable_dashboard=False, signin=config, oidc_transport=FakeIdp().transport)
+        app = create_app(
+            db_path=str(root),
+            enable_dashboard=False,
+            signin=config,
+            oidc_transport=FakeIdp().transport,
+        )
         with TestClient(app, base_url=PUBLIC) as client:
-            assert "email" not in client.get("/auth/me").json()["data"]["methods"], "so the page shows no passkey button"
+            assert "email" not in client.get("/auth/me").json()["data"]["methods"], (
+                "so the page shows no passkey button"
+            )
             answered = FakePasskey(PUBLIC).create({"challenge": b64u(os.urandom(32))})
             assert client.post("/auth/passkey/begin").status_code == 404
-            assert client.post("/auth/passkey/finish", json={"credential": answered}).status_code == 404
+            assert (
+                client.post("/auth/passkey/finish", json={"credential": answered}).status_code
+                == 404
+            )
             assert client.post("/auth/passkey/enrol/begin", json={"token": "t"}).status_code == 404
-            assert client.post("/auth/passkey/enrol/finish", json={"ticket": "t", "credential": answered}).status_code == 404
+            assert (
+                client.post(
+                    "/auth/passkey/enrol/finish", json={"ticket": "t", "credential": answered}
+                ).status_code
+                == 404
+            )
 
     def test_beside_single_sign_on_there_are_no_passkeys_for_anybody(self, both, monkeypatch):
         client, config, idp = both
@@ -826,24 +1127,35 @@ class TestPasskeysAreForPeopleOnTheList:
         assert client.post("/auth/step-up/passkey/begin", headers=csrf(client)).status_code == 404
         later(monkeypatch, ELEVEN_MINUTES)
         stale = make_a_key(client)
-        assert stale.status_code == 403 and stale.json()["data"]["ways"] == ["sso"], "the provider again: they keep no passkey to offer"
+        assert stale.status_code == 403 and stale.json()["data"]["ways"] == ["sso"], (
+            "the provider again: they keep no passkey to offer"
+        )
 
-    def test_somebody_let_in_by_the_settings_list_alone_has_no_passkeys_here(self, tmp_path, monkeypatch):
+    def test_somebody_let_in_by_the_settings_list_alone_has_no_passkeys_here(
+        self, tmp_path, monkeypatch
+    ):
         """On VECTRIXDB_OIDC_ALLOWED_EMAILS and not on the People list: single sign-on is their only way."""
         monkeypatch.delenv("VECTRIXDB_API_KEY", raising=False)
         idp = FakeIdp()
         root = tmp_path / "db"
         oidc = OidcConfig(
-            issuer=ISSUER, client_id="vectrixdb", client_secret="s3cret", role_map={"g-admins": "admin", "g-ops": "operator"},
+            issuer=ISSUER,
+            client_id="vectrixdb",
+            client_secret="s3cret",
+            role_map={"g-admins": "admin", "g-ops": "operator"},
             allowed_emails=(ADA,),
         )
         config = _config(root, methods=("oidc", "email"), oidc=oidc, users=((OLU, "admin"),))
-        app = create_app(db_path=str(root), enable_dashboard=False, signin=config, oidc_transport=idp.transport)
+        app = create_app(
+            db_path=str(root), enable_dashboard=False, signin=config, oidc_transport=idp.transport
+        )
         with TestClient(app, base_url=PUBLIC, follow_redirects=False) as client:
             sso_sign_in(client, idp)
             assert client.get("/auth/me").json()["data"]["person"]["email"] == ADA
             assert client.post("/auth/me/passkeys/begin", headers=csrf(client)).status_code == 400
-            assert client.post("/auth/step-up/passkey/begin", headers=csrf(client)).status_code == 400
+            assert (
+                client.post("/auth/step-up/passkey/begin", headers=csrf(client)).status_code == 400
+            )
             ways = client.get("/auth/me/ways").json()["data"]
             assert ways["local"] is False and ways["listed"] is False and "passkeys" not in ways
             later(monkeypatch, ELEVEN_MINUTES)
@@ -866,8 +1178,15 @@ class TestPasskeysAreForPeopleOnTheList:
         _, vis_passkey = person(server, VI)
         assert ada.delete(f"/auth/people/{VI}", headers=csrf(ada)).status_code == 200
         assert sign_in(browser(server), vis_passkey).status_code == 401
-        assert ada.post("/auth/people", json={"email": VI, "role": "viewer"}, headers=csrf(ada)).status_code == 200
-        assert sign_in(browser(server), vis_passkey).status_code == 401, "the address came back, the old passkey did not"
+        assert (
+            ada.post(
+                "/auth/people", json={"email": VI, "role": "viewer"}, headers=csrf(ada)
+            ).status_code
+            == 200
+        )
+        assert sign_in(browser(server), vis_passkey).status_code == 401, (
+            "the address came back, the old passkey did not"
+        )
 
     def test_a_disabled_person_is_not_signed_in_by_their_passkey(self, server):
         olu, device = person(server, OLU)
@@ -876,16 +1195,25 @@ class TestPasskeysAreForPeopleOnTheList:
         refused = sign_in(browser(server), device)
         assert refused.status_code == 401 and "__Host-vx_sid" not in refused.cookies
 
-    def test_a_passkey_made_before_single_sign_on_came_stops_working_with_it(self, tmp_path, monkeypatch):
+    def test_a_passkey_made_before_single_sign_on_came_stops_working_with_it(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.delenv("VECTRIXDB_API_KEY", raising=False)
         root = tmp_path / "db"
         config = _config(root)
-        with TestClient(create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC) as first:
+        with TestClient(
+            create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC
+        ) as first:
             adas_passkey, _ = enrol_with_passkey(first, config, ADA)
         first.app.state.signin.close()
         # The server starts again with single sign-on. The passkey is still in the file, and no route takes it.
         with_sso = _config(root, methods=("oidc", "email"), oidc=_oidc())
-        app = create_app(db_path=str(root), enable_dashboard=False, signin=with_sso, oidc_transport=FakeIdp().transport)
+        app = create_app(
+            db_path=str(root),
+            enable_dashboard=False,
+            signin=with_sso,
+            oidc_transport=FakeIdp().transport,
+        )
         with TestClient(app, base_url=PUBLIC) as client:
             assert client.post("/auth/passkey/begin").status_code == 404
             assert client.post("/auth/passkey/finish", json={"credential": {}}).status_code == 404

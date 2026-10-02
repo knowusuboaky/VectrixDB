@@ -89,7 +89,10 @@ def _nowhere(*args, **kwargs):
 
 
 def listed(*allowed: str) -> OidcClient:
-    return OidcClient(OidcConfig(issuer=ISSUER, client_id="vectrixdb", role_map=ROLES, allowed_emails=allowed), transport=_nowhere)
+    return OidcClient(
+        OidcConfig(issuer=ISSUER, client_id="vectrixdb", role_map=ROLES, allowed_emails=allowed),
+        transport=_nowhere,
+    )
 
 
 @pytest.fixture
@@ -100,9 +103,20 @@ def sso(tmp_path, monkeypatch):
 
     def serve(*allowed: str):
         idp = FakeIdp()
-        oidc = OidcConfig(issuer=ISSUER, client_id="vectrixdb", client_secret="s3cret", role_map=ROLES, allowed_emails=allowed)
+        oidc = OidcConfig(
+            issuer=ISSUER,
+            client_id="vectrixdb",
+            client_secret="s3cret",
+            role_map=ROLES,
+            allowed_emails=allowed,
+        )
         config = _config(tmp_path / f"db{len(built)}", methods=("oidc",), oidc=oidc)
-        app = create_app(db_path=str(tmp_path / f"db{len(built)}"), enable_dashboard=False, signin=config, oidc_transport=idp.transport)
+        app = create_app(
+            db_path=str(tmp_path / f"db{len(built)}"),
+            enable_dashboard=False,
+            signin=config,
+            oidc_transport=idp.transport,
+        )
         built.append(app)
         return TestClient(app, base_url=PUBLIC, follow_redirects=False), idp
 
@@ -119,7 +133,9 @@ def sign_in(client: TestClient, idp: FakeIdp, to: str = "/dashboard/#/search"):
 
 
 def refused(reply) -> str:
-    assert reply.status_code == 302 and reply.headers["location"].startswith("/dashboard/#/signin?error=")
+    assert reply.status_code == 302 and reply.headers["location"].startswith(
+        "/dashboard/#/signin?error="
+    )
     return reply.headers["location"].split("error=")[1]
 
 
@@ -138,9 +154,15 @@ def asked_of_the_provider(start) -> dict:
 
 class TestTheListIsReadFromTheEnvironment:
     def test_addresses_and_domains_split_on_commas_or_semicolons_and_tidied(self, tmp_path):
-        env = _env(VECTRIXDB_OIDC_ALLOWED_EMAILS=" Ama@Company.com;@Contractors.Company.com , bo@partner.example ;; ,")
+        env = _env(
+            VECTRIXDB_OIDC_ALLOWED_EMAILS=" Ama@Company.com;@Contractors.Company.com , bo@partner.example ;; ,"
+        )
         config = SignInConfig.from_env(tmp_path, env=env)
-        assert config.oidc.allowed_emails == ("ama@company.com", "@contractors.company.com", "bo@partner.example")
+        assert config.oidc.allowed_emails == (
+            "ama@company.com",
+            "@contractors.company.com",
+            "bo@partner.example",
+        )
 
     @pytest.mark.parametrize("value", [None, "", "  ", " ; , ;"])
     def test_unset_or_blank_means_there_is_no_list(self, tmp_path, value):
@@ -154,14 +176,23 @@ class TestTheListIsReadFromTheEnvironment:
             SignInConfig.from_env(tmp_path, env=env)
 
     def test_a_list_given_in_code_is_tidied_the_same_way(self):
-        config = OidcConfig(issuer=ISSUER, client_id="vectrixdb", role_map=ROLES, allowed_emails=["  AMA@Company.com ", "", "@Partner.Example"])
+        config = OidcConfig(
+            issuer=ISSUER,
+            client_id="vectrixdb",
+            role_map=ROLES,
+            allowed_emails=["  AMA@Company.com ", "", "@Partner.Example"],
+        )
         assert config.allowed_emails == ("ama@company.com", "@partner.example")
 
     def test_a_star_alone_is_read_as_the_groups_deciding_on_their_own(self, tmp_path):
-        assert SignInConfig.from_env(tmp_path, env=_env(VECTRIXDB_OIDC_ALLOWED_EMAILS=" * ")).oidc.allowed_emails == ("*",)
+        assert SignInConfig.from_env(
+            tmp_path, env=_env(VECTRIXDB_OIDC_ALLOWED_EMAILS=" * ")
+        ).oidc.allowed_emails == ("*",)
 
     @pytest.mark.parametrize("value", ["*,ama@company.com", "@company.com;*"])
-    def test_a_star_beside_anything_else_is_refused_since_it_would_make_the_rest_mean_nothing(self, tmp_path, value):
+    def test_a_star_beside_anything_else_is_refused_since_it_would_make_the_rest_mean_nothing(
+        self, tmp_path, value
+    ):
         with pytest.raises(ConfigurationError, match="alone"):
             SignInConfig.from_env(tmp_path, env=_env(VECTRIXDB_OIDC_ALLOWED_EMAILS=value))
 
@@ -173,7 +204,11 @@ class TestWhoTheListLetsIn:
 
     def test_a_star_lets_the_groups_decide_on_their_own(self):
         everybody = listed("*")
-        assert everybody.groups_alone and everybody.allows("anybody@anywhere.example") and everybody.allows(None)
+        assert (
+            everybody.groups_alone
+            and everybody.allows("anybody@anywhere.example")
+            and everybody.allows(None)
+        )
 
     def test_a_listed_address_in_any_case_and_with_stray_spaces(self):
         ama = listed("ama@company.com")
@@ -183,7 +218,12 @@ class TestWhoTheListLetsIn:
     def test_a_domain_lets_in_anybody_there_and_nobody_at_a_look_alike(self):
         company = listed("@company.com")
         assert company.allows("ama@company.com") and company.allows("Bo@COMPANY.com")
-        for elsewhere in ("ama@sub.company.com", "ama@evilcompany.com", "ama@company.com.evil.test", "ama@company.com@evil.test"):
+        for elsewhere in (
+            "ama@sub.company.com",
+            "ama@evilcompany.com",
+            "ama@company.com.evil.test",
+            "ama@company.com@evil.test",
+        ):
             assert not company.allows(elsewhere), elsewhere
 
     def test_an_address_and_a_domain_on_one_list(self):
@@ -222,7 +262,9 @@ class TestBothLocksMustOpen:
 
     def test_a_domain_on_the_list_lets_in_anybody_there_who_is_in_the_group(self, sso):
         client, idp = sso("@example.com")
-        idp.person.update(sub="u-2", email="Grace@Example.com", name="Grace Hopper", groups=["g-ops"])
+        idp.person.update(
+            sub="u-2", email="Grace@Example.com", name="Grace Hopper", groups=["g-ops"]
+        )
         sign_in(client, idp)
         assert signed_in_as(client) == "grace@example.com"
         other = TestClient(client.app, base_url=PUBLIC, follow_redirects=False)
@@ -238,7 +280,11 @@ class TestBothLocksMustOpen:
     def test_with_no_list_and_nobody_on_the_people_list_the_server_will_not_start(self, sso):
         with pytest.raises(ConfigurationError, match="nobody is named who may sign in") as stopped:
             sso()
-        for way_out in ("VECTRIXDB_SIGNIN_USERS", "vectrixdb people add", "VECTRIXDB_OIDC_ALLOWED_EMAILS=*"):
+        for way_out in (
+            "VECTRIXDB_SIGNIN_USERS",
+            "vectrixdb people add",
+            "VECTRIXDB_OIDC_ALLOWED_EMAILS=*",
+        ):
             assert way_out in str(stopped.value), way_out
 
     def test_an_address_the_provider_says_it_did_not_check_is_on_no_list(self, sso):
@@ -267,16 +313,26 @@ class TestBothLocksMustOpen:
 
 class TestTheButton:
     def test_it_reads_continue_with_sso_unless_told_otherwise(self, tmp_path):
-        assert OidcConfig(issuer=ISSUER, client_id="vectrixdb", default_role="viewer").label == "Continue with SSO"
+        assert (
+            OidcConfig(issuer=ISSUER, client_id="vectrixdb", default_role="viewer").label
+            == "Continue with SSO"
+        )
         assert SignInConfig.from_env(tmp_path, env=_env()).oidc.label == "Continue with SSO"
-        assert SignInConfig.from_env(tmp_path, env=_env(VECTRIXDB_OIDC_LABEL="   ")).oidc.label == "Continue with SSO"
-        named = SignInConfig.from_env(tmp_path, env=_env(VECTRIXDB_OIDC_LABEL=" Sign in with Contoso "))
+        assert (
+            SignInConfig.from_env(tmp_path, env=_env(VECTRIXDB_OIDC_LABEL="   ")).oidc.label
+            == "Continue with SSO"
+        )
+        named = SignInConfig.from_env(
+            tmp_path, env=_env(VECTRIXDB_OIDC_LABEL=" Sign in with Contoso ")
+        )
         assert named.oidc.label == "Sign in with Contoso"
 
     def test_the_page_is_told_the_label_before_anybody_signs_in(self, sso):
         client, _ = sso("*")
         reply = client.get("/auth/me")
-        assert reply.status_code == 401 and reply.json()["data"]["methods"] == {"oidc": {"label": "Continue with SSO"}}
+        assert reply.status_code == 401 and reply.json()["data"]["methods"] == {
+            "oidc": {"label": "Continue with SSO"}
+        }
 
 
 # ---------------------------------------------------------------- the prompt
@@ -293,10 +349,14 @@ class TestAskingTheProviderToAskAgain:
         assert back.status_code == 302 and back.headers["location"] == "/dashboard/"
         assert signed_in_as(client) == "ada@example.com", "and the way round still works"
 
-    @pytest.mark.parametrize("prompt", ["none", "consent", "LOGIN", "login consent", "select_account&prompt=none", ""])
+    @pytest.mark.parametrize(
+        "prompt", ["none", "consent", "LOGIN", "login consent", "select_account&prompt=none", ""]
+    )
     def test_anything_else_is_left_out(self, sso, prompt):
         client, _ = sso("*")
-        assert "prompt" not in asked_of_the_provider(client.get("/auth/oidc/start", params={"prompt": prompt}))
+        assert "prompt" not in asked_of_the_provider(
+            client.get("/auth/oidc/start", params={"prompt": prompt})
+        )
 
     def test_no_prompt_asked_for_is_no_prompt_sent(self, sso):
         client, _ = sso("*")

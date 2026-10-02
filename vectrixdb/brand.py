@@ -145,14 +145,36 @@ PALETTE = {
 #: VectrixDB's own colours, as app.css has them: what a palette leaves out is measured as these.
 _THEMES = {
     "light": {
-        "page": "#f7f5f1", "sidebar": "#fdfcf9", "card": "#ffffff", "field": "#fdfcf9", "subtle": "#f5f1e8",
-        "text": "#1a170f", "text-2": "#5f5b50", "muted": "#6f6b61", "line": "#ece9e2", "border": "#d6d1c6",
-        "success": "#0f6b50", "warning": "#a3541a", "danger": "#c0362c", "info": "#2f5f8a",
+        "page": "#f7f5f1",
+        "sidebar": "#fdfcf9",
+        "card": "#ffffff",
+        "field": "#fdfcf9",
+        "subtle": "#f5f1e8",
+        "text": "#1a170f",
+        "text-2": "#5f5b50",
+        "muted": "#6f6b61",
+        "line": "#ece9e2",
+        "border": "#d6d1c6",
+        "success": "#0f6b50",
+        "warning": "#a3541a",
+        "danger": "#c0362c",
+        "info": "#2f5f8a",
     },
     "dark": {
-        "page": "#120f09", "sidebar": "#14110a", "card": "#1a170f", "field": "#14110a", "subtle": "#242015",
-        "text": "#f7f5f1", "text-2": "#b3a99b", "muted": "#9a958a", "line": "#2a2619", "border": "#3a3527",
-        "success": "#7ec97e", "warning": "#e59a5c", "danger": "#d3736a", "info": "#8fb4d9",
+        "page": "#120f09",
+        "sidebar": "#14110a",
+        "card": "#1a170f",
+        "field": "#14110a",
+        "subtle": "#242015",
+        "text": "#f7f5f1",
+        "text-2": "#b3a99b",
+        "muted": "#9a958a",
+        "line": "#2a2619",
+        "border": "#3a3527",
+        "success": "#7ec97e",
+        "warning": "#e59a5c",
+        "danger": "#d3736a",
+        "info": "#8fb4d9",
     },
 }
 #: Each ink, and the grounds it is written on.
@@ -226,7 +248,12 @@ def _ink_on(rgb: tuple[int, int, int]) -> str:
     return "#ffffff" if contrast(rgb, _WHITE) >= contrast(rgb, _INK_DARK) else "#1a170f"
 
 
-def _toward(rgb: tuple[int, int, int], target: tuple[int, int, int], *grounds: tuple[int, int, int], wanted: float = 4.5) -> tuple[float, float, float]:
+def _toward(
+    rgb: tuple[int, int, int],
+    target: tuple[int, int, int],
+    *grounds: tuple[int, int, int],
+    wanted: float = 4.5,
+) -> tuple[float, float, float]:
     """The accent, moved toward ``target`` only as far as it takes to read on every one of ``grounds``."""
     for step in range(0, 101):
         t = step / 100
@@ -288,14 +315,20 @@ def _data_url(name: str, value: str) -> bytes:
     """The image inside ``data:[type][;base64],...``. The type it claims is not trusted: the bytes are sniffed like a file's."""
     head, comma, body = value.partition(",")
     if not comma:
-        raise ConfigurationError(f"{name} starts like a data: address and has no comma before the image. Write it as data:image/svg+xml;base64,...")
+        raise ConfigurationError(
+            f"{name} starts like a data: address and has no comma before the image. Write it as data:image/svg+xml;base64,..."
+        )
     if len(body) > MAX_LOGO_BYTES * 2:
-        raise ConfigurationError(f"{name}: the logo is over {MAX_LOGO_BYTES // 1024} KB. Keep it under {MAX_LOGO_BYTES // 1024} KB")
+        raise ConfigurationError(
+            f"{name}: the logo is over {MAX_LOGO_BYTES // 1024} KB. Keep it under {MAX_LOGO_BYTES // 1024} KB"
+        )
     if head.lower().endswith(";base64"):
         try:
             return base64.b64decode("".join(body.split()), validate=True)
         except (binascii.Error, ValueError) as exc:
-            raise ConfigurationError(f"{name} says base64 and what follows is not base64: {exc}") from exc
+            raise ConfigurationError(
+                f"{name} says base64 and what follows is not base64: {exc}"
+            ) from exc
     return unquote_to_bytes(body)
 
 
@@ -311,7 +344,9 @@ def _logo(env: Mapping[str, str], name: str) -> Optional[Logo]:
         except OSError as exc:
             raise ConfigurationError(f"{name} names {path}, which cannot be read: {exc}") from exc
     if len(data) > MAX_LOGO_BYTES:
-        raise ConfigurationError(f"{name}: the logo is {len(data) // 1024} KB. Keep it under {MAX_LOGO_BYTES // 1024} KB")
+        raise ConfigurationError(
+            f"{name}: the logo is {len(data) // 1024} KB. Keep it under {MAX_LOGO_BYTES // 1024} KB"
+        )
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         mime, size = "image/png", _png_size(data)
     elif data.startswith(b"\xff\xd8\xff"):
@@ -332,9 +367,16 @@ def _logo(env: Mapping[str, str], name: str) -> Optional[Logo]:
         raise ConfigurationError(f"{name}: {path} could not be read as an image")
     width, height = size
     if min(width, height) < MIN_LOGO_PX:
-        raise ConfigurationError(f"{name}: the logo is {width}x{height}. Use one at least {MIN_LOGO_PX} pixels on each side")
+        raise ConfigurationError(
+            f"{name}: the logo is {width}x{height}. Use one at least {MIN_LOGO_PX} pixels on each side"
+        )
     if max(width, height) > 2 * min(width, height):
-        logger.warning("%s is %sx%s. A square logo fits the folded sidebar and the browser tab best", name, width, height)
+        logger.warning(
+            "%s is %sx%s. A square logo fits the folded sidebar and the browser tab best",
+            name,
+            width,
+            height,
+        )
     return Logo(data=data, mime=mime, path=path)
 
 
@@ -351,24 +393,38 @@ def _palette(env: Mapping[str, str]) -> dict:
         try:
             text = Path(given).read_text(encoding="utf-8")
         except OSError as exc:
-            raise ConfigurationError(f"VECTRIXDB_BRAND_PALETTE names {given}, which cannot be read: {exc}") from exc
+            raise ConfigurationError(
+                f"VECTRIXDB_BRAND_PALETTE names {given}, which cannot be read: {exc}"
+            ) from exc
     try:
         palette = json.loads(text)
     except ValueError as exc:
-        raise ConfigurationError(f'VECTRIXDB_BRAND_PALETTE must be JSON, for example {{"light": {{"page": "#f4f6f4"}}}}: {exc}') from exc
+        raise ConfigurationError(
+            f'VECTRIXDB_BRAND_PALETTE must be JSON, for example {{"light": {{"page": "#f4f6f4"}}}}: {exc}'
+        ) from exc
     if not isinstance(palette, dict) or not palette:
-        raise ConfigurationError('VECTRIXDB_BRAND_PALETTE is an object with "light", "dark" or both')
+        raise ConfigurationError(
+            'VECTRIXDB_BRAND_PALETTE is an object with "light", "dark" or both'
+        )
     out: dict = {}
     for theme, colours in palette.items():
         if theme not in _THEMES:
-            raise ConfigurationError(f"VECTRIXDB_BRAND_PALETTE names the theme {theme!r}. The themes are light and dark")
+            raise ConfigurationError(
+                f"VECTRIXDB_BRAND_PALETTE names the theme {theme!r}. The themes are light and dark"
+            )
         if not isinstance(colours, dict):
-            raise ConfigurationError(f"VECTRIXDB_BRAND_PALETTE: {theme} is an object of colours by name")
+            raise ConfigurationError(
+                f"VECTRIXDB_BRAND_PALETTE: {theme} is an object of colours by name"
+            )
         for key, colour in colours.items():
             if key not in PALETTE:
-                raise ConfigurationError(f"VECTRIXDB_BRAND_PALETTE names {key!r} in {theme}. What it can set is {', '.join(PALETTE)}")
+                raise ConfigurationError(
+                    f"VECTRIXDB_BRAND_PALETTE names {key!r} in {theme}. What it can set is {', '.join(PALETTE)}"
+                )
             if not isinstance(colour, str) or not _HEX.match(colour.strip()):
-                raise ConfigurationError(f"VECTRIXDB_BRAND_PALETTE: {theme} {key} is {colour!r}. Write it as #rrggbb")
+                raise ConfigurationError(
+                    f"VECTRIXDB_BRAND_PALETTE: {theme} {key} is {colour!r}. Write it as #rrggbb"
+                )
         out[theme] = {key: colour.strip().lower() for key, colour in colours.items()}
         seen = {**_THEMES[theme], **out[theme]}
         for ink, grounds in _READS_ON.items():
@@ -398,8 +454,12 @@ class Brand:
     @property
     def custom(self) -> bool:
         return (
-            self.name != "VectrixDB" or self.logo is not None or self.accent is not None
-            or self.holder != HOLDER or self.wordmark or bool(self.palette)
+            self.name != "VectrixDB"
+            or self.logo is not None
+            or self.accent is not None
+            or self.holder != HOLDER
+            or self.wordmark
+            or bool(self.palette)
         )
 
     @property
@@ -411,26 +471,44 @@ class Brand:
         env = os.environ if env is None else env
         name = " ".join(str(env.get("VECTRIXDB_BRAND_NAME", "") or "").split())
         if len(name) > 40:
-            raise ConfigurationError("VECTRIXDB_BRAND_NAME is over 40 characters. It sits beside a logo in a narrow sidebar")
+            raise ConfigurationError(
+                "VECTRIXDB_BRAND_NAME is over 40 characters. It sits beside a logo in a narrow sidebar"
+            )
         accent = str(env.get("VECTRIXDB_BRAND_ACCENT", "") or "").strip() or None
         if accent is not None and not _HEX.match(accent):
-            raise ConfigurationError(f"VECTRIXDB_BRAND_ACCENT is {accent!r}. Write it as #rrggbb, for example #0b5cad")
+            raise ConfigurationError(
+                f"VECTRIXDB_BRAND_ACCENT is {accent!r}. Write it as #rrggbb, for example #0b5cad"
+            )
         logo, dark = _logo(env, "VECTRIXDB_BRAND_LOGO"), _logo(env, "VECTRIXDB_BRAND_LOGO_DARK")
         if dark is not None and logo is None:
-            raise ConfigurationError("VECTRIXDB_BRAND_LOGO_DARK is set and VECTRIXDB_BRAND_LOGO is not. Set the light one first")
+            raise ConfigurationError(
+                "VECTRIXDB_BRAND_LOGO_DARK is set and VECTRIXDB_BRAND_LOGO is not. Set the light one first"
+            )
         if accent is not None and _is_red(_rgb(accent)):
-            logger.warning("the brand accent %s is close to the red that means something is wrong. It is allowed", accent)
+            logger.warning(
+                "the brand accent %s is close to the red that means something is wrong. It is allowed",
+                accent,
+            )
         holder = " ".join(str(env.get("VECTRIXDB_BRAND_COPYRIGHT", "") or "").split())
         if holder.startswith("©") or holder.lower().startswith(("(c)", "copyright")):
-            raise ConfigurationError(f"VECTRIXDB_BRAND_COPYRIGHT is whose it is, {holder.lstrip('©').strip() or 'Northwind'}; the © and the year are added")
+            raise ConfigurationError(
+                f"VECTRIXDB_BRAND_COPYRIGHT is whose it is, {holder.lstrip('©').strip() or 'Northwind'}; the © and the year are added"
+            )
         if len(holder) > 60:
-            raise ConfigurationError("VECTRIXDB_BRAND_COPYRIGHT is over 60 characters. It is one short line under the sidebar")
+            raise ConfigurationError(
+                "VECTRIXDB_BRAND_COPYRIGHT is over 60 characters. It is one short line under the sidebar"
+            )
         wordmark = str(env.get("VECTRIXDB_BRAND_WORDMARK", "") or "").strip().lower()
         if wordmark not in ("", "on", "off", "true", "false", "yes", "no", "1", "0"):
             raise ConfigurationError(f"VECTRIXDB_BRAND_WORDMARK is {wordmark!r}. It is on or off")
         return cls(
-            name=name or "VectrixDB", logo=logo, logo_dark=dark, accent=accent.lower() if accent else None,
-            holder=holder or HOLDER, wordmark=wordmark in ("on", "true", "yes", "1"), palette=_palette(env),
+            name=name or "VectrixDB",
+            logo=logo,
+            logo_dark=dark,
+            accent=accent.lower() if accent else None,
+            holder=holder or HOLDER,
+            wordmark=wordmark in ("on", "true", "yes", "1"),
+            palette=_palette(env),
         )
 
     def tokens(self) -> dict:
@@ -444,16 +522,28 @@ class Brand:
                     out[theme][PALETTE[key] + "-bg"] = f"rgba({r}, {g}, {b}, {_TINT[theme]})"
             if "text" in colours:
                 r, g, b = _rgb(colours["text"])
-                out[theme]["--hover"] = f"rgba({r}, {g}, {b}, {0.04 if theme == 'light' else 0.045})"
+                out[theme]["--hover"] = (
+                    f"rgba({r}, {g}, {b}, {0.04 if theme == 'light' else 0.045})"
+                )
         if self.accent:
             rgb = _rgb(self.accent)
             on_fill = _ink_on(rgb)
             r, g, b = rgb
-            for theme, target, tint in (("light", (0, 0, 0), 0.12), ("dark", (255, 255, 255), 0.18)):
+            for theme, target, tint in (
+                ("light", (0, 0, 0), 0.12),
+                ("dark", (255, 255, 255), 0.18),
+            ):
                 seen = {**_THEMES[theme], **self.palette.get(theme, {})}
                 # As text, the accent sits on the page and on cards: moved only as far as it takes to read on both.
                 shade = _toward(rgb, target, _rgb(seen["page"]), _rgb(seen["card"]))
-                out[theme].update({"--acc": _hex(shade), "--acc-fill": self.accent, "--acc-ink": on_fill, "--acc-bg": f"rgba({r}, {g}, {b}, {tint})"})
+                out[theme].update(
+                    {
+                        "--acc": _hex(shade),
+                        "--acc-fill": self.accent,
+                        "--acc-ink": on_fill,
+                        "--acc-bg": f"rgba({r}, {g}, {b}, {tint})",
+                    }
+                )
         return {theme: tokens for theme, tokens in out.items() if tokens}
 
     def css(self) -> str:
@@ -474,7 +564,9 @@ class Brand:
         """
         light = {**_THEMES["light"], **self.palette.get("light", {})}
         ink, tile = light["text"], light["page"]
-        if contrast(_rgb(ink), _rgb(tile)) < CODE_CONTRAST or _luminance(_rgb(ink)) > _luminance(_rgb(tile)):
+        if contrast(_rgb(ink), _rgb(tile)) < CODE_CONTRAST or _luminance(_rgb(ink)) > _luminance(
+            _rgb(tile)
+        ):
             ink, tile = _THEMES["light"]["text"], _THEMES["light"]["page"]
         fill = self.accent or _GOLD
         return {
@@ -525,15 +617,29 @@ class Brand:
         page = page.replace("<title>VectrixDB</title>", f"<title>{name}</title>", 1)
         page = page.replace('id="brand-name">VectrixDB<', f'id="brand-name">{name}<')
         if self.holder != HOLDER:
-            page = page.replace('id="copyline">&copy; 2026 VectrixDB<', f'id="copyline">{html.escape(self.copyright)}<')
+            page = page.replace(
+                'id="copyline">&copy; 2026 VectrixDB<',
+                f'id="copyline">{html.escape(self.copyright)}<',
+            )
         if self.wordmark:
-            page = page.replace('<div class="word"><b id="brand-name">', '<div class="word wordmark"><b id="brand-name">')
+            page = page.replace(
+                '<div class="word"><b id="brand-name">',
+                '<div class="word wordmark"><b id="brand-name">',
+            )
         if self.logo:
             images = f'<img class="logo-light" src="{html.escape(at("/brand/logo"))}" alt="">' + (
-                f'<img class="logo-dark" src="{html.escape(at("/brand/logo-dark"))}" alt="">' if self.logo_dark else ""
+                f'<img class="logo-dark" src="{html.escape(at("/brand/logo-dark"))}" alt="">'
+                if self.logo_dark
+                else ""
             )
-            page = page.replace('<div class="mark" id="brand-mark" data-icon="layers" data-size="16"></div>', f'<div class="mark logo" id="brand-mark">{images}</div>')
-            page = page.replace('<link rel="icon" href="favicon.svg">', f'<link rel="icon" href="{html.escape(at("/brand/logo"))}" type="{self.logo.mime}">')
+            page = page.replace(
+                '<div class="mark" id="brand-mark" data-icon="layers" data-size="16"></div>',
+                f'<div class="mark logo" id="brand-mark">{images}</div>',
+            )
+            page = page.replace(
+                '<link rel="icon" href="favicon.svg">',
+                f'<link rel="icon" href="{html.escape(at("/brand/logo"))}" type="{self.logo.mime}">',
+            )
         # Data, not a script: the page's policy runs no inline script, and a data
         # block is never run. A "<" is written escaped, so no name can end the block.
         told = self.public()

@@ -29,6 +29,7 @@ from ..exceptions import (
     StorageOperationError,
 )
 from .storage import (
+    RESERVED_DATABASE_NAMES,
     StorageBackend,
     StorageConfig,
     BaseStorage,
@@ -117,6 +118,20 @@ def validate_collection_name(name: str) -> str:
         raise InvalidCollectionName(
             f"Collection name must not contain a drive or stream separator: {name!r}"
         )
+    lowered = name.lower()
+    if lowered in RESERVED_DATABASE_NAMES:
+        raise InvalidCollectionName(
+            f"{name!r} is reserved: VectrixDB keeps its own {name}.db beside the collections."
+        )
+    # A collection's files sit beside the others' in the database directory:
+    # "docs.db" is the file of a collection "docs", and "docs.documents" its
+    # documents, so a name ending like that collided with them.
+    for suffix in (".db", ".db-wal", ".db-shm", ".db-journal", ".documents"):
+        if lowered.endswith(suffix):
+            raise InvalidCollectionName(
+                f"Collection name must not end in {suffix!r}: {name!r} would collide "
+                f"with another collection's files."
+            )
     if name.split(".")[0].lower() in _RESERVED_NAMES:
         raise InvalidCollectionName(f"{name!r} is a reserved device name on Windows.")
     if len(name) > 255:
@@ -313,11 +328,12 @@ class VectrixDB:
                 resource_monitor=self._resource_monitor,
             )
 
+        # Read-only opens map each index file instead of loading it, so a
+        # collection larger than memory can still be searched. Set before the
+        # storage opens, which writes nothing when it is set.
+        self.readonly = readonly
         # Initialize main database storage
         self._init_storage()
-        # Read-only opens map each index file instead of loading it, so a
-        # collection larger than memory can still be searched.
-        self.readonly = readonly
         # The copy of every chunk the collection pages read when more than one
         # process writes. Opened once; each collection gets its own view of it.
         from ..chunk_store import open_chunk_store
@@ -395,7 +411,10 @@ class VectrixDB:
             );
         """)
 
-        # Store version and config
+        # Store version and config. Not on a read-only open, which writes
+        # nothing.
+        if getattr(self, "readonly", False):
+            return
         self._db.execute(
             "INSERT OR REPLACE INTO database_meta (key, value) VALUES (?, ?)",
             ("version", __version__),
@@ -435,6 +454,9 @@ class VectrixDB:
                 text_boosts = None
                 text_language = "en"
                 shard_size = None
+                # A row written before this was kept opens with the text
+                # index, which is what every such collection had.
+                enable_text_index = True
                 if row["index_config"]:
                     try:
                         config_data = json.loads(row["index_config"])
@@ -451,6 +473,7 @@ class VectrixDB:
                         # How the collection was built. A row written before
                         # sharding existed has none, and opens unsharded.
                         shard_size = config_data.get("shard_size")
+                        enable_text_index = bool(config_data.get("enable_text_index", True))
                     except (json.JSONDecodeError, KeyError):
                         pass
 
@@ -463,6 +486,9 @@ class VectrixDB:
                         tags = []
 
                 # Skip demo collections - they should not persist across restarts
+                if tags and "demo" in tags and self.readonly:
+                    # Skipped, not deleted: a read-only open writes nothing.
+                    continue
                 if tags and "demo" in tags:
                     # Delete demo collection from database and files
                     self._db.execute("DELETE FROM collections WHERE name = ?", (row["name"],))
@@ -483,8 +509,10 @@ class VectrixDB:
                     path=self.path / row["name"] if self.path else None,
                     metric=DistanceMetric(row["metric"]),
                     description=row["description"],
+                    index_config=index_config,
                     ef_construction=index_config.hnsw_ef_construction if index_config else 200,
                     m=index_config.hnsw_m if index_config else 16,
+                    enable_text_index=enable_text_index,
                     tags=tags,
                     storage_backend=self._storage,  # Pass storage backend for vector persistence
                     text_boosts=text_boosts,
@@ -558,7 +586,9 @@ class VectrixDB:
             try:
                 config = self._storage.get_collection_config(each)
             except Exception as exc:  # noqa: BLE001 - one record that cannot be read leaves the others
-                logger.warning("collection %r in the shared backend could not be read: %s", each, exc)
+                logger.warning(
+                    "collection %r in the shared backend could not be read: %s", each, exc
+                )
                 continue
             if not config:
                 continue
@@ -568,7 +598,12 @@ class VectrixDB:
             except Exception as exc:  # noqa: BLE001 - one bad record must not stop the others opening
                 with self._lock:
                     self._failed_collections[each] = f"{type(exc).__name__}: {exc}"
-                logger.warning("collection %r in the shared backend failed to open: %s", each, exc, exc_info=True)
+                logger.warning(
+                    "collection %r in the shared backend failed to open: %s",
+                    each,
+                    exc,
+                    exc_info=True,
+                )
         return opened
 
     def _open_shared(self, name: str, config: Dict[str, Any]) -> None:
@@ -674,6 +709,13 @@ class VectrixDB:
         with self._lock:
             if name in self._collections:
                 raise ValueError(f"Collection '{name}' already exists")
+            if name in self._failed_collections:
+                # Registered and on disk, just not loadable. Making it again
+                # here opened the same broken files.
+                raise ValueError(
+                    f"Collection '{name}' already exists but failed to load "
+                    f"({self._failed_collections[name]}); delete_collection() it first"
+                )
 
             # Create collection directory
             collection_path = self.path / name if self.path else None
@@ -688,6 +730,8 @@ class VectrixDB:
                 path=collection_path,
                 metric=metric,
                 description=description,
+                # The whole config, or its ef_search never reached the index.
+                index_config=index_config,
                 ef_construction=index_config.hnsw_ef_construction,
                 m=index_config.hnsw_m,
                 enable_text_index=enable_text_index,
@@ -718,6 +762,8 @@ class VectrixDB:
                     "text_language": text_language,
                     # And so a sharded collection reopens sharded.
                     "shard_size": shard_size,
+                    # And with or without its text index, as it was made.
+                    "enable_text_index": bool(enable_text_index),
                 }
             )
 
@@ -906,6 +952,11 @@ class VectrixDB:
             True if deleted, False if not found
         """
         with self._lock:
+            if name in self._failed_collections and name not in self._collections:
+                # Nothing to close, but its record and files are there, and
+                # this was the only way to remove them.
+                self._delete_failed_collection(name)
+                return True
             if name not in self._collections:
                 return False
 
@@ -964,6 +1015,30 @@ class VectrixDB:
             del self._collections[name]
             return True
 
+    def _delete_failed_collection(self, name: str) -> None:
+        """What delete_collection does, for one that never opened."""
+        chunks = self._chunks_for(name)
+        if chunks is not None:
+            chunks.clear()
+        if getattr(self, "_collection_store", None) is not None:
+            self._collection_store.delete(name)
+        if self._storage is not None:
+            self._storage.delete_collection(name)
+        self._db.execute("DELETE FROM collections WHERE name = ?", (name,))
+        self._db.commit()
+        self._cache.delete("vectrix:collections:list")
+        try:
+            self._vector_cache.invalidate_collection(name)
+        except Exception:  # pragma: no cover - a cache that is down
+            pass
+        if self.path:
+            collection_path = self.path / name
+            if collection_path.exists():
+                import shutil
+
+                shutil.rmtree(collection_path)
+        del self._failed_collections[name]
+
     def list_collections(self) -> list[CollectionInfo]:
         """
         List all collections.
@@ -983,7 +1058,11 @@ class VectrixDB:
 
     def _follow(self, name: str) -> None:
         """With ``follow_shared``, a name this process does not know is looked for in the shared backend."""
-        if getattr(self, "_follow_shared", False) and name not in self._collections and name not in self._failed_collections:
+        if (
+            getattr(self, "_follow_shared", False)
+            and name not in self._collections
+            and name not in self._failed_collections
+        ):
             self.open_shared(name)
 
     def info(self) -> DatabaseInfo:

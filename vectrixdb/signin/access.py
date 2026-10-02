@@ -105,7 +105,9 @@ def _at(values: list, share: float) -> Optional[float]:
     if not values:
         return None
     ordered = sorted(values)
-    return round(ordered[min(len(ordered) - 1, max(0, int(share * len(ordered) + 0.999999) - 1))], 1)
+    return round(
+        ordered[min(len(ordered) - 1, max(0, int(share * len(ordered) + 0.999999) - 1))], 1
+    )
 
 
 # ============================================================================
@@ -129,7 +131,11 @@ class AccessLog:
         self.to_stdout = str(path).strip().lower() in ("stdout", "-")
         #: The append blobs the lines go to, when the log is kept in Blob; None for a file or the output.
         self.store: Any = None
-        if not self.to_stdout and (isinstance(path, AppendLog) and not isinstance(path, (str, Path)) or is_blob_address(path)):
+        if not self.to_stdout and (
+            isinstance(path, AppendLog)
+            and not isinstance(path, (str, Path))
+            or is_blob_address(path)
+        ):
             self.store = open_append_log(path, setting="VECTRIXDB_ACCESS_LOG")
         self.path = Path(str(path)) if self.store is None else None
         self._lock = threading.Lock()
@@ -202,7 +208,10 @@ class AccessLog:
         try:
             if self.to_stdout:
                 with self._lock:
-                    sys.stdout.write(json.dumps({"log": "vectrixdb.access", **line}, separators=(",", ":")) + "\n")
+                    sys.stdout.write(
+                        json.dumps({"log": "vectrixdb.access", **line}, separators=(",", ":"))
+                        + "\n"
+                    )
                     sys.stdout.flush()
             elif self.store is not None:
                 self.store.append(json.dumps(line, separators=(",", ":")))
@@ -211,11 +220,17 @@ class AccessLog:
                 with self._lock, self.path.open("a", encoding="utf-8") as out:
                     out.write(json.dumps(line, separators=(",", ":")) + "\n")
         except (OSError, ValueError) as exc:
-            raise AccessLogUnavailable(f"the access log at {self.where} could not be written: {exc}") from exc
-        except Exception as exc:  # a Blob store's own error, whatever it is: the read is refused, as for a file
+            raise AccessLogUnavailable(
+                f"the access log at {self.where} could not be written: {exc}"
+            ) from exc
+        except (
+            Exception
+        ) as exc:  # a Blob store's own error, whatever it is: the read is refused, as for a file
             if self.store is None:
                 raise
-            raise AccessLogUnavailable(f"the access log at {self.where} could not be written: {type(exc).__name__}: {exc}") from exc
+            raise AccessLogUnavailable(
+                f"the access log at {self.where} could not be written: {type(exc).__name__}: {exc}"
+            ) from exc
         return line
 
     def daily(self, days: int = 14, *, now: Optional[float] = None) -> Optional[dict]:
@@ -235,7 +250,12 @@ class AccessLog:
         today = int((time.time() if now is None else now) // 86400)
         first = today - days + 1
         counts = {name: [0] * days for name in ("searches", "signins", "refused", "denied")}
-        kinds = {"search": "searches", "signin": "signins", "signin_failed": "refused", "denied": "refused"}
+        kinds = {
+            "search": "searches",
+            "signin": "signins",
+            "signin_failed": "refused",
+            "denied": "refused",
+        }
         took: list = [[] for _ in range(days)]
         lines = self._lines(since=first * 86400)
         if lines:
@@ -253,14 +273,18 @@ class AccessLog:
                     if name == "searches" and isinstance(line.get("took_ms"), (int, float)):
                         took[day - first].append(float(line["took_ms"]))
         return {
-            "days": [time.strftime("%Y-%m-%d", time.gmtime(d * 86400)) for d in range(first, today + 1)],
+            "days": [
+                time.strftime("%Y-%m-%d", time.gmtime(d * 86400)) for d in range(first, today + 1)
+            ],
             **counts,
             # None on a day with no timed search: a line written before searches were timed has no time in it.
             "search_ms_median": [_at(values, 0.5) for values in took],
             "search_ms_p95": [_at(values, 0.95) for values in took],
         }
 
-    def readers(self, days: int = 14, top: int = 6, *, now: Optional[float] = None) -> Optional[list[dict]]:
+    def readers(
+        self, days: int = 14, top: int = 6, *, now: Optional[float] = None
+    ) -> Optional[list[dict]]:
         """Who searched and read most in the last ``days`` days, the busiest first.
 
         One row a caller: a person by their address, a key as ``key:name``,
@@ -287,12 +311,28 @@ class AccessLog:
                 event, who = line.get("event"), line.get("who")
                 if event not in ("search", "read") or not who or not first <= day <= today:
                     continue
-                row = counted.setdefault(str(who), {"who": str(who), "key": line.get("method") == "key", "searches": 0, "reads": 0})
+                row = counted.setdefault(
+                    str(who),
+                    {
+                        "who": str(who),
+                        "key": line.get("method") == "key",
+                        "searches": 0,
+                        "reads": 0,
+                    },
+                )
                 row["searches" if event == "search" else "reads"] += 1
         busiest = sorted(counted.values(), key=lambda r: (-(r["searches"] + r["reads"]), r["who"]))
         return busiest[: max(1, int(top))]
 
-    def listing(self, limit: int = 10, offset: int = 0, *, q: Optional[str] = None, event: Optional[str] = None, who: Optional[str] = None) -> tuple[list[dict], int]:
+    def listing(
+        self,
+        limit: int = 10,
+        offset: int = 0,
+        *,
+        q: Optional[str] = None,
+        event: Optional[str] = None,
+        who: Optional[str] = None,
+    ) -> tuple[list[dict], int]:
         """A page of the newest lines first, and how many match in all.
 
         ``q`` is a find: a line matches when the text is somewhere in what it
@@ -313,13 +353,18 @@ class AccessLog:
                 continue
             if who and line.get("who") != who:
                 continue
-            if needle and needle not in " ".join(str(v) for k, v in line.items() if k != "at").lower():
+            if (
+                needle
+                and needle not in " ".join(str(v) for k, v in line.items() if k != "at").lower()
+            ):
                 continue
             found.append(line)
         offset = max(0, int(offset))
         return found[offset : offset + max(1, int(limit))], len(found)
 
-    def recent(self, limit: int = 200, *, event: Optional[str] = None, who: Optional[str] = None) -> list[dict]:
+    def recent(
+        self, limit: int = 200, *, event: Optional[str] = None, who: Optional[str] = None
+    ) -> list[dict]:
         """The newest lines first. A line that does not parse is skipped, not fatal. Nothing when it goes to stdout.
 
         A Blob log is read a week back first, and all the way back only when
@@ -327,7 +372,9 @@ class AccessLog:
         """
         if self.to_stdout:
             return []
-        lines = self._lines(since=time.time() - 7 * 86400) if self.store is not None else self._lines()
+        lines = (
+            self._lines(since=time.time() - 7 * 86400) if self.store is not None else self._lines()
+        )
         if self.store is not None and len(lines) < limit:
             lines = self._lines()
         out: list[dict] = []

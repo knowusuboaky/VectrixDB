@@ -38,7 +38,13 @@ from urllib.parse import urlparse
 from ..citations import _clock
 from ..exceptions import DependencyError, ExtractionError
 from ..ingest import LoadedDocument, join_pages
-from .layout import drop_running_lines, looks_blank, mend_sentence_breaks, reading_order
+from .layout import (
+    drop_running_lines,
+    looks_blank,
+    mend_sentence_breaks,
+    paragraphs_of,
+    reading_order,
+)
 
 __all__ = [
     "AUDIO_SUFFIXES",
@@ -87,7 +93,9 @@ _OWN_LINE = re.compile(r"^(?:Speaker \d+|On screen):")
 # Minutes as pages, so a citation into a recording reads like one into a book.
 
 
-def segments_to_document(segments: Iterable[Segment], seconds_per_page: float = 60.0) -> LoadedDocument:
+def segments_to_document(
+    segments: Iterable[Segment], seconds_per_page: float = 60.0
+) -> LoadedDocument:
     """Timed speech as a document whose pages are minutes.
 
     Everything said within one minute is one paragraph, and minute ``n``
@@ -111,7 +119,9 @@ def segments_to_document(segments: Iterable[Segment], seconds_per_page: float = 
         for piece in buckets[minute]:
             if paragraph:
                 # Each voice's turn, and what the screen shows, on a line of its own.
-                paragraph += "\n" if _OWN_LINE.match(piece) or previous.startswith("On screen:") else " "
+                paragraph += (
+                    "\n" if _OWN_LINE.match(piece) or previous.startswith("On screen:") else " "
+                )
             paragraph += piece
             previous = piece
         parts.append(paragraph)
@@ -267,7 +277,10 @@ class RapidOcr:
                 result, _elapsed = model(data)
                 # Sorted by the top of each box, a page in two columns read
                 # L1 R1 L2 R2, and the words of one line came out of order.
-                return [mend_sentence_breaks(line) for line in reading_order([(r[0], str(r[1])) for r in result or []])]
+                return [
+                    mend_sentence_breaks(line)
+                    for line in reading_order([(r[0], str(r[1])) for r in result or []])
+                ]
 
             self._engine = run
         return self._engine(image)
@@ -325,11 +338,15 @@ class RapidOcr:
     def __call__(self, data: bytes, name: str) -> LoadedDocument:
         if Path(name).suffix.lower() != ".pdf":
             if self.skip_blank and looks_blank(data):
-                return LoadedDocument(text="", metadata={"ocr": True, "pages_ocr": 0, "pages_blank": 1})
-            text = "\n".join(self._lines(data))
+                return LoadedDocument(
+                    text="", metadata={"ocr": True, "pages_ocr": 0, "pages_blank": 1}
+                )
+            text = paragraphs_of(self._lines(data))
             return LoadedDocument(text=text, metadata={"ocr": True, "pages_ocr": 1})
         layer = self._text_layer(data)
-        needs = [i for i, t in enumerate(layer) if len(t.strip()) < self.min_chars] if layer else None
+        needs = (
+            [i for i, t in enumerate(layer) if len(t.strip()) < self.min_chars] if layer else None
+        )
         if needs == []:
             return self._joined(layer, [], 0)
         read: List[str] = []
@@ -350,8 +367,18 @@ class RapidOcr:
         dropped: List[str] = []
         if self.drop_running:
             page_texts, dropped = drop_running_lines(page_texts)
+        # A page the engine read is a line of text a line of print; joined
+        # back into its paragraphs, once the running lines are out of the way.
+        page_texts = [
+            paragraphs_of(page.splitlines()) if number in by_ocr else page
+            for number, page in enumerate(page_texts, start=1)
+        ]
         text, pages = join_pages(page_texts)
-        metadata: Dict[str, Any] = {"pages": len(pages), "ocr": bool(by_ocr), "pages_ocr": len(by_ocr)}
+        metadata: Dict[str, Any] = {
+            "pages": len(pages),
+            "ocr": bool(by_ocr),
+            "pages_ocr": len(by_ocr),
+        }
         if by_ocr:
             metadata["ocr_pages"] = by_ocr
         if blank:
@@ -359,8 +386,6 @@ class RapidOcr:
         if dropped:
             metadata["running_lines"] = dropped
         return LoadedDocument(text=text, pages=pages, metadata=metadata)
-
-
 
 
 class Whisper:
@@ -418,7 +443,9 @@ class _NoSound(Exception):
     """A video with no sound track: nothing was said, which is not a broken file."""
 
 
-def _moments(changes: Sequence[Tuple[float, float]], duration: float, most: int, scene: float = 0.02) -> List[float]:
+def _moments(
+    changes: Sequence[Tuple[float, float]], duration: float, most: int, scene: float = 0.02
+) -> List[float]:
     """The seconds of a video worth a frame, from how much each look at it changed, at most ``most``.
 
     ``changes`` is ``(seconds, score)``, a score from 0 for no change to 1
@@ -503,7 +530,18 @@ class Video:
             import imageio_ffmpeg
         except ImportError as exc:
             raise DependencyError("imageio-ffmpeg", "ffmpeg") from exc
-        command = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", video, "-vn", "-ac", "1", "-ar", "16000", wav]
+        command = [
+            imageio_ffmpeg.get_ffmpeg_exe(),
+            "-y",
+            "-i",
+            video,
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            wav,
+        ]
         done = subprocess.run(command, capture_output=True)  # noqa: S603 - fixed argv, no shell
         if done.returncode != 0:
             said = done.stderr.decode("utf-8", errors="replace")
@@ -529,20 +567,59 @@ class Video:
             raise DependencyError("imageio-ffmpeg", "ffmpeg") from exc
         exe = imageio_ffmpeg.get_ffmpeg_exe()
         looked = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            [exe, "-hide_banner", "-nostats", "-i", video, "-an", "-sn", "-dn",
-             "-vf", "fps=2,scale=320:-2,select='gt(scene\\,0)',metadata=print:key=lavfi.scene_score", "-f", "null", "-"],
+            [
+                exe,
+                "-hide_banner",
+                "-nostats",
+                "-i",
+                video,
+                "-an",
+                "-sn",
+                "-dn",
+                "-vf",
+                "fps=2,scale=320:-2,select='gt(scene\\,0)',metadata=print:key=lavfi.scene_score",
+                "-f",
+                "null",
+                "-",
+            ],
             capture_output=True,
         )
         said = looked.stderr.decode("utf-8", errors="replace")
-        changes = [(float(t), float(s)) for t, s in re.findall(r"pts_time:([0-9.]+)[^\n]*\n[^\n]*lavfi\.scene_score=([0-9.]+)", said)]
+        changes = [
+            (float(t), float(s))
+            for t, s in re.findall(
+                r"pts_time:([0-9.]+)[^\n]*\n[^\n]*lavfi\.scene_score=([0-9.]+)", said
+            )
+        ]
         length = re.search(r"Duration: (\d+):(\d+):([0-9.]+)", said)
-        duration = int(length.group(1)) * 3600 + int(length.group(2)) * 60 + float(length.group(3)) if length else 0.0
+        duration = (
+            int(length.group(1)) * 3600 + int(length.group(2)) * 60 + float(length.group(3))
+            if length
+            else 0.0
+        )
         duration = duration or max((t for t, _ in changes), default=0.0)
         taken: List[Tuple[float, bytes]] = []
         for seconds in _moments(changes, duration, self.max_frames, self.scene):
             drawn = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                [exe, "-hide_banner", "-loglevel", "error", "-ss", f"{seconds:.3f}", "-i", video, "-frames:v", "1",
-                 "-vf", "scale='min(1600\\,iw)':-2", "-f", "image2pipe", "-vcodec", "png", "-"],
+                [
+                    exe,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-ss",
+                    f"{seconds:.3f}",
+                    "-i",
+                    video,
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale='min(1600\\,iw)':-2",
+                    "-f",
+                    "image2pipe",
+                    "-vcodec",
+                    "png",
+                    "-",
+                ],
                 capture_output=True,
             )
             if drawn.returncode == 0 and drawn.stdout.startswith(b"\x89PNG"):
@@ -628,7 +705,9 @@ class Video:
 
 #: What the layout model writes about a page rather than on it: its running
 #: header and footer, the number printed on it, where it ends.
-_LAYOUT_COMMENT = re.compile(r'<!--\s*(PageHeader|PageFooter|PageNumber|PageBreak)(?:\s*=\s*"([^"]*)")?\s*-->', re.IGNORECASE)
+_LAYOUT_COMMENT = re.compile(
+    r'<!--\s*(PageHeader|PageFooter|PageNumber|PageBreak)(?:\s*=\s*"([^"]*)")?\s*-->', re.IGNORECASE
+)
 _LAYOUT_FIGURE = re.compile(r"<figure\b[^>]*>(.*?)</figure\s*>", re.IGNORECASE | re.DOTALL)
 _LAYOUT_CAPTION = re.compile(r"<figcaption\b[^>]*>(.*?)</figcaption\s*>", re.IGNORECASE | re.DOTALL)
 _LAYOUT_TAG = re.compile(r"<[^>]+>")
@@ -669,7 +748,13 @@ def _layout_document(
     the PDF rather than pasted in as a picture is a figure here too. Tables
     become rows, the headings it found are headings.
     """
-    from ..ingest import _apply_edits, _html_table_edits, _markdown_headings, _table_edits, figure_line
+    from ..ingest import (
+        _apply_edits,
+        _html_table_edits,
+        _markdown_headings,
+        _table_edits,
+        figure_line,
+    )
 
     pages = sorted((int(o), int(n)) for o, n in pages)
     labels: Dict[int, str] = {}
@@ -687,11 +772,24 @@ def _layout_document(
     for index, found in enumerate(_LAYOUT_FIGURE.finditer(content)):
         inside = found.group(1)
         caption_of = _LAYOUT_CAPTION.search(inside)
-        caption = " ".join(_LAYOUT_TAG.sub(" ", html.unescape(caption_of.group(1))).split()) if caption_of else ""
+        caption = (
+            " ".join(_LAYOUT_TAG.sub(" ", html.unescape(caption_of.group(1))).split())
+            if caption_of
+            else ""
+        )
         if caption_of:
-            inside = inside[: caption_of.start()] + inside[caption_of.end():]
-        words = [w for w in (" ".join(_LAYOUT_TAG.sub(" ", html.unescape(line)).split()) for line in inside.splitlines()) if w]
-        figure_id, crop = by_start.get(found.start()) or (in_order[index] if index < len(in_order) else (str(index + 1), None))
+            inside = inside[: caption_of.start()] + inside[caption_of.end() :]
+        words = [
+            w
+            for w in (
+                " ".join(_LAYOUT_TAG.sub(" ", html.unescape(line)).split())
+                for line in inside.splitlines()
+            )
+            if w
+        ]
+        figure_id, crop = by_start.get(found.start()) or (
+            in_order[index] if index < len(in_order) else (str(index + 1), None)
+        )
         src = f"figure-{figure_id}.png"
         if crop:
             images[src] = crop
@@ -702,10 +800,14 @@ def _layout_document(
         marks.append((found.start(), {"caption": line[9:-1], "src": src, "described": False}))
     text, (moved, marks) = _apply_edits(content, edits, list(pages), marks)
     marks = [(o + 2, info) for o, info in marks]
-    text, (moved, marks) = _apply_edits(text, _table_edits(text) + _html_table_edits(text), moved, marks)
+    text, (moved, marks) = _apply_edits(
+        text, _table_edits(text) + _html_table_edits(text), moved, marks
+    )
     # What the edits left: blank lines in runs, and space at either end.
     lead, end = len(text) - len(text.lstrip()), len(text.rstrip())
-    edges = ([(0, lead, "")] if lead else []) + ([(end, len(text), "")] if lead < end < len(text) else [])
+    edges = ([(0, lead, "")] if lead else []) + (
+        [(end, len(text), "")] if lead < end < len(text) else []
+    )
     text, (moved, marks) = _apply_edits(text, edges, moved, marks)
     runs = [(m.start(), m.end(), "\n\n") for m in re.finditer(r"\n[ \t]*\n(?:[ \t]*\n)+", text)]
     text, (moved, marks) = _apply_edits(text, runs, moved, marks)
@@ -772,7 +874,9 @@ class AzureDocumentIntelligence:
             if not operation:
                 return None
             model = _field(result, "model_id") or _field(result, "modelId") or self.model
-            got = self.client.get_analyze_result_figure(model_id=model, result_id=operation, figure_id=figure_id)
+            got = self.client.get_analyze_result_figure(
+                model_id=model, result_id=operation, figure_id=figure_id
+            )
             data = bytes(got) if isinstance(got, (bytes, bytearray)) else b"".join(got)
             return data or None
         except Exception:  # noqa: BLE001 - a figure without its picture keeps its words
@@ -794,7 +898,9 @@ class AzureDocumentIntelligence:
             figure_id = str(_field(figure, "id") or index)
             spans = _field(figure, "spans") or []
             start = int(_field(spans[0], "offset") or 0) if spans else None
-            figures.append((start, figure_id, self._crop(poller, result, figure_id) if cropped else None))
+            figures.append(
+                (start, figure_id, self._crop(poller, result, figure_id) if cropped else None)
+            )
         doc = _layout_document(content, pages, figures)
         doc.metadata = {"ocr": True, "pages": len(pages)}
         return doc
@@ -860,7 +966,9 @@ class AzureImageAnalysis:
         transport: Optional[Callable[..., Any]] = None,
     ) -> None:
         if not endpoint:
-            raise ValueError("endpoint is the Vision resource, like https://<name>.cognitiveservices.azure.com")
+            raise ValueError(
+                "endpoint is the Vision resource, like https://<name>.cognitiveservices.azure.com"
+            )
         self.endpoint = endpoint.rstrip("/")
         self._key = key
         self.timeout = float(timeout)
@@ -875,7 +983,9 @@ class AzureImageAnalysis:
         return f"{type(self).__name__}({self.endpoint!r})"
 
     @classmethod
-    def from_environment(cls, env: Optional[Mapping[str, str]] = None, **kwargs: Any) -> Optional["AzureImageAnalysis"]:
+    def from_environment(
+        cls, env: Optional[Mapping[str, str]] = None, **kwargs: Any
+    ) -> Optional["AzureImageAnalysis"]:
         """One built from ``AZURE_VISION_ENDPOINT`` and ``AZURE_VISION_KEY``, or None.
 
         None is a working deployment without it: a figure then keeps its
@@ -911,7 +1021,10 @@ class AzureImageAnalysis:
                 url,
                 data=image,
                 method="POST",
-                headers={"Ocp-Apim-Subscription-Key": self._key, "Content-Type": "application/octet-stream"},
+                headers={
+                    "Ocp-Apim-Subscription-Key": self._key,
+                    "Content-Type": "application/octet-stream",
+                },
             )
             with urllib.request.urlopen(request, timeout=self.timeout) as reply:  # noqa: S310 - the endpoint is the caller's
                 return json.loads(reply.read())
@@ -1062,9 +1175,9 @@ class AzureSpeech:
         safe = name.replace('"', "")
         body = (
             (
-                f"--{boundary}\r\nContent-Disposition: form-data; name=\"definition\"\r\n"
+                f'--{boundary}\r\nContent-Disposition: form-data; name="definition"\r\n'
                 f"Content-Type: application/json\r\n\r\n{definition}\r\n"
-                f"--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"{safe}\"\r\n"
+                f'--{boundary}\r\nContent-Disposition: form-data; name="audio"; filename="{safe}"\r\n'
                 f"Content-Type: application/octet-stream\r\n\r\n"
             ).encode()
             + bytes(data)
@@ -1082,26 +1195,36 @@ class AzureSpeech:
         pause = self._sleep or time.sleep
         for attempt in range(self.retries + 1):
             try:
-                status, answered, reply = transport("POST", self.endpoint + route, headers, body, self.timeout)
+                status, answered, reply = transport(
+                    "POST", self.endpoint + route, headers, body, self.timeout
+                )
             except Exception as exc:
-                raise ExtractionError(f"Azure Speech could not be reached: {exc}", route=route) from exc
+                raise ExtractionError(
+                    f"Azure Speech could not be reached: {exc}", route=route
+                ) from exc
             # A free tier's quota and a busy service answer 429 and 503 and
             # say when to come back; that is asked again, not reported.
             if int(status) not in (429, 503) or attempt == self.retries:
                 break
             said = {str(k).lower(): v for k, v in dict(answered or {}).items()}.get("retry-after")
             try:
-                wait = float(said) if said is not None else 2.0 * (2 ** attempt)
+                wait = float(said) if said is not None else 2.0 * (2**attempt)
             except ValueError:
-                wait = 2.0 * (2 ** attempt)
+                wait = 2.0 * (2**attempt)
             pause(min(wait, 30.0))
         if not 200 <= int(status) < 300:
             detail = bytes(reply or b"")[:300].decode("utf-8", errors="replace")
-            raise ExtractionError(f"Azure Speech answered {status} for {name}: {detail}", route=route, status=int(status))
+            raise ExtractionError(
+                f"Azure Speech answered {status} for {name}: {detail}",
+                route=route,
+                status=int(status),
+            )
         try:
             parsed = json.loads(bytes(reply).decode("utf-8"))
         except ValueError as exc:
-            raise ExtractionError("Azure Speech sent something that is not JSON", route=route) from exc
+            raise ExtractionError(
+                "Azure Speech sent something that is not JSON", route=route
+            ) from exc
         phrases = list(parsed.get("phrases") or [])
         voices = {phrase.get("speaker") for phrase in phrases if phrase.get("speaker") is not None}
         segments: List[Segment] = []
@@ -1155,7 +1278,9 @@ class Textract:
 
     label = "aws-textract"
 
-    def __init__(self, client: Any, poll_seconds: float = 2.0, timeout: float = 900.0, sleep: Any = None) -> None:
+    def __init__(
+        self, client: Any, poll_seconds: float = 2.0, timeout: float = 900.0, sleep: Any = None
+    ) -> None:
         self.client = client
         self.poll_seconds = float(poll_seconds)
         self.timeout = float(timeout)
@@ -1175,19 +1300,40 @@ class Textract:
         for block in blocks:
             if block.get("BlockType") == "LINE" and block.get("Text"):
                 number = int(block.get("Page") or 1)
-                box = ((block.get("Geometry") or {}).get("BoundingBox") or {}) if isinstance(block.get("Geometry"), Mapping) else {}
+                box = (
+                    ((block.get("Geometry") or {}).get("BoundingBox") or {})
+                    if isinstance(block.get("Geometry"), Mapping)
+                    else {}
+                )
                 has = all(k in box for k in ("Left", "Top", "Width", "Height"))
-                rect = (box["Left"], box["Top"], box["Left"] + box["Width"], box["Top"] + box["Height"]) if has else None
+                rect = (
+                    (
+                        box["Left"],
+                        box["Top"],
+                        box["Left"] + box["Width"],
+                        box["Top"] + box["Height"],
+                    )
+                    if has
+                    else None
+                )
                 placed[number] = placed.get(number, True) and has
                 by_page.setdefault(number, []).append((rect, str(block["Text"])))
         last = max(by_page, default=0)
         page_texts = []
         for n in range(1, last + 1):
             found = by_page.get(n, [])
-            page_texts.append("\n".join(reading_order(found) if found and placed.get(n) else [t for _, t in found]))
+            page_texts.append(
+                "\n".join(
+                    reading_order(found) if found and placed.get(n) else [t for _, t in found]
+                )
+            )
         page_texts, dropped = drop_running_lines(page_texts)
         text, pages = join_pages(page_texts)
-        metadata: Dict[str, Any] = {"ocr": True, "pages": len(pages), "ocr_pages": list(range(1, last + 1))}
+        metadata: Dict[str, Any] = {
+            "ocr": True,
+            "pages": len(pages),
+            "ocr_pages": list(range(1, last + 1)),
+        }
         if dropped:
             metadata["running_lines"] = dropped
         return LoadedDocument(text=text, pages=pages, metadata=metadata)
@@ -1212,12 +1358,16 @@ class Textract:
             status = reply.get("JobStatus")
             if status == "IN_PROGRESS":
                 if waited >= self.timeout:
-                    raise ExtractionError(f"Textract job {job} did not finish in {self.timeout:.0f} seconds")
+                    raise ExtractionError(
+                        f"Textract job {job} did not finish in {self.timeout:.0f} seconds"
+                    )
                 self._sleep(self.poll_seconds)
                 waited += self.poll_seconds
                 continue
             if status not in ("SUCCEEDED", "PARTIAL_SUCCESS"):
-                raise ExtractionError(f"Textract job {job} ended {status}: {reply.get('StatusMessage') or 'no reason given'}")
+                raise ExtractionError(
+                    f"Textract job {job} ended {status}: {reply.get('StatusMessage') or 'no reason given'}"
+                )
             blocks.extend(reply.get("Blocks") or [])
             token = reply.get("NextToken")
             if not token:
@@ -1286,9 +1436,13 @@ class Transcribe:
             if status == "COMPLETED":
                 break
             if status == "FAILED":
-                raise ExtractionError(f"Transcribe job {job} failed: {state.get('FailureReason') or 'no reason given'}")
+                raise ExtractionError(
+                    f"Transcribe job {job} failed: {state.get('FailureReason') or 'no reason given'}"
+                )
             if waited >= self.timeout:
-                raise ExtractionError(f"Transcribe job {job} did not finish in {self.timeout:.0f} seconds")
+                raise ExtractionError(
+                    f"Transcribe job {job} did not finish in {self.timeout:.0f} seconds"
+                )
             self._sleep(self.poll_seconds)
             waited += self.poll_seconds
         body = self.s3.get_object(Bucket=self.output_bucket, Key=key)["Body"].read()

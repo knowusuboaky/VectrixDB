@@ -613,6 +613,17 @@ class HybridCache(BaseCache):
 # A search cache keys on everything that changes the answer.
 
 
+def _json_key_default(value: Any) -> Any:
+    """JSON for a cache key's non-JSON values, the same on every call.
+
+    A set operand (``{"$in": {"a", "b"}}``) made json.dumps raise, and its
+    iteration order is not stable across processes, so it is sorted.
+    """
+    if isinstance(value, (set, frozenset)):
+        return sorted(value, key=repr)
+    return repr(value)
+
+
 class VectorCache:
     """
     Specialized cache for vector search results.
@@ -634,24 +645,36 @@ class VectorCache:
         return f"{self._prefix}v:{collection}:{vector_id}"
 
     def _hash_query(
-        self, query: List[float], filter: Optional[Dict] = None, limit: int = 10
+        self,
+        query: List[float],
+        filter: Optional[Dict] = None,
+        limit: int = 10,
+        options: Optional[Dict] = None,
     ) -> str:
         """Create a hash for a query.
 
         The vector is hashed as rounded float32 bytes rather than through
         JSON: a 384-float dump with a Python round() per element cost more
         than the index search it was caching. Rounding keeps near-identical
-        queries on the same key.
+        queries on the same key. ``options`` holds anything else that
+        changes the answer, such as a score threshold or ef.
         """
         vector = np.round(np.asarray(query, dtype=np.float32), 5).tobytes()
-        rest = json.dumps({"f": filter, "l": limit}, sort_keys=True).encode()
+        rest = json.dumps(
+            {"f": filter, "l": limit, "o": options}, sort_keys=True, default=_json_key_default
+        ).encode()
         return hashlib.md5(vector + rest).hexdigest()[:16]  # noqa: S324 - not security
 
     def get_search_results(
-        self, collection: str, query: List[float], filter: Optional[Dict] = None, limit: int = 10
+        self,
+        collection: str,
+        query: List[float],
+        filter: Optional[Dict] = None,
+        limit: int = 10,
+        options: Optional[Dict] = None,
     ) -> Optional[List[Dict]]:
         """Get cached search results."""
-        query_hash = self._hash_query(query, filter, limit)
+        query_hash = self._hash_query(query, filter, limit, options)
         key = self._query_key(collection, query_hash)
         return self._cache.get(key)
 
@@ -663,9 +686,10 @@ class VectorCache:
         filter: Optional[Dict] = None,
         limit: int = 10,
         ttl: int = 300,
+        options: Optional[Dict] = None,
     ) -> None:
         """Cache search results."""
-        query_hash = self._hash_query(query, filter, limit)
+        query_hash = self._hash_query(query, filter, limit, options)
         key = self._query_key(collection, query_hash)
         self._cache.set(key, results, ttl)
 

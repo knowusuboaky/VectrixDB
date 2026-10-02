@@ -111,7 +111,9 @@ def _sniff(data: bytes) -> Optional[str]:
     return None
 
 
-def _picture(data: bytes, max_side: int, formats: Sequence[str] = _CHAT_FORMATS) -> Optional[Tuple[bytes, str]]:
+def _picture(
+    data: bytes, max_side: int, formats: Sequence[str] = _CHAT_FORMATS
+) -> Optional[Tuple[bytes, str]]:
     """The picture in a form the reader takes, and its type; None when it cannot be made one.
 
     Sent as it came when it already is one, and turned into PNG or JPEG only
@@ -128,7 +130,11 @@ def _picture(data: bytes, max_side: int, formats: Sequence[str] = _CHAT_FORMATS)
     try:
         with Image.open(io.BytesIO(data)) as picture:
             picture.load()
-            if readable and max(picture.size) <= max_side and picture.mode in ("RGB", "L", "RGBA", "LA", "P"):
+            if (
+                readable
+                and max(picture.size) <= max_side
+                and picture.mode in ("RGB", "L", "RGBA", "LA", "P")
+            ):
                 return data, readable
             picture.thumbnail((max_side, max_side))
             out = io.BytesIO()
@@ -178,7 +184,8 @@ def _words(value: Any) -> List[str]:
 #: A value a model says it guessed: "about 7,100", "approximately 450". A
 #: chart's rows hold what it prints, so a guess is no value for one of them.
 GUESS_WORDS = re.compile(
-    r"\b(?:about|approximately|approx\.?|around|roughly|nearly|almost|circa|estimated|est\.)\s*[$€£¥]?\s*\(?\d", re.IGNORECASE
+    r"\b(?:about|approximately|approx\.?|around|roughly|nearly|almost|circa|estimated|est\.)\s*[$€£¥]?\s*\(?\d",
+    re.IGNORECASE,
 )
 
 
@@ -200,7 +207,10 @@ def _rows(value: Any, most: int, chart: bool = False) -> Optional[List[List[str]
         if isinstance(row, list) and any(cell is not None and str(cell).strip() for cell in row)
     ]
     if chart and rows:
-        rows = rows[:1] + [[row[0]] + ["" if GUESS_WORDS.search(cell) else cell for cell in row[1:]] for row in rows[1:]]
+        rows = rows[:1] + [
+            [row[0]] + ["" if GUESS_WORDS.search(cell) else cell for cell in row[1:]]
+            for row in rows[1:]
+        ]
         rows = rows[:1] + [row for row in rows[1:] if any(row[1:])]
     return rows[: most + 1] if len(rows) >= 2 else None
 
@@ -216,7 +226,10 @@ def _context_text(context: Mapping[str, Any]) -> str:
     if context.get("heading"):
         lines.append(f"Section: {context['heading']}")
     lines.append(f"Caption in the document: {context.get('caption') or 'none'}")
-    for key, title in (("before", "Text just before the picture"), ("after", "Text just after the picture")):
+    for key, title in (
+        ("before", "Text just before the picture"),
+        ("after", "Text just after the picture"),
+    ):
         text = str(context.get(key) or "").strip()
         if text:
             lines.append(f'{title}:\n"""\n{text}\n"""')
@@ -279,7 +292,12 @@ class ChatDescriber(ChatRoute):
 
     label = "chat-model"
     _AZURE_DEPLOYMENT = "AZURE_OPENAI_VISION_DEPLOYMENT"
-    _ROUTE = ("VECTRIXDB_DESCRIBER_URL", "VECTRIXDB_DESCRIBER_KEY", "VECTRIXDB_DESCRIBER_MODEL", "VECTRIXDB_DESCRIBER_KEY_HEADER")
+    _ROUTE = (
+        "VECTRIXDB_DESCRIBER_URL",
+        "VECTRIXDB_DESCRIBER_KEY",
+        "VECTRIXDB_DESCRIBER_MODEL",
+        "VECTRIXDB_DESCRIBER_KEY_HEADER",
+    )
     _FAILED = "did not describe a picture"
     _WITHOUT = "pictures are not described by it"
 
@@ -329,7 +347,9 @@ class ChatDescriber(ChatRoute):
         return super().azure_openai(endpoint, deployment, **kwargs)
 
     @classmethod
-    def from_environment(cls, env: Optional[Mapping[str, str]] = None, **kwargs: Any) -> Optional["ChatDescriber"]:
+    def from_environment(
+        cls, env: Optional[Mapping[str, str]] = None, **kwargs: Any
+    ) -> Optional["ChatDescriber"]:
         """One from the settings, or None when they name none.
 
         ``AZURE_OPENAI_VISION_DEPLOYMENT`` with ``AZURE_OPENAI_ENDPOINT`` is an
@@ -344,18 +364,28 @@ class ChatDescriber(ChatRoute):
     def __call__(self, image: bytes, context: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         ready = _picture(image, self.max_side)
         if ready is None:
-            logger.info("%s was not sent %s: not a picture it can read", self.label, context.get("src") or "a picture")
+            logger.info(
+                "%s was not sent %s: not a picture it can read",
+                self.label,
+                context.get("src") or "a picture",
+            )
             return None
         data, mime = ready
         messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": INSTRUCTION.format(language=self.language or SAME_LANGUAGE)},
+            {
+                "role": "system",
+                "content": INSTRUCTION.format(language=self.language or SAME_LANGUAGE),
+            },
             {
                 "role": "user",
                 "content": [
                     {"type": "text", "text": _context_text(context)},
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}", "detail": self.detail},
+                        "image_url": {
+                            "url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}",
+                            "detail": self.detail,
+                        },
                     },
                 ],
             },
@@ -372,12 +402,18 @@ class ChatDescriber(ChatRoute):
         if parsed is None:
             # A model that answered in prose still said what it saw.
             prose = " ".join(answer.split())
-            return {"description": _capped(prose, self.max_chars), "by": self.label} if prose else None
+            return (
+                {"description": _capped(prose, self.max_chars), "by": self.label} if prose else None
+            )
         if parsed.get("decorative") is True:
             return {"decorative": True, "by": self.label}
         found: Dict[str, Any] = {"by": self.label}
         words = _words(parsed.get("words"))
-        printed = _capped(f"Words in the picture: {'; '.join(words)}.", self.max_chars // 3) if words else ""
+        printed = (
+            _capped(f"Words in the picture: {'; '.join(words)}.", self.max_chars // 3)
+            if words
+            else ""
+        )
         room = self.max_chars - (len(printed) + 1 if printed else 0)
         description = _capped(" ".join(str(parsed.get("description") or "").split()), room)
         text = "\n".join(part for part in (description, printed) if part)
@@ -386,7 +422,11 @@ class ChatDescriber(ChatRoute):
         caption = " ".join(str(parsed.get("caption") or "").split()).rstrip(".")
         if caption and not str(context.get("caption") or "").strip():
             found["caption"] = caption[:160]
-        rows = _rows(parsed.get("table"), self.max_rows, chart=str(parsed.get("kind") or "").strip().lower() == "chart")
+        rows = _rows(
+            parsed.get("table"),
+            self.max_rows,
+            chart=str(parsed.get("kind") or "").strip().lower() == "chart",
+        )
         if rows:
             found["table"] = rows
         return found if len(found) > 1 else None
@@ -423,11 +463,15 @@ class WordsOnly:
             read = self.reader(data, name)
         except DependencyError as exc:
             self.available = False
-            logger.warning("%s cannot read pictures here, and is not asked again: %s", self.label, exc)
+            logger.warning(
+                "%s cannot read pictures here, and is not asked again: %s", self.label, exc
+            )
             return None
         from . import coerce
 
-        lines = [" ".join(line.split()) for line in coerce(read, name).text.splitlines() if line.strip()]
+        lines = [
+            " ".join(line.split()) for line in coerce(read, name).text.splitlines() if line.strip()
+        ]
         if not lines:
             return None
         return {"description": "The words in it read: " + "; ".join(lines) + ".", "by": self.label}
@@ -469,7 +513,12 @@ class Fallback:
             try:
                 answer = describer(image, context)
             except Exception as exc:  # noqa: BLE001 - the next one is asked instead
-                logger.warning("%s could not describe %s: %s", _label_of(describer), context.get("src") or "a picture", exc)
+                logger.warning(
+                    "%s could not describe %s: %s",
+                    _label_of(describer),
+                    context.get("src") or "a picture",
+                    exc,
+                )
                 continue
             if isinstance(answer, str):
                 answer = {"description": answer} if answer.strip() else None
@@ -496,7 +545,11 @@ def describer_from_environment(
     """
     from .engines import AzureImageAnalysis
 
-    seeing = [d for d in (ChatDescriber.from_environment(env), AzureImageAnalysis.from_environment(env)) if d is not None]
+    seeing = [
+        d
+        for d in (ChatDescriber.from_environment(env), AzureImageAnalysis.from_environment(env))
+        if d is not None
+    ]
     if not seeing:
         return None
     return Fallback(*seeing, WordsOnly(reader) if reader is not None else None)

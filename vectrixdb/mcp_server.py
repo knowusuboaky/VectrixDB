@@ -148,6 +148,7 @@ def tool_forget(
     older_than_days: Optional[float] = None,
     ids: Optional[list] = None,
     superseded: bool = False,
+    all_sessions: bool = False,
 ) -> str:
     """Delete turns by age or ids; the one memory tool that loses information."""
     # ``is not None``, not truthiness. An agent whose filter matched nothing
@@ -157,6 +158,10 @@ def tool_forget(
     # wrapper used to undo it.
     if ids is not None:
         gone = db.forget(ids=ids)
+    elif session is None and older_than_days is None and not superseded and not all_sessions:
+        # A bare call would delete every turn of every session. An agent can
+        # send one by accident, so wiping everything has to be asked for.
+        return "Forgot nothing: name ids, a session, older_than_days or superseded, or pass all_sessions=true to delete every turn."
     else:
         gone = db.forget(session=session, older_than=older_than_days, superseded=superseded)
     where = f" in session {session!r}" if session else ""
@@ -271,7 +276,8 @@ def build_server(db: Vectrix, name: str = "vectrixdb") -> Any:
         description=(
             "Delete memories for good: by ids, or the turns of a session older than "
             "older_than_days, or with superseded=true only facts a correction has "
-            "already replaced. Nothing else in this server deletes."
+            "already replaced; all_sessions=true with nothing else deletes every "
+            "turn. Nothing else in this server deletes."
         ),
     )
     def forget(
@@ -279,9 +285,15 @@ def build_server(db: Vectrix, name: str = "vectrixdb") -> Any:
         older_than_days: Optional[float] = None,
         ids: Optional[list] = None,
         superseded: bool = False,
+        all_sessions: bool = False,
     ) -> str:
         return tool_forget(
-            db, session=session, older_than_days=older_than_days, ids=ids, superseded=superseded
+            db,
+            session=session,
+            older_than_days=older_than_days,
+            ids=ids,
+            superseded=superseded,
+            all_sessions=all_sessions,
         )
 
     @server.tool(

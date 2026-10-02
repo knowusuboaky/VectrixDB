@@ -102,7 +102,11 @@ def data(tmp_path):
     """One collection with two points, for a key to read and write against."""
     root = tmp_path / "db"
     plain = Vectrix("plain", path=str(root), dimension=4, embed_fn=_embed, embedding_cache=False)
-    plain.add(["alpha", "beta"], ids=["p-alpha", "p-beta"], metadata=[{"source": "a.pdf"}, {"source": "b.pdf"}])
+    plain.add(
+        ["alpha", "beta"],
+        ids=["p-alpha", "p-beta"],
+        metadata=[{"source": "a.pdf"}, {"source": "b.pdf"}],
+    )
     plain.close()
     return root
 
@@ -129,7 +133,11 @@ def _config(root: Path, **over) -> SignInConfig:
         "methods": ("email",),
         "secrets": (SECRET,),
         "public_url": PUBLIC,
-        "users": (("ada@example.com", "admin"), ("olu@example.com", "operator"), ("grace@example.com", "operator")),
+        "users": (
+            ("ada@example.com", "admin"),
+            ("olu@example.com", "operator"),
+            ("grace@example.com", "operator"),
+        ),
         "store_path": root / "auth" / "signin.db",
         "access_log": root / "auth" / "access.jsonl",
         "sender": Mail(),
@@ -141,7 +149,9 @@ def _config(root: Path, **over) -> SignInConfig:
 @contextmanager
 def serve(root: Path, **over):
     config = _config(root, **over)
-    with TestClient(create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC) as client:
+    with TestClient(
+        create_app(db_path=str(root), enable_dashboard=False, signin=config), base_url=PUBLIC
+    ) as client:
         yield client, config
 
 
@@ -196,10 +206,14 @@ def wrong_code(secret: str) -> str:
     return next(code for code in (f"{n:06d}" for n in range(1000)) if code not in live)
 
 
-def enrol(client: TestClient, config: SignInConfig, email: str, password: Optional[str] = None) -> tuple[str, list]:
+def enrol(
+    client: TestClient, config: SignInConfig, email: str, password: Optional[str] = None
+) -> tuple[str, list]:
     """The whole first visit. Returns the authenticator secret and the recovery codes."""
     assert client.post("/auth/email/begin", json={"email": email}).status_code == 200
-    begun = client.post("/auth/email/enrol/begin", json={"token": config.sender.token()}).json()["data"]
+    begun = client.post("/auth/email/enrol/begin", json={"token": config.sender.token()}).json()[
+        "data"
+    ]
     body = {"ticket": begun["ticket"], "code": current_code(begun["secret"])}
     if password is not None:
         body["password"] = password
@@ -224,7 +238,11 @@ def _column(path: Path, column: str, email: str = "ada@example.com"):
     """What the file itself holds for this person, read around the store."""
     db = sqlite3.connect(str(path))
     try:
-        return json.loads(db.execute("SELECT data FROM records WHERE kind = 'person' AND key = ?", (email,)).fetchone()[0])[column]
+        return json.loads(
+            db.execute(
+                "SELECT data FROM records WHERE kind = 'person' AND key = ?", (email,)
+            ).fetchone()[0]
+        )[column]
     finally:
         db.close()
 
@@ -236,7 +254,11 @@ def sealing_key(secret: str) -> Fernet:
 
 def legacy_key(secret: str) -> Fernet:
     """How they were sealed before 2.3: the SHA-256 of a label and the sign-in secret, as a Fernet key."""
-    return Fernet(base64.urlsafe_b64encode(hashlib.sha256(b"vectrixdb authenticator secrets|" + secret.encode()).digest()))
+    return Fernet(
+        base64.urlsafe_b64encode(
+            hashlib.sha256(b"vectrixdb authenticator secrets|" + secret.encode()).digest()
+        )
+    )
 
 
 # --------------------------------------------------------- 1 · secrets and keys
@@ -244,38 +266,64 @@ def legacy_key(secret: str) -> Fernet:
 
 class TestWhereASecretComesFrom:
     def test_from_the_environment_without_the_spaces_around_it(self):
-        assert env_secret({"VECTRIXDB_API_KEY": "  inline-key \n"}, "VECTRIXDB_API_KEY") == "inline-key"
+        assert (
+            env_secret({"VECTRIXDB_API_KEY": "  inline-key \n"}, "VECTRIXDB_API_KEY")
+            == "inline-key"
+        )
 
     @pytest.mark.parametrize(
         "written",
         [b"from-a-file\n", b"from-a-file\r\n", b"  from-a-file\n\n"],
         ids=["a newline", "a windows line end", "spaces and blank lines"],
     )
-    def test_from_the_file_its_twin_names_without_what_an_editor_leaves_around_it(self, tmp_path, written):
+    def test_from_the_file_its_twin_names_without_what_an_editor_leaves_around_it(
+        self, tmp_path, written
+    ):
         path = tmp_path / "api-key"
         path.write_bytes(written)
-        assert env_secret({"VECTRIXDB_API_KEY_FILE": str(path)}, "VECTRIXDB_API_KEY") == "from-a-file"
+        assert (
+            env_secret({"VECTRIXDB_API_KEY_FILE": str(path)}, "VECTRIXDB_API_KEY") == "from-a-file"
+        )
 
     def test_neither_set_is_nothing_and_a_blank_value_does_not_count_as_set(self, tmp_path):
         assert env_secret({}, "VECTRIXDB_API_KEY") is None
-        assert env_secret({"VECTRIXDB_API_KEY": "  ", "VECTRIXDB_API_KEY_FILE": ""}, "VECTRIXDB_API_KEY") is None
+        assert (
+            env_secret(
+                {"VECTRIXDB_API_KEY": "  ", "VECTRIXDB_API_KEY_FILE": ""}, "VECTRIXDB_API_KEY"
+            )
+            is None
+        )
         path = tmp_path / "api-key"
         path.write_text("from-a-file", encoding="utf-8")
-        assert env_secret({"VECTRIXDB_API_KEY": " ", "VECTRIXDB_API_KEY_FILE": str(path)}, "VECTRIXDB_API_KEY") == "from-a-file"
+        assert (
+            env_secret(
+                {"VECTRIXDB_API_KEY": " ", "VECTRIXDB_API_KEY_FILE": str(path)}, "VECTRIXDB_API_KEY"
+            )
+            == "from-a-file"
+        )
 
     def test_both_set_is_refused_because_nobody_can_say_which_was_meant(self, tmp_path):
         path = tmp_path / "api-key"
         path.write_text("from-a-file", encoding="utf-8")
-        with pytest.raises(ConfigurationError, match="VECTRIXDB_API_KEY and VECTRIXDB_API_KEY_FILE are both set"):
-            env_secret({"VECTRIXDB_API_KEY": "inline", "VECTRIXDB_API_KEY_FILE": str(path)}, "VECTRIXDB_API_KEY")
+        with pytest.raises(
+            ConfigurationError, match="VECTRIXDB_API_KEY and VECTRIXDB_API_KEY_FILE are both set"
+        ):
+            env_secret(
+                {"VECTRIXDB_API_KEY": "inline", "VECTRIXDB_API_KEY_FILE": str(path)},
+                "VECTRIXDB_API_KEY",
+            )
 
     @pytest.mark.parametrize("missing", [True, False], ids=["a file that is not there", "a folder"])
     def test_a_file_that_cannot_be_read_is_refused_and_named(self, tmp_path, missing):
         target = tmp_path / "not-there" if missing else tmp_path
-        with pytest.raises(ConfigurationError, match="VECTRIXDB_SIGNIN_SECRET_FILE names .*which cannot be read"):
+        with pytest.raises(
+            ConfigurationError, match="VECTRIXDB_SIGNIN_SECRET_FILE names .*which cannot be read"
+        ):
             env_secret({"VECTRIXDB_SIGNIN_SECRET_FILE": str(target)}, "VECTRIXDB_SIGNIN_SECRET")
 
-    @pytest.mark.parametrize("written", ["", "\n", " \r\n\t"], ids=["nothing", "a newline", "only whitespace"])
+    @pytest.mark.parametrize(
+        "written", ["", "\n", " \r\n\t"], ids=["nothing", "a newline", "only whitespace"]
+    )
     def test_an_empty_file_is_refused_rather_than_read_as_no_secret(self, tmp_path, written):
         path = tmp_path / "signin-secret"
         path.write_text(written, encoding="utf-8")
@@ -289,12 +337,19 @@ class TestOneKeyForEachJob:
         assert len(cookies) == len(sealing) == 32
         assert cookies != sealing, "a value made for one job is useless for the other"
         assert derive(OLD_SECRET, "cookies") != cookies and derive(OLD_SECRET, "sealing") != sealing
-        assert derive(SECRET, "cookies") == cookies and derive(SECRET, "sealing") == sealing, "or a restart could not read what the last run wrote"
+        assert derive(SECRET, "cookies") == cookies and derive(SECRET, "sealing") == sealing, (
+            "or a restart could not read what the last run wrote"
+        )
 
     @pytest.mark.parametrize("purpose, length", [("cookies", 32), ("sealing", 32), ("sealing", 80)])
-    def test_it_is_rfc_5869_hkdf_over_sha256_with_the_salt_and_label_sealed_files_depend_on(self, purpose, length):
+    def test_it_is_rfc_5869_hkdf_over_sha256_with_the_salt_and_label_sealed_files_depend_on(
+        self, purpose, length
+    ):
         expected = HKDF(
-            algorithm=hashes.SHA256(), length=length, salt=b"vectrixdb sign-in", info=b"vectrixdb|" + purpose.encode()
+            algorithm=hashes.SHA256(),
+            length=length,
+            salt=b"vectrixdb sign-in",
+            info=b"vectrixdb|" + purpose.encode(),
         ).derive(SECRET.encode())
         assert derive(SECRET, purpose, length) == expected
 
@@ -302,7 +357,9 @@ class TestOneKeyForEachJob:
         store = SignInStore(":memory:", [SECRET])
         try:
             mac = hmac.new(derive(SECRET, "cookies"), b"value", hashlib.sha256).digest()
-            assert store.sign("value") == "value." + base64.urlsafe_b64encode(mac).decode().rstrip("=")
+            assert store.sign("value") == "value." + base64.urlsafe_b64encode(mac).decode().rstrip(
+                "="
+            )
         finally:
             store.close()
 
@@ -316,7 +373,9 @@ class TestAnApiKeyGivenAsItsHash:
         assert key_matches(KEY, KEY, None) and key_matches(KEY, None, hashed)
         assert key_matches(KEY, "another-key", hashed), "either form is enough"
         assert not key_matches("wrong", KEY, hashed) and not key_matches(KEY + " ", None, hashed)
-        assert not key_matches(hashed, None, hashed), "the hash is what the server keeps, not something to present"
+        assert not key_matches(hashed, None, hashed), (
+            "the hash is what the server keeps, not something to present"
+        )
         assert not key_matches(None, KEY, hashed) and not key_matches("", KEY, hashed)
         assert not key_matches(KEY, None, None)
 
@@ -330,17 +389,32 @@ class TestAServerThatKnowsOnlyTheHash:
         with serve(data) as (client, _):
             full = {"api-key": KEY}
             assert client.get("/api/v1/collections", headers=full).status_code == 200
-            assert client.post("/api/v1/collections", json={"name": "bykey", "dimension": 4}, headers=full).status_code == 200
+            assert (
+                client.post(
+                    "/api/v1/collections", json={"name": "bykey", "dimension": 4}, headers=full
+                ).status_code
+                == 200
+            )
             for wrong in (hash_key(KEY), KEY.upper(), "wrong"):
-                assert client.get("/api/v1/collections", headers={"api-key": wrong}).status_code == 401, wrong
+                assert (
+                    client.get("/api/v1/collections", headers={"api-key": wrong}).status_code == 401
+                ), wrong
 
     def test_the_read_only_key_given_as_its_hash_reads_and_does_not_write(self, data, monkeypatch):
         monkeypatch.setenv("VECTRIXDB_API_KEY_SHA256", hash_key(KEY))
         monkeypatch.setenv("VECTRIXDB_READ_ONLY_API_KEY_SHA256", hash_key(READ_KEY).upper())
         with serve(data) as (client, _):
             ro = {"api-key": READ_KEY}
-            assert client.get("/api/v1/collections/plain/points/p-alpha", headers=ro).status_code == 200
-            assert client.post("/api/v1/collections/plain/points", json={"points": []}, headers=ro).status_code == 403
+            assert (
+                client.get("/api/v1/collections/plain/points/p-alpha", headers=ro).status_code
+                == 200
+            )
+            assert (
+                client.post(
+                    "/api/v1/collections/plain/points", json={"points": []}, headers=ro
+                ).status_code
+                == 403
+            )
             assert client.get("/api/v1/audit", headers=ro).status_code == 403
 
     def test_with_sign_in_off_the_hash_alone_turns_the_key_on(self, data, monkeypatch):
@@ -348,20 +422,37 @@ class TestAServerThatKnowsOnlyTheHash:
         monkeypatch.setenv("VECTRIXDB_READ_ONLY_API_KEY_SHA256", hash_key(READ_KEY))
         from vectrixdb.api.server import _full_key_configured, get_api_key, get_read_only_key
 
-        assert get_api_key() is None and get_read_only_key() is None, "the server holds no key, only its hash"
+        assert get_api_key() is None and get_read_only_key() is None, (
+            "the server holds no key, only its hash"
+        )
         assert _full_key_configured()
         with TestClient(create_app(db_path=str(data), enable_dashboard=False)) as client:
             status = client.get("/auth/status").json()["data"]
             assert status["auth_enabled"] is True and status["read_only_key_enabled"] is True
             made = {"name": "made", "dimension": 4}
-            assert client.get("/api/v1/collections/plain/points/p-alpha").status_code == 200, "reads never needed the key"
+            assert client.get("/api/v1/collections/plain/points/p-alpha").status_code == 200, (
+                "reads never needed the key"
+            )
             assert client.post("/api/v1/collections", json=made).status_code == 401
-            assert client.post("/api/v1/collections", json=made, headers={"api-key": READ_KEY}).status_code == 403
-            assert client.post("/api/v1/collections", json=made, headers={"api-key": KEY}).status_code == 200
+            assert (
+                client.post(
+                    "/api/v1/collections", json=made, headers={"api-key": READ_KEY}
+                ).status_code
+                == 403
+            )
+            assert (
+                client.post("/api/v1/collections", json=made, headers={"api-key": KEY}).status_code
+                == 200
+            )
             assert client.get("/api/v1/collections/plain/policy").status_code == 403
-            assert client.get("/api/v1/collections/plain/policy", headers={"api-key": KEY}).status_code == 200
+            assert (
+                client.get("/api/v1/collections/plain/policy", headers={"api-key": KEY}).status_code
+                == 200
+            )
 
-    def test_a_key_read_from_a_file_works_without_the_newline_the_file_ends_with(self, data, monkeypatch, tmp_path):
+    def test_a_key_read_from_a_file_works_without_the_newline_the_file_ends_with(
+        self, data, monkeypatch, tmp_path
+    ):
         path = tmp_path / "api-key"
         path.write_text(KEY + "\n", encoding="utf-8")
         monkeypatch.setenv("VECTRIXDB_API_KEY_FILE", str(path))
@@ -377,7 +468,9 @@ class TestAServerThatKnowsOnlyTheHash:
         ],
         ids=["a key and a key file", "a key file that is not there", "an empty key file"],
     )
-    def test_a_mistake_in_a_key_setting_stops_the_server_before_it_starts(self, data, monkeypatch, tmp_path, settings, says):
+    def test_a_mistake_in_a_key_setting_stops_the_server_before_it_starts(
+        self, data, monkeypatch, tmp_path, settings, says
+    ):
         (tmp_path / "key").write_text(KEY, encoding="utf-8")
         (tmp_path / "empty").write_text("\n", encoding="utf-8")
         for name, value in settings.items():
@@ -390,13 +483,19 @@ class TestAServerThatKnowsOnlyTheHash:
 
 
 class TestSealing:
-    def test_the_setting_is_every_value_comma_separated_newest_first_from_the_environment_or_a_file(self, tmp_path):
+    def test_the_setting_is_every_value_comma_separated_newest_first_from_the_environment_or_a_file(
+        self, tmp_path
+    ):
         base = {"VECTRIXDB_SIGNIN": "email", "VECTRIXDB_PUBLIC_URL": PUBLIC}
-        inline = SignInConfig.from_env(tmp_path, {**base, "VECTRIXDB_SIGNIN_SECRET": f" {NEW_SECRET} , {OLD_SECRET} ,"})
+        inline = SignInConfig.from_env(
+            tmp_path, {**base, "VECTRIXDB_SIGNIN_SECRET": f" {NEW_SECRET} , {OLD_SECRET} ,"}
+        )
         assert inline.secrets == (NEW_SECRET, OLD_SECRET)
         path = tmp_path / "signin-secret"
         path.write_text(f"{NEW_SECRET},{OLD_SECRET}\n", encoding="utf-8")
-        from_file = SignInConfig.from_env(tmp_path, {**base, "VECTRIXDB_SIGNIN_SECRET_FILE": str(path)})
+        from_file = SignInConfig.from_env(
+            tmp_path, {**base, "VECTRIXDB_SIGNIN_SECRET_FILE": str(path)}
+        )
         assert from_file.secrets == (NEW_SECRET, OLD_SECRET)
 
     def test_a_secret_is_sealed_with_the_key_derived_from_the_first_value(self, tmp_path):
@@ -413,13 +512,17 @@ class TestSealing:
             with pytest.raises(InvalidToken):
                 other.decrypt(sealed)
 
-    def test_rotating_seals_everything_again_under_the_new_secret_so_the_old_one_can_go(self, tmp_path):
+    def test_rotating_seals_everything_again_under_the_new_secret_so_the_old_one_can_go(
+        self, tmp_path
+    ):
         path = tmp_path / "auth" / "signin.db"
         now = 1_800_000_000.0
         first = SignInStore(path, [OLD_SECRET])
         first.put_person("ada@example.com", "operator")
         secret = first.begin_enrolment("ada@example.com")
-        assert first.check_code("ada@example.com", totp.code_at(secret, totp.step_now(now)), confirming=True, now=now)
+        assert first.check_code(
+            "ada@example.com", totp.code_at(secret, totp.step_now(now)), confirming=True, now=now
+        )
         replacement = first.begin_replacement("ada@example.com")
         first.close()
         before = [_column(path, column) for column in ("totp_secret", "totp_pending")]
@@ -427,34 +530,51 @@ class TestSealing:
         SignInStore(path, [NEW_SECRET, OLD_SECRET]).close()
         after = [_column(path, column) for column in ("totp_secret", "totp_pending")]
         assert after[0] != before[0] and after[1] != before[1]
-        assert [sealing_key(NEW_SECRET).decrypt(value.encode()).decode() for value in after] == [secret, replacement]
+        assert [sealing_key(NEW_SECRET).decrypt(value.encode()).decode() for value in after] == [
+            secret,
+            replacement,
+        ]
 
         only_new = SignInStore(path, [NEW_SECRET])
         try:
             later = now + totp.PERIOD
-            assert only_new.check_code("ada@example.com", totp.code_at(secret, totp.step_now(later)), now=later), "a code still checks"
-            assert only_new.confirm_replacement("ada@example.com", totp.code_at(replacement, totp.step_now(later)), now=later)
+            assert only_new.check_code(
+                "ada@example.com", totp.code_at(secret, totp.step_now(later)), now=later
+            ), "a code still checks"
+            assert only_new.confirm_replacement(
+                "ada@example.com", totp.code_at(replacement, totp.step_now(later)), now=later
+            )
         finally:
             only_new.close()
 
-    def test_a_start_nothing_configured_can_open_is_refused_and_says_to_put_the_old_secret_back_second(self, tmp_path):
+    def test_a_start_nothing_configured_can_open_is_refused_and_says_to_put_the_old_secret_back_second(
+        self, tmp_path
+    ):
         path = tmp_path / "auth" / "signin.db"
         store = SignInStore(path, [OLD_SECRET])
         store.put_person("ada@example.com", "operator")
         store.begin_enrolment("ada@example.com")
         store.close()
         before = _column(path, "totp_secret")
-        with pytest.raises(ConfigurationError, match="put the old one back as the second value") as refused:
+        with pytest.raises(
+            ConfigurationError, match="put the old one back as the second value"
+        ) as refused:
             SignInStore(path, [NEW_SECRET])
         assert "VECTRIXDB_SIGNIN_SECRET=new,old" in str(refused.value)
         assert _column(path, "totp_secret") == before, "a refused start changes nothing"
         SignInStore(path, [NEW_SECRET, OLD_SECRET]).close()
-        assert sealing_key(NEW_SECRET).decrypt(_column(path, "totp_secret").encode()), "with the old one back second, it starts"
+        assert sealing_key(NEW_SECRET).decrypt(_column(path, "totp_secret").encode()), (
+            "with the old one back second, it starts"
+        )
 
     @pytest.mark.parametrize(
-        "configured", [[OLD_SECRET], [NEW_SECRET, OLD_SECRET]], ids=["the same secret", "the old secret as the second value"]
+        "configured",
+        [[OLD_SECRET], [NEW_SECRET, OLD_SECRET]],
+        ids=["the same secret", "the old secret as the second value"],
     )
-    def test_a_secret_sealed_the_way_it_was_before_2_3_is_read_and_sealed_again_the_new_way(self, tmp_path, configured):
+    def test_a_secret_sealed_the_way_it_was_before_2_3_is_read_and_sealed_again_the_new_way(
+        self, tmp_path, configured
+    ):
         path = tmp_path / "auth" / "signin.db"
         secret = totp.new_secret()
         legacy = legacy_key(OLD_SECRET).encrypt(secret.encode()).decode()
@@ -482,7 +602,9 @@ class TestSealing:
         store = SignInStore(path, [configured[0]])
         try:
             assert store.person("ada@example.com").enrolled
-            assert store.check_code("ada@example.com", totp.code_at(secret, totp.step_now(now)), now=now)
+            assert store.check_code(
+                "ada@example.com", totp.code_at(secret, totp.step_now(now)), now=now
+            )
         finally:
             store.close()
 
@@ -509,7 +631,9 @@ def shut(store: SignInStore, key: str, **how) -> None:
 
 
 class TestTheDoorStaysShutLongerEachTime:
-    def test_fifteen_minutes_then_an_hour_then_four_hours_then_a_day_and_a_day_after_that(self, clock, store):
+    def test_fifteen_minutes_then_an_hour_then_four_hours_then_a_day_and_a_day_after_that(
+        self, clock, store
+    ):
         for minutes in (15, 60, 240, 1440, 1440):
             shut(store, KEY_ADA)
             assert store.lock_minutes(KEY_ADA) == minutes
@@ -562,18 +686,26 @@ class TestTheDoorStaysShutLongerEachTime:
 
 
 class TestWrongCodesAtTheServer:
-    def test_the_fifth_wrong_code_shuts_the_door_the_reply_says_for_how_long_and_the_person_is_told(self, clock, server):
+    def test_the_fifth_wrong_code_shuts_the_door_the_reply_says_for_how_long_and_the_person_is_told(
+        self, clock, server
+    ):
         client, config = server
         secret, _ = enrol(client, config, "ada@example.com")
         next_step(clock)
         for tries in range(5):
-            assert config.sender.warnings_to("ada@example.com") == [], f"nobody is warned after {tries} wrong codes"
+            assert config.sender.warnings_to("ada@example.com") == [], (
+                f"nobody is warned after {tries} wrong codes"
+            )
             assert verify(client, "ada@example.com", wrong_code(secret)).status_code == 401
         warnings = config.sender.warnings_to("ada@example.com")
         assert len(warnings) == 1 and "for 15 minutes" in warnings[0]
         held = verify(client, "ada@example.com", current_code(secret))
-        assert held.status_code == 429 and held.json()["message"] == HELD_15, "the right code waits too"
-        assert len(config.sender.warnings_to("ada@example.com")) == 1, "one warning when it shuts, not one per try"
+        assert held.status_code == 429 and held.json()["message"] == HELD_15, (
+            "the right code waits too"
+        )
+        assert len(config.sender.warnings_to("ada@example.com")) == 1, (
+            "one warning when it shuts, not one per try"
+        )
         locked = client.app.state.signin.access.recent(event="locked")
         assert [(r["who"], r["reason"]) for r in locked] == [("ada@example.com", "code")]
 
@@ -594,7 +726,9 @@ class TestWrongCodesAtTheServer:
         assert verify(client, "ada@example.com", current_code(secret)).json()["message"] == HELD_15
         assert len(config.sender.warnings_to("ada@example.com")) == 6
 
-    def test_an_address_nobody_listed_is_held_the_same_way_and_nobody_is_written_to(self, clock, server):
+    def test_an_address_nobody_listed_is_held_the_same_way_and_nobody_is_written_to(
+        self, clock, server
+    ):
         client, config = server
         for _ in range(5):
             assert verify(client, "mallory@example.com", "000000").status_code == 401
@@ -610,7 +744,9 @@ class TestWrongCodesAtTheServer:
             assert verify(client, "ada@example.com", wrong_code(secret)).status_code == 401
         assert verify(client, "ada@example.com", current_code(secret)).status_code == 429
         runtime = client.app.state.signin
-        assert runtime.store.locked("code:ada@example.com") and not runtime.store.locked("recovery:ada@example.com")
+        assert runtime.store.locked("code:ada@example.com") and not runtime.store.locked(
+            "recovery:ada@example.com"
+        )
         recovered = verify(another_browser(client), "ada@example.com", codes[0])
         assert recovered.status_code == 200 and recovered.json()["data"]["recovery_codes_left"] == 9
 
@@ -621,14 +757,25 @@ class TestWrongCodesAtTheServer:
         for _ in range(5):
             assert verify(client, "ada@example.com", "AAAA-BBBB-CCCC").status_code == 401
         runtime = client.app.state.signin
-        assert runtime.store.locked("recovery:ada@example.com") and not runtime.store.locked("code:ada@example.com")
-        assert verify(client, "ada@example.com", codes[0]).status_code == 429, "a right recovery code waits too"
-        assert runtime.store.recovery_codes_left("ada@example.com") == 10, "and is not used up by waiting"
+        assert runtime.store.locked("recovery:ada@example.com") and not runtime.store.locked(
+            "code:ada@example.com"
+        )
+        assert verify(client, "ada@example.com", codes[0]).status_code == 429, (
+            "a right recovery code waits too"
+        )
+        assert runtime.store.recovery_codes_left("ada@example.com") == 10, (
+            "and is not used up by waiting"
+        )
         assert len(config.sender.warnings_to("ada@example.com")) == 1
         assert [r["reason"] for r in runtime.access.recent(event="locked")] == ["recovery"]
-        assert verify(another_browser(client), "ada@example.com", current_code(secret)).status_code == 200
+        assert (
+            verify(another_browser(client), "ada@example.com", current_code(secret)).status_code
+            == 200
+        )
 
-    def test_one_address_trying_many_accounts_is_stopped_at_the_fiftieth_wrong_try(self, clock, server):
+    def test_one_address_trying_many_accounts_is_stopped_at_the_fiftieth_wrong_try(
+        self, clock, server
+    ):
         client, config = server
         secret, _ = enrol(client, config, "ada@example.com")
         next_step(clock)
@@ -643,10 +790,16 @@ class TestWrongCodesAtTheServer:
             assert reply.status_code == 401, f"try {n + 1} was held"
         held = verify(guesser, "ada@example.com", current_code(secret))
         assert held.status_code == 429 and held.json()["message"] == HELD_15
-        elsewhere = verify(another_browser(client, "192.0.2.44"), "ada@example.com", current_code(secret))
+        elsewhere = verify(
+            another_browser(client, "192.0.2.44"), "ada@example.com", current_code(secret)
+        )
         assert elsewhere.status_code == 200, "the address waits, not the person"
-        addresses = {r["address"] for r in client.app.state.signin.access.recent(event="signin_failed")}
-        assert addresses == {"203.0.113.7"}, "the address is the connection's, whatever a header claims"
+        addresses = {
+            r["address"] for r in client.app.state.signin.access.recent(event="signin_failed")
+        }
+        assert addresses == {"203.0.113.7"}, (
+            "the address is the connection's, whatever a header claims"
+        )
 
 
 # -------------------------------------------------------------- 4 · passwords
@@ -662,7 +815,15 @@ class TestAPasswordAsStored:
         assert re.fullmatch(r"scrypt\$32768\$8\$1\$[\w-]{22}\$[\w-]{43}", stored), stored
         _, n, r, p, salt, digest = stored.split("$")
         assert len(_unpack(salt)) == 16
-        again = hashlib.scrypt(PASSWORD.encode("utf-8"), salt=_unpack(salt), n=int(n), r=int(r), p=int(p), dklen=32, maxmem=64 * 1024 * 1024)
+        again = hashlib.scrypt(
+            PASSWORD.encode("utf-8"),
+            salt=_unpack(salt),
+            n=int(n),
+            r=int(r),
+            p=int(p),
+            dklen=32,
+            maxmem=64 * 1024 * 1024,
+        )
         assert again == _unpack(digest)
         assert passwords.hash_password(PASSWORD) != stored, "a fresh salt every time"
 
@@ -671,7 +832,9 @@ class TestAPasswordAsStored:
         assert passwords.check(PASSWORD, stored)
         for wrong in ("plum orbit ledger 43", PASSWORD.upper(), PASSWORD + " ", "", None):
             assert not passwords.check(wrong, stored), repr(wrong)
-        assert not passwords.check("", passwords.hash_password("")), "an empty password opens nothing, even an empty one stored"
+        assert not passwords.check("", passwords.hash_password("")), (
+            "an empty password opens nothing, even an empty one stored"
+        )
 
     def test_nothing_stored_costs_the_same_work_as_a_wrong_password(self, monkeypatch):
         stored = passwords.hash_password(PASSWORD)
@@ -739,74 +902,124 @@ class TestSettingUpWithPasswordsOn:
     def test_set_up_needs_a_good_password_and_keeps_only_its_hash(self, clock, password_server):
         client, config = password_server
         client.post("/auth/email/begin", json={"email": "grace@example.com"})
-        begun = client.post("/auth/email/enrol/begin", json={"token": config.sender.token()}).json()["data"]
+        begun = client.post(
+            "/auth/email/enrol/begin", json={"token": config.sender.token()}
+        ).json()["data"]
         assert begun["passwords"] is True
         code, ticket = current_code(begun["secret"]), begun["ticket"]
-        weak = ((None, "at least 12 characters"), ("short", "at least 12 characters"), ("Password1234", "first anybody tries"), ("grace-is-my-name", "email address"))
+        weak = (
+            (None, "at least 12 characters"),
+            ("short", "at least 12 characters"),
+            ("Password1234", "first anybody tries"),
+            ("grace-is-my-name", "email address"),
+        )
         for password, says in weak:
-            body = {"ticket": ticket, "code": code, **({} if password is None else {"password": password})}
+            body = {
+                "ticket": ticket,
+                "code": code,
+                **({} if password is None else {"password": password}),
+            }
             refused = client.post("/auth/email/enrol/confirm", json=body)
             assert refused.status_code == 400 and says in refused.json()["message"], password
             ticket = refused.json()["data"]["ticket"]
-        done = client.post("/auth/email/enrol/confirm", json={"ticket": ticket, "code": code, "password": PASSWORD})
-        assert done.status_code == 200, "a refused password spent neither the code nor the chance to try again"
+        done = client.post(
+            "/auth/email/enrol/confirm", json={"ticket": ticket, "code": code, "password": PASSWORD}
+        )
+        assert done.status_code == 200, (
+            "a refused password spent neither the code nor the chance to try again"
+        )
         assert client.get("/auth/me/ways").json()["data"]["password"]["set_at"] is not None
         stored = _column(config.store_path, "password_hash", "grace@example.com")
-        assert stored.startswith("scrypt$") and PASSWORD not in stored and passwords.check(PASSWORD, stored)
+        assert (
+            stored.startswith("scrypt$")
+            and PASSWORD not in stored
+            and passwords.check(PASSWORD, stored)
+        )
 
 
 class TestSigningInWithPasswordsOn:
-    def test_it_takes_the_code_and_the_password_and_either_one_wrong_is_the_same_refusal(self, clock, password_server):
+    def test_it_takes_the_code_and_the_password_and_either_one_wrong_is_the_same_refusal(
+        self, clock, password_server
+    ):
         client, config = password_server
         secret, _ = enrol(client, config, "ada@example.com", password=PASSWORD)
         door = another_browser(client)
         next_step(clock)
-        wrong_password = verify(door, "ada@example.com", current_code(secret), "plum orbit ledger 43")
+        wrong_password = verify(
+            door, "ada@example.com", current_code(secret), "plum orbit ledger 43"
+        )
         next_step(clock)
         no_password = verify(door, "ada@example.com", current_code(secret))
         wrong_code_reply = verify(door, "ada@example.com", wrong_code(secret), PASSWORD)
         nobody = verify(door, "nobody@example.com", "123456", PASSWORD)
         replies = [wrong_password, no_password, wrong_code_reply, nobody]
         assert [r.status_code for r in replies] == [401] * 4
-        assert all(r.json() == replies[0].json() for r in replies), "nothing says which half was wrong"
+        assert all(r.json() == replies[0].json() for r in replies), (
+            "nothing says which half was wrong"
+        )
         assert replies[0].json()["message"] == REFUSED_BOTH
         assert door.get("/api/v1/collections").status_code == 401
         next_step(clock)
         assert verify(door, "ada@example.com", current_code(secret), PASSWORD).status_code == 200
         assert door.get("/api/v1/collections").status_code == 200
 
-    def test_the_password_is_checked_after_a_wrong_code_and_for_an_address_nobody_listed(self, clock, password_server, monkeypatch):
+    def test_the_password_is_checked_after_a_wrong_code_and_for_an_address_nobody_listed(
+        self, clock, password_server, monkeypatch
+    ):
         client, config = password_server
         secret, _ = enrol(client, config, "ada@example.com", password=PASSWORD)
         work = []
         real = hashlib.scrypt
-        monkeypatch.setattr(passwords.hashlib, "scrypt", lambda password, **how: work.append(how["n"]) or real(password, **how))
-        for email, code in (("ada@example.com", wrong_code(secret)), ("nobody@example.com", "123456")):
+        monkeypatch.setattr(
+            passwords.hashlib,
+            "scrypt",
+            lambda password, **how: work.append(how["n"]) or real(password, **how),
+        )
+        for email, code in (
+            ("ada@example.com", wrong_code(secret)),
+            ("nobody@example.com", "123456"),
+        ):
             work.clear()
             assert verify(client, email, code, PASSWORD).status_code == 401
-            assert work == [2**15], f"{email}: one scrypt, so the time taken says nothing about which half was wrong"
+            assert work == [2**15], (
+                f"{email}: one scrypt, so the time taken says nothing about which half was wrong"
+            )
 
     def test_a_recovery_code_needs_the_password_too(self, clock, password_server):
         client, config = password_server
         _, codes = enrol(client, config, "ada@example.com", password=PASSWORD)
-        refused = verify(another_browser(client), "ada@example.com", codes[1], "plum orbit ledger 43")
+        refused = verify(
+            another_browser(client), "ada@example.com", codes[1], "plum orbit ledger 43"
+        )
         assert refused.status_code == 401 and refused.json()["message"] == REFUSED_BOTH
-        assert verify(another_browser(client), "ada@example.com", codes[0], PASSWORD).status_code == 200
+        assert (
+            verify(another_browser(client), "ada@example.com", codes[0], PASSWORD).status_code
+            == 200
+        )
 
 
 class TestAForgottenPassword:
-    def test_forgot_sends_a_link_only_to_somebody_with_an_authenticator_and_says_the_same_to_everybody(self, clock, password_server):
+    def test_forgot_sends_a_link_only_to_somebody_with_an_authenticator_and_says_the_same_to_everybody(
+        self, clock, password_server
+    ):
         client, config = password_server
         enrol(client, config, "ada@example.com", password=PASSWORD)
         before = len(config.sender.sent)
-        replies = [client.post("/auth/password/forgot", json={"email": email}).json() for email in ("ada@example.com", "olu@example.com", "nobody@example.com")]
+        replies = [
+            client.post("/auth/password/forgot", json={"email": email}).json()
+            for email in ("ada@example.com", "olu@example.com", "nobody@example.com")
+        ]
         assert replies == [{"ok": True, "data": {"note": "reset_link"}}] * 3
         sent = config.sender.sent[before:]
-        assert [to for to, _, _ in sent] == ["ada@example.com"], "olu has not set up an authenticator, and nobody is not listed"
+        assert [to for to, _, _ in sent] == ["ada@example.com"], (
+            "olu has not set up an authenticator, and nobody is not listed"
+        )
         assert "new password" in sent[0][1]
         assert re.search(re.escape(PUBLIC) + r"/dashboard/#/password\?token=[\w-]+", sent[0][2])
 
-    def test_a_reset_needs_the_link_and_a_current_code_and_a_mistyped_code_gets_a_fresh_link(self, clock, password_server):
+    def test_a_reset_needs_the_link_and_a_current_code_and_a_mistyped_code_gets_a_fresh_link(
+        self, clock, password_server
+    ):
         client, config = password_server
         secret, _ = enrol(client, config, "ada@example.com", password=PASSWORD)
         client.post("/auth/password/forgot", json={"email": "ada@example.com"})
@@ -814,45 +1027,88 @@ class TestAForgottenPassword:
         browser = another_browser(client)
 
         def reset(link: str, code: str):
-            return browser.post("/auth/password/reset", json={"token": link, "code": code, "password": NEW_PASSWORD})
+            return browser.post(
+                "/auth/password/reset", json={"token": link, "code": code, "password": NEW_PASSWORD}
+            )
 
         next_step(clock)
         assert reset("made-up", current_code(secret)).status_code == 400, "no link, no reset"
         mistyped = reset(token, wrong_code(secret))
-        assert mistyped.status_code == 401 and mistyped.json()["message"].startswith("That code was not accepted")
+        assert mistyped.status_code == 401 and mistyped.json()["message"].startswith(
+            "That code was not accepted"
+        )
         retry = mistyped.json()["data"]["token"]
-        assert retry != token and reset(token, current_code(secret)).status_code == 400, "the first link worked once"
+        assert retry != token and reset(token, current_code(secret)).status_code == 400, (
+            "the first link worked once"
+        )
         done = reset(retry, current_code(secret))
         assert done.status_code == 200 and browser.get("/auth/me").status_code == 200
         next_step(clock)
-        assert verify(another_browser(client), "ada@example.com", current_code(secret), PASSWORD).status_code == 401, "the old password is gone"
+        assert (
+            verify(
+                another_browser(client), "ada@example.com", current_code(secret), PASSWORD
+            ).status_code
+            == 401
+        ), "the old password is gone"
         next_step(clock)
-        assert verify(another_browser(client), "ada@example.com", current_code(secret), NEW_PASSWORD).status_code == 200
+        assert (
+            verify(
+                another_browser(client), "ada@example.com", current_code(secret), NEW_PASSWORD
+            ).status_code
+            == 200
+        )
 
-    def test_a_weak_new_password_gets_a_fresh_link_and_spends_neither_the_code_nor_a_try(self, clock, password_server):
+    def test_a_weak_new_password_gets_a_fresh_link_and_spends_neither_the_code_nor_a_try(
+        self, clock, password_server
+    ):
         client, config = password_server
         secret, _ = enrol(client, config, "ada@example.com", password=PASSWORD)
         client.post("/auth/password/forgot", json={"email": "ada@example.com"})
         next_step(clock)
-        weak = client.post("/auth/password/reset", json={"token": config.sender.token("password"), "code": current_code(secret), "password": "short"})
+        weak = client.post(
+            "/auth/password/reset",
+            json={
+                "token": config.sender.token("password"),
+                "code": current_code(secret),
+                "password": "short",
+            },
+        )
         assert weak.status_code == 400 and "at least 12 characters" in weak.json()["message"]
         assert client.app.state.signin.access.recent(event="signin_failed") == []
-        done = client.post("/auth/password/reset", json={"token": weak.json()["data"]["token"], "code": current_code(secret), "password": NEW_PASSWORD})
+        done = client.post(
+            "/auth/password/reset",
+            json={
+                "token": weak.json()["data"]["token"],
+                "code": current_code(secret),
+                "password": NEW_PASSWORD,
+            },
+        )
         assert done.status_code == 200
 
-    def test_somebody_who_set_up_before_passwords_were_on_chooses_one_with_the_link(self, clock, data):
+    def test_somebody_who_set_up_before_passwords_were_on_chooses_one_with_the_link(
+        self, clock, data
+    ):
         with serve(data) as (client, config):
             secret, _ = enrol(client, config, "ada@example.com")
         with serve(data, passwords=True) as (client, config):
             next_step(clock)
-            assert verify(client, "ada@example.com", current_code(secret)).status_code == 401, "a code alone is no longer enough"
+            assert verify(client, "ada@example.com", current_code(secret)).status_code == 401, (
+                "a code alone is no longer enough"
+            )
             client.post("/auth/password/forgot", json={"email": "ada@example.com"})
             next_step(clock)
-            reset = {"token": config.sender.token("password"), "code": current_code(secret), "password": NEW_PASSWORD}
+            reset = {
+                "token": config.sender.token("password"),
+                "code": current_code(secret),
+                "password": NEW_PASSWORD,
+            }
             assert client.post("/auth/password/reset", json=reset).status_code == 200
 
     def test_with_passwords_off_there_is_nothing_to_reset(self, server):
         client, _ = server
-        assert client.post("/auth/password/forgot", json={"email": "ada@example.com"}).status_code == 404
+        assert (
+            client.post("/auth/password/forgot", json={"email": "ada@example.com"}).status_code
+            == 404
+        )
         reset = {"token": "made-up", "code": "123456", "password": NEW_PASSWORD}
         assert client.post("/auth/password/reset", json=reset).status_code == 404

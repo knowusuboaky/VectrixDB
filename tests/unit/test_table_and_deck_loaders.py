@@ -32,7 +32,12 @@ def _slide(title, paragraphs=(), table=()):
     body = sp(title, "title") + "".join(sp(t) for t in paragraphs)
     if table:
         rows = "".join(
-            "<a:tr>" + "".join(f"<a:tc><a:txBody><a:p><a:r><a:t>{c}</a:t></a:r></a:p></a:txBody></a:tc>" for c in row) + "</a:tr>"
+            "<a:tr>"
+            + "".join(
+                f"<a:tc><a:txBody><a:p><a:r><a:t>{c}</a:t></a:r></a:p></a:txBody></a:tc>"
+                for c in row
+            )
+            + "</a:tr>"
             for row in table
         )
         body += f"<p:graphicFrame><a:graphic><a:graphicData><a:tbl>{rows}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>"
@@ -44,9 +49,14 @@ def make_deck(path, slides, order=None):
     order = order or sorted(slides)
     ids = "".join(f'<p:sldId id="{256 + i}" r:id="rId{i + 1}"/>' for i in range(len(order)))
     presentation = f'<?xml version="1.0"?><p:presentation xmlns:p="{P}" xmlns:r="{R}"><p:sldIdLst>{ids}</p:sldIdLst></p:presentation>'
-    rels = f'<?xml version="1.0"?><Relationships xmlns="{REL}">' + "".join(
-        f'<Relationship Id="rId{i + 1}" Type="x" Target="slides/{name}"/>' for i, name in enumerate(order)
-    ) + "</Relationships>"
+    rels = (
+        f'<?xml version="1.0"?><Relationships xmlns="{REL}">'
+        + "".join(
+            f'<Relationship Id="rId{i + 1}" Type="x" Target="slides/{name}"/>'
+            for i, name in enumerate(order)
+        )
+        + "</Relationships>"
+    )
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("[Content_Types].xml", "<Types/>")
         z.writestr("ppt/presentation.xml", presentation)
@@ -57,8 +67,18 @@ def make_deck(path, slides, order=None):
 
 class TestRows:
     def test_header_and_values_become_one_line_per_row(self):
-        lines = rows_to_lines([["Region", "Revenue", "Note"], ["EMEA", 1200.0, None], [None, None, None], ["APAC", 950.5, "prelim"]])
-        assert lines == ["Region: EMEA; Revenue: 1200", "Region: APAC; Revenue: 950.5; Note: prelim"]
+        lines = rows_to_lines(
+            [
+                ["Region", "Revenue", "Note"],
+                ["EMEA", 1200.0, None],
+                [None, None, None],
+                ["APAC", 950.5, "prelim"],
+            ]
+        )
+        assert lines == [
+            "Region: EMEA; Revenue: 1200",
+            "Region: APAC; Revenue: 950.5; Note: prelim",
+        ]
 
     def test_without_a_text_header_rows_are_bare(self):
         assert rows_to_lines([[1, 2], [3, 4]]) == ["1; 2", "3; 4"]
@@ -99,7 +119,11 @@ class TestPptx:
             deck,
             {
                 "slide1.xml": _slide("Second in the deck", ["Moved to the end."]),
-                "slide2.xml": _slide("Results", ["Revenue grew in every region."], table=[["Region", "Revenue"], ["EMEA", "1200"]]),
+                "slide2.xml": _slide(
+                    "Results",
+                    ["Revenue grew in every region."],
+                    table=[["Region", "Revenue"], ["EMEA", "1200"]],
+                ),
             },
             order=["slide2.xml", "slide1.xml"],
         )
@@ -126,7 +150,10 @@ class TestCsv:
         path.write_text("Region,Revenue\nEMEA,1200\nAPAC,950\n", encoding="utf-8")
         doc = load(path)
         assert doc.metadata["kind"] == "csv" and doc.metadata["rows"] == 2
-        assert doc.text.splitlines() == ["Region: EMEA; Revenue: 1200", "Region: APAC; Revenue: 950"]
+        assert doc.text.splitlines() == [
+            "Region: EMEA; Revenue: 1200",
+            "Region: APAC; Revenue: 950",
+        ]
 
 
 class TestThroughVectrix:
@@ -134,7 +161,13 @@ class TestThroughVectrix:
         from vectrixdb import Vectrix
 
         deck = tmp_path / "deck.pptx"
-        make_deck(deck, {"slide1.xml": _slide("Bread", ["Sourdough is leavened by wild yeast."]), "slide2.xml": _slide("Rock", ["Basalt forms when lava cools."])})
+        make_deck(
+            deck,
+            {
+                "slide1.xml": _slide("Bread", ["Sourdough is leavened by wild yeast."]),
+                "slide2.xml": _slide("Rock", ["Basalt forms when lava cools."]),
+            },
+        )
         db = Vectrix("decks", path=str(tmp_path / "db"), mode="dense")
         try:
             db.add_document(deck, chunk="markdown")

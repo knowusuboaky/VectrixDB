@@ -65,7 +65,9 @@ class TestTheChunkStore:
 
     def test_a_line_a_chunk_read_back_in_order(self, tmp_path):
         store = ChunkStore(LocalFiles(tmp_path))
-        store.put("td/report.pdf", ["a", "b"], ["first", "second"], [{"page": 1}, {"page": np.int64(2)}])
+        store.put(
+            "td/report.pdf", ["a", "b"], ["first", "second"], [{"page": 1}, {"page": np.int64(2)}]
+        )
         lines = (tmp_path / "td" / "report.pdf.jsonl").read_text(encoding="utf-8").splitlines()
         assert [json.loads(line)["id"] for line in lines] == ["a", "b"]
         assert store.get("td/report.pdf") == [
@@ -94,7 +96,9 @@ class TestKeepChunks:
             kept = db.kept_chunks.get("a.pdf")
             assert [(c["id"], c["text"]) for c in kept] == [(i, t) for i, t, _m in rows(db)]
             assert all(c["metadata"]["_vx_doc"] == "a.pdf" for c in kept)
-            assert (tmp_path / "db" / "docs.chunks" / "a.pdf.jsonl").is_file(), "True keeps them beside the collection"
+            assert (tmp_path / "db" / "docs.chunks" / "a.pdf.jsonl").is_file(), (
+                "True keeps them beside the collection"
+            )
         finally:
             db.close()
 
@@ -105,7 +109,9 @@ class TestKeepChunks:
             before = len(db.kept_chunks.get("a.pdf"))
             db.rechunk("a.pdf", chunk_size=80)
             after = db.kept_chunks.get("a.pdf")
-            assert len(after) > before and [(c["id"], c["text"]) for c in after] == [(i, t) for i, t, _m in rows(db)]
+            assert len(after) > before and [(c["id"], c["text"]) for c in after] == [
+                (i, t) for i, t, _m in rows(db)
+            ]
         finally:
             db.close()
 
@@ -130,11 +136,17 @@ class TestMarkdownFirst:
     def test_the_markdown_is_kept_even_when_a_later_step_fails(self, tmp_path, monkeypatch):
         db = staged(tmp_path)
         try:
-            monkeypatch.setattr(db, "add", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("the index is down")))
+            monkeypatch.setattr(
+                db, "add", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("the index is down"))
+            )
             with pytest.raises(RuntimeError, match="the index is down"):
                 db.add_document(CONTRACT, doc_id="a.pdf", source_version="v1")
-            assert db.documents.entry("a.pdf")["source_version"] == "v1", "reading ended when the Markdown was written"
-            assert "a.pdf" in db.kept_chunks, "and the chunks were written before anything embedded them"
+            assert db.documents.entry("a.pdf")["source_version"] == "v1", (
+                "reading ended when the Markdown was written"
+            )
+            assert "a.pdf" in db.kept_chunks, (
+                "and the chunks were written before anything embedded them"
+            )
             assert rows(db) == []
         finally:
             db.close()
@@ -142,10 +154,14 @@ class TestMarkdownFirst:
     def test_without_it_a_failed_write_keeps_nothing_as_before(self, tmp_path, monkeypatch):
         db = open_db(tmp_path, keep_source=True)
         try:
-            monkeypatch.setattr(db, "add", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("the index is down")))
+            monkeypatch.setattr(
+                db, "add", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("the index is down"))
+            )
             with pytest.raises(RuntimeError):
                 db.add_document(CONTRACT, doc_id="a.pdf")
-            assert db.documents.entry("a.pdf") is None, "the store never holds a document the index refused"
+            assert db.documents.entry("a.pdf") is None, (
+                "the store never holds a document the index refused"
+            )
         finally:
             db.close()
 
@@ -158,8 +174,11 @@ class TestMarkdownFirst:
         try:
             real = db.documents.get
             monkeypatch.setattr(
-                db.documents, "get",
-                lambda doc_id, images=False: replace(real(doc_id, images=images), text=real(doc_id).text.replace("thirty", "ninety")),
+                db.documents,
+                "get",
+                lambda doc_id, images=False: replace(
+                    real(doc_id, images=images), text=real(doc_id).text.replace("thirty", "ninety")
+                ),
             )
             db.add_document(CONTRACT, doc_id="a.pdf")
             indexed = " ".join(t for _i, t, _m in rows(db))
@@ -186,7 +205,9 @@ class TestMarkdownFirst:
                 db.add_document(CONTRACT, doc_id="a.pdf", source_version="v1")
             puts = []
             real_put = db.documents.put
-            monkeypatch.setattr(db.documents, "put", lambda *a, **k: puts.append(a[0]) or real_put(*a, **k))
+            monkeypatch.setattr(
+                db.documents, "put", lambda *a, **k: puts.append(a[0]) or real_put(*a, **k)
+            )
             state["down"] = False
             assert db.add_document(CONTRACT, doc_id="a.pdf", source_version="v1") > 0
             assert puts == []
@@ -203,7 +224,12 @@ class TestTheWorkerStartsFromTheMarkdown:
         from vectrixdb.worker import IngestWorker, LocalFetcher
 
         db = Vectrix(
-            "inbox", path=str(tmp_path / "db"), embed_fn=embed, dimension=8, extractors={".pdf": reader}, **options
+            "inbox",
+            path=str(tmp_path / "db"),
+            embed_fn=embed,
+            dimension=8,
+            extractors={".pdf": reader},
+            **options,
         )
         return db, IngestWorker(db, LocalFetcher(), doc_id_of=lambda uri: uri.rsplit("/", 1)[-1])
 
@@ -213,7 +239,9 @@ class TestTheWorkerStartsFromTheMarkdown:
         return path
 
     @pytest.mark.parametrize("etag", [None, "0x8DC1"], ids=["hashed", "with an etag"])
-    def test_a_retry_after_the_index_failed_does_not_read_the_original_again(self, tmp_path, monkeypatch, etag):
+    def test_a_retry_after_the_index_failed_does_not_read_the_original_again(
+        self, tmp_path, monkeypatch, etag
+    ):
         """With an ETag, as a blob event carries, the original is not even fetched again."""
         from vectrixdb.worker import IngestEvent
 
@@ -228,13 +256,23 @@ class TestTheWorkerStartsFromTheMarkdown:
         try:
             state = {"down": True}
             real_add = db.add
-            monkeypatch.setattr(db, "add", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")) if state["down"] else real_add(*a, **k))
+            monkeypatch.setattr(
+                db,
+                "add",
+                lambda *a, **k: (
+                    (_ for _ in ()).throw(RuntimeError("down"))
+                    if state["down"]
+                    else real_add(*a, **k)
+                ),
+            )
             event = IngestEvent("created", self.scan(tmp_path).as_uri(), version=etag)
             with pytest.raises(RuntimeError):
                 worker.handle(event)
             fetched = []
             real_fetch = worker.fetcher.fetch
-            monkeypatch.setattr(worker.fetcher, "fetch", lambda uri: fetched.append(uri) or real_fetch(uri))
+            monkeypatch.setattr(
+                worker.fetcher, "fetch", lambda uri: fetched.append(uri) or real_fetch(uri)
+            )
             state["down"] = False
             outcome = worker.handle(event)
             assert outcome.action == "created" and outcome.chunks == 1
@@ -248,11 +286,23 @@ class TestTheWorkerStartsFromTheMarkdown:
         from vectrixdb.worker import IngestEvent
 
         read = []
-        db, worker = self.worker(tmp_path, lambda data, name: read.append(name) or "The covenant is tested quarterly.", keep_source=True)
+        db, worker = self.worker(
+            tmp_path,
+            lambda data, name: read.append(name) or "The covenant is tested quarterly.",
+            keep_source=True,
+        )
         try:
             state = {"down": True}
             real_add = db.add
-            monkeypatch.setattr(db, "add", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")) if state["down"] else real_add(*a, **k))
+            monkeypatch.setattr(
+                db,
+                "add",
+                lambda *a, **k: (
+                    (_ for _ in ()).throw(RuntimeError("down"))
+                    if state["down"]
+                    else real_add(*a, **k)
+                ),
+            )
             event = IngestEvent("created", self.scan(tmp_path).as_uri())
             with pytest.raises(RuntimeError):
                 worker.handle(event)
@@ -275,7 +325,9 @@ class TestTheWorkerStartsFromTheMarkdown:
         try:
             scan = self.scan(tmp_path)
             worker.handle(IngestEvent("created", scan.as_uri()))
-            assert (tmp_path / "markdown" / "scan.pdf.md").is_file() and (tmp_path / "chunks" / "scan.pdf.jsonl").is_file()
+            assert (tmp_path / "markdown" / "scan.pdf.md").is_file() and (
+                tmp_path / "chunks" / "scan.pdf.jsonl"
+            ).is_file()
             outcome = worker.handle(IngestEvent("deleted", scan.as_uri()))
             assert outcome.action == "deleted" and rows(db) == []
             assert not (tmp_path / "markdown" / "scan.pdf.md").exists(), "its Markdown is gone"
@@ -289,8 +341,10 @@ class TestTheWorkerStartsFromTheMarkdown:
         from vectrixdb.worker import IngestEvent
 
         db, worker = self.worker(
-            tmp_path, lambda data, name: "The covenant is tested quarterly.",
-            keep_source=DocumentStore(LocalFiles(tmp_path / "markdown")), keep_chunks=tmp_path / "chunks",
+            tmp_path,
+            lambda data, name: "The covenant is tested quarterly.",
+            keep_source=DocumentStore(LocalFiles(tmp_path / "markdown")),
+            keep_chunks=tmp_path / "chunks",
         )
         try:
             scan = self.scan(tmp_path)

@@ -159,6 +159,9 @@ function headers(json = true) {
   const token = cookie('__Host-vx_csrf') || cookie('vx_csrf'); if (token) h['X-CSRF-Token'] = token;
   return h;
 }
+// A hand-typed address with a stray % would throw here and leave the page blank;
+// the part is kept as typed instead, and reads as a page or name that is not there.
+function safeDecode(part) { try { return decodeURIComponent(part); } catch (_) { return part; } }
 function cookie(name) { const m = document.cookie.split('; ').find((c) => c.startsWith(name + '=')); return m ? decodeURIComponent(m.slice(name.length + 1)) : null; }
 
 async function api(path, opts = {}) {
@@ -296,8 +299,10 @@ function modeOf(c) {
   const tags = (c.tags || []).map((t) => String(t).toLowerCase());
   if (tags.includes('graph')) return 'graph';
   if (tags.includes('ultimate')) return 'ultimate';
-  if (tags.includes('hybrid') || c.has_text_index) return 'hybrid';
-  return 'dense';
+  if (tags.includes('hybrid')) return 'hybrid';
+  // The v1 API tags a collection 'dense' and still gives it a text index, so the index alone would say hybrid.
+  if (tags.includes('dense')) return 'dense';
+  return c.has_text_index ? 'hybrid' : 'dense';
 }
 
 /* A collection with a policy: an entitlement policy bound to it, or, on a server that gates
@@ -368,7 +373,7 @@ const TITLES = { overview: 'Overview', collections: 'Collections', collection: '
 const NEEDS = { search: 'search', evaluate: 'evaluation.read', ingest: 'content.write', audit: 'audit.read', access: 'access.read', console: 'content.read' };
 
 function route() {
-  const parts = (location.hash.replace(/^#\/?/, '') || 'overview').split('/').map(decodeURIComponent);
+  const parts = (location.hash.replace(/^#\/?/, '') || 'overview').split('/').map(safeDecode);
   let page = parts[0];
   if (page === 'collections' && parts[1]) { page = 'collection'; state.collection = parts[1]; state.tab = parts[2] || 'overview'; }
   // Evaluate has two tabs, Chunking first. An address from before the tabs, #/evaluate/<setup>, is that setup under Retrieval.

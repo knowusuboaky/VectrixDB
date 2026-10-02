@@ -106,7 +106,9 @@ def _settings(path: Optional[str], env_file: Optional[str]) -> str:
 @app.command()
 def serve(
     port: int = typer.Option(7337, "--port", "-p", help="Port to run on"),
-    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to. 0.0.0.0 needs an API key or sign-in"),
+    host: str = typer.Option(
+        "127.0.0.1", "--host", "-h", help="Host to bind to. 0.0.0.0 needs an API key or sign-in"
+    ),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload"),
     dashboard: bool = typer.Option(True, "--dashboard/--no-dashboard", help="Enable dashboard"),
@@ -146,7 +148,9 @@ def serve(
             from .signin.records import describe_where
 
             signin = SignInConfig.from_env(path)
-            console.print(f"  [dim]Sign-in store:[/dim] {escape(describe_where(signin.store_url or signin.store_path))}")
+            console.print(
+                f"  [dim]Sign-in store:[/dim] {escape(describe_where(signin.store_url or signin.store_path))}"
+            )
         from .brand import Brand
 
         brand = Brand.from_env().banner()
@@ -156,7 +160,9 @@ def serve(
             config, store = _signin_store(path)
             try:
                 # An admin named in VECTRIXDB_SIGNIN_USERS and not here yet is added as the server starts.
-                coming = any(role == "admin" and store.person(email) is None for email, role in config.users)
+                coming = any(
+                    role == "admin" and store.person(email) is None for email, role in config.users
+                )
                 no_admin = not store.admins() and not coming
             finally:
                 store.close()
@@ -166,7 +172,9 @@ def serve(
     if no_admin:
         # A command to run, not a link: the start-up banner never prints anything that opens a door.
         console.print()
-        console.print("[yellow]No admin yet. To add the first one, run this on the server:[/yellow]")
+        console.print(
+            "[yellow]No admin yet. To add the first one, run this on the server:[/yellow]"
+        )
         console.print("  vectrixdb people add you@company.com --role admin", markup=False)
     console.print()
 
@@ -691,7 +699,9 @@ def _format_size(bytes: int) -> str:
 # is here with single sign-on alone as well; a link is only for the list's
 # own ways.
 
-people_app = typer.Typer(help="The people who may sign in, managed from the server itself.", no_args_is_help=True)
+people_app = typer.Typer(
+    help="The people who may sign in, managed from the server itself.", no_args_is_help=True
+)
 app.add_typer(people_app, name="people")
 
 
@@ -711,7 +721,9 @@ def _signin_store(path: str, *, links: bool = False) -> Any:
             "email sign-in is not on here, so nobody has a passkey or an authenticator kept here to reset: they sign in "
             "with single sign-on. To give people ways of their own too, set VECTRIXDB_SIGNIN=oidc,email, the same as the server's."
         )
-    return config, SignInStore(config.store_url or config.store_path, config.secrets, key=config.store_key)
+    return config, SignInStore(
+        config.store_url or config.store_path, config.secrets, key=config.store_key
+    )
 
 
 def _people(path: str, *, links: bool = False) -> Any:
@@ -730,9 +742,15 @@ def _print_link(config: Any, token: str, then: str) -> None:
     from .signin.store import LINK_MINUTES
 
     # Written the way people reach the dashboard: through the gateway, when there is one.
-    dashboard = Gateway.from_env(root=root_path_from_env()).address("/dashboard/", config.public_url)
-    console.print(f"{then} It works once, for {LINK_MINUTES} minutes:", markup=False, highlight=False)
-    console.print(f"  {dashboard}#/enrol?token={token}", markup=False, highlight=False, soft_wrap=True)
+    dashboard = Gateway.from_env(root=root_path_from_env()).address(
+        "/dashboard/", config.public_url
+    )
+    console.print(
+        f"{then} It works once, for {LINK_MINUTES} minutes:", markup=False, highlight=False
+    )
+    console.print(
+        f"  {dashboard}#/enrol?token={token}", markup=False, highlight=False, soft_wrap=True
+    )
 
 
 def _record(config: Any, event: str, **fields: Any) -> None:
@@ -759,30 +777,49 @@ def people_add(
         if before is not None and before.enrolled:
             console.print(
                 f"{before.email} is already here, as {before.role}, and set up. To send them round again: vectrixdb people reset {before.email}",
-                markup=False, highlight=False,
+                markup=False,
+                highlight=False,
             )
             raise typer.Exit(code=1)
         person = store.put_person(email, role)
         token = store.new_link(person.email, "enrol") if links else None
-        _record(config, "person_changed" if before is not None else "person_added", who=person.email, role=person.role)
+        _record(
+            config,
+            "person_changed" if before is not None else "person_added",
+            who=person.email,
+            role=person.role,
+        )
     except ConfigurationError as exc:
         console.print(f"[red]{exc}[/red]", highlight=False)
         raise typer.Exit(code=2)
     finally:
         store.close()
     article = "an" if person.role[0] in "aeiou" else "a"
-    console.print(f"Added {person.email} as {article} {person.role}.", markup=False, highlight=False)
+    console.print(
+        f"Added {person.email} as {article} {person.role}.", markup=False, highlight=False
+    )
     if "oidc" in config.methods:
         console.print(
             "They sign in with single sign-on"
             + (", then may add an authenticator app from their account." if links else "."),
-            markup=False, highlight=False,
+            markup=False,
+            highlight=False,
         )
     if token is not None:
         if config.sso_pending:
-            console.print("Single sign-on is not set up yet, so they sign in with their email and a code until it is.", markup=False, highlight=False)
+            console.print(
+                "Single sign-on is not set up yet, so they sign in with their email and a code until it is.",
+                markup=False,
+                highlight=False,
+            )
         own = "a passkey or an authenticator app" if config.own_passkeys else "an authenticator app"
-        _print_link(config, token, f"Or open this to set up {own} first." if "oidc" in config.methods else f"Open this to set up {own}.")
+        _print_link(
+            config,
+            token,
+            f"Or open this to set up {own} first."
+            if "oidc" in config.methods
+            else f"Open this to set up {own}.",
+        )
 
 
 @people_app.command("reset")
@@ -797,7 +834,11 @@ def people_reset(
     try:
         person = store.person(email)
         if person is None:
-            console.print(f"Nobody by the address {email} is on this server. Add them with: vectrixdb people add {email}", markup=False, highlight=False)
+            console.print(
+                f"Nobody by the address {email} is on this server. Add them with: vectrixdb people add {email}",
+                markup=False,
+                highlight=False,
+            )
             raise typer.Exit(code=1)
         store.reset_authenticator(person.email)
         token = store.new_link(person.email, "enrol")
@@ -806,7 +847,8 @@ def people_reset(
         store.close()
     console.print(
         f"Removed the passkeys, authenticator and recovery codes for {person.email}, and signed them out everywhere.",
-        markup=False, highlight=False,
+        markup=False,
+        highlight=False,
     )
     _print_link(config, token, "Open this to set up a new way in.")
 
@@ -826,7 +868,11 @@ def people_list(
     finally:
         store.close()
     if not everyone:
-        console.print("Nobody yet. Add the first admin with: vectrixdb people add you@company.com --role admin", markup=False, highlight=False)
+        console.print(
+            "Nobody yet. Add the first admin with: vectrixdb people add you@company.com --role admin",
+            markup=False,
+            highlight=False,
+        )
         return
     table = Table(show_header=True, header_style="bold")
     for heading in ("Email", "Role", "Signs in with", "Last sign-in"):
@@ -837,8 +883,17 @@ def people_list(
             ways.append(f"{person.passkeys} passkey{'s' if person.passkeys != 1 else ''}")
         if person.authenticator:
             ways.append("authenticator app")
-        last = datetime.datetime.fromtimestamp(person.last_sign_in).strftime("%d %b %Y %H:%M") if person.last_sign_in else "never"
-        table.add_row(person.email, person.role + (" (disabled)" if person.disabled else ""), ", ".join(ways) or "not set up yet", last)
+        last = (
+            datetime.datetime.fromtimestamp(person.last_sign_in).strftime("%d %b %Y %H:%M")
+            if person.last_sign_in
+            else "never"
+        )
+        table.add_row(
+            person.email,
+            person.role + (" (disabled)" if person.disabled else ""),
+            ", ".join(ways) or "not set up yet",
+            last,
+        )
     console.print(table)
 
 
@@ -854,16 +909,26 @@ def people_remove(
     try:
         person = store.person(email)
         if person is None:
-            console.print(f"Nobody by the address {email} is on this server.", markup=False, highlight=False)
+            console.print(
+                f"Nobody by the address {email} is on this server.", markup=False, highlight=False
+            )
             raise typer.Exit(code=1)
         if person.role == "admin" and store.admins() <= 1:
-            console.print("This is the only admin. Make somebody else an admin first: vectrixdb people add them@company.com --role admin", markup=False, highlight=False)
+            console.print(
+                "This is the only admin. Make somebody else an admin first: vectrixdb people add them@company.com --role admin",
+                markup=False,
+                highlight=False,
+            )
             raise typer.Exit(code=1)
         store.remove_person(person.email)
         _record(config, "person_removed", who=person.email)
     finally:
         store.close()
-    console.print(f"Removed {person.email}. They are signed out and can no longer sign in.", markup=False, highlight=False)
+    console.print(
+        f"Removed {person.email}. They are signed out and can no longer sign in.",
+        markup=False,
+        highlight=False,
+    )
 
 
 # ============================================================================
@@ -876,27 +941,48 @@ def people_remove(
 # The password goes in a key vault and its hash in the settings. The hash
 # checks a password and cannot be read back as one.
 
-glass_app = typer.Typer(help="Emergency sign-in, for while the usual sign-in is down.", no_args_is_help=True)
+glass_app = typer.Typer(
+    help="Emergency sign-in, for while the usual sign-in is down.", no_args_is_help=True
+)
 app.add_typer(glass_app, name="break-glass")
 
 
 @glass_app.command("hash")
 def break_glass_hash_command(
-    admin: Optional[str] = typer.Option(None, "--admin", help="The emergency admin's username, so the password may not hold it"),
+    admin: Optional[str] = typer.Option(
+        None, "--admin", help="The emergency admin's username, so the password may not hold it"
+    ),
 ):
     """Make the hash of a new emergency password. The password is typed twice, never shown, and kept nowhere."""
     from .exceptions import ConfigurationError
     from .signin import BREAK_GLASS_MIN_PASSWORD, break_glass_hash
 
-    password = typer.prompt(f"New emergency password, {BREAK_GLASS_MIN_PASSWORD} characters or more", hide_input=True, confirmation_prompt=True)
+    password = typer.prompt(
+        f"New emergency password, {BREAK_GLASS_MIN_PASSWORD} characters or more",
+        hide_input=True,
+        confirmation_prompt=True,
+    )
     try:
         hashed = break_glass_hash(password, admin)
     except ConfigurationError as exc:
         console.print(f"[red]{exc}[/red]", highlight=False)
         raise typer.Exit(code=2)
-    console.print("Keep the password in a key vault. Set this, its hash, on the server:", markup=False, highlight=False)
-    console.print(f"  VECTRIXDB_BREAK_GLASS_PASSWORD_HASH={hashed}", markup=False, highlight=False, soft_wrap=True)
-    console.print("A password works for one emergency: make a new one for the next.", markup=False, highlight=False)
+    console.print(
+        "Keep the password in a key vault. Set this, its hash, on the server:",
+        markup=False,
+        highlight=False,
+    )
+    console.print(
+        f"  VECTRIXDB_BREAK_GLASS_PASSWORD_HASH={hashed}",
+        markup=False,
+        highlight=False,
+        soft_wrap=True,
+    )
+    console.print(
+        "A password works for one emergency: make a new one for the next.",
+        markup=False,
+        highlight=False,
+    )
 
 
 # --- keys -----------------------------------------------------------------------
@@ -918,7 +1004,10 @@ def break_glass_hash_command(
 #
 # Anything using a revoked key stops working at once.
 
-keys_app = typer.Typer(help="Named API keys for scripts and apps, managed from the server itself.", no_args_is_help=True)
+keys_app = typer.Typer(
+    help="Named API keys for scripts and apps, managed from the server itself.",
+    no_args_is_help=True,
+)
 app.add_typer(keys_app, name="keys")
 
 
@@ -933,7 +1022,9 @@ def _keys_store(path: str) -> Any:
                 "sign-in is not on here, and named keys are kept with it. Set VECTRIXDB_SIGNIN, VECTRIXDB_SIGNIN_SECRET and "
                 "VECTRIXDB_PUBLIC_URL, the same as the server's."
             )
-        return config, SignInStore(config.store_url or config.store_path, config.secrets, key=config.store_key)
+        return config, SignInStore(
+            config.store_url or config.store_path, config.secrets, key=config.store_key
+        )
     except ConfigurationError as exc:
         console.print(f"[red]{exc}[/red]", markup=True, highlight=False)
         raise typer.Exit(code=2)
@@ -955,9 +1046,18 @@ def _key_scope(key: Any) -> str:
 def keys_add(
     name: str = typer.Argument(..., help="What uses the key, so it is clear later: handbook-bot"),
     role: str = typer.Option("searcher", "--role", "-r", help="reader, searcher or operator"),
-    collection: Optional[List[str]] = typer.Option(None, "--collection", "-c", help="A collection it may reach. Repeat for more. Left out, every collection."),
-    days: Optional[int] = typer.Option(None, "--days", help="How many days it works for. Left out, until it is revoked."),
-    per_minute: Optional[int] = typer.Option(None, "--per-minute", help="Requests a minute it may make. Left out, the server's setting."),
+    collection: Optional[List[str]] = typer.Option(
+        None,
+        "--collection",
+        "-c",
+        help="A collection it may reach. Repeat for more. Left out, every collection.",
+    ),
+    days: Optional[int] = typer.Option(
+        None, "--days", help="How many days it works for. Left out, until it is revoked."
+    ),
+    per_minute: Optional[int] = typer.Option(
+        None, "--per-minute", help="Requests a minute it may make. Left out, the server's setting."
+    ),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
 ):
@@ -972,8 +1072,12 @@ def keys_add(
         if days is not None and days < 1:
             raise ConfigurationError("--days is a whole number of days, 1 or more")
         made, key = store.create_key(
-            name, role, "server console", collections=collection or None,
-            expires_at=time.time() + days * 86400 if days else None, per_minute=per_minute,
+            name,
+            role,
+            "server console",
+            collections=collection or None,
+            expires_at=time.time() + days * 86400 if days else None,
+            per_minute=per_minute,
         )
         _record(config, "key_created", who=made.name, role=made.role, reason=_key_scope(made))
     except ConfigurationError as exc:
@@ -981,7 +1085,11 @@ def keys_add(
         raise typer.Exit(code=2)
     finally:
         store.close()
-    console.print(f"Made the key {made.name}: {made.role}, {_key_scope(made)}. Copy it now, it is not shown again:", markup=False, highlight=False)
+    console.print(
+        f"Made the key {made.name}: {made.role}, {_key_scope(made)}. Copy it now, it is not shown again:",
+        markup=False,
+        highlight=False,
+    )
     console.print(f"  {key}", markup=False, highlight=False, soft_wrap=True)
 
 
@@ -1000,13 +1108,21 @@ def keys_list(
     finally:
         store.close()
     if not keys:
-        console.print("No keys yet. Make one with: vectrixdb keys add handbook-bot --collection handbook --days 90", markup=False, highlight=False)
+        console.print(
+            "No keys yet. Make one with: vectrixdb keys add handbook-bot --collection handbook --days 90",
+            markup=False,
+            highlight=False,
+        )
         return
     table = Table(show_header=True, header_style="bold")
     for heading in ("Id", "Name", "Role", "Reaches", "Last used"):
         table.add_column(heading)
     for key in keys:
-        last = datetime.datetime.fromtimestamp(key.last_used).strftime("%d %b %Y %H:%M") if key.last_used else "never"
+        last = (
+            datetime.datetime.fromtimestamp(key.last_used).strftime("%d %b %Y %H:%M")
+            if key.last_used
+            else "never"
+        )
         table.add_row(key.key_id, key.name, key.role, _key_scope(key), last)
     console.print(table)
 
@@ -1023,12 +1139,18 @@ def keys_revoke(
     try:
         name = store.revoke_key(key_id)
         if name is None:
-            console.print(f"No key with the id {key_id}. See them with: vectrixdb keys list", markup=False, highlight=False)
+            console.print(
+                f"No key with the id {key_id}. See them with: vectrixdb keys list",
+                markup=False,
+                highlight=False,
+            )
             raise typer.Exit(code=1)
         _record(config, "key_revoked", who=name)
     finally:
         store.close()
-    console.print(f"Revoked {name}. Anything using it has stopped working.", markup=False, highlight=False)
+    console.print(
+        f"Revoked {name}. Anything using it has stopped working.", markup=False, highlight=False
+    )
 
 
 # --- golden data and evaluation --------------------------------------------------
@@ -1053,7 +1175,9 @@ def keys_revoke(
 #
 # The evaluation commands, each a thin face over vectrixdb.evaluation.
 
-golden_app = typer.Typer(help="Golden questions: the questions whose right answers you know.", no_args_is_help=True)
+golden_app = typer.Typer(
+    help="Golden questions: the questions whose right answers you know.", no_args_is_help=True
+)
 app.add_typer(golden_app, name="golden")
 
 
@@ -1096,14 +1220,31 @@ def golden_write_command(
     name: str = typer.Argument(..., help="Collection whose chunks the questions are written from"),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
-    out: str = typer.Option("golden.jsonl", "--out", "-o", help="Where to write the rows; never over a file that is there"),
+    out: str = typer.Option(
+        "golden.jsonl",
+        "--out",
+        "-o",
+        help="Where to write the rows; never over a file that is there",
+    ),
     count: int = typer.Option(50, "--count", "-n", help="How many questions"),
-    seed: int = typer.Option(0, "--seed", help="The same seed, with the same answers, gives the same rows"),
-    examples: Optional[str] = typer.Option(None, "--examples", help="A text file of questions people really ask, one a line, whose style is copied"),
+    seed: int = typer.Option(
+        0, "--seed", help="The same seed, with the same answers, gives the same rows"
+    ),
+    examples: Optional[str] = typer.Option(
+        None,
+        "--examples",
+        help="A text file of questions people really ask, one a line, whose style is copied",
+    ),
     scenario: str = typer.Option("", "--scenario", help="Who asks, in a few words"),
     task: str = typer.Option("", "--task", help="What they are after, in a few words"),
-    evolve: int = typer.Option(1, "--evolve", help="How many times each question is made harder; 0 for none"),
-    cache: Optional[str] = typer.Option(None, "--cache", help="Where answers are kept as they come, so a stopped run starts where it stopped. Default: beside --out"),
+    evolve: int = typer.Option(
+        1, "--evolve", help="How many times each question is made harder; 0 for none"
+    ),
+    cache: Optional[str] = typer.Option(
+        None,
+        "--cache",
+        help="Where answers are kept as they come, so a stopped run starts where it stopped. Default: beside --out",
+    ),
 ):
     """Draft golden questions with a chat model from the collection's own chunks, every one a draft to check."""
     path = _settings(path, env_file)
@@ -1113,12 +1254,18 @@ def golden_write_command(
     from .evaluation import WriterUnavailable, write_golden
 
     if _Path(out).exists():
-        console.print(f"[red]Error:[/red] {out} is already there, and questions somebody checked are not written over. Give another --out.")
+        console.print(
+            f"[red]Error:[/red] {out} is already there, and questions somebody checked are not written over. Give another --out."
+        )
         raise typer.Exit(1)
     asked = []
     if examples:
         try:
-            asked = [line.strip() for line in _Path(examples).read_text(encoding="utf-8").splitlines() if line.strip()]
+            asked = [
+                line.strip()
+                for line in _Path(examples).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
         except OSError as exc:
             console.print(f"[red]Error:[/red] {exc}")
             raise typer.Exit(1)
@@ -1131,9 +1278,18 @@ def golden_write_command(
         raise typer.Exit(1)
     try:
         written = write_golden(
-            db, out, n=count, seed=seed, examples=asked, scenario=scenario, task=task, evolve=evolve,
+            db,
+            out,
+            n=count,
+            seed=seed,
+            examples=asked,
+            scenario=scenario,
+            task=task,
+            evolve=evolve,
             cache=cache or f"{out}.answers.jsonl",
-            progress=lambda done, wanted: console.print(f"  {done} of {wanted}", markup=False, highlight=False),
+            progress=lambda done, wanted: console.print(
+                f"  {done} of {wanted}", markup=False, highlight=False
+            ),
         )
     except (ValueError, WriterUnavailable) as exc:
         console.print(f"[red]Error:[/red] {exc}", markup=False, highlight=False)
@@ -1152,7 +1308,12 @@ def golden_write_command(
 @golden_app.command("label")
 def golden_label_command(
     name: str = typer.Argument(..., help="Collection that holds the documents"),
-    questions: str = typer.Option(..., "--questions", "-q", help="Questions with reference answers and no labels: a Bedrock evaluation dataset or this library's JSONL"),
+    questions: str = typer.Option(
+        ...,
+        "--questions",
+        "-q",
+        help="Questions with reference answers and no labels: a Bedrock evaluation dataset or this library's JSONL",
+    ),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
     out: str = typer.Option("golden.jsonl", "--out", "-o", help="Where to write the rows"),
@@ -1167,7 +1328,9 @@ def golden_label_command(
     from .evaluation import load_questions, suggest_expected
 
     if _Path(out).exists():
-        console.print(f"[red]Error:[/red] {out} is already there, and labels somebody checked are not written over. Give another --out.")
+        console.print(
+            f"[red]Error:[/red] {out} is already there, and labels somebody checked are not written over. Give another --out."
+        )
         raise typer.Exit(1)
     try:
         asked = load_questions(questions)
@@ -1187,7 +1350,9 @@ def golden_label_command(
             # answer, which finds the document that says it and proves nothing.
             row["expected"], row["draft"] = proposed.get(q.id or q.text, []), True
         rows.append(row)
-    _Path(out).write_text("".join(_json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    _Path(out).write_text(
+        "".join(_json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8"
+    )
     drafts = sum(1 for r in rows if r.get("draft"))
     console.print(
         f"Wrote {len(rows)} rows to {out}, {drafts} with a proposed label marked draft. "
@@ -1200,12 +1365,27 @@ def golden_label_command(
 @golden_app.command("cutoff")
 def golden_cutoff_command(
     name: str = typer.Argument(..., help="Collection to search"),
-    golden: str = typer.Option(..., "--golden", "-g", help="Golden file: a path, s3://bucket/key or a Blob address"),
+    golden: str = typer.Option(
+        ..., "--golden", "-g", help="Golden file: a path, s3://bucket/key or a Blob address"
+    ),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
-    unanswerable: Optional[str] = typer.Option(None, "--unanswerable", "-u", help="A text file of questions the documents do not answer, one a line"),
-    mode: str = typer.Option("dense", "--mode", help="How the questions are searched; the cut-off belongs to that way of searching"),
-    measure: str = typer.Option("similarity", "--measure", help="similarity, the cosine alone, or relevance, the reranker's verdict where one ran"),
+    unanswerable: Optional[str] = typer.Option(
+        None,
+        "--unanswerable",
+        "-u",
+        help="A text file of questions the documents do not answer, one a line",
+    ),
+    mode: str = typer.Option(
+        "dense",
+        "--mode",
+        help="How the questions are searched; the cut-off belongs to that way of searching",
+    ),
+    measure: str = typer.Option(
+        "similarity",
+        "--measure",
+        help="similarity, the cosine alone, or relevance, the reranker's verdict where one ran",
+    ),
 ):
     """Measure the relevance below which the top result is more likely a near miss than the answer."""
     path = _settings(path, env_file)
@@ -1216,7 +1396,15 @@ def golden_cutoff_command(
 
     try:
         gold = read_golden(golden)
-        outside = [line.strip() for line in _Path(unanswerable).read_text(encoding="utf-8").splitlines() if line.strip()] if unanswerable else []
+        outside = (
+            [
+                line.strip()
+                for line in _Path(unanswerable).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            if unanswerable
+            else []
+        )
         db = Vectrix(name, path=path, mode=cast(Any, mode), readonly=True)
     except Exception as exc:
         console.print(f"[red]Error:[/red] {exc}")
@@ -1242,7 +1430,12 @@ def golden_cutoff_command(
         table.add_column(column, justify="right")
     for row in found["table"]:
         mark = " *" if row["cutoff"] == found["cutoff"] else ""
-        table.add_row(f"{row['cutoff']:.3f}{mark}", f"{row['precision']:.0%}" if row["precision"] is not None else "", f"{row['answered']:.0%}", f"{row['declined']:.0%}")
+        table.add_row(
+            f"{row['cutoff']:.3f}{mark}",
+            f"{row['precision']:.0%}" if row["precision"] is not None else "",
+            f"{row['answered']:.0%}",
+            f"{row['declined']:.0%}",
+        )
     console.print(table)
     console.print(
         f"Cut-off {found['cutoff']:.3f}. An answer outscores a near miss {found['separation']:.0%} of the time; "
@@ -1255,13 +1448,25 @@ def golden_cutoff_command(
 @app.command("sweep")
 def sweep_command(
     files: List[str] = typer.Argument(..., help="The original documents, or folders of them"),
-    golden: str = typer.Option(..., "--golden", "-g", help="Golden file whose expected names documents"),
-    chunk: List[str] = typer.Option(["recursive", "markdown"], "--chunk", help="A chunker to try; give it again for another"),
-    size: List[int] = typer.Option([500, 1000], "--size", help="A chunk size to try, in characters"),
+    golden: str = typer.Option(
+        ..., "--golden", "-g", help="Golden file whose expected names documents"
+    ),
+    chunk: List[str] = typer.Option(
+        ["recursive", "markdown"], "--chunk", help="A chunker to try; give it again for another"
+    ),
+    size: List[int] = typer.Option(
+        [500, 1000], "--size", help="A chunk size to try, in characters"
+    ),
     overlap: List[int] = typer.Option([100], "--overlap", help="An overlap to try, in characters"),
-    heading: str = typer.Option("both", "--heading", help="Whether the headings go to the embedder: yes, no, or both"),
-    mode: List[str] = typer.Option(["dense"], "--mode", help="A way of searching each build: dense, hybrid, ultimate"),
-    out: Optional[str] = typer.Option(None, "--out", "-o", help="Write the whole report here as JSON"),
+    heading: str = typer.Option(
+        "both", "--heading", help="Whether the headings go to the embedder: yes, no, or both"
+    ),
+    mode: List[str] = typer.Option(
+        ["dense"], "--mode", help="A way of searching each build: dense, hybrid, ultimate"
+    ),
+    out: Optional[str] = typer.Option(
+        None, "--out", "-o", help="Write the whole report here as JSON"
+    ),
 ):
     """Build the index every way asked, from the originals, and rank the ways by what the golden questions find."""
     import json as _json
@@ -1276,7 +1481,9 @@ def sweep_command(
     sources: List[str] = []
     for given in files:
         here = _Path(given)
-        sources += sorted(str(f) for f in here.rglob("*") if f.is_file()) if here.is_dir() else [str(here)]
+        sources += (
+            sorted(str(f) for f in here.rglob("*") if f.is_file()) if here.is_dir() else [str(here)]
+        )
     try:
         gold = read_golden(golden)
         report = sweep(
@@ -1287,7 +1494,11 @@ def sweep_command(
             overlap=overlap,
             embed_heading=headings,
             search=[{"mode": m} if m == "dense" else {"mode": m, "rerank": False} for m in mode],
-            progress=lambda row, n, total: console.print(f"  {n}/{total} {row['chunk']} {row['chunk_size']}, nDCG {row['ndcg']:.3f}", markup=False, highlight=False),
+            progress=lambda row, n, total: console.print(
+                f"  {n}/{total} {row['chunk']} {row['chunk_size']}, nDCG {row['ndcg']:.3f}",
+                markup=False,
+                highlight=False,
+            ),
         )
     except (OSError, ValueError, ImportError) as exc:
         console.print(f"[red]Error:[/red] {exc}")
@@ -1296,19 +1507,39 @@ def sweep_command(
     if out:
         _Path(out).write_text(_json.dumps(report, indent=2), encoding="utf-8")
         console.print(f"Wrote {out}.", markup=False, highlight=False)
-    console.print("Nothing was changed. The builds were scratch copies; to use the best one, ingest with those settings.", markup=False, highlight=False)
+    console.print(
+        "Nothing was changed. The builds were scratch copies; to use the best one, ingest with those settings.",
+        markup=False,
+        highlight=False,
+    )
 
 
 @app.command()
 def evaluate(
-    names: List[str] = typer.Argument(..., help="Collections to evaluate, the same documents on each"),
-    golden: str = typer.Option(..., "--golden", "-g", help="Golden file: a path, s3://bucket/key or a Blob address"),
+    names: List[str] = typer.Argument(
+        ..., help="Collections to evaluate, the same documents on each"
+    ),
+    golden: str = typer.Option(
+        ..., "--golden", "-g", help="Golden file: a path, s3://bucket/key or a Blob address"
+    ),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
-    save_to: Optional[str] = typer.Option(None, "--save-to", help="Where runs go: a folder, s3://bucket/prefix or a Blob address. Default: VECTRIXDB_EVALUATIONS, or <path>/evaluations, which is where the server reads them"),
-    mode: str = typer.Option("ultimate", "--mode", help="The most a collection is opened for; ultimate includes every local method"),
-    balance: float = typer.Option(4, "--balance", help="best_for_balance: the fastest within this many points of the most"),
-    time_points: float = typer.Option(8, "--time", help="best_for_time: the fastest within this many points of the most"),
+    save_to: Optional[str] = typer.Option(
+        None,
+        "--save-to",
+        help="Where runs go: a folder, s3://bucket/prefix or a Blob address. Default: VECTRIXDB_EVALUATIONS, or <path>/evaluations, which is where the server reads them",
+    ),
+    mode: str = typer.Option(
+        "ultimate",
+        "--mode",
+        help="The most a collection is opened for; ultimate includes every local method",
+    ),
+    balance: float = typer.Option(
+        4, "--balance", help="best_for_balance: the fastest within this many points of the most"
+    ),
+    time_points: float = typer.Option(
+        8, "--time", help="best_for_time: the fastest within this many points of the most"
+    ),
 ):
     """Search every golden question every way the collections can be searched, and pick three."""
     path = _settings(path, env_file)
@@ -1317,7 +1548,13 @@ def evaluate(
     from pathlib import Path as _Path
 
     from .easy import Vectrix
-    from .evaluation import PICKS, MissingDocumentsWarning, Target, evaluate as run_evaluation, read_golden
+    from .evaluation import (
+        PICKS,
+        MissingDocumentsWarning,
+        Target,
+        evaluate as run_evaluation,
+        read_golden,
+    )
 
     try:
         gold = read_golden(golden)
@@ -1327,15 +1564,30 @@ def evaluate(
     handles = []
     try:
         for name in names:
-            handles.append(Target(Vectrix(name, path=path, mode=cast(Any, mode), readonly=True), name=None if len(names) == 1 else name, collection=name))
+            handles.append(
+                Target(
+                    Vectrix(name, path=path, mode=cast(Any, mode), readonly=True),
+                    name=None if len(names) == 1 else name,
+                    collection=name,
+                )
+            )
     except Exception as exc:
         for target in handles:
             target.db.close()
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1)
     # Where the server reads runs, so a run made here is on its Evaluate page.
-    where = save_to or _os.environ.get("VECTRIXDB_EVALUATIONS", "").strip() or str(_Path(path) / "evaluations")
-    console.print(f"{len(gold.labelled)} questions from {golden}" + (f", {gold.unfilled} template rows still empty" if gold.unfilled else ""), markup=False, highlight=False)
+    where = (
+        save_to
+        or _os.environ.get("VECTRIXDB_EVALUATIONS", "").strip()
+        or str(_Path(path) / "evaluations")
+    )
+    console.print(
+        f"{len(gold.labelled)} questions from {golden}"
+        + (f", {gold.unfilled} template rows still empty" if gold.unfilled else ""),
+        markup=False,
+        highlight=False,
+    )
 
     def say(message: Any, *_where: Any, **_how: Any) -> None:
         # The missing-documents check runs before any searching, so this
@@ -1352,7 +1604,11 @@ def evaluate(
                 save_to=where,
                 balance=balance,
                 time_points=time_points,
-                progress=lambda setup, n, total: console.print(f"  {n}/{total} {setup['method_label']} on {setup['engine']}", markup=False, highlight=False),
+                progress=lambda setup, n, total: console.print(
+                    f"  {n}/{total} {setup['method_label']} on {setup['engine']}",
+                    markup=False,
+                    highlight=False,
+                ),
             )
     except (ValueError, ImportError) as exc:
         console.print(f"[red]Error:[/red] {exc}")
@@ -1372,29 +1628,61 @@ def evaluate(
             continue
         models = " + ".join(m["label"] for m in s["models"]) or "Words only"
         summary = s["summary"]
-        table.add_row(str(s["rank"]), f"{s['method_label']} on {s['engine']}, {models}", f"{summary['found']['10']:.0%}", f"{summary['found']['1']:.0%}", f"{summary['median_ms']:.0f} ms")
+        table.add_row(
+            str(s["rank"]),
+            f"{s['method_label']} on {s['engine']}, {models}",
+            f"{summary['found']['10']:.0%}",
+            f"{summary['found']['1']:.0%}",
+            f"{summary['median_ms']:.0f} ms",
+        )
     console.print(table)
     failed = [s for s in report["setups"] if s.get("error")]
     for s in failed:
-        console.print(f"Could not run {s['method_label']} on {s['engine']}: {s['error']}", markup=False, highlight=False)
+        console.print(
+            f"Could not run {s['method_label']} on {s['engine']}: {s['error']}",
+            markup=False,
+            highlight=False,
+        )
     by_key = {s["key"]: s for s in report["setups"]}
     for pick in PICKS:
         key = report["picks"].get(pick)
         if key:
             s = by_key[key]
-            console.print(f"{pick}: {s['method_label']} on {s['engine']}, {s['summary']['found']['10']:.0%} in the top 10, {s['summary']['median_ms']:.0f} ms", markup=False, highlight=False)
-    console.print(f"Saved run {report['id']} to {where}. Nothing was switched: choose, then change the settings.", markup=False, highlight=False)
+            console.print(
+                f"{pick}: {s['method_label']} on {s['engine']}, {s['summary']['found']['10']:.0%} in the top 10, {s['summary']['median_ms']:.0f} ms",
+                markup=False,
+                highlight=False,
+            )
+    console.print(
+        f"Saved run {report['id']} to {where}. Nothing was switched: choose, then change the settings.",
+        markup=False,
+        highlight=False,
+    )
 
 
 @app.command()
 def check(
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
-    template: bool = typer.Option(False, "--template", help="Print a settings file with every setting in it, to fill in, and stop"),
-    url: Optional[str] = typer.Option(None, "--url", help="Check a running server from outside instead, through its gateway: https://apim.company.com/vectrixdb"),
-    prefix: Optional[str] = typer.Option(None, "--prefix", help="With --url: the path every route lives under, as VECTRIXDB_PREFIX. Left out, the setting"),
+    template: bool = typer.Option(
+        False,
+        "--template",
+        help="Print a settings file with every setting in it, to fill in, and stop",
+    ),
+    url: Optional[str] = typer.Option(
+        None,
+        "--url",
+        help="Check a running server from outside instead, through its gateway: https://apim.company.com/vectrixdb",
+    ),
+    prefix: Optional[str] = typer.Option(
+        None,
+        "--prefix",
+        help="With --url: the path every route lives under, as VECTRIXDB_PREFIX. Left out, the setting",
+    ),
     gateway_paths: Optional[str] = typer.Option(
-        None, "--gateway-paths", help="With --url: the gateway path each route is published under, as VECTRIXDB_GATEWAY_PATHS: api/v1=/files/search,auth=/files/auth. Left out, the setting"
+        None,
+        "--gateway-paths",
+        help="With --url: the gateway path each route is published under, as VECTRIXDB_GATEWAY_PATHS: api/v1=/files/search,auth=/files/auth. Left out, the setting",
     ),
 ):
     """Test the settings before a start: what a start would refuse, and what looks wrong."""
@@ -1424,18 +1712,35 @@ def check(
         except ConfigurationError as exc:
             console.print(f"[red]{_escape(str(exc))}[/red]")
             raise typer.Exit(code=2)
-        console.print(f"Asking {url} what a caller would. Every request is a GET.", markup=False, highlight=False)
+        console.print(
+            f"Asking {url} what a caller would. Every request is a GET.",
+            markup=False,
+            highlight=False,
+        )
         console.print()
-        _marks = {"ok": "[green]ok[/green]   ", "warn": "[yellow]warn[/yellow] ", "error": "[red]error[/red]"}
-        answers = probe(url, gateway=gateway if gateway.dressed or gateway.token_header != "authorization" else None)
+        _marks = {
+            "ok": "[green]ok[/green]   ",
+            "warn": "[yellow]warn[/yellow] ",
+            "error": "[red]error[/red]",
+        }
+        answers = probe(
+            url,
+            gateway=gateway if gateway.dressed or gateway.token_header != "authorization" else None,
+        )
         for finding in answers:
             console.print(f"  {_marks[finding.level]}  {_escape(finding.text)}", highlight=False)
         bad = sum(1 for f in answers if f.level == "error")
         console.print()
         if bad:
-            console.print(f"{bad} error{'s' if bad != 1 else ''}. Callers on the other side of the gateway are not getting the server they were promised.", markup=False, highlight=False)
+            console.print(
+                f"{bad} error{'s' if bad != 1 else ''}. Callers on the other side of the gateway are not getting the server they were promised.",
+                markup=False,
+                highlight=False,
+            )
             raise typer.Exit(code=1)
-        console.print("No errors. What a caller reaches is the server.", markup=False, highlight=False)
+        console.print(
+            "No errors. What a caller reaches is the server.", markup=False, highlight=False
+        )
         return
     _env_file(env_file)
     from .check import run
@@ -1445,18 +1750,33 @@ def check(
     source = f"{env_file} and the environment" if env_file else "the environment"
     console.print(f"Settings for {where}, from {source}", markup=False, highlight=False)
     console.print()
-    marks = {"ok": "[green]ok[/green]   ", "warn": "[yellow]warn[/yellow] ", "error": "[red]error[/red]"}
+    marks = {
+        "ok": "[green]ok[/green]   ",
+        "warn": "[yellow]warn[/yellow] ",
+        "error": "[red]error[/red]",
+    }
     from rich.markup import escape
 
     for finding in findings:
-        console.print(f"  {marks[finding.level]}  {escape(finding.area):<12} {escape(finding.text)}", highlight=False)
+        console.print(
+            f"  {marks[finding.level]}  {escape(finding.area):<12} {escape(finding.text)}",
+            highlight=False,
+        )
     errors = sum(1 for f in findings if f.level == "error")
     warnings = sum(1 for f in findings if f.level == "warn")
     console.print()
     if errors:
-        console.print(f"{errors} error{'s' if errors != 1 else ''}, {warnings} warning{'s' if warnings != 1 else ''}. A start would fail or misbehave until the errors are fixed.", markup=False, highlight=False)
+        console.print(
+            f"{errors} error{'s' if errors != 1 else ''}, {warnings} warning{'s' if warnings != 1 else ''}. A start would fail or misbehave until the errors are fixed.",
+            markup=False,
+            highlight=False,
+        )
         raise typer.Exit(code=1)
-    console.print(f"No errors{f', {warnings} warning' + ('s' if warnings != 1 else '') if warnings else ''}. Ready to start.", markup=False, highlight=False)
+    console.print(
+        f"No errors{f', {warnings} warning' + ('s' if warnings != 1 else '') if warnings else ''}. Ready to start.",
+        markup=False,
+        highlight=False,
+    )
 
 
 # ============================================================================

@@ -22,7 +22,13 @@ _TOKEN = re.compile(r"\w+")
 
 
 class FakeIndex:
-    def __init__(self, name: str, fields: List[Any], vectorizers: Optional[List[Any]] = None, semantic_search: Any = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        fields: List[Any],
+        vectorizers: Optional[List[Any]] = None,
+        semantic_search: Any = None,
+    ) -> None:
         self.name = name
         self.fields = fields
         self.vectorizers = list(vectorizers or [])
@@ -42,10 +48,14 @@ class FakeIndexClient:
 
     def create_or_update_index(self, index):
         existing = self.indexes.get(index.name)
-        vectorizers = list(getattr(getattr(index, "vector_search", None), "vectorizers", None) or [])
+        vectorizers = list(
+            getattr(getattr(index, "vector_search", None), "vectorizers", None) or []
+        )
         semantic = getattr(index, "semantic_search", None)
         if existing is None:
-            self.indexes[index.name] = FakeIndex(index.name, list(index.fields), vectorizers, semantic)
+            self.indexes[index.name] = FakeIndex(
+                index.name, list(index.fields), vectorizers, semantic
+            )
         else:
             existing.fields = list(index.fields)
             existing.vectorizers = vectorizers
@@ -69,7 +79,9 @@ class FakeIndexClient:
         return FakeSearchClient(self, name)
 
 
-_TOK = re.compile(r"\s*(?:(\()|(\))|('(?:[^']|'')*')|(-?\d+(?:\.\d+)?)|([A-Za-z_][A-Za-z0-9_./:]*))")
+_TOK = re.compile(
+    r"\s*(?:(\()|(\))|('(?:[^']|'')*')|(-?\d+(?:\.\d+)?)|([A-Za-z_][A-Za-z0-9_./:]*))"
+)
 
 
 def _tokens(expr: str) -> List[Any]:
@@ -101,7 +113,9 @@ class _Parser:
     """The OData the backend emits: and/or/not, parentheses, comparisons with
     string, number, boolean and null literals, ``search.in`` and ``/any``."""
 
-    def __init__(self, expr: str, doc: Dict[str, Any], bound: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(
+        self, expr: str, doc: Dict[str, Any], bound: Optional[Dict[str, Any]] = None
+    ) -> None:
         self.toks = _tokens(expr)
         self.i = 0
         self.doc = doc
@@ -225,7 +239,7 @@ def _match_filter(expr: Optional[str], doc: Dict[str, Any]) -> bool:
     p = _Parser(expr, doc)
     result = p.expr()
     if p.i != len(p.toks):
-        raise ValueError(f"fake filter cannot parse {expr!r}: trailing {p.toks[p.i:]}")
+        raise ValueError(f"fake filter cannot parse {expr!r}: trailing {p.toks[p.i :]}")
     return result
 
 
@@ -295,7 +309,9 @@ class FakeSearchClient:
             semantic = self._ic.get_index(self._name).semantic_search
             names = [c.name for c in (getattr(semantic, "configurations", None) or [])]
             if semantic_configuration_name not in names:
-                raise ValueError(f"semantic configuration {semantic_configuration_name!r} is not defined on {self._name}")
+                raise ValueError(
+                    f"semantic configuration {semantic_configuration_name!r} is not defined on {self._name}"
+                )
         docs = [d for d in self._docs.values() if _match_filter(filter, d)]
         scores: Dict[str, float] = {}
         text_scores: Dict[str, float] = {}
@@ -375,7 +391,9 @@ class FakeSearchClient:
             row["@search.score"] = scores[doc_id]
             if query_type == "semantic":
                 # The service's reranker scores 0 to 4 and keeps the order here.
-                row["@search.reranker_score"] = round(4.0 * scores[doc_id] / max(scores.values()), 4)
+                row["@search.reranker_score"] = round(
+                    4.0 * scores[doc_id] / max(scores.values()), 4
+                )
             out.append(row)
         return _Paged(out, len(scores) if include_total_count else None)
 

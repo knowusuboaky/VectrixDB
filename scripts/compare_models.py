@@ -66,7 +66,9 @@ MODELS: Dict[str, dict] = {
 # trained (mean, or the [CLS] vector) and the prefixes they recommend. The
 # run that chose the 2.2 default compared bge-small against e5-small-v2 and
 # snowflake-arctic-embed-xs, in fp32 and in three INT8 exports; the table is
-# on the benchmarks page.
+# on the benchmarks page and its files are under benchmarks/archive, since
+# those candidates are no longer on this machine and this script cannot
+# write them again (benchmarks/archive/README.md says what it ran as).
 
 
 # ============================================================================

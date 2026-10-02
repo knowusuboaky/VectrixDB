@@ -34,7 +34,15 @@ from urllib.parse import quote, urlparse
 from .exceptions import ConfigurationError, DocumentNotFoundError
 from .ingest import LoadedDocument, split_front_matter
 
-__all__ = ["BlobFiles", "ChunkStore", "DocumentStore", "LocalFiles", "S3Files", "chunks_name", "stored_name"]
+__all__ = [
+    "BlobFiles",
+    "ChunkStore",
+    "DocumentStore",
+    "LocalFiles",
+    "S3Files",
+    "chunks_name",
+    "stored_name",
+]
 
 
 # ============================================================================
@@ -74,7 +82,7 @@ def stored_name(doc_id: str) -> str:
     if parsed.scheme and "://" in text:
         text = parsed.netloc + parsed.path
     parts = [p for p in text.split("/") if p and p not in (".", "..")]
-    safe = [quote(p, safe=" ()+,=@!~'") .replace("%20", " ") for p in parts] or ["document"]
+    safe = [quote(p, safe=" ()+,=@!~'").replace("%20", " ") for p in parts] or ["document"]
     # A segment must not end in a dot or a space on Windows.
     safe = [s.rstrip(". ") or "_" for s in safe]
     return "/".join(safe) + ".md"
@@ -268,7 +276,9 @@ class DocumentStore:
     deleted at its source is gone everywhere.
     """
 
-    def __init__(self, files: Any, retain_days: Optional[int] = None, *, keep_deleted: bool = True) -> None:
+    def __init__(
+        self, files: Any, retain_days: Optional[int] = None, *, keep_deleted: bool = True
+    ) -> None:
         for method in ("read", "write", "exists", "delete", "list", "holds"):
             if not callable(getattr(files, method, None)):
                 raise ConfigurationError(f"a document store needs files with a {method}() method")
@@ -278,7 +288,11 @@ class DocumentStore:
         self._lock = threading.RLock()
 
     def __repr__(self) -> str:
-        where = self.files.describe() if callable(getattr(self.files, "describe", None)) else type(self.files).__name__
+        where = (
+            self.files.describe()
+            if callable(getattr(self.files, "describe", None))
+            else type(self.files).__name__
+        )
         return f"DocumentStore({where})"
 
     # -- the listing
@@ -295,7 +309,9 @@ class DocumentStore:
 
     def _save_index(self, index: Dict[str, Any]) -> None:
         index["version"] = 1
-        self.files.write(INDEX, json.dumps(index, indent=2, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+        self.files.write(
+            INDEX, json.dumps(index, indent=2, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        )
 
     def reindex(self, write: bool = True) -> Dict[str, Any]:
         """The listing, rebuilt from the front matter of the files."""
@@ -304,7 +320,9 @@ class DocumentStore:
             if not rel.endswith(".md") or rel.startswith(DELETED + "/") or ".figures/" in rel:
                 continue
             try:
-                front, _body = split_front_matter(self.files.read(rel).decode("utf-8", errors="replace"))
+                front, _body = split_front_matter(
+                    self.files.read(rel).decode("utf-8", errors="replace")
+                )
             except Exception:
                 continue
             doc_id = front.get("doc_id")
@@ -319,7 +337,20 @@ class DocumentStore:
 
     @staticmethod
     def _entry_from(front: Mapping[str, Any], rel: str) -> Dict[str, Any]:
-        keys = ("source", "filename", "kind", "source_version", "source_sha", "version", "extractor", "extracted_at", "chunking", "user_metadata", "figure_files", "masking")
+        keys = (
+            "source",
+            "filename",
+            "kind",
+            "source_version",
+            "source_sha",
+            "version",
+            "extractor",
+            "extracted_at",
+            "chunking",
+            "user_metadata",
+            "figure_files",
+            "masking",
+        )
         entry = {k: front.get(k) for k in keys if front.get(k) is not None}
         entry["file"] = rel
         return entry
@@ -347,13 +378,18 @@ class DocumentStore:
             for number, (src, data) in enumerate(sorted(doc.images.items()), start=1):
                 # The image keeps the name its document gave it, p4-fig1.png,
                 # unless two figures share one.
-                base = quote(PurePosixPath(src.split("?")[0]).name, safe="()+,=@!~'") or f"fig{number}.png"
+                base = (
+                    quote(PurePosixPath(src.split("?")[0]).name, safe="()+,=@!~'")
+                    or f"fig{number}.png"
+                )
                 name = folder + base
                 if name in figure_files.values():
                     name = folder + f"{number}-{base}"
                 self.files.write(name, data)
                 figure_files[src] = name
-            for stale in set(((previous or {}).get("figure_files") or {}).values()) - set(figure_files.values()):
+            for stale in set(((previous or {}).get("figure_files") or {}).values()) - set(
+                figure_files.values()
+            ):
                 self.files.delete(stale)
             extra = {
                 "doc_id": doc_id,
@@ -365,7 +401,9 @@ class DocumentStore:
                 "extractor": doc.metadata.get("extractor"),
                 "extracted_at": _utc().isoformat(timespec="seconds"),
                 # What the reader masked before this copy was kept: counts and a risk score, never the text.
-                "masking": doc.metadata.get("masking") if isinstance(doc.metadata.get("masking"), dict) else None,
+                "masking": doc.metadata.get("masking")
+                if isinstance(doc.metadata.get("masking"), dict)
+                else None,
                 "chunking": chunking or None,
                 "user_metadata": user_metadata or None,
                 "figure_files": figure_files or None,
@@ -400,7 +438,9 @@ class DocumentStore:
                 front["source_sha"] = source_sha
             from .ingest import _front_matter_text
 
-            self.files.write(entry["file"], (_front_matter_text(dict(front)) + body).encode("utf-8"))
+            self.files.write(
+                entry["file"], (_front_matter_text(dict(front)) + body).encode("utf-8")
+            )
             entry["source_version"] = source_version
             if source_sha:
                 entry["source_sha"] = source_sha
@@ -488,7 +528,13 @@ class DocumentStore:
                     moved.append(target)
                 except Exception:
                     continue
-            index["deleted"].append({"doc_id": doc_id, "deleted_at": _utc().isoformat(timespec="seconds"), "files": moved})
+            index["deleted"].append(
+                {
+                    "doc_id": doc_id,
+                    "deleted_at": _utc().isoformat(timespec="seconds"),
+                    "files": moved,
+                }
+            )
             self._save_index(index)
             return True
 
@@ -580,13 +626,27 @@ class ChunkStore:
         self.files = files
 
     def __repr__(self) -> str:
-        where = self.files.describe() if callable(getattr(self.files, "describe", None)) else type(self.files).__name__
+        where = (
+            self.files.describe()
+            if callable(getattr(self.files, "describe", None))
+            else type(self.files).__name__
+        )
         return f"ChunkStore({where})"
 
-    def put(self, doc_id: str, ids: Sequence[str], texts: Sequence[str], metadata: Sequence[Mapping[str, Any]]) -> str:
+    def put(
+        self,
+        doc_id: str,
+        ids: Sequence[str],
+        texts: Sequence[str],
+        metadata: Sequence[Mapping[str, Any]],
+    ) -> str:
         """A document's chunks, replacing whatever was written for it before. Returns the file's name."""
         lines = [
-            json.dumps({"id": str(i), "text": t, "metadata": _plain(dict(m or {}))}, ensure_ascii=False, sort_keys=True)
+            json.dumps(
+                {"id": str(i), "text": t, "metadata": _plain(dict(m or {}))},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
             for i, t, m in zip(ids, texts, metadata)
         ]
         rel = chunks_name(doc_id)
@@ -598,7 +658,11 @@ class ChunkStore:
         rel = chunks_name(doc_id)
         if not self.files.exists(rel):
             raise DocumentNotFoundError(doc_id)
-        return [json.loads(line) for line in self.files.read(rel).decode("utf-8").splitlines() if line.strip()]
+        return [
+            json.loads(line)
+            for line in self.files.read(rel).decode("utf-8").splitlines()
+            if line.strip()
+        ]
 
     def __contains__(self, doc_id: object) -> bool:
         return isinstance(doc_id, str) and bool(self.files.exists(chunks_name(doc_id)))
@@ -654,7 +718,9 @@ def open_store(keep_source: Any, default_root: Optional[Path]) -> Optional[Docum
 Where = Callable[[Dict[str, Any]], bool]
 
 
-def matching(store: DocumentStore, where: Optional[Where], ids: Optional[Iterable[str]] = None) -> List[str]:
+def matching(
+    store: DocumentStore, where: Optional[Where], ids: Optional[Iterable[str]] = None
+) -> List[str]:
     wanted = list(ids) if ids is not None else store.ids()
     if where is None:
         return wanted

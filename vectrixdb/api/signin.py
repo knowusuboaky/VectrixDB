@@ -48,7 +48,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional, Sequence
-from urllib.parse import quote, unquote
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -81,6 +81,7 @@ __all__ = [
     "outside_the_scope",
     "presented_key",
     "principal_of",
+    "reads_are_open",
     "router",
     "runtime_of",
     "sees_content",
@@ -141,14 +142,32 @@ SCOPED_KEY_MAY_ALSO_READ = frozenset(
 
 #: Reached without a key or a session. None of them says anything about what is stored.
 PUBLIC_PATHS = {
-    "/", "/auth/status", "/health", "/docs", "/redoc", "/openapi.json", "/favicon.ico", "/auth/me",
-    "/brand.json", "/brand.css", "/brand/logo", "/brand/logo-dark", "/auth/break-glass", "/auth/developer",
+    "/",
+    "/auth/status",
+    "/health",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/favicon.ico",
+    "/auth/me",
+    "/brand.json",
+    "/brand.css",
+    "/brand/logo",
+    "/brand/logo-dark",
+    "/auth/break-glass",
+    "/auth/developer",
 }
 #: How a session opened by emergency sign-in says how it came in.
 BREAK_GLASS = "break_glass"
 #: How a session opened by Developer Access says how it came in.
 DEVELOPER = "developer"
-_PUBLIC_PREFIXES = ("/dashboard", "/auth/oidc/", "/auth/email/", "/auth/passkey/", "/auth/password/")
+_PUBLIC_PREFIXES = (
+    "/dashboard",
+    "/auth/oidc/",
+    "/auth/email/",
+    "/auth/passkey/",
+    "/auth/password/",
+)
 
 _COLLECTION = re.compile(r"/api(?:/v[12])?/collections/([^/]+)")
 #: The one chunk or document a request opens, so the log can name it.
@@ -170,7 +189,14 @@ _LOGGED = {
 #: What a collection's policy gates: reading what is in it. Managing it is the role's business.
 RETRIEVAL_ACTIONS = frozenset({"search", "content.index", "content.read", "document.read"})
 #: What a guest may reach that is not one collection: the list, who may search each, and which models are here.
-_GUEST_PATHS = {"/api/v1/collections", "/api/collections", "/api/v1/models", "/api/v1/policies", "/api/v1/access/daily", "/api/v1/growth"}
+_GUEST_PATHS = {
+    "/api/v1/collections",
+    "/api/collections",
+    "/api/v1/models",
+    "/api/v1/policies",
+    "/api/v1/access/daily",
+    "/api/v1/growth",
+}
 #: The evaluation runs, the Retrieval and Chunking tabs: a guest reads how the setups scored, never the golden questions.
 _GUEST_EVALUATIONS = re.compile(r"/api/v1/(?:evaluations|chunking)(?:/[^/]+)?/?\Z")
 #: Wrong tries from one address, across every account, before that address waits. High, because an office is one address.
@@ -178,7 +204,13 @@ _FROM_ONE_ADDRESS = 50
 #: What a guest may reach inside a shared collection: itself and its health. A search is for people who sign in.
 _GUEST_INSIDE = re.compile(r"/api(?:/v[12])?/collections/[^/]+(?:/health)?/?\Z")
 #: All a person may reach while a server that asks for passkeys waits for their first one.
-_WHILE_MAKING_A_PASSKEY = {"/auth/me/ways", "/auth/me/passkeys/begin", "/auth/me/passkeys/finish", "/auth/signout", "/auth/step-up"}
+_WHILE_MAKING_A_PASSKEY = {
+    "/auth/me/ways",
+    "/auth/me/passkeys/begin",
+    "/auth/me/passkeys/finish",
+    "/auth/signout",
+    "/auth/step-up",
+}
 
 
 # ============================================================================
@@ -214,8 +246,28 @@ def full_key_configured() -> bool:
     return bool(get_api_key() or _hashed("VECTRIXDB_API_KEY_SHA256"))
 
 
+def reads_are_open() -> bool:
+    """Whether, with a key and no sign-in, a read goes through with no key at all.
+
+    That is what the server has always done, so it stays the default; a
+    server that should hand its text and vectors to nobody it does not know
+    sets ``VECTRIXDB_OPEN_READS=0`` and then every read, the live feed at
+    ``/ws`` included, needs the full or the read-only key.
+    """
+    return (os.environ.get("VECTRIXDB_OPEN_READS", "") or "").strip().lower() not in (
+        "0",
+        "no",
+        "false",
+        "off",
+    )
+
+
 def _same(given: Optional[str], wanted: Optional[str]) -> bool:
-    return bool(given) and bool(wanted) and hmac.compare_digest(str(given).encode(), str(wanted).encode())
+    return (
+        bool(given)
+        and bool(wanted)
+        and hmac.compare_digest(str(given).encode(), str(wanted).encode())
+    )
 
 
 @dataclass
@@ -257,17 +309,28 @@ class Caller:
 class SignInRuntime:
     """What the routes and the middleware share: the configuration and the things built from it."""
 
-    def __init__(self, config: SignInConfig, *, oidc_transport: Any = None, product: str = "VectrixDB", gateway: Optional[Gateway] = None) -> None:
+    def __init__(
+        self,
+        config: SignInConfig,
+        *,
+        oidc_transport: Any = None,
+        product: str = "VectrixDB",
+        gateway: Optional[Gateway] = None,
+    ) -> None:
         self.config = config
         self.product = product
         #: How a caller reaches each route, which the return address, the cookie's path and the links are written with.
         self.gateway = gateway if gateway is not None else Gateway.at(config.public_url)
-        self.store = SignInStore(config.store_url or config.store_path, config.secrets, key=config.store_key)
+        self.store = SignInStore(
+            config.store_url or config.store_path, config.secrets, key=config.store_key
+        )
         logger.info("sign-in is kept in %s", self.store.where)
         self.store.seed(config.users)
         self.access = AccessLog(config.access_log)
         self.sender = config.make_sender()
-        self.oidc = OidcClient(config.oidc, transport=oidc_transport) if config.oidc is not None else None
+        self.oidc = (
+            OidcClient(config.oidc, transport=oidc_transport) if config.oidc is not None else None
+        )
         if self.oidc is not None:
             # The People list is what single sign-on is checked against too, and a person's record gives their role.
             self.oidc.listed = self.store.person
@@ -275,14 +338,18 @@ class SignInRuntime:
         self.stamp_of: Callable[[str], Optional[str]] = lambda name: None
         if "email" in config.methods and not getattr(self.sender, "configured", True):
             if config.local:
-                logger.warning("email sign-in is on and no mail server is configured: sign-in links go to this log, which is fine on this machine.")
+                logger.warning(
+                    "email sign-in is on and no mail server is configured: sign-in links go to this log, which is fine on this machine."
+                )
             else:
                 logger.warning(
                     "email sign-in is on and no mail server is configured, so sign-in emails are not sent. Set VECTRIXDB_SMTP_URL "
                     "and VECTRIXDB_MAIL_FROM, or make set-up links on the server with: vectrixdb people add / vectrixdb people reset"
                 )
         if "email" in config.methods and not self.store.admins():
-            logger.warning("No admin yet. To add the first one, run this on the server: vectrixdb people add you@company.com --role admin")
+            logger.warning(
+                "No admin yet. To add the first one, run this on the server: vectrixdb people add you@company.com --role admin"
+            )
         if config.oidc is not None and config.oidc.allowed_emails == ("*",):
             logger.warning(
                 "single sign-on lets in everyone the identity provider puts in a mapped group, because VECTRIXDB_OIDC_ALLOWED_EMAILS "
@@ -297,13 +364,21 @@ class SignInRuntime:
         if config.developer is not None:
             logger.warning(
                 "Developer Access is on, for this machine only: %s",
-                ", ".join(f"{name} ({role})" for name, role in sorted(config.developer.accounts.items())),
+                ", ".join(
+                    f"{name} ({role})" for name, role in sorted(config.developer.accounts.items())
+                ),
             )
         if config.break_glass is not None and config.break_glass.open():
-            logger.warning("emergency sign-in is on, for %s, until %s. Turn it off when the usual sign-in is back", config.break_glass.admin, config.break_glass.until_iso)
+            logger.warning(
+                "emergency sign-in is on, for %s, until %s. Turn it off when the usual sign-in is back",
+                config.break_glass.admin,
+                config.break_glass.until_iso,
+            )
         elif self.store.close_emergencies():
             # Off, or past its time: the emergency is over, and the password used in it is spent.
-            logger.info("emergency sign-in is off, so the password used while it was on is spent: the next emergency needs a new one")
+            logger.info(
+                "emergency sign-in is off, so the password used while it was on is spent: the next emergency needs a new one"
+            )
 
     def close(self) -> None:
         self.store.close()
@@ -324,7 +399,11 @@ class SignInRuntime:
             # Drawn, and said not to be set up yet: nobody is sent to a provider that is not named.
             out["oidc"] = {"label": self.config.sso_label, "pending": True}
         if "email" in self.config.methods:
-            out["email"] = {"qr": qr.available(), "passkeys": self.config.own_passkeys, "passwords": self.config.passwords}
+            out["email"] = {
+                "qr": qr.available(),
+                "passkeys": self.config.own_passkeys,
+                "passwords": self.config.passwords,
+            }
             if self.config.email_stands_in:
                 # Drawn only once the single sign-on button has been pressed and found nothing to open.
                 out["email"]["stands_in"] = True
@@ -346,7 +425,8 @@ class SignInRuntime:
         """
         session = self.store.session(sid, idle_minutes=self.config.idle_minutes)
         if session is not None and (
-            (session.method == BREAK_GLASS and self.break_glass is None) or (session.method == DEVELOPER and self.config.developer is None)
+            (session.method == BREAK_GLASS and self.break_glass is None)
+            or (session.method == DEVELOPER and self.config.developer is None)
         ):
             self.store.close_session(sid)
             return None
@@ -416,7 +496,11 @@ class SignInRuntime:
         if self.config.require_passkey and person.passkeys:
             return sso + ["passkey"]
         # Somebody on the list who came in with single sign-on may confirm with their own passkey or code as well.
-        return sso + (["passkey"] if person.passkeys else []) + (["code"] if person.authenticator else [])
+        return (
+            sso
+            + (["passkey"] if person.passkeys else [])
+            + (["code"] if person.authenticator else [])
+        )
 
     def must_add_passkey(self, email: Optional[str], method: str) -> bool:
         """Somebody on the list who came in with a code on a server that asks for passkeys, and has none yet."""
@@ -501,11 +585,33 @@ def device_of(user_agent: Optional[str]) -> str:
     """A browser and a system, in words: "Edge on Windows". Enough to recognise a device, no more."""
     ua = user_agent or ""
     browser = next(
-        (name for token, name in (("Edg/", "Edge"), ("OPR/", "Opera"), ("Firefox/", "Firefox"), ("Chrome/", "Chrome"), ("Safari/", "Safari")) if token in ua),
+        (
+            name
+            for token, name in (
+                ("Edg/", "Edge"),
+                ("OPR/", "Opera"),
+                ("Firefox/", "Firefox"),
+                ("Chrome/", "Chrome"),
+                ("Safari/", "Safari"),
+            )
+            if token in ua
+        ),
         "A browser",
     )
     system = next(
-        (name for token, name in (("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"), ("Windows", "Windows"), ("Mac OS X", "Mac"), ("Macintosh", "Mac"), ("Linux", "Linux")) if token in ua),
+        (
+            name
+            for token, name in (
+                ("iPhone", "iPhone"),
+                ("iPad", "iPad"),
+                ("Android", "Android"),
+                ("Windows", "Windows"),
+                ("Mac OS X", "Mac"),
+                ("Macintosh", "Mac"),
+                ("Linux", "Linux"),
+            )
+            if token in ua
+        ),
         None,
     )
     return f"{browser} on {system}" if system else browser
@@ -526,7 +632,9 @@ def device_of(user_agent: Optional[str]) -> str:
 # backs off by it.
 
 
-async def _timed_search(request: Request, call_next: Any, runtime: "SignInRuntime", **line: Any) -> Response:
+async def _timed_search(
+    request: Request, call_next: Any, runtime: "SignInRuntime", **line: Any
+) -> Response:
     """Run a search, then write its line with how long it took, and only then let the reply go.
 
     Every other read is written down before it is served. A search is written
@@ -577,7 +685,9 @@ def outside_the_scope(path: str, method: str, scope: Sequence[str]) -> Optional[
     """
     asked = _COLLECTION.match(path)
     if asked is not None:
-        wanted = unquote(asked.group(1))
+        # Already decoded: the server percent-decodes the path once, and a
+        # second unquote would let a key for 'handbook%41' reach 'handbookA'.
+        wanted = asked.group(1)
         if wanted in scope:
             return None
         # The reply a collection that is not there gets, to the letter, because
@@ -589,7 +699,9 @@ def outside_the_scope(path: str, method: str, scope: Sequence[str]) -> Optional[
     # The route is real and the app was built from a document that lists it, so
     # this one says what is wrong rather than pretending the route is missing.
     named = ", ".join(scope)
-    return _refuse(403, f"This key reaches {named} and nothing else, so {method} {path} is not its to make.")
+    return _refuse(
+        403, f"This key reaches {named} and nothing else, so {method} {path} is not its to make."
+    )
 
 
 def _headers_of(request: Any) -> tuple:
@@ -600,8 +712,8 @@ def _headers_of(request: Any) -> tuple:
     return gateway.key_header, gateway.token_header
 
 
-def presented_key(request: Request) -> Optional[str]:
-    """The key on a request: the ``api-key`` header, or a Bearer token.
+def presented_key(request: Any) -> Optional[str]:
+    """The key on a request, or on a WebSocket: the ``api-key`` header, or a Bearer token.
 
     ``api-key`` is the header Qdrant uses and what the dashboard sends.
     ``Authorization: Bearer`` is what a generated client, an HTTP library and
@@ -667,7 +779,10 @@ class AccessMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         full_key, read_key = get_api_key(), get_read_only_key()
-        full_hash, read_hash = _hashed("VECTRIXDB_API_KEY_SHA256"), _hashed("VECTRIXDB_READ_ONLY_API_KEY_SHA256")
+        full_hash, read_hash = (
+            _hashed("VECTRIXDB_API_KEY_SHA256"),
+            _hashed("VECTRIXDB_READ_ONLY_API_KEY_SHA256"),
+        )
         given_key = presented_key(request)
         if runtime is None and not (full_key or full_hash):
             # No key and no sign-in: open, as it has always been, unless a
@@ -683,15 +798,29 @@ class AccessMiddleware(BaseHTTPMiddleware):
             elif key_matches(given_key, read_key, read_hash):
                 caller = Caller(who="read-only-key", role=roles.READER, method="key")
             elif runtime is not None and (named := runtime.store.api_key(given_key)) is not None:
-                caller = Caller(who=f"key:{named.name}", role=named.role, method="key", collections=named.collections)
+                caller = Caller(
+                    who=f"key:{named.name}",
+                    role=named.role,
+                    method="key",
+                    collections=named.collections,
+                )
                 # The key's own number, or the server's for every key, or none.
                 allowance = named.per_minute or runtime.config.key_requests_per_minute
                 if allowance:
                     allowed, wait = runtime.store.within_rate(f"key:{named.key_id}", allowance)
                     if not allowed:
-                        return _too_many(f"The key {named.name} may make {allowance} requests a minute. Wait {wait} seconds.", wait)
-            elif runtime is not None and runtime.oidc is not None and runtime.config.oidc is not None and runtime.config.oidc.api_audience \
-                    and not request.headers.get(_headers_of(request)[0]) and _looks_like_a_token(given_key):
+                        return _too_many(
+                            f"The key {named.name} may make {allowance} requests a minute. Wait {wait} seconds.",
+                            wait,
+                        )
+            elif (
+                runtime is not None
+                and runtime.oidc is not None
+                and runtime.config.oidc is not None
+                and runtime.config.oidc.api_audience
+                and not request.headers.get(_headers_of(request)[0])
+                and _looks_like_a_token(given_key)
+            ):
                 # An app, for the person using it. They are who the token says,
                 # with the role their groups give them here, and what they read
                 # is recorded under their name and judged by the policy as
@@ -699,11 +828,19 @@ class AccessMiddleware(BaseHTTPMiddleware):
                 try:
                     known = await run_in_threadpool(runtime.oidc.token_identity, given_key)
                 except SignInRefused as exc:
-                    runtime.access.record("signin_failed", method="token", reason=exc.code, address=_address(request))
+                    runtime.access.record(
+                        "signin_failed", method="token", reason=exc.code, address=_address(request)
+                    )
                     return _refuse(401, exc.reason)
                 caller = Caller(
-                    who=known.email or known.subject, role=known.role, method="token", principal=known.principal,
-                    name=known.name, grants=roles.clean_grants(known.grants), email=known.email, subject=known.subject,
+                    who=known.email or known.subject,
+                    role=known.role,
+                    method="token",
+                    principal=known.principal,
+                    name=known.name,
+                    grants=roles.clean_grants(known.grants),
+                    email=known.email,
+                    subject=known.subject,
                     groups=list(known.groups),
                 )
             else:
@@ -744,8 +881,14 @@ class AccessMiddleware(BaseHTTPMiddleware):
                 return await self._guest(request, call_next, runtime)
             return _refuse(401, "Sign in to continue", signin=True)
 
-        if path not in _WHILE_MAKING_A_PASSKEY and runtime.must_add_passkey(caller.email, caller.method):
-            return _refuse(403, "Add a passkey to continue: this server signs people in with passkeys.", must_add_passkey=True)
+        if path not in _WHILE_MAKING_A_PASSKEY and runtime.must_add_passkey(
+            caller.email, caller.method
+        ):
+            return _refuse(
+                403,
+                "Add a passkey to continue: this server signs people in with passkeys.",
+                must_add_passkey=True,
+            )
 
         # ---- 2 · forgery
         # A forged request rides on a cookie the browser sends by itself. A key
@@ -764,20 +907,42 @@ class AccessMiddleware(BaseHTTPMiddleware):
         found = _COLLECTION.match(path)
         collection = found.group(1) if found else None
         opened = _ITEM.search(path)
-        item = unquote(opened.group(1)) if opened and method in READ_ONLY_METHODS else None
+        item = opened.group(1) if opened and method in READ_ONLY_METHODS else None
         address = _address(request)
         try:
             if not caller.can(action):
                 runtime.access.record(
-                    "denied", who=caller.who, role=caller.role, method=caller.method, action=action or "unlisted",
-                    collection=collection, item=item, route=f"{method} {path}", status=403, address=address,
+                    "denied",
+                    who=caller.who,
+                    role=caller.role,
+                    method=caller.method,
+                    action=action or "unlisted",
+                    collection=collection,
+                    item=item,
+                    route=f"{method} {path}",
+                    status=403,
+                    address=address,
                 )
-                return _refuse(403, "Your role does not allow this", role=caller.role, action=action)
+                return _refuse(
+                    403, "Your role does not allow this", role=caller.role, action=action
+                )
             if caller.method == "token" and roles.needs_step_up(action, method):
                 # These want a proof from the last ten minutes, and an app cannot give one.
-                return _refuse(403, "This change needs the person themselves, signed in at the dashboard. An app acting for them cannot make it.")
-            if caller.method != "key" and roles.needs_step_up(action, method) and not runtime.fresh(caller):
-                return _refuse(403, "Confirm it's you to make this change", step_up=True, ways=runtime.step_up_ways(caller))
+                return _refuse(
+                    403,
+                    "This change needs the person themselves, signed in at the dashboard. An app acting for them cannot make it.",
+                )
+            if (
+                caller.method != "key"
+                and roles.needs_step_up(action, method)
+                and not runtime.fresh(caller)
+            ):
+                return _refuse(
+                    403,
+                    "Confirm it's you to make this change",
+                    step_up=True,
+                    ways=runtime.step_up_ways(caller),
+                )
             # ---- 4 · the collection's own policy: who may retrieve from it
             refused = self._gate(request, runtime, caller, path, method)
             if refused is not None:
@@ -787,14 +952,28 @@ class AccessMiddleware(BaseHTTPMiddleware):
                 # it took. The rule it was written first to keep still holds:
                 # the reply has not left yet, and it does not leave unrecorded.
                 return await _timed_search(
-                    request, call_next, runtime,
-                    who=caller.who, role=caller.role, method=caller.method, action=action,
-                    collection=collection, route=f"{method} {path}", address=address,
+                    request,
+                    call_next,
+                    runtime,
+                    who=caller.who,
+                    role=caller.role,
+                    method=caller.method,
+                    action=action,
+                    collection=collection,
+                    route=f"{method} {path}",
+                    address=address,
                 )
             if action in _LOGGED:
                 runtime.access.record(
-                    _LOGGED[action], who=caller.who, role=caller.role, method=caller.method, action=action,
-                    collection=collection, item=item, route=f"{method} {path}", address=address,
+                    _LOGGED[action],
+                    who=caller.who,
+                    role=caller.role,
+                    method=caller.method,
+                    action=action,
+                    collection=collection,
+                    item=item,
+                    route=f"{method} {path}",
+                    address=address,
                 )
         except AccessLogUnavailable as exc:
             logger.error("%s", exc)
@@ -810,17 +989,25 @@ class AccessMiddleware(BaseHTTPMiddleware):
         found = _COLLECTION.match(path)
         request.state.caller = Caller(who="guest", role=roles.GUEST, method="guest")
         if found is None:
-            if method in READ_ONLY_METHODS and (path.rstrip("/") in _GUEST_PATHS or _GUEST_EVALUATIONS.match(path)):
+            if method in READ_ONLY_METHODS and (
+                path.rstrip("/") in _GUEST_PATHS or _GUEST_EVALUATIONS.match(path)
+            ):
                 return await call_next(request)
             return _refuse(401, "Sign in to continue", signin=True)
-        name = unquote(found.group(1))
+        name = found.group(1)
         if not (action == "meta.read" and _GUEST_INSIDE.match(path)):
             # A search, a chunk, a document: sign in first.
             return _refuse(401, "Sign in to continue", signin=True)
         return await call_next(request)
 
     @staticmethod
-    def _gate(request: Request, runtime: Optional[SignInRuntime], caller: Optional[Caller], path: str, method: str) -> Optional[Response]:
+    def _gate(
+        request: Request,
+        runtime: Optional[SignInRuntime],
+        caller: Optional[Caller],
+        path: str,
+        method: str,
+    ) -> Optional[Response]:
         """The collection's policy, before anything in it is read: None to go on, or the refusal.
 
         A collection answers the people its policy names and nobody else, and
@@ -833,7 +1020,7 @@ class AccessMiddleware(BaseHTTPMiddleware):
         found = _COLLECTION.match(path)
         if found is None:
             return None
-        name = unquote(found.group(1))
+        name = found.group(1)
         action = roles.action_for(method, path)
         if action not in RETRIEVAL_ACTIONS:
             return None
@@ -847,16 +1034,27 @@ class AccessMiddleware(BaseHTTPMiddleware):
             return None
         if runtime is not None:
             runtime.access.record(
-                "denied", who=caller.who if caller is not None else "nobody", role=caller.role if caller is not None else None,
-                method=caller.method if caller is not None else None, action=action or "unlisted", collection=name,
-                route=f"{method} {path}", status=403, reason=decision.code, address=_address(request),
+                "denied",
+                who=caller.who if caller is not None else "nobody",
+                role=caller.role if caller is not None else None,
+                method=caller.method if caller is not None else None,
+                action=action or "unlisted",
+                collection=name,
+                route=f"{method} {path}",
+                status=403,
+                reason=decision.code,
+                address=_address(request),
             )
         # Everyone sees that the collection exists, so the refusal can say why: restricted, with the code the page reads,
         # and which kind of policy said it, a token's groups or a store's list.
-        return _refuse(403, decision.because, code=decision.code, collection=name, policy=decision.method)
+        return _refuse(
+            403, decision.because, code=decision.code, collection=name, policy=decision.method
+        )
 
     @staticmethod
-    async def _keys_only(request: Request, call_next: Any, caller: Optional[Caller], full_key: Optional[str]) -> Response:
+    async def _keys_only(
+        request: Request, call_next: Any, caller: Optional[Caller], full_key: Optional[str]
+    ) -> Response:
         """Sign-in is off: the behaviour the server has always had, and the collection's policy if one gates it."""
         refused = AccessMiddleware._gate(request, None, caller, route_path(request), request.method)
         if refused is not None:
@@ -864,9 +1062,22 @@ class AccessMiddleware(BaseHTTPMiddleware):
         if not full_key or (caller is not None and caller.role == roles.ADMIN):
             return await call_next(request)
         if request.method in READ_ONLY_METHODS:
+            # Open unless VECTRIXDB_OPEN_READS says otherwise: then a read
+            # needs a key too, since a GET hands out the text and the vectors.
+            if caller is not None or reads_are_open():
+                return await call_next(request)
+            return _refuse(401, "API key required. Provide api-key header.")
+        if caller is not None and roles.action_for(request.method, route_path(request)) == "search":
+            # A search is a read sent as a POST. Refusing it left the read-only
+            # key unable to do the one thing it is for.
             return await call_next(request)
         if caller is not None:
             return _refuse(403, "Read-only API key cannot perform write operations")
+        if (
+            not reads_are_open()
+            and roles.action_for(request.method, route_path(request)) == "search"
+        ):
+            return _refuse(401, "API key required. Provide api-key header.")
         return _refuse(401, "API key required for write operations. Provide api-key header.")
 
 
@@ -896,9 +1107,25 @@ def _need(request: Request) -> SignInRuntime:
 def _set_session_cookies(runtime: SignInRuntime, response: Response, sid: str, csrf: str) -> None:
     age = int(runtime.config.session_hours * 3600)
     secure, same = runtime.config.secure_cookies, runtime.config.samesite
-    response.set_cookie(runtime.cookie(SID_COOKIE), runtime.store.sign(sid), max_age=age, httponly=True, secure=secure, samesite=same, path="/")
+    response.set_cookie(
+        runtime.cookie(SID_COOKIE),
+        runtime.store.sign(sid),
+        max_age=age,
+        httponly=True,
+        secure=secure,
+        samesite=same,
+        path="/",
+    )
     # Readable on purpose: the page copies it into a header, which a page on another site cannot do.
-    response.set_cookie(runtime.cookie(CSRF_COOKIE), csrf, max_age=age, httponly=False, secure=secure, samesite=same, path="/")
+    response.set_cookie(
+        runtime.cookie(CSRF_COOKIE),
+        csrf,
+        max_age=age,
+        httponly=False,
+        secure=secure,
+        samesite=same,
+        path="/",
+    )
 
 
 def _oidc_cookie_path(runtime: SignInRuntime) -> str:
@@ -910,13 +1137,21 @@ def _clear_cookies(runtime: SignInRuntime, response: Response) -> None:
     secure = runtime.config.secure_cookies
     for base in (SID_COOKIE, CSRF_COOKIE):
         response.delete_cookie(runtime.cookie(base), path="/", secure=secure)
-    response.delete_cookie(runtime.cookie(OIDC_COOKIE), path=_oidc_cookie_path(runtime), secure=secure)
+    response.delete_cookie(
+        runtime.cookie(OIDC_COOKIE), path=_oidc_cookie_path(runtime), secure=secure
+    )
 
 
 def _safe_return(target: Optional[str], fallback: str = "/dashboard/") -> str:
     """Only ever a path on this server. An address somebody else chose is how a sign-in page becomes a phishing page."""
     target = str(target or "")
-    if target.startswith("/") and not target.startswith("//") and "\\" not in target and "\n" not in target and "\r" not in target:
+    if (
+        target.startswith("/")
+        and not target.startswith("//")
+        and "\\" not in target
+        and "\n" not in target
+        and "\r" not in target
+    ):
         return target
     return fallback
 
@@ -951,7 +1186,9 @@ async def me(request: Request) -> Any:
             data["methods"]["developer"] = {}
         if runtime.config.guests:
             data["guests"] = True
-        return JSONResponse(status_code=401, content=refusal_content("Sign in to continue", data=data))
+        return JSONResponse(
+            status_code=401, content=refusal_content("Sign in to continue", data=data)
+        )
     from .. import __version__
 
     out = {
@@ -980,7 +1217,9 @@ async def me(request: Request) -> Any:
     return {"ok": True, "data": out}
 
 
-def _sso_first(runtime: SignInRuntime, request: Request, person: Any, method: str) -> Optional[Response]:
+def _sso_first(
+    runtime: SignInRuntime, request: Request, person: Any, method: str
+) -> Optional[Response]:
     """With VECTRIXDB_SSO_RECHECK_DAYS set: a refusal for somebody who has not signed in with single sign-on lately, or None.
 
     Their passkey and their code are theirs, not the company's, so the
@@ -988,9 +1227,17 @@ def _sso_first(runtime: SignInRuntime, request: Request, person: Any, method: st
     cannot sign in there, and then not here either.
     """
     days = runtime.config.sso_recheck_days
-    if not days or (person.last_sso_at is not None and time.time() - float(person.last_sso_at) <= days * 86400):
+    if not days or (
+        person.last_sso_at is not None and time.time() - float(person.last_sso_at) <= days * 86400
+    ):
         return None
-    runtime.access.record("signin_failed", who=person.email, method=method, reason="sso_recheck", address=_address(request))
+    runtime.access.record(
+        "signin_failed",
+        who=person.email,
+        method=method,
+        reason="sso_recheck",
+        address=_address(request),
+    )
     said = (
         "Sign in with single sign-on first. After that, your passkey or code works here too."
         if person.last_sso_at is None
@@ -999,7 +1246,9 @@ def _sso_first(runtime: SignInRuntime, request: Request, person: Any, method: st
     return _refuse(403, said, code="sso_recheck", sso=True)
 
 
-def _signed_in(runtime: SignInRuntime, request: Request, email: str, method: str, extra: Optional[dict] = None) -> Response:
+def _signed_in(
+    runtime: SignInRuntime, request: Request, email: str, method: str, extra: Optional[dict] = None
+) -> Response:
     """A new session for somebody on the list, however they proved it was them."""
     person = runtime.store.person(email)
     assert person is not None
@@ -1010,11 +1259,23 @@ def _signed_in(runtime: SignInRuntime, request: Request, email: str, method: str
     # Somebody on the server's own list is in the groups an admin wrote on
     # their record, which is what a collection's policy reads for them.
     sid, session = runtime.store.open_session(
-        subject=person.email, email=person.email, name=None, role=person.role, principal=person.principal, method=method,
-        hours=runtime.config.session_hours, grants=person.grants, user_agent=request.headers.get("user-agent"), address=_address(request),
-        groups=[str(g) for g in (person.principal.get("groups") or [])] if isinstance(person.principal.get("groups"), (list, tuple)) else [],
+        subject=person.email,
+        email=person.email,
+        name=None,
+        role=person.role,
+        principal=person.principal,
+        method=method,
+        hours=runtime.config.session_hours,
+        grants=person.grants,
+        user_agent=request.headers.get("user-agent"),
+        address=_address(request),
+        groups=[str(g) for g in (person.principal.get("groups") or [])]
+        if isinstance(person.principal.get("groups"), (list, tuple))
+        else [],
     )
-    runtime.access.record("signin", who=person.email, role=person.role, method=method, address=_address(request))
+    runtime.access.record(
+        "signin", who=person.email, role=person.role, method=method, address=_address(request)
+    )
     response = JSONResponse({"ok": True, "data": {"person": session.public(), **(extra or {})}})
     _set_session_cookies(runtime, response, sid, session.csrf)
     return response
@@ -1027,14 +1288,20 @@ def _admin_needs_sso(runtime: SignInRuntime, email: str) -> Optional[Response]:
     return None
 
 
-def _count_failure(runtime: SignInRuntime, request: Request, key: str, email: str, reason: str) -> None:
+def _count_failure(
+    runtime: SignInRuntime, request: Request, key: str, email: str, reason: str
+) -> None:
     """A wrong try: counted against the address and the place it came from, and the person told when the door shuts."""
     shut = runtime.store.failed(key)
     runtime.store.failed(f"from:{_address(request)}", limit=_FROM_ONE_ADDRESS, escalate=False)
-    runtime.access.record("signin_failed", who=email, method="email", reason=reason, address=_address(request))
+    runtime.access.record(
+        "signin_failed", who=email, method="email", reason=reason, address=_address(request)
+    )
     if shut and runtime.store.person(email) is not None:
         minutes = runtime.store.lock_minutes(key)
-        runtime.access.record("locked", who=email, reason=key.split(":", 1)[0], address=_address(request))
+        runtime.access.record(
+            "locked", who=email, reason=key.split(":", 1)[0], address=_address(request)
+        )
         try:
             runtime.sender(email, *lock_email(minutes, runtime.product))
         except Exception as exc:  # noqa: BLE001 - a mail server can fail in any way it likes
@@ -1044,7 +1311,10 @@ def _count_failure(runtime: SignInRuntime, request: Request, key: str, email: st
 def _locked_out(runtime: SignInRuntime, request: Request, key: str) -> Optional[Response]:
     for held in (key, f"from:{_address(request)}"):
         if runtime.store.locked(held):
-            return _refuse(429, f"Too many wrong tries. Wait {runtime.store.lock_minutes(held)} minutes and try again.")
+            return _refuse(
+                429,
+                f"Too many wrong tries. Wait {runtime.store.lock_minutes(held)} minutes and try again.",
+            )
     return None
 
 
@@ -1062,7 +1332,9 @@ def _locked_out(runtime: SignInRuntime, request: Request, key: str) -> Optional[
 
 
 @router.get("/auth/oidc/start", tags=["auth"], include_in_schema=False)
-async def oidc_start(request: Request, to: Optional[str] = None, prompt: Optional[str] = None) -> Response:
+async def oidc_start(
+    request: Request, to: Optional[str] = None, prompt: Optional[str] = None
+) -> Response:
     runtime = _need(request)
     if runtime.oidc is None:
         raise HTTPException(status_code=404, detail="single sign-on is not turned on")
@@ -1070,31 +1342,51 @@ async def oidc_start(request: Request, to: Optional[str] = None, prompt: Optiona
     # Where the browser comes back to, as it reaches it: through the gateway, when there is one.
     redirect_uri = runtime.address("/auth/oidc/callback")
     try:
-        url = runtime.oidc.authorization_url(redirect_uri=redirect_uri, state=state, nonce=nonce, verifier=verifier, prompt=prompt)
+        url = runtime.oidc.authorization_url(
+            redirect_uri=redirect_uri, state=state, nonce=nonce, verifier=verifier, prompt=prompt
+        )
     except SignInRefused as exc:
         return RedirectResponse(_signin_page(runtime, exc.code), status_code=302)
     response = RedirectResponse(url, status_code=302)
     to = _safe_return(to, runtime.visible("/dashboard/"))
-    held = json.dumps({"s": state, "n": nonce, "v": verifier, "to": to, "at": time.time()}, separators=(",", ":"))
+    held = json.dumps(
+        {"s": state, "n": nonce, "v": verifier, "to": to, "at": time.time()}, separators=(",", ":")
+    )
     # Lax, not Strict: the provider sends the person back by a navigation from
     # another site, and a Strict cookie is withheld on exactly that request.
     response.set_cookie(
-        runtime.cookie(OIDC_COOKIE), runtime.store.sign(held), max_age=600, httponly=True, secure=runtime.config.secure_cookies,
-        samesite="lax", path=_oidc_cookie_path(runtime),
+        runtime.cookie(OIDC_COOKIE),
+        runtime.store.sign(held),
+        max_age=600,
+        httponly=True,
+        secure=runtime.config.secure_cookies,
+        samesite="lax",
+        path=_oidc_cookie_path(runtime),
     )
     return response
 
 
 @router.get("/auth/oidc/callback", tags=["auth"], include_in_schema=False)
-async def oidc_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None) -> Response:
+async def oidc_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+) -> Response:
     runtime = _need(request)
     if runtime.oidc is None:
         raise HTTPException(status_code=404, detail="single sign-on is not turned on")
 
     def back(reason: str, who: Optional[str] = None) -> Response:
-        runtime.access.record("signin_failed", method="oidc", who=who, reason=reason, address=_address(request))
+        runtime.access.record(
+            "signin_failed", method="oidc", who=who, reason=reason, address=_address(request)
+        )
         response = RedirectResponse(_signin_page(runtime, reason), status_code=302)
-        response.delete_cookie(runtime.cookie(OIDC_COOKIE), path=_oidc_cookie_path(runtime), secure=runtime.config.secure_cookies)
+        response.delete_cookie(
+            runtime.cookie(OIDC_COOKIE),
+            path=_oidc_cookie_path(runtime),
+            secure=runtime.config.secure_cookies,
+        )
         return response
 
     raw = runtime.store.unsign(request.cookies.get(runtime.cookie(OIDC_COOKIE)))
@@ -1109,7 +1401,12 @@ async def oidc_callback(request: Request, code: Optional[str] = None, state: Opt
     if not _same(state, held.get("s")):
         return back("state")
     try:
-        identity = runtime.oidc.redeem(code=code, redirect_uri=runtime.address("/auth/oidc/callback"), verifier=held["v"], nonce=held["n"])
+        identity = runtime.oidc.redeem(
+            code=code,
+            redirect_uri=runtime.address("/auth/oidc/callback"),
+            verifier=held["v"],
+            nonce=held["n"],
+        )
     except SignInRefused as exc:
         logger.warning("single sign-on refused: %s (%s)", exc.reason, exc.code)
         return back(exc.code)
@@ -1119,15 +1416,37 @@ async def oidc_callback(request: Request, code: Optional[str] = None, state: Opt
     # Somebody on the People list has the role their record gives, and their
     # session ends when the record changes, as a local one does.
     sid, session = runtime.store.open_session(
-        subject=identity.subject, email=identity.email, name=identity.name, role=identity.role,
-        principal=identity.principal, method="oidc", hours=runtime.config.session_hours, grants=identity.grants,
-        user_agent=request.headers.get("user-agent"), address=_address(request), groups=identity.groups, listed=identity.listed,
+        subject=identity.subject,
+        email=identity.email,
+        name=identity.name,
+        role=identity.role,
+        principal=identity.principal,
+        method="oidc",
+        hours=runtime.config.session_hours,
+        grants=identity.grants,
+        user_agent=request.headers.get("user-agent"),
+        address=_address(request),
+        groups=identity.groups,
+        listed=identity.listed,
     )
     if identity.listed and identity.email:
         runtime.store.stamp_sso(identity.email)
-    runtime.access.record("signin", who=identity.email or identity.subject, role=identity.role, method="oidc", subject=identity.subject, address=_address(request))
-    response = RedirectResponse(_safe_return(held.get("to"), runtime.visible("/dashboard/")), status_code=302)
-    response.delete_cookie(runtime.cookie(OIDC_COOKIE), path=_oidc_cookie_path(runtime), secure=runtime.config.secure_cookies)
+    runtime.access.record(
+        "signin",
+        who=identity.email or identity.subject,
+        role=identity.role,
+        method="oidc",
+        subject=identity.subject,
+        address=_address(request),
+    )
+    response = RedirectResponse(
+        _safe_return(held.get("to"), runtime.visible("/dashboard/")), status_code=302
+    )
+    response.delete_cookie(
+        runtime.cookie(OIDC_COOKIE),
+        path=_oidc_cookie_path(runtime),
+        secure=runtime.config.secure_cookies,
+    )
     _set_session_cookies(runtime, response, sid, session.csrf)
     return response
 
@@ -1165,7 +1484,9 @@ def _same_text(given: str, wanted: str) -> bool:
     """Compared as hashes, so neither the length nor the first wrong letter shows in the time taken."""
     import hashlib
 
-    return hmac.compare_digest(hashlib.sha256(given.encode()).digest(), hashlib.sha256(wanted.encode()).digest())
+    return hmac.compare_digest(
+        hashlib.sha256(given.encode()).digest(), hashlib.sha256(wanted.encode()).digest()
+    )
 
 
 @router.get("/auth/break-glass", tags=["auth"], include_in_schema=False)
@@ -1181,17 +1502,29 @@ async def break_glass_signin(request: Request, body: EmergencyRequest) -> Any:
     key = f"emergency:{glass.admin}"
     held = _locked_out(runtime, request, key)
     if held is not None:
-        runtime.access.record("signin_failed", who=glass.admin, method=BREAK_GLASS, reason="locked", address=_address(request))
+        runtime.access.record(
+            "signin_failed",
+            who=glass.admin,
+            method=BREAK_GLASS,
+            reason="locked",
+            address=_address(request),
+        )
         return held
     # Both are checked whatever the first says, and the password against its hash, which is all the server holds.
-    right = passwords.check(body.password, glass.password_hash) & _same_text(body.username.strip(), glass.admin)
+    right = passwords.check(body.password, glass.password_hash) & _same_text(
+        body.username.strip(), glass.admin
+    )
     # Said only to somebody who gave the right password: it worked for one emergency, and that one is over.
     spent = right and not runtime.store.use_emergency(glass.admin, glass.mark, glass.until)
     if not right or spent:
         runtime.store.failed(key)
         runtime.store.failed(f"from:{_address(request)}", limit=_FROM_ONE_ADDRESS, escalate=False)
         runtime.access.record(
-            "signin_failed", who=body.username.strip()[:64] or None, method=BREAK_GLASS, reason="spent" if spent else "wrong", address=_address(request)
+            "signin_failed",
+            who=body.username.strip()[:64] or None,
+            method=BREAK_GLASS,
+            reason="spent" if spent else "wrong",
+            address=_address(request),
         )
         return _refuse(401, _SPENT if spent else _WRONG_ALL)
     runtime.store.succeeded(key)
@@ -1199,11 +1532,29 @@ async def break_glass_signin(request: Request, body: EmergencyRequest) -> Any:
     # Never longer than emergency sign-in itself is on.
     hours = max(1 / 60, min(runtime.config.session_hours, (glass.until - time.time()) / 3600))
     sid, session = runtime.store.open_session(
-        subject=f"break-glass:{glass.admin}", email=None, name="Emergency admin", role=roles.ADMIN, principal={}, method=BREAK_GLASS,
-        hours=hours, user_agent=request.headers.get("user-agent"), address=_address(request),
+        subject=f"break-glass:{glass.admin}",
+        email=None,
+        name="Emergency admin",
+        role=roles.ADMIN,
+        principal={},
+        method=BREAK_GLASS,
+        hours=hours,
+        user_agent=request.headers.get("user-agent"),
+        address=_address(request),
     )
-    runtime.access.record("break_glass_used", who=glass.admin, role=roles.ADMIN, method=BREAK_GLASS, address=_address(request))
-    logger.warning("emergency sign-in used by %s from %s; it is on until %s", glass.admin, _address(request), glass.until_iso)
+    runtime.access.record(
+        "break_glass_used",
+        who=glass.admin,
+        role=roles.ADMIN,
+        method=BREAK_GLASS,
+        address=_address(request),
+    )
+    logger.warning(
+        "emergency sign-in used by %s from %s; it is on until %s",
+        glass.admin,
+        _address(request),
+        glass.until_iso,
+    )
     response = JSONResponse({"ok": True, "data": {"person": session.public()}})
     _set_session_cookies(runtime, response, sid, session.csrf)
     return response
@@ -1228,7 +1579,9 @@ class DeveloperRequest(BaseModel):
     password: str = Field(max_length=1000)
 
 
-_WRONG_DEVELOPER = "That username and password were not accepted together. Check both and try again."
+_WRONG_DEVELOPER = (
+    "That username and password were not accepted together. Check both and try again."
+)
 
 
 def _developer(request: Request) -> tuple[SignInRuntime, Any]:
@@ -1243,7 +1596,14 @@ def _developer(request: Request) -> tuple[SignInRuntime, Any]:
 async def developer_state(request: Request) -> Any:
     """The accounts Developer Access takes, to a caller on this machine. Off, or from anywhere else, this answers 404."""
     _, access = _developer(request)
-    return {"ok": True, "data": {"accounts": [{"username": name, "role": role} for name, role in sorted(access.accounts.items())]}}
+    return {
+        "ok": True,
+        "data": {
+            "accounts": [
+                {"username": name, "role": role} for name, role in sorted(access.accounts.items())
+            ]
+        },
+    }
 
 
 @router.post("/auth/developer", tags=["auth"], include_in_schema=False)
@@ -1253,7 +1613,13 @@ async def developer_signin(request: Request, body: DeveloperRequest) -> Any:
     key = f"developer:{name[:64]}"
     held = _locked_out(runtime, request, key)
     if held is not None:
-        runtime.access.record("signin_failed", who=name[:64] or None, method=DEVELOPER, reason="locked", address=_address(request))
+        runtime.access.record(
+            "signin_failed",
+            who=name[:64] or None,
+            method=DEVELOPER,
+            reason="locked",
+            address=_address(request),
+        )
         return held
     role = access.accounts.get(name)
     # The password is checked whatever the name, so a wrong name and a wrong password take the same time.
@@ -1261,15 +1627,30 @@ async def developer_signin(request: Request, body: DeveloperRequest) -> Any:
     if not right:
         runtime.store.failed(key)
         runtime.store.failed(f"from:{_address(request)}", limit=_FROM_ONE_ADDRESS, escalate=False)
-        runtime.access.record("signin_failed", who=name[:64] or None, method=DEVELOPER, reason="wrong", address=_address(request))
+        runtime.access.record(
+            "signin_failed",
+            who=name[:64] or None,
+            method=DEVELOPER,
+            reason="wrong",
+            address=_address(request),
+        )
         return _refuse(401, _WRONG_DEVELOPER)
     runtime.store.succeeded(key)
     runtime.store.close_session(_current_sid(runtime, request))
     sid, session = runtime.store.open_session(
-        subject=f"developer:{name}", email=None, name=name, role=role, principal={}, method=DEVELOPER,
-        hours=runtime.config.session_hours, user_agent=request.headers.get("user-agent"), address=_address(request),
+        subject=f"developer:{name}",
+        email=None,
+        name=name,
+        role=role,
+        principal={},
+        method=DEVELOPER,
+        hours=runtime.config.session_hours,
+        user_agent=request.headers.get("user-agent"),
+        address=_address(request),
     )
-    runtime.access.record("signin", who=name, role=role, method=DEVELOPER, address=_address(request))
+    runtime.access.record(
+        "signin", who=name, role=role, method=DEVELOPER, address=_address(request)
+    )
     response = JSONResponse({"ok": True, "data": {"person": session.public()}})
     _set_session_cookies(runtime, response, sid, session.csrf)
     return response
@@ -1352,7 +1733,9 @@ async def email_begin(request: Request, body: BeginRequest) -> Any:
     if person is not None and not person.disabled and not person.enrolled:
         token = runtime.store.new_link(email, "enrol")
         link = f"{runtime.address('/dashboard/')}#/enrol?token={token}"
-        subject, text = enrolment_email(link, LINK_MINUTES, runtime.product, passkeys=runtime.config.own_passkeys)
+        subject, text = enrolment_email(
+            link, LINK_MINUTES, runtime.product, passkeys=runtime.config.own_passkeys
+        )
         try:
             runtime.sender(email, subject, text)
         except Exception as exc:  # noqa: BLE001 - a mail server can fail in any way it likes
@@ -1371,7 +1754,9 @@ async def email_verify(request: Request, body: VerifyRequest) -> Any:
     key = f"{'recovery' if recovering else 'code'}:{email}"
     held = _locked_out(runtime, request, key)
     if held is not None:
-        runtime.access.record("signin_failed", who=email, method="email", reason="locked", address=_address(request))
+        runtime.access.record(
+            "signin_failed", who=email, method="email", reason="locked", address=_address(request)
+        )
         return held
     person = runtime.store.person(email)
     ok, recovered = False, False
@@ -1388,19 +1773,37 @@ async def email_verify(request: Request, body: VerifyRequest) -> Any:
         return _refuse(401, _WRONG_BOTH if runtime.config.passwords else _WRONG)
     runtime.store.succeeded(key)
     if runtime.config.require_passkey and not recovered and person.passkeys:
-        return _refuse(403, "Sign in with your passkey: this server signs people in with passkeys.", passkey_only=True)
+        return _refuse(
+            403,
+            "Sign in with your passkey: this server signs people in with passkeys.",
+            passkey_only=True,
+        )
     refused = _admin_needs_sso(runtime, email)
     if refused is not None:
         return refused
     if recovered:
-        runtime.access.record("recovery_code_used", who=email, method="email", address=_address(request))
-    return _signed_in(runtime, request, person.email, "email", extra={"recovery_codes_left": runtime.store.recovery_codes_left(email)} if recovered else None)
+        runtime.access.record(
+            "recovery_code_used", who=email, method="email", address=_address(request)
+        )
+    return _signed_in(
+        runtime,
+        request,
+        person.email,
+        "email",
+        extra={"recovery_codes_left": runtime.store.recovery_codes_left(email)}
+        if recovered
+        else None,
+    )
 
 
 def _code(request: Request, uri: str) -> Optional[str]:
     """The QR code an authenticator app scans, in the dashboard's own look: its logo or mark in the middle, its colours."""
     brand = getattr(request.app.state, "brand", None)
-    look = brand.code_look() if brand is not None and hasattr(brand, "code_look") else Brand().code_look()
+    look = (
+        brand.code_look()
+        if brand is not None and hasattr(brand, "code_look")
+        else Brand().code_look()
+    )
     return qr.svg(uri, **look)
 
 
@@ -1417,33 +1820,52 @@ async def enrol_begin(request: Request, body: TokenRequest) -> Any:
     email = runtime.store.use_link(body.token, "enrol")
     person = runtime.store.person(email) if email else None
     if email is None or person is None or person.disabled or person.enrolled:
-        return _refuse(400, "This link has been used or has expired. Ask for a new one from the sign-in page.")
+        return _refuse(
+            400, "This link has been used or has expired. Ask for a new one from the sign-in page."
+        )
     # Before anything is made, so no recovery code is handed out to be lost with a refused sign-in.
     refused = _sso_first(runtime, request, person, "email")
     if refused is not None:
         return refused
     if runtime.config.require_passkey:
-        return {"ok": True, "data": {"email": email, "ticket": runtime.store.new_link(email, "confirm"), "passkey_only": True, "passwords": False}}
+        return {
+            "ok": True,
+            "data": {
+                "email": email,
+                "ticket": runtime.store.new_link(email, "confirm"),
+                "passkey_only": True,
+                "passwords": False,
+            },
+        }
     secret = runtime.store.begin_enrolment(email)
     uri = totp.provisioning_uri(secret, email, issuer=runtime.product)
     return {
         "ok": True,
         "data": {
-            "email": email, "secret": secret, "uri": uri, "qr": _code(request, uri), "ticket": runtime.store.new_link(email, "confirm"),
+            "email": email,
+            "secret": secret,
+            "uri": uri,
+            "qr": _code(request, uri),
+            "ticket": runtime.store.new_link(email, "confirm"),
             "passwords": runtime.config.passwords,
         },
     }
 
 
 def _fresh_ticket(runtime: SignInRuntime, email: str, status: int, message: str) -> JSONResponse:
-    return JSONResponse(status_code=status, content=refusal_content(message, data={"ticket": runtime.store.new_link(email, "confirm")}))
+    return JSONResponse(
+        status_code=status,
+        content=refusal_content(message, data={"ticket": runtime.store.new_link(email, "confirm")}),
+    )
 
 
 @router.post("/auth/email/enrol/confirm", tags=["auth"])
 async def enrol_confirm(request: Request, body: ConfirmRequest) -> Any:
     runtime = _email_on(request)
     if runtime.config.require_passkey:
-        return _refuse(403, "This server signs people in with passkeys. Make one to finish setting up.")
+        return _refuse(
+            403, "This server signs people in with passkeys. Make one to finish setting up."
+        )
     # A ticket works once, like everything else here. A mistyped code gets a
     # fresh ticket back with the refusal, so the person can try again, and
     # the tries are counted against the address, not the ticket.
@@ -1452,13 +1874,20 @@ async def enrol_confirm(request: Request, body: ConfirmRequest) -> Any:
         return _refuse(400, "This set-up has expired. Ask for a new link from the sign-in page.")
     attempts = f"confirm:{email}"
     if runtime.store.locked(attempts):
-        return _refuse(429, f"Too many wrong codes. Wait {runtime.store.lock_minutes(attempts)} minutes, then ask for a new link from the sign-in page.")
+        return _refuse(
+            429,
+            f"Too many wrong codes. Wait {runtime.store.lock_minutes(attempts)} minutes, then ask for a new link from the sign-in page.",
+        )
     person = runtime.store.person(email)
     if runtime.config.passwords:
         problem = passwords.problem_with(body.password or "", email)
         if problem:
             return _fresh_ticket(runtime, email, 400, problem)
-    if person is None or person.disabled or not runtime.store.check_code(email, body.code, confirming=True):
+    if (
+        person is None
+        or person.disabled
+        or not runtime.store.check_code(email, body.code, confirming=True)
+    ):
         runtime.store.failed(attempts)
         return _fresh_ticket(runtime, email, 401, _WRONG)
     runtime.store.succeeded(attempts)
@@ -1475,7 +1904,9 @@ async def signout(request: Request) -> Response:
     caller = caller_of(request)
     runtime.store.close_session(_current_sid(runtime, request))
     if caller is not None:
-        runtime.access.record("signout", who=caller.who, method=caller.method, address=_address(request))
+        runtime.access.record(
+            "signout", who=caller.who, method=caller.method, address=_address(request)
+        )
     response = JSONResponse({"ok": True, "data": None})
     _clear_cookies(runtime, response)
     return response
@@ -1518,18 +1949,29 @@ def _credential_id(credential: Any) -> str:
 def _creation(runtime: SignInRuntime, email: str, purpose: str) -> dict:
     challenge = runtime.store.new_challenge(purpose, email)
     return pk.creation_options(
-        rp_id=runtime.rp_id, rp_name=runtime.product, user_id=runtime.store.user_handle(email), user_name=email,
-        display_name=email, challenge=challenge, exclude=runtime.store.passkey_ids(email),
+        rp_id=runtime.rp_id,
+        rp_name=runtime.product,
+        user_id=runtime.store.user_handle(email),
+        user_name=email,
+        display_name=email,
+        challenge=challenge,
+        exclude=runtime.store.passkey_ids(email),
     )
 
 
-def _registered(runtime: SignInRuntime, request: Request, email: str, purpose: str, body: CredentialRequest) -> dict:
+def _registered(
+    runtime: SignInRuntime, request: Request, email: str, purpose: str, body: CredentialRequest
+) -> dict:
     challenge = _challenge_in(body.credential)
     if runtime.store.use_challenge(challenge, purpose) != email:
         raise pk.PasskeyRefused("That passkey answered a request that has run out. Try again.")
-    made = pk.verify_registration(body.credential, challenge=challenge, origin=runtime.origin, rp_id=runtime.rp_id)
+    made = pk.verify_registration(
+        body.credential, challenge=challenge, origin=runtime.origin, rp_id=runtime.rp_id
+    )
     name = (body.name or "").strip() or device_of(request.headers.get("user-agent"))
-    added = runtime.store.add_passkey(email, made.credential_id, made.public_key, made.alg, made.sign_count, made.transports, name)
+    added = runtime.store.add_passkey(
+        email, made.credential_id, made.public_key, made.alg, made.sign_count, made.transports, name
+    )
     runtime.access.record("passkey_added", who=email, method="passkey", address=_address(request))
     return added
 
@@ -1558,7 +2000,9 @@ async def passkey_enrol_finish(request: Request, body: CredentialRequest) -> Any
     if email is None or person is None or person.disabled:
         return _refuse(400, "This set-up has expired. Ask for a new link from the sign-in page.")
     if runtime.store.locked(f"confirm:{email}"):
-        return _refuse(429, "Too many tries. Wait a while, then ask for a new link from the sign-in page.")
+        return _refuse(
+            429, "Too many tries. Wait a while, then ask for a new link from the sign-in page."
+        )
     try:
         _registered(runtime, request, email, "passkey-enrol", body)
     except pk.PasskeyRefused as exc:
@@ -1581,10 +2025,15 @@ async def passkey_begin(request: Request) -> Any:
         return _refuse(429, "Too many tries from here. Wait a few minutes and try again.")
     runtime.store.failed(key, limit=120, escalate=False)
     challenge = runtime.store.new_challenge("passkey-signin")
-    return {"ok": True, "data": {"options": pk.request_options(rp_id=runtime.rp_id, challenge=challenge)}}
+    return {
+        "ok": True,
+        "data": {"options": pk.request_options(rp_id=runtime.rp_id, challenge=challenge)},
+    }
 
 
-def _asserted(runtime: SignInRuntime, credential: Any, purpose: str, email: Optional[str] = None) -> str:
+def _asserted(
+    runtime: SignInRuntime, credential: Any, purpose: str, email: Optional[str] = None
+) -> str:
     """Check a passkey sign-in. The address it belongs to."""
     challenge = _challenge_in(credential)
     issued_for = runtime.store.use_challenge(challenge, purpose)
@@ -1598,7 +2047,12 @@ def _asserted(runtime: SignInRuntime, credential: Any, purpose: str, email: Opti
     if handle and pk.unb64u(handle) != runtime.store.user_handle(stored["email"]):
         raise pk.PasskeyRefused()
     count = pk.verify_assertion(
-        credential, challenge=challenge, origin=runtime.origin, rp_id=runtime.rp_id, public_key=stored["public_key"], sign_count=stored["sign_count"]
+        credential,
+        challenge=challenge,
+        origin=runtime.origin,
+        rp_id=runtime.rp_id,
+        public_key=stored["public_key"],
+        sign_count=stored["sign_count"],
     )
     runtime.store.touch_passkey(credential_id, count)
     return str(stored["email"])
@@ -1611,7 +2065,9 @@ async def passkey_finish(request: Request, body: CredentialRequest) -> Any:
     try:
         email = _asserted(runtime, body.credential, "passkey-signin")
     except pk.PasskeyRefused as exc:
-        runtime.access.record("signin_failed", method="passkey", reason="passkey", address=_address(request))
+        runtime.access.record(
+            "signin_failed", method="passkey", reason="passkey", address=_address(request)
+        )
         return _refuse(401, exc.reason)
     person = runtime.store.person(email)
     if person is None or person.disabled:
@@ -1672,7 +2128,9 @@ async def password_reset(request: Request, body: ResetRequest) -> Any:
     runtime = _passwords_on(request)
     email = runtime.store.use_link(body.token, "password")
     if email is None:
-        return _refuse(400, "This link has been used or has expired. Ask for a new one from the sign-in page.")
+        return _refuse(
+            400, "This link has been used or has expired. Ask for a new one from the sign-in page."
+        )
     key = f"code:{email}"
     held = _locked_out(runtime, request, key)
     if held is not None:
@@ -1680,7 +2138,9 @@ async def password_reset(request: Request, body: ResetRequest) -> Any:
 
     def again(status: int, message: str) -> JSONResponse:
         token = runtime.store.new_link(email, "password")
-        return JSONResponse(status_code=status, content=refusal_content(message, data={"token": token}))
+        return JSONResponse(
+            status_code=status, content=refusal_content(message, data={"token": token})
+        )
 
     problem = passwords.problem_with(body.password, email)
     if problem:
@@ -1714,7 +2174,13 @@ async def password_reset(request: Request, body: ResetRequest) -> Any:
 
 def _listed_sso(runtime: SignInRuntime, caller: Optional[Caller]) -> bool:
     """Signed in with single sign-on, on the People list, and the list's own ways are on here."""
-    if caller is None or caller.method != "oidc" or not caller.listed or not caller.email or "email" not in runtime.config.methods:
+    if (
+        caller is None
+        or caller.method != "oidc"
+        or not caller.listed
+        or not caller.email
+        or "email" not in runtime.config.methods
+    ):
         return False
     person = runtime.store.person(caller.email)
     return person is not None and not person.disabled
@@ -1724,7 +2190,10 @@ def _local_caller(request: Request) -> tuple[SignInRuntime, Caller]:
     runtime = _need(request)
     caller = caller_of(request)
     if caller is None or not caller.email or not (caller.local or _listed_sso(runtime, caller)):
-        raise HTTPException(status_code=400, detail="This is for somebody on this server's People list, signed in at the dashboard, not a key")
+        raise HTTPException(
+            status_code=400,
+            detail="This is for somebody on this server's People list, signed in at the dashboard, not a key",
+        )
     return runtime, caller
 
 
@@ -1737,7 +2206,9 @@ def _session_caller(request: Request) -> tuple[SignInRuntime, Caller]:
     runtime = _need(request)
     caller = caller_of(request)
     if caller is None or caller.method in ("key", "guest") or not caller.subject:
-        raise HTTPException(status_code=400, detail="This is for somebody signed in to the dashboard")
+        raise HTTPException(
+            status_code=400, detail="This is for somebody signed in to the dashboard"
+        )
     return runtime, caller
 
 
@@ -1753,8 +2224,13 @@ async def my_ways(request: Request) -> Any:
     return {
         "ok": True,
         "data": {
-            "local": caller.local, "listed": listed, "method": caller.method, "passwords": runtime.config.passwords,
-            "require_passkey": runtime.config.require_passkey, "own_passkeys": runtime.config.own_passkeys, **ways,
+            "local": caller.local,
+            "listed": listed,
+            "method": caller.method,
+            "passwords": runtime.config.passwords,
+            "require_passkey": runtime.config.require_passkey,
+            "own_passkeys": runtime.config.own_passkeys,
+            **ways,
         },
     }
 
@@ -1776,7 +2252,13 @@ async def end_my_session(request: Request, session_id: str) -> Any:
         return _refuse(400, "That is this browser. Sign out instead.")
     if not runtime.store.close_sessions_of(caller.subject or "", only=session_id):
         raise HTTPException(status_code=404, detail="no such session")
-    runtime.access.record("sessions_ended", who=caller.who, method=caller.method, reason="one", address=_address(request))
+    runtime.access.record(
+        "sessions_ended",
+        who=caller.who,
+        method=caller.method,
+        reason="one",
+        address=_address(request),
+    )
     return {"ok": True, "data": None}
 
 
@@ -1784,7 +2266,13 @@ async def end_my_session(request: Request, session_id: str) -> Any:
 async def end_my_other_sessions(request: Request) -> Any:
     runtime, caller = _session_caller(request)
     ended = runtime.store.close_sessions_of(caller.subject or "", keep=caller.session_key)
-    runtime.access.record("sessions_ended", who=caller.who, method=caller.method, reason=f"{ended} others", address=_address(request))
+    runtime.access.record(
+        "sessions_ended",
+        who=caller.who,
+        method=caller.method,
+        reason=f"{ended} others",
+        address=_address(request),
+    )
     return {"ok": True, "data": {"ended": ended}}
 
 
@@ -1812,13 +2300,24 @@ async def remove_my_passkey(request: Request, credential_id: str) -> Any:
     person = runtime.store.person(caller.email or "")
     if person is None:
         raise HTTPException(status_code=404, detail="nobody by that address")
-    if person.passkeys <= 1 and (runtime.config.require_passkey or not person.authenticator) and not _sso_backs(runtime, person):
+    if (
+        person.passkeys <= 1
+        and (runtime.config.require_passkey or not person.authenticator)
+        and not _sso_backs(runtime, person)
+    ):
         if runtime.config.require_passkey:
-            return _refuse(409, "This is your only passkey, and this server signs people in with passkeys. Add another first.")
-        return _refuse(409, "This is your only way in. Add another passkey or an authenticator app first.")
+            return _refuse(
+                409,
+                "This is your only passkey, and this server signs people in with passkeys. Add another first.",
+            )
+        return _refuse(
+            409, "This is your only way in. Add another passkey or an authenticator app first."
+        )
     if not runtime.store.remove_passkey(person.email, credential_id):
         raise HTTPException(status_code=404, detail="no such passkey")
-    runtime.access.record("passkey_removed", who=person.email, method=caller.method, address=_address(request))
+    runtime.access.record(
+        "passkey_removed", who=person.email, method=caller.method, address=_address(request)
+    )
     return {"ok": True, "data": None}
 
 
@@ -1848,7 +2347,9 @@ async def remove_my_authenticator(request: Request) -> Any:
     if not person.passkeys and not _sso_backs(runtime, person):
         return _refuse(409, "This is your only way in. Add a passkey first.")
     runtime.store.remove_authenticator(person.email)
-    runtime.access.record("authenticator_removed", who=person.email, method=caller.method, address=_address(request))
+    runtime.access.record(
+        "authenticator_removed", who=person.email, method=caller.method, address=_address(request)
+    )
     return {"ok": True, "data": None}
 
 
@@ -1860,12 +2361,17 @@ async def replace_authenticator_confirm(request: Request, body: CodeRequest) -> 
     email = caller.email or ""
     key = f"confirm:{email}"
     if runtime.store.locked(key):
-        return _refuse(429, f"Too many wrong codes. Wait {runtime.store.lock_minutes(key)} minutes and try again.")
+        return _refuse(
+            429,
+            f"Too many wrong codes. Wait {runtime.store.lock_minutes(key)} minutes and try again.",
+        )
     if not runtime.store.confirm_replacement(email, body.code):
         runtime.store.failed(key)
         return _refuse(401, _WRONG)
     runtime.store.succeeded(key)
-    runtime.access.record("authenticator_replaced", who=email, method=caller.method, address=_address(request))
+    runtime.access.record(
+        "authenticator_replaced", who=email, method=caller.method, address=_address(request)
+    )
     return {"ok": True, "data": None}
 
 
@@ -1873,7 +2379,9 @@ async def replace_authenticator_confirm(request: Request, body: CodeRequest) -> 
 async def make_recovery_codes(request: Request) -> Any:
     runtime, caller = _local_caller(request)
     codes = runtime.store.new_recovery_codes(caller.email or "")
-    runtime.access.record("recovery_codes_made", who=caller.email, method=caller.method, address=_address(request))
+    runtime.access.record(
+        "recovery_codes_made", who=caller.email, method=caller.method, address=_address(request)
+    )
     return {"ok": True, "data": {"recovery_codes": codes}}
 
 
@@ -1886,7 +2394,9 @@ async def set_my_password(request: Request, body: PasswordRequest) -> Any:
     if problem:
         return _refuse(400, problem)
     runtime.store.set_password(caller.email or "", body.password)
-    runtime.access.record("password_set", who=caller.email, method=caller.method, address=_address(request))
+    runtime.access.record(
+        "password_set", who=caller.email, method=caller.method, address=_address(request)
+    )
     return {"ok": True, "data": None}
 
 
@@ -1920,11 +2430,19 @@ async def step_up(request: Request, body: StepUpRequest) -> Any:
             return held
         if not _same_text(body.password or "", access.password):
             runtime.store.failed(key)
-            runtime.access.record("signin_failed", who=caller.name, method=DEVELOPER, reason="step_up", address=_address(request))
+            runtime.access.record(
+                "signin_failed",
+                who=caller.name,
+                method=DEVELOPER,
+                reason="step_up",
+                address=_address(request),
+            )
             return _refuse(401, "That password was not accepted.")
         runtime.store.succeeded(key)
         runtime.store.mark_verified(_current_sid(runtime, request))
-        runtime.access.record("step_up", who=caller.name, method=DEVELOPER, address=_address(request))
+        runtime.access.record(
+            "step_up", who=caller.name, method=DEVELOPER, address=_address(request)
+        )
         return {"ok": True, "data": None}
     if caller.method == "oidc" and "code" not in runtime.step_up_ways(caller):
         return _refuse(400, "Confirm with single sign-on", sso=True)
@@ -1938,11 +2456,19 @@ async def step_up(request: Request, body: StepUpRequest) -> Any:
             return held
         if not passwords.check(body.password or "", glass.password_hash):
             runtime.store.failed(key)
-            runtime.access.record("signin_failed", who=glass.admin, method=BREAK_GLASS, reason="step_up", address=_address(request))
+            runtime.access.record(
+                "signin_failed",
+                who=glass.admin,
+                method=BREAK_GLASS,
+                reason="step_up",
+                address=_address(request),
+            )
             return _refuse(401, "That password was not accepted.")
         runtime.store.succeeded(key)
         runtime.store.mark_verified(_current_sid(runtime, request))
-        runtime.access.record("step_up", who=glass.admin, method=BREAK_GLASS, address=_address(request))
+        runtime.access.record(
+            "step_up", who=glass.admin, method=BREAK_GLASS, address=_address(request)
+        )
         return {"ok": True, "data": None}
     email = caller.email or ""
     code = body.code.strip()
@@ -1951,7 +2477,11 @@ async def step_up(request: Request, body: StepUpRequest) -> Any:
     held = _locked_out(runtime, request, key)
     if held is not None:
         return held
-    ok = runtime.store.use_recovery_code(email, code) if recovering else runtime.store.check_code(email, code)
+    ok = (
+        runtime.store.use_recovery_code(email, code)
+        if recovering
+        else runtime.store.check_code(email, code)
+    )
     if not ok:
         _count_failure(runtime, request, key, email, "step_up")
         return _refuse(401, _WRONG)
@@ -1967,7 +2497,14 @@ async def step_up_passkey_begin(request: Request) -> Any:
     _passkeys_on(runtime)
     email = caller.email or ""
     challenge = runtime.store.new_challenge("passkey-stepup", email)
-    return {"ok": True, "data": {"options": pk.request_options(rp_id=runtime.rp_id, challenge=challenge, allow=runtime.store.passkey_ids(email))}}
+    return {
+        "ok": True,
+        "data": {
+            "options": pk.request_options(
+                rp_id=runtime.rp_id, challenge=challenge, allow=runtime.store.passkey_ids(email)
+            )
+        },
+    }
 
 
 @router.post("/auth/step-up/passkey/finish", tags=["auth"])
@@ -2018,11 +2555,20 @@ async def people(request: Request, q: Optional[str] = None, limit: int = 0, offs
     listed, total = _page_of(everybody, q, limit, offset, keys=("email", "role"))
     return {
         "ok": True,
-        "data": {"people": listed, "total": total, "offset": max(0, offset), "roles": list(roles.ROLES), "grants": roles.table(), "grantable": sorted(roles.GRANTABLE)},
+        "data": {
+            "people": listed,
+            "total": total,
+            "offset": max(0, offset),
+            "roles": list(roles.ROLES),
+            "grants": roles.table(),
+            "grantable": sorted(roles.GRANTABLE),
+        },
     }
 
 
-def _page_of(rows: list, q: Optional[str], limit: int, offset: int, *, keys: tuple) -> tuple[list, int]:
+def _page_of(
+    rows: list, q: Optional[str], limit: int, offset: int, *, keys: tuple
+) -> tuple[list, int]:
     """The rows that hold ``q`` in one of ``keys``, then the page ``offset`` and ``limit`` cut: ``limit`` 0 is all of them."""
     needle = (q or "").strip().lower()
     if needle:
@@ -2034,7 +2580,13 @@ def _page_of(rows: list, q: Optional[str], limit: int, offset: int, *, keys: tup
 
 def _would_leave_no_admin(runtime: SignInRuntime, email: str, new_role: Optional[str]) -> bool:
     person = runtime.store.person(email)
-    return person is not None and person.role == roles.ADMIN and not person.disabled and new_role != roles.ADMIN and runtime.store.admins() <= 1
+    return (
+        person is not None
+        and person.role == roles.ADMIN
+        and not person.disabled
+        and new_role != roles.ADMIN
+        and runtime.store.admins() <= 1
+    )
 
 
 @router.post("/auth/people", tags=["auth"])
@@ -2048,7 +2600,12 @@ async def put_person(request: Request, body: PersonRequest) -> Any:
         person = runtime.store.put_person(body.email, body.role, body.principal, body.grants)
     except Exception as exc:  # noqa: BLE001 - a ConfigurationError, said back as it is
         return _refuse(400, str(exc))
-    runtime.access.record("person_changed" if existed else "person_added", who=person.email, role=person.role, by=caller.who if caller else None)
+    runtime.access.record(
+        "person_changed" if existed else "person_added",
+        who=person.email,
+        role=person.role,
+        by=caller.who if caller else None,
+    )
     return {"ok": True, "data": person.public()}
 
 
@@ -2060,7 +2617,9 @@ async def remove_person(request: Request, email: str) -> Any:
         return _refuse(409, "This is the only admin. Make somebody else an admin first.")
     if not runtime.store.remove_person(email):
         raise HTTPException(status_code=404, detail="nobody by that address")
-    runtime.access.record("person_removed", who=normalise_email(email), by=caller.who if caller else None)
+    runtime.access.record(
+        "person_removed", who=normalise_email(email), by=caller.who if caller else None
+    )
     return {"ok": True, "data": None}
 
 
@@ -2072,7 +2631,9 @@ async def reset_person(request: Request, email: str) -> Any:
     if runtime.store.person(email) is None:
         raise HTTPException(status_code=404, detail="nobody by that address")
     runtime.store.reset_authenticator(email)
-    runtime.access.record("authenticator_reset", who=normalise_email(email), by=caller.who if caller else None)
+    runtime.access.record(
+        "authenticator_reset", who=normalise_email(email), by=caller.who if caller else None
+    )
     return {"ok": True, "data": None}
 
 
@@ -2092,7 +2653,11 @@ async def reset_person(request: Request, email: str) -> Any:
 # chunk's text or what a search returned.
 
 #: What each kind of key may do, in the words the page shows.
-KEY_ROLE_WORDS = {roles.READER: "Read only", roles.SEARCHER: "Read and search", roles.OPERATOR: "Read, search and write"}
+KEY_ROLE_WORDS = {
+    roles.READER: "Read only",
+    roles.SEARCHER: "Read and search",
+    roles.OPERATOR: "Read, search and write",
+}
 
 
 class KeyRequest(BaseModel):
@@ -2103,10 +2668,15 @@ class KeyRequest(BaseModel):
         description="The collections this key may reach. Left out, every collection its role allows.",
     )
     expires_in_days: Optional[int] = Field(
-        default=None, gt=0, le=3650, description="How long the key works for. Left out, until it is revoked."
+        default=None,
+        gt=0,
+        le=3650,
+        description="How long the key works for. Left out, until it is revoked.",
     )
     requests_per_minute: Optional[int] = Field(
-        default=None, gt=0, le=100000,
+        default=None,
+        gt=0,
+        le=100000,
         description="How many requests a minute the key may make. Left out, the server's VECTRIXDB_KEY_REQUESTS_PER_MINUTE, and with that unset, no limit.",
     )
 
@@ -2116,7 +2686,10 @@ async def list_keys(request: Request) -> Any:
     runtime = _need(request)
     return {
         "ok": True,
-        "data": {"keys": [k.public() for k in runtime.store.keys()], "roles": [{"role": r, "means": KEY_ROLE_WORDS[r]} for r in roles.KEY_ROLES]},
+        "data": {
+            "keys": [k.public() for k in runtime.store.keys()],
+            "roles": [{"role": r, "means": KEY_ROLE_WORDS[r]} for r in roles.KEY_ROLES],
+        },
     }
 
 
@@ -2127,17 +2700,29 @@ async def create_key(request: Request, body: KeyRequest) -> Any:
     expires_at = time.time() + body.expires_in_days * 86400 if body.expires_in_days else None
     try:
         record, key = runtime.store.create_key(
-            body.name, body.role, caller.who if caller else None,
-            collections=body.collections, expires_at=expires_at, per_minute=body.requests_per_minute,
+            body.name,
+            body.role,
+            caller.who if caller else None,
+            collections=body.collections,
+            expires_at=expires_at,
+            per_minute=body.requests_per_minute,
         )
     except Exception as exc:  # noqa: BLE001 - a ConfigurationError, said back as it is
         return _refuse(400, str(exc))
     # What the key may reach is part of what was given out, so the line says it.
     scope = ", ".join(record.collections) if record.collections else "every collection"
-    until = time.strftime("%Y-%m-%d", time.gmtime(record.expires_at)) if record.expires_at else "revoked"
+    until = (
+        time.strftime("%Y-%m-%d", time.gmtime(record.expires_at))
+        if record.expires_at
+        else "revoked"
+    )
     runtime.access.record(
-        "key_created", who=record.name, role=record.role, by=caller.who if caller else None,
-        address=_address(request), reason=f"{scope}, until {until}",
+        "key_created",
+        who=record.name,
+        role=record.role,
+        by=caller.who if caller else None,
+        address=_address(request),
+        reason=f"{scope}, until {until}",
     )
     # Shown once. What is kept is its hash.
     return {"ok": True, "data": {**record.public(), "key": key}}
@@ -2150,15 +2735,24 @@ async def revoke_key(request: Request, key_id: str) -> Any:
     name = runtime.store.revoke_key(key_id)
     if name is None:
         raise HTTPException(status_code=404, detail="no such key")
-    runtime.access.record("key_revoked", who=name, by=caller.who if caller else None, address=_address(request))
+    runtime.access.record(
+        "key_revoked", who=name, by=caller.who if caller else None, address=_address(request)
+    )
     return {"ok": True, "data": None}
 
 
 class AccessCheckRequest(BaseModel):
     collection: str
-    email: Optional[str] = Field(None, description="The address to try, as their sign-in would carry it")
-    subject: Optional[str] = Field(None, description="Their subject at the identity provider, when there is no address")
-    groups: Optional[List[str]] = Field(None, description="The security group ids to try them with, standing in for the token. A store policy reads the address alone")
+    email: Optional[str] = Field(
+        None, description="The address to try, as their sign-in would carry it"
+    )
+    subject: Optional[str] = Field(
+        None, description="Their subject at the identity provider, when there is no address"
+    )
+    groups: Optional[List[str]] = Field(
+        None,
+        description="The security group ids to try them with, standing in for the token. A store policy reads the address alone",
+    )
 
 
 @router.post("/api/v1/access/check", tags=["inspect"])
@@ -2172,12 +2766,22 @@ async def access_check(request: Request, body: AccessCheckRequest) -> Any:
     """
     records = getattr(request.app.state, "collection_store", None)
     if records is None:
-        return refusal(404, "Nothing is gated on this server: set VECTRIXDB_COLLECTION_STORE to where each collection's record is kept")
+        return refusal(
+            404,
+            "Nothing is gated on this server: set VECTRIXDB_COLLECTION_STORE to where each collection's record is kept",
+        )
     name = body.collection.strip()
     try:
         record = records.get(name)
         policy = record.policy_object() if record is not None else None
-        decision = decide(policy, collection=name, method="session", email=body.email, subject=body.subject, groups=body.groups or [])
+        decision = decide(
+            policy,
+            collection=name,
+            method="session",
+            email=body.email,
+            subject=body.subject,
+            groups=body.groups or [],
+        )
     except CollectionStoreUnavailable as exc:
         return refusal(503, str(exc))
     except ConfigurationError as exc:
@@ -2185,8 +2789,14 @@ async def access_check(request: Request, body: AccessCheckRequest) -> Any:
     runtime, caller = runtime_of(request), caller_of(request)
     if runtime is not None:
         runtime.access.record(
-            "access_checked", who=caller.who if caller else None, role=caller.role if caller else None, method=caller.method if caller else None,
-            collection=name, subject=body.email or body.subject, reason=decision.code, address=_address(request),
+            "access_checked",
+            who=caller.who if caller else None,
+            role=caller.role if caller else None,
+            method=caller.method if caller else None,
+            collection=name,
+            subject=body.email or body.subject,
+            reason=decision.code,
+            address=_address(request),
         )
     return {"ok": True, "data": {"collection": name, **decision.to_dict()}}
 
@@ -2203,7 +2813,13 @@ async def access_daily(request: Request, days: int = 14) -> Any:
     runtime = _need(request)
     counted = runtime.access.daily(max(1, min(days, 90)))
     if counted is None:
-        return {"ok": True, "data": {"available": False, "reason": "the access log goes to the server's output, where it cannot be read back"}}
+        return {
+            "ok": True,
+            "data": {
+                "available": False,
+                "reason": "the access log goes to the server's output, where it cannot be read back",
+            },
+        }
     caller = caller_of(request)
     if caller is not None and not caller.can("access.read"):
         for about_people in ("signins", "refused", "denied"):
@@ -2212,7 +2828,9 @@ async def access_daily(request: Request, days: int = 14) -> Any:
 
 
 @router.get("/api/v1/access/readers", tags=["inspect"])
-async def access_readers(request: Request, days: int = 14, top: int = 10, offset: int = 0, q: Optional[str] = None) -> Any:
+async def access_readers(
+    request: Request, days: int = 14, top: int = 10, offset: int = 0, q: Optional[str] = None
+) -> Any:
     """Who searched and read most in the last days, the busiest first, a page at a time.
 
     ``top`` is the page, ``offset`` where it starts, ``q`` a find on the
@@ -2222,16 +2840,40 @@ async def access_readers(request: Request, days: int = 14, top: int = 10, offset
     runtime = _need(request)
     everybody = runtime.access.readers(max(1, min(days, 90)), 1_000_000)
     if everybody is None:
-        return {"ok": True, "data": {"available": False, "reason": "the access log goes to the server's output, where it cannot be read back"}}
+        return {
+            "ok": True,
+            "data": {
+                "available": False,
+                "reason": "the access log goes to the server's output, where it cannot be read back",
+            },
+        }
     listed, total = _page_of(everybody, q, max(1, min(top, 100)), offset, keys=("who",))
-    return {"ok": True, "data": {"available": True, "days": max(1, min(days, 90)), "readers": listed, "total": total, "offset": max(0, offset)}}
+    return {
+        "ok": True,
+        "data": {
+            "available": True,
+            "days": max(1, min(days, 90)),
+            "readers": listed,
+            "total": total,
+            "offset": max(0, offset),
+        },
+    }
 
 
 @router.get("/api/v1/access", tags=["inspect"])
-async def access_log(request: Request, limit: int = 200, offset: int = 0, q: Optional[str] = None, event: Optional[str] = None, who: Optional[str] = None) -> Any:
+async def access_log(
+    request: Request,
+    limit: int = 200,
+    offset: int = 0,
+    q: Optional[str] = None,
+    event: Optional[str] = None,
+    who: Optional[str] = None,
+) -> Any:
     """The access log, newest first, a page at a time: ``q`` finds in anything a line says, ``total`` is how many match."""
     runtime = _need(request)
-    records, total = runtime.access.listing(max(1, min(limit, 1000)), max(0, offset), q=q, event=event, who=who)
+    records, total = runtime.access.listing(
+        max(1, min(limit, 1000)), max(0, offset), q=q, event=event, who=who
+    )
     return {
         "ok": True,
         "data": {

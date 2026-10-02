@@ -154,7 +154,10 @@ class ChatRoute:
 
             transport = _urllib_transport
         self._transport = transport
-        self._settings: Dict[str, Any] = {"temperature": 0, "response_format": {"type": "json_object"}}
+        self._settings: Dict[str, Any] = {
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
         self._limit = "max_tokens"
         #: The status and the start of what the service said, the last time a call got no answer.
         self.failure: Optional[Tuple[int, str]] = None
@@ -175,13 +178,17 @@ class ChatRoute:
     ) -> Any:
         """One for an Azure OpenAI deployment."""
         if not (endpoint and deployment):
-            raise ValueError("an Azure OpenAI deployment is called with the resource's endpoint and the deployment's name")
+            raise ValueError(
+                "an Azure OpenAI deployment is called with the resource's endpoint and the deployment's name"
+            )
         url = (
             f"{endpoint.rstrip('/')}/openai/deployments/{deployment}/chat/completions"
             f"?api-version={api_version or cls.AZURE_API_VERSION}"
         )
         kwargs.setdefault("label", deployment)
-        return cls(url, key=key, token=token, key_header="api-key" if key else "Authorization", **kwargs)
+        return cls(
+            url, key=key, token=token, key_header="api-key" if key else "Authorization", **kwargs
+        )
 
     @classmethod
     def from_environment(cls, env: Optional[Mapping[str, str]] = None, **kwargs: Any) -> Any:
@@ -205,10 +212,17 @@ class ChatRoute:
             token = None if key else managed_identity()
             if key or token:
                 return cls.azure_openai(
-                    endpoint, deployment, key=key, token=token, api_version=get("AZURE_OPENAI_API_VERSION") or None, **kwargs
+                    endpoint,
+                    deployment,
+                    key=key,
+                    token=token,
+                    api_version=get("AZURE_OPENAI_API_VERSION") or None,
+                    **kwargs,
                 )
             logger.warning(
-                "%s is set with no AZURE_OPENAI_KEY and no managed identity to use, so %s", cls._AZURE_DEPLOYMENT, cls._WITHOUT
+                "%s is set with no AZURE_OPENAI_KEY and no managed identity to use, so %s",
+                cls._AZURE_DEPLOYMENT,
+                cls._WITHOUT,
             )
         at, key, model, header = cls._ROUTE
         url = get(at) if at else ""
@@ -266,7 +280,11 @@ class ChatRoute:
         attempt = 0
         adjusted = 0
         while True:
-            body: Dict[str, Any] = {"messages": messages, **self._settings, self._limit: self.max_tokens}
+            body: Dict[str, Any] = {
+                "messages": messages,
+                **self._settings,
+                self._limit: self.max_tokens,
+            }
             if self.model:
                 body["model"] = self.model
             try:
@@ -291,7 +309,9 @@ class ChatRoute:
             if (status == 0 or status == 429 or status >= 500) and attempt < self.tries:
                 time.sleep(self._wait(reply_headers, attempt))
                 continue
-            logger.warning("%s %s: %s %s", self.label, self._FAILED, status or "no answer", text[:300])
+            logger.warning(
+                "%s %s: %s %s", self.label, self._FAILED, status or "no answer", text[:300]
+            )
             self.failure = (status, text[:300])
             return None
 
@@ -299,11 +319,17 @@ class ChatRoute:
         try:
             message = json.loads(text)["choices"][0]["message"]
         except (ValueError, KeyError, IndexError, TypeError):
-            logger.warning("%s answered with something that is not a chat completion: %s", self.label, text[:300])
+            logger.warning(
+                "%s answered with something that is not a chat completion: %s",
+                self.label,
+                text[:300],
+            )
             return None
         if not isinstance(message, Mapping) or message.get("refusal"):
             return None
         content = message.get("content")
         if isinstance(content, list):
-            content = "".join(str(part.get("text") or "") for part in content if isinstance(part, Mapping))
+            content = "".join(
+                str(part.get("text") or "") for part in content if isinstance(part, Mapping)
+            )
         return str(content or "").strip() or None

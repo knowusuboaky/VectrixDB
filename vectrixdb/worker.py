@@ -106,7 +106,13 @@ def events_from_s3(payload: Mapping[str, Any]) -> List[IngestEvent]:
     for record in payload.get("Records", []) or []:
         if "s3" in record:
             name = str(record.get("eventName", ""))
-            kind = "created" if name.startswith("ObjectCreated") else "deleted" if name.startswith("ObjectRemoved") else None
+            kind = (
+                "created"
+                if name.startswith("ObjectCreated")
+                else "deleted"
+                if name.startswith("ObjectRemoved")
+                else None
+            )
             if kind is None:
                 continue
             s3 = record["s3"]
@@ -133,7 +139,9 @@ def events_from_s3(payload: Mapping[str, Any]) -> List[IngestEvent]:
     return out
 
 
-def events_from_event_grid(payload: Union[Mapping[str, Any], Iterable[Mapping[str, Any]]]) -> List[IngestEvent]:
+def events_from_event_grid(
+    payload: Union[Mapping[str, Any], Iterable[Mapping[str, Any]]],
+) -> List[IngestEvent]:
     """The events in an Event Grid delivery, in the Event Grid or the CloudEvents schema.
 
     Blob Storage raises ``Microsoft.Storage.BlobCreated`` and
@@ -218,7 +226,9 @@ class S3Fetcher:
         parsed = urlparse(uri)
         if parsed.scheme != "s3":
             raise ValueError(f"not an s3 URI: {uri}")
-        body = self._client.get_object(Bucket=parsed.netloc, Key=unquote(parsed.path.lstrip("/")))["Body"]
+        body = self._client.get_object(Bucket=parsed.netloc, Key=unquote(parsed.path.lstrip("/")))[
+            "Body"
+        ]
         return body.read()
 
 
@@ -281,7 +291,14 @@ class TokenBucket:
     ``clock`` and ``sleep`` are injectable, so a test needs no real second.
     """
 
-    def __init__(self, rate: float, burst: Optional[float] = None, *, clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep) -> None:
+    def __init__(
+        self,
+        rate: float,
+        burst: Optional[float] = None,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         if rate <= 0:
             raise ValueError(f"rate is tokens a second, above zero, got {rate!r}")
         self.rate = float(rate)
@@ -349,7 +366,9 @@ class IngestWorker:
         self.on_error = on_error
         # A pace on what is written to the index: a burst of files then waits between documents
         # rather than flooding the store or the model that embeds for it.
-        self.pace: Optional[TokenBucket] = TokenBucket(chunks_per_second) if chunks_per_second else None
+        self.pace: Optional[TokenBucket] = (
+            TokenBucket(chunks_per_second) if chunks_per_second else None
+        )
         if extractors is not None:
             from .extract import resolve
 
@@ -370,14 +389,20 @@ class IngestWorker:
             # that one would raise an event too.
             logger.warning("ignored %s: it is inside the document store %r", event.uri, store)
             return IngestOutcome(
-                action="ignored", doc_id=doc_id, uri=event.uri, version=event.version,
+                action="ignored",
+                doc_id=doc_id,
+                uri=event.uri,
+                version=event.version,
                 error="inside the collection's document store",
             )
         chunks = getattr(self.db, "kept_chunks", None)
         if chunks is not None and chunks.holds(event.uri):
             logger.warning("ignored %s: it is inside the chunk store %r", event.uri, chunks)
             return IngestOutcome(
-                action="ignored", doc_id=doc_id, uri=event.uri, version=event.version,
+                action="ignored",
+                doc_id=doc_id,
+                uri=event.uri,
+                version=event.version,
                 error="inside the collection's chunk store",
             )
         if event.kind == "deleted":
@@ -398,9 +423,18 @@ class IngestWorker:
         # event carries one, an ETag, else a hash of the bytes. The same
         # original is not read again, which is what an OCR bill wants.
         kept = store.entry(doc_id) if store is not None else None
-        if kept and event.version and kept.get("source_version") == event.version and self._current_version(doc_id):
+        if (
+            kept
+            and event.version
+            and kept.get("source_version") == event.version
+            and self._current_version(doc_id)
+        ):
             return IngestOutcome(
-                action="unchanged", doc_id=doc_id, uri=event.uri, version=event.version, build_id=self.db.index_build_id
+                action="unchanged",
+                doc_id=doc_id,
+                uri=event.uri,
+                version=event.version,
+                build_id=self.db.index_build_id,
             )
         # Kept and not indexed. With the Markdown written first, that is a
         # later step that failed last time, and this try starts from the
@@ -408,21 +442,42 @@ class IngestWorker:
         # part that costs money when reading is OCR, a vision model or speech.
         first = bool(getattr(self.db, "markdown_first", False))
         digest: Optional[str] = None
-        if first and store is not None and kept and event.version and kept.get("source_version") == event.version:
+        if (
+            first
+            and store is not None
+            and kept
+            and event.version
+            and kept.get("source_version") == event.version
+        ):
             doc = store.get(doc_id, images=True)
             source_version = event.version
         else:
             data = self.fetcher.fetch(event.uri)
             digest = hashlib.sha256(data).hexdigest()[:16]
             source_version = event.version or digest
-            if kept and (kept.get("source_version") == source_version or kept.get("source_sha") == digest) and self._current_version(doc_id):
+            if (
+                kept
+                and (
+                    kept.get("source_version") == source_version or kept.get("source_sha") == digest
+                )
+                and self._current_version(doc_id)
+            ):
                 if kept.get("source_version") != source_version and store is not None:
                     # The same bytes under a new ETag, a file saved again unchanged: noted, and not read again.
                     store.touch(doc_id, source_version=source_version, source_sha=digest)
                 return IngestOutcome(
-                    action="unchanged", doc_id=doc_id, uri=event.uri, version=event.version, build_id=self.db.index_build_id
+                    action="unchanged",
+                    doc_id=doc_id,
+                    uri=event.uri,
+                    version=event.version,
+                    build_id=self.db.index_build_id,
                 )
-            if first and store is not None and kept and kept.get("source_version") == source_version:
+            if (
+                first
+                and store is not None
+                and kept
+                and kept.get("source_version") == source_version
+            ):
                 doc = store.get(doc_id, images=True)
             else:
                 name = _name_of(event.uri)
@@ -444,7 +499,11 @@ class IngestWorker:
                     if self.on_error == "raise":
                         raise
                     return IngestOutcome(
-                        action="failed", doc_id=doc_id, uri=event.uri, version=event.version, error=str(exc)
+                        action="failed",
+                        doc_id=doc_id,
+                        uri=event.uri,
+                        version=event.version,
+                        error=str(exc),
                     )
 
         # Stage two: has the text changed? A file saved again with the same
@@ -455,7 +514,11 @@ class IngestWorker:
             if store is not None and kept:
                 store.touch(doc_id, source_version=source_version)
             return IngestOutcome(
-                action="unchanged", doc_id=doc_id, uri=event.uri, version=event.version, build_id=self.db.index_build_id
+                action="unchanged",
+                doc_id=doc_id,
+                uri=event.uri,
+                version=event.version,
+                build_id=self.db.index_build_id,
             )
 
         extra: Dict[str, Any] = {"object_version": event.version} if event.version else {}
@@ -465,7 +528,9 @@ class IngestWorker:
 
         if current is not None:
             self.db.delete_document(doc_id)
-        written = self.db.add_document(doc, doc_id=doc_id, metadata=extra, source_version=source_version, **self.options)
+        written = self.db.add_document(
+            doc, doc_id=doc_id, metadata=extra, source_version=source_version, **self.options
+        )
         if digest and store is not None:
             # The bytes' own hash beside the version, so the same file saved again is known without being read.
             store.touch(doc_id, source_version=source_version, source_sha=digest)
@@ -501,7 +566,10 @@ class IngestWorker:
                 if last[event.uri] != index:
                     outcomes.append(
                         IngestOutcome(
-                            action="superseded", doc_id=self.doc_id_of(event.uri), uri=event.uri, version=event.version
+                            action="superseded",
+                            doc_id=self.doc_id_of(event.uri),
+                            uri=event.uri,
+                            version=event.version,
                         )
                     )
                     continue
@@ -548,7 +616,9 @@ class LocalWatcher:
     makes that a no-op. Recursion follows the glob.
     """
 
-    def __init__(self, root: Union[str, Path], worker: IngestWorker, *, pattern: str = "**/*") -> None:
+    def __init__(
+        self, root: Union[str, Path], worker: IngestWorker, *, pattern: str = "**/*"
+    ) -> None:
         self.root = Path(root)
         self.worker = worker
         self.pattern = pattern

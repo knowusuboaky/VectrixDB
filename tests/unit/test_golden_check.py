@@ -35,7 +35,10 @@ GOOD = {"id": "g1", "question": "What was total revenue?", "expected": ["td/repo
 
 def written(tmp_path, *rows, name="golden.jsonl"):
     path = tmp_path / name
-    path.write_text("".join((row if isinstance(row, str) else json.dumps(row)) + "\n" for row in rows), encoding="utf-8")
+    path.write_text(
+        "".join((row if isinstance(row, str) else json.dumps(row)) + "\n" for row in rows),
+        encoding="utf-8",
+    )
     return path
 
 
@@ -49,21 +52,35 @@ def small_collection(tmp_path):
     def embed(texts):
         return np.asarray([[1.0, float(len(t) % 7), 0.5] for t in texts], dtype=np.float32)
 
-    db = Vectrix("golden", path=str(tmp_path / "db"), embed_fn=embed, dimension=3, embedding_cache=False)
-    db.add_document("# Deferment\n\nA payment can be deferred for up to three months.", doc_id="deferment")
+    db = Vectrix(
+        "golden", path=str(tmp_path / "db"), embed_fn=embed, dimension=3, embedding_cache=False
+    )
+    db.add_document(
+        "# Deferment\n\nA payment can be deferred for up to three months.", doc_id="deferment"
+    )
     db.add_document("# Fees\n\nA late fee is charged after ten days.", doc_id="fees")
     return db
 
 
 class TestTheSchema:
     def test_the_published_file_is_the_schema_the_check_uses(self):
-        published = json.loads((ROOT / "docs" / "reference" / "golden.schema.json").read_text(encoding="utf-8"))
+        published = json.loads(
+            (ROOT / "docs" / "reference" / "golden.schema.json").read_text(encoding="utf-8")
+        )
         assert published == GOLDEN_SCHEMA
 
     def test_a_question_and_where_its_answer_is_are_required_and_nothing_else_is_allowed(self):
         assert GOLDEN_SCHEMA["required"] == ["question", "expected"]
         assert GOLDEN_SCHEMA["additionalProperties"] is False
-        assert set(GOLDEN_SCHEMA["properties"]) == {"id", "question", "expected", "reference", "evidence", "hint", "draft"}
+        assert set(GOLDEN_SCHEMA["properties"]) == {
+            "id",
+            "question",
+            "expected",
+            "reference",
+            "evidence",
+            "hint",
+            "draft",
+        }
 
     def test_an_empty_question_is_a_template_row_only_with_a_hint(self):
         assert GOLDEN_SCHEMA["then"] == {"required": ["hint"]}
@@ -81,7 +98,10 @@ class TestTheSchema:
         ],
     )
     def test_an_expected_entry_is_a_document_or_one_page_of_it(self, entry, fine):
-        assert bool(re.search(GOLDEN_SCHEMA["properties"]["expected"]["items"]["pattern"], entry)) is fine
+        assert (
+            bool(re.search(GOLDEN_SCHEMA["properties"]["expected"]["items"]["pattern"], entry))
+            is fine
+        )
 
 
 class TestEveryMistakeAtOnce:
@@ -90,8 +110,17 @@ class TestEveryMistakeAtOnce:
             tmp_path,
             GOOD,
             {"id": "g2", "question": "", "expected": ["td/report.pdf"], "hint": "Who we are"},
-            {"id": "g3", "question": "How much was set aside?", "expected": ["td/report.pdf"], "draft": True},
-            {"id": "g4", "question": "What is the CET1 ratio?", "expeted": ["td/report.pdf#page=77"]},
+            {
+                "id": "g3",
+                "question": "How much was set aside?",
+                "expected": ["td/report.pdf"],
+                "draft": True,
+            },
+            {
+                "id": "g4",
+                "question": "What is the CET1 ratio?",
+                "expeted": ["td/report.pdf#page=77"],
+            },
             {"id": "g5", "question": "Who leads the bank?", "expected": "td/report.pdf"},
             {"id": "g6", "question": "How many employees?", "expected": []},
             {"id": "g3", "question": "What is the dividend?", "expected": ["td/report.pdf#page=0"]},
@@ -105,7 +134,10 @@ class TestEveryMistakeAtOnce:
             (4, '"expeted" is not a field. Did you mean "expected"?'),
             (5, 'expected should be a list, not text, like ["td/report.pdf"]'),
             (6, "expected is empty: name the document that answers it"),
-            (7, "td/report.pdf#page=0 should end in a page number from 1, like #page=41, or name the document alone"),
+            (
+                7,
+                "td/report.pdf#page=0 should end in a page number from 1, like #page=41, or name the document alone",
+            ),
             (7, "id g3 is used twice, first on line 3"),
             (8, 'text is the old name for question: rename it "question"'),
             (9, "the same question as line 1"),
@@ -114,7 +146,13 @@ class TestEveryMistakeAtOnce:
         assert (check.rows, check.ready, check.unfilled, check.drafts) == (10, 2, 1, 1)
 
     def test_the_summary_reads_as_a_list(self, tmp_path):
-        path = written(tmp_path, GOOD, {"id": "g1", "question": "Another?", "expected": ["x"]}, "{", name="golden-financial.jsonl")
+        path = written(
+            tmp_path,
+            GOOD,
+            {"id": "g1", "question": "Another?", "expected": ["x"]},
+            "{",
+            name="golden-financial.jsonl",
+        )
         assert check_golden(path).summary().splitlines() == [
             "golden-financial.jsonl: 2 problems",
             "  line 2  id g1 is used twice, first on line 1",
@@ -128,14 +166,26 @@ class TestEachRuleInWords:
         [
             ({"question": "Q?"}, "expected is missing: name the document that answers it"),
             ({"expected": ["a"]}, "question is missing"),
-            ({"question": "Q?", "expected": ["a"], "draft": "yes"}, "draft should be true or false, not text"),
-            ({"question": "Q?", "expected": ["a"], "id": 7}, "id should be text or null, not a number"),
+            (
+                {"question": "Q?", "expected": ["a"], "draft": "yes"},
+                "draft should be true or false, not text",
+            ),
+            (
+                {"question": "Q?", "expected": ["a"], "id": 7},
+                "id should be text or null, not a number",
+            ),
             ({"question": "Q?", "expected": ["a"], "id": ""}, "id is empty"),
             ({"question": "Q?", "expected": ["a", "a"]}, "expected names a twice"),
             ({"question": "Q?", "expected": [""]}, "expected has an empty id in it"),
-            ({"question": "Q?", "expected": [3]}, "expected should hold document ids as text, not a number"),
+            (
+                {"question": "Q?", "expected": [3]},
+                "expected should hold document ids as text, not a number",
+            ),
             ({"question": "  ", "expected": ["a"]}, "question is empty"),
-            ({"question": "Q?", "expected": ["a"], "reference": 4}, "reference should be text, not a number"),
+            (
+                {"question": "Q?", "expected": ["a"], "reference": 4},
+                "reference should be text, not a number",
+            ),
             (
                 {"question": "Q?", "expected": ["a"], "notes": "x"},
                 '"notes" is not a field. The fields are id, question, expected, reference, evidence, hint and draft',
@@ -150,32 +200,66 @@ class TestEachRuleInWords:
 
 class TestWhatIsFine:
     def test_a_template_row_waits_rather_than_fails(self, tmp_path):
-        check = check_golden(written(tmp_path, GOOD, {"id": "g2", "question": "", "expected": ["a"], "hint": "The start of it"}))
+        check = check_golden(
+            written(
+                tmp_path,
+                GOOD,
+                {"id": "g2", "question": "", "expected": ["a"], "hint": "The start of it"},
+            )
+        )
         assert check.ok and (check.ready, check.unfilled) == (1, 1)
-        assert [p.message for p in check.warnings] == ["1 template row is still waiting for a question"]
+        assert [p.message for p in check.warnings] == [
+            "1 template row is still waiting for a question"
+        ]
 
     def test_nothing_but_template_rows_is_not_ready(self, tmp_path):
-        check = check_golden(written(tmp_path, {"id": "g1", "question": "", "expected": ["a"], "hint": "h"}))
-        assert said(check) == [(None, "no question is ready yet: 1 template row is waiting for one. Fill some in and try again")]
+        check = check_golden(
+            written(tmp_path, {"id": "g1", "question": "", "expected": ["a"], "hint": "h"})
+        )
+        assert said(check) == [
+            (
+                None,
+                "no question is ready yet: 1 template row is waiting for one. Fill some in and try again",
+            )
+        ]
 
     def test_an_empty_file(self, tmp_path):
         check = check_golden(written(tmp_path, "   "))
         assert said(check) == [(None, "the file is empty: one question a line, each a JSON object")]
 
     def test_a_bedrock_dataset_names_no_documents(self, tmp_path):
-        turn = {"conversationTurns": [{"prompt": {"content": [{"text": "Can I defer?"}]}, "referenceResponses": []}]}
+        turn = {
+            "conversationTurns": [
+                {"prompt": {"content": [{"text": "Can I defer?"}]}, "referenceResponses": []}
+            ]
+        }
         check = check_golden(written(tmp_path, turn))
         assert not check.ok and "Label it first: vectrixdb golden label" in check.errors[0].message
 
     def test_drafts_are_a_note_not_a_stop(self, tmp_path):
-        check = check_golden(written(tmp_path, {**GOOD, "draft": True}, {"id": "g2", "question": "Q2?", "expected": ["a"], "draft": True}))
+        check = check_golden(
+            written(
+                tmp_path,
+                {**GOOD, "draft": True},
+                {"id": "g2", "question": "Q2?", "expected": ["a"], "draft": True},
+            )
+        )
         assert check.ok and check.drafts == 2
         assert [p.message for p in check.warnings] == [
             "drafts nobody has checked, on lines 1 and 2: read each against its document, then delete draft"
         ]
 
     def test_a_good_file_comes_back_read_the_way_read_golden_reads_it(self, tmp_path):
-        path = written(tmp_path, GOOD, {"id": "g2", "question": "On a page?", "expected": ["td/report.pdf#page=41"], "reference": "Yes."})
+        path = written(
+            tmp_path,
+            GOOD,
+            {
+                "id": "g2",
+                "question": "On a page?",
+                "expected": ["td/report.pdf#page=41"],
+                "reference": "Yes.",
+            },
+        )
         check = check_golden(path)
         assert check.ok and check.golden == read_golden(path)
         assert check.to_dict()["ok"] is True and check.to_dict()["errors"] == []
@@ -189,19 +273,29 @@ class TestWhatTheLibraryWritesPasses:
         finally:
             db.close()
         blank = check_golden(tmp_path / "template.jsonl")
-        assert [m for _l, m in said(blank)] == ["no question is ready yet: 2 template rows are waiting for one. Fill some in and try again"]
+        assert [m for _l, m in said(blank)] == [
+            "no question is ready yet: 2 template rows are waiting for one. Fill some in and try again"
+        ]
         rows[0]["question"] = "How long can a payment be deferred?"
         filled = written(tmp_path, *rows, name="filled.jsonl")
         assert check_golden(filled).ok
 
     def test_questions_saved_by_the_library_even_without_an_id(self, tmp_path):
-        save_questions([Question("Q?", "A.", ["a"], "q1"), Question("R?", expected=["b"])], tmp_path / "saved.jsonl")
+        save_questions(
+            [Question("Q?", "A.", ["a"], "q1"), Question("R?", expected=["b"])],
+            tmp_path / "saved.jsonl",
+        )
         assert check_golden(tmp_path / "saved.jsonl").ok
 
     def test_what_a_writer_drafted_is_a_note(self, tmp_path):
         db = small_collection(tmp_path)
         try:
-            golden_template(db, tmp_path / "drafted.jsonl", n=2, writer=lambda text: "What does this say?" + str(len(text)))
+            golden_template(
+                db,
+                tmp_path / "drafted.jsonl",
+                n=2,
+                writer=lambda text: "What does this say?" + str(len(text)),
+            )
         finally:
             db.close()
         check = check_golden(tmp_path / "drafted.jsonl")

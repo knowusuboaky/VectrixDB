@@ -125,7 +125,9 @@ def off_the_shelf(pretend: bool) -> int:
         inside = path.relative_to(LATER)
         target = RAW_FILES / inside
         if target.exists():
-            note(f"{inside.as_posix()} is in the mirror already, so the one on the shelf is left where it is")
+            note(
+                f"{inside.as_posix()} is in the mirror already, so the one on the shelf is left where it is"
+            )
             continue
         if pretend:
             print(f"  would move .local/later/{inside.as_posix()} into the mirror")
@@ -160,7 +162,9 @@ def records(az: Az, config: Dict[str, str], again: bool) -> int:
     Who may see a collection and its masking stay as the dashboard left them,
     unless ``--again``.
     """
-    step(f"{len(local_files(RECORD_FILES)) or 'the'} records to Cosmos DB, data_db/collection_records")
+    step(
+        f"{len(local_files(RECORD_FILES)) or 'the'} records to Cosmos DB, data_db/collection_records"
+    )
     return push_records(az, config, by=BY, again=again)
 
 
@@ -186,21 +190,40 @@ def files(az: Az, config: Dict[str, str], again: bool, pretend: bool) -> int:
     in before it sends.
     """
     in_mirror = local_files(RAW_FILES)
-    shelf = [(path, path.relative_to(LATER).as_posix()) for path in local_files(LATER) if not (RAW_FILES / path.relative_to(LATER)).exists()] if pretend else []
+    shelf = (
+        [
+            (path, path.relative_to(LATER).as_posix())
+            for path in local_files(LATER)
+            if not (RAW_FILES / path.relative_to(LATER)).exists()
+        ]
+        if pretend
+        else []
+    )
     if not in_mirror and not shelf:
         if pretend:
-            note(f"there is nothing in {RAW_FILES} yet, so there is no plan to show. Run 04_push_local_to_blob_cosmosdb.py first.")
+            note(
+                f"there is nothing in {RAW_FILES} yet, so there is no plan to show. Run 04_push_local_to_blob_cosmosdb.py first."
+            )
             return 0
         stop(f"There is nothing in {RAW_FILES}. Run 04_push_local_to_blob_cosmosdb.py first.")
-    step(f"{len(in_mirror) + len(shelf)} in the mirror" + (f", {len(shelf)} of them once off the shelf" if shelf else ""))
+    step(
+        f"{len(in_mirror) + len(shelf)} in the mirror"
+        + (f", {len(shelf)} of them once off the shelf" if shelf else "")
+    )
     sent = push_raw(az, config, again=again, also=shelf)
     if pretend:
-        note(f"{sent} would go up, each an event on the queue that wakes the running app" if sent else "nothing new, so no event would fire")
+        note(
+            f"{sent} would go up, each an event on the queue that wakes the running app"
+            if sent
+            else "nothing new, so no event would fire"
+        )
     elif not sent:
         note("nothing new, so no event fired and the function will not wake")
     else:
         note(f"{sent} events are on their way to the queue now")
-        note("the long report takes minutes: it is read, cut, every picture described, then embedded")
+        note(
+            "the long report takes minutes: it is read, cut, every picture described, then embedded"
+        )
     return sent
 
 
@@ -210,7 +233,11 @@ def files(az: Az, config: Dict[str, str], again: bool, pretend: bool) -> int:
 
 
 def options(parser) -> None:
-    parser.add_argument("--again", action="store_true", help="upload even what is already there, and each record as its file says")
+    parser.add_argument(
+        "--again",
+        action="store_true",
+        help="upload even what is already there, and each record as its file says",
+    )
 
 
 def main() -> int:
@@ -218,7 +245,11 @@ def main() -> int:
     config = settings()
     az = Az(args.dry_run)
     account = config["VX_STORAGE"]
-    begin("07", "The files that come later", f"The shelf moves into the mirror, the records go to Cosmos DB, and whatever {INGESTION} has not got goes up.")
+    begin(
+        "07",
+        "The files that come later",
+        f"The shelf moves into the mirror, the records go to Cosmos DB, and whatever {INGESTION} has not got goes up.",
+    )
 
     moved = off_the_shelf(args.dry_run)
     written = records(az, config, args.again)
@@ -227,13 +258,22 @@ def main() -> int:
     links(
         (f"the {INGESTION} container", portal("storage", account, config, page="containersList")),
         ("the queue, filling and draining", portal("storage", account, config, page="queuesList")),
-        ("the records, in Data Explorer", portal("cosmos", config["VX_COSMOS_NAME"], config, page="dataExplorer") if wants(config, "VX_COSMOS") else ""),
+        (
+            "the records, in Data Explorer",
+            portal("cosmos", config["VX_COSMOS_NAME"], config, page="dataExplorer")
+            if wants(config, "VX_COSMOS")
+            else "",
+        ),
         ("the mirror on this machine", folder_link(LOCAL)),
     )
     if args.dry_run:
-        finish(f"a dry run, so nothing moved: {moved} would come off the shelf, {written} records would be written, {sent} files would go up to {INGESTION}")
+        finish(
+            f"a dry run, so nothing moved: {moved} would come off the shelf, {written} records would be written, {sent} files would go up to {INGESTION}"
+        )
     else:
-        finish(f"{written} records written, {sent} files uploaded to {INGESTION}, {len(local_files(LATER))} left on the shelf")
+        finish(
+            f"{written} records written, {sent} files uploaded to {INGESTION}, {len(local_files(LATER))} left on the shelf"
+        )
     return 0
 
 

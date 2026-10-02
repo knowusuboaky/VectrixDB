@@ -26,7 +26,9 @@ from vectrixdb.core.cache import CacheConfig, MemoryCache, RedisCache, VectorCac
 
 
 def embed(texts):
-    return np.asarray([[1, 0, 0, 0] if "alpha" in t else [0, 1, 0, 0] for t in texts], dtype=np.float32)
+    return np.asarray(
+        [[1, 0, 0, 0] if "alpha" in t else [0, 1, 0, 0] for t in texts], dtype=np.float32
+    )
 
 
 @pytest.fixture
@@ -83,7 +85,11 @@ class TestTheCache:
         class Client:
             def __init__(self):
                 self.keys_called = False
-                self.data = {b"vectrix:vec:q:memos:1": b"1", b"vectrix:vec:q:memos:2": b"1", b"vectrix:vec:q:other:1": b"1"}
+                self.data = {
+                    b"vectrix:vec:q:memos:1": b"1",
+                    b"vectrix:vec:q:memos:2": b"1",
+                    b"vectrix:vec:q:other:1": b"1",
+                }
                 self.patterns = []
 
             def scan(self, cursor, match=None, count=None):
@@ -105,7 +111,9 @@ class TestTheCache:
         cache.config = CacheConfig(redis_prefix="vectrix:")
         cache._client = Client()
         assert cache.delete_prefix("vec:q:memos:") == 2
-        assert list(cache._client.data) == [b"vectrix:vec:q:other:1"] and not cache._client.keys_called
+        assert (
+            list(cache._client.data) == [b"vectrix:vec:q:other:1"] and not cache._client.keys_called
+        )
         assert cache._client.patterns == ["vectrix:vec:q:memos:*"]
 
 
@@ -127,17 +135,31 @@ def azure(monkeypatch, tmp_path):
 
     fake = FakeIndexClient()
     storage = AzureSearchStorage(
-        StorageConfig(backend=StorageBackend.AZURE_SEARCH, azure_search_index_prefix="t",
-                      azure_search_filter_fields={"client_id": "string"}),
-        index_client=fake, client_factory=fake.get_search_client,
+        StorageConfig(
+            backend=StorageBackend.AZURE_SEARCH,
+            azure_search_index_prefix="t",
+            azure_search_filter_fields={"client_id": "string"},
+        ),
+        index_client=fake,
+        client_factory=fake.get_search_client,
     )
     storage.connect()
     monkeypatch.setattr("vectrixdb.core.database.create_storage", lambda config: storage)
     backend = VectrixDB.with_azure_search("https://svc.search.windows.net", key="k")
     policy = Policy([Overlap("client_id", "clients", scope=True)], require_pushdown=True)
-    docs = Vectrix("memos", storage_backend=backend, path=str(tmp_path), embed_fn=embed, dimension=4, policy=policy)
-    docs.add(["alpha memo for acme", "alpha memo for zeta"], ids=["acme-1", "zeta-1"],
-             metadata=[{"client_id": "acme"}, {"client_id": "zeta"}])
+    docs = Vectrix(
+        "memos",
+        storage_backend=backend,
+        path=str(tmp_path),
+        embed_fn=embed,
+        dimension=4,
+        policy=policy,
+    )
+    docs.add(
+        ["alpha memo for acme", "alpha memo for zeta"],
+        ids=["acme-1", "zeta-1"],
+        metadata=[{"client_id": "acme"}, {"client_id": "zeta"}],
+    )
     yield docs, fake
     docs.close()
 
@@ -161,11 +183,17 @@ class TestTheStore:
 
         docs._collection.update_metadata("acme-1", {"client_id": "quarantine"})
 
-        assert rows(fake)["acme-1"]["f_client_id"] == "quarantine", "the field the service filters on"
+        assert rows(fake)["acme-1"]["f_client_id"] == "quarantine", (
+            "the field the service filters on"
+        )
         assert acme.search("alpha", limit=5).items == [], "and the search it serves"
-        assert [h.id for h in docs.as_principal({"clients": ["quarantine"]}).search("alpha", limit=5)] == ["acme-1"]
+        assert [
+            h.id for h in docs.as_principal({"clients": ["quarantine"]}).search("alpha", limit=5)
+        ] == ["acme-1"]
 
-    def test_a_store_that_refuses_a_delete_leaves_the_document_where_it_was(self, azure, monkeypatch):
+    def test_a_store_that_refuses_a_delete_leaves_the_document_where_it_was(
+        self, azure, monkeypatch
+    ):
         docs, fake = azure
         from vectrixdb.exceptions import StorageOperationError
 

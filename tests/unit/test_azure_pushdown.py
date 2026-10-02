@@ -55,7 +55,9 @@ class TestCompile:
         self.storage = fake_storage()
 
     def test_a_policy_compiles_to_guarded_odata(self):
-        policy = Policy([Overlap("client_id", "clients", scope=True), AtMost("classification", "clearance")])
+        policy = Policy(
+            [Overlap("client_id", "clients", scope=True), AtMost("classification", "clearance")]
+        )
         compiled = policy.compile({"clients": ["acme", "bolt"], "clearance": 2})
         odata = self.storage.compile_filter("c", compiled)
         assert odata == (
@@ -64,7 +66,9 @@ class TestCompile:
         )
 
     def test_scope_only_leaves_the_redaction_rules_out(self):
-        policy = Policy([Overlap("client_id", "clients", scope=True), AtMost("classification", "clearance")])
+        policy = Policy(
+            [Overlap("client_id", "clients", scope=True), AtMost("classification", "clearance")]
+        )
         scope = policy.compile({"clients": ["acme"], "clearance": 2}, scope_only=True)
         assert [c["field"] for c in scope["$and"]] == ["client_id"]
 
@@ -76,18 +80,28 @@ class TestCompile:
         assert s.compile_filter("c", {"field": "roles", "op": "nin", "value": ["zeta"]}) == (
             "(f_roles/any() and not f_roles/any(x: search.in(x, 'zeta', ',')))"
         )
-        assert s.compile_filter("c", {"field": "client_id", "op": "exists", "value": True}) == "f_client_id ne null"
-        assert s.compile_filter("c", {"field": "public", "op": "eq", "value": True}) == "(f_public ne null and f_public eq true)"
-        assert s.compile_filter("c", {"field": "entitlements.allowed_roles", "op": "in", "value": ["x"]}).startswith(
-            "(f_entitlements__allowed_roles/any()"
+        assert (
+            s.compile_filter("c", {"field": "client_id", "op": "exists", "value": True})
+            == "f_client_id ne null"
         )
+        assert (
+            s.compile_filter("c", {"field": "public", "op": "eq", "value": True})
+            == "(f_public ne null and f_public eq true)"
+        )
+        assert s.compile_filter(
+            "c", {"field": "entitlements.allowed_roles", "op": "in", "value": ["x"]}
+        ).startswith("(f_entitlements__allowed_roles/any()")
 
     def test_a_value_with_a_comma_picks_another_separator(self):
-        out = self.storage.compile_filter("c", {"field": "client_id", "op": "in", "value": ["a,b", "c"]})
+        out = self.storage.compile_filter(
+            "c", {"field": "client_id", "op": "in", "value": ["a,b", "c"]}
+        )
         assert "search.in(f_client_id, 'a,b|c', '|')" in out
 
     def test_quotes_are_doubled(self):
-        out = self.storage.compile_filter("c", {"field": "client_id", "op": "eq", "value": "o'neil"})
+        out = self.storage.compile_filter(
+            "c", {"field": "client_id", "op": "eq", "value": "o'neil"}
+        )
         assert "f_client_id eq 'o''neil'" in out
 
     @pytest.mark.parametrize(
@@ -124,7 +138,10 @@ class TestIndexAndRows:
         by_name = {f.name: f for f in index.fields}
         assert by_name[_field_name("client_id")].filterable is True
         assert by_name[_field_name("roles")].type == "Collection(Edm.String)"
-        assert by_name[_field_name("entitlements.allowed_roles")].name == "f_entitlements__allowed_roles"
+        assert (
+            by_name[_field_name("entitlements.allowed_roles")].name
+            == "f_entitlements__allowed_roles"
+        )
 
     def test_values_are_copied_beside_the_payload_and_nulls_left_out(self):
         storage = fake_storage()
@@ -151,17 +168,29 @@ class TestIndexAndRows:
 
     def test_the_fake_evaluates_what_the_backend_emits(self):
         storage = fake_storage()
-        doc = {"f_client_id": "acme", "f_roles": ["a", "b"], "f_classification": 2.0, "f_public": True}
-        ok = storage.compile_filter("c", {"$and": [
-            {"field": "client_id", "op": "in", "value": ["acme"]},
-            {"field": "roles", "op": "nin", "value": ["zeta"]},
-            {"field": "classification", "op": "lte", "value": 2},
-            {"field": "public", "op": "eq", "value": True},
-        ]})
+        doc = {
+            "f_client_id": "acme",
+            "f_roles": ["a", "b"],
+            "f_classification": 2.0,
+            "f_public": True,
+        }
+        ok = storage.compile_filter(
+            "c",
+            {
+                "$and": [
+                    {"field": "client_id", "op": "in", "value": ["acme"]},
+                    {"field": "roles", "op": "nin", "value": ["zeta"]},
+                    {"field": "classification", "op": "lte", "value": 2},
+                    {"field": "public", "op": "eq", "value": True},
+                ]
+            },
+        )
         assert _match_filter(ok, doc) is True
         assert _match_filter(ok, {**doc, "f_roles": ["zeta"]}) is False
         assert _match_filter(ok, {**doc, "f_classification": None}) is False
-        assert _match_filter(ok, {**doc, "f_roles": []}) is False, "an empty list has nothing to pass a wall with"
+        assert _match_filter(ok, {**doc, "f_roles": []}) is False, (
+            "an empty list has nothing to pass a wall with"
+        )
 
 
 @pytest.fixture
@@ -171,7 +200,9 @@ def azure(monkeypatch):
 
     storage = fake_storage()
     monkeypatch.setattr("vectrixdb.core.database.create_storage", lambda config: storage)
-    db = VectrixDB.with_azure_search("https://svc.search.windows.net", key="k", filter_fields=FIELDS)
+    db = VectrixDB.with_azure_search(
+        "https://svc.search.windows.net", key="k", filter_fields=FIELDS
+    )
     yield db, storage
     db.close()
 
@@ -200,7 +231,9 @@ MEMOS = [
 
 
 class TestThroughVectrix:
-    def test_a_policy_over_promoted_fields_opens_and_runs_in_the_engine(self, azure, tmp_path, monkeypatch):
+    def test_a_policy_over_promoted_fields_opens_and_runs_in_the_engine(
+        self, azure, tmp_path, monkeypatch
+    ):
         from vectrixdb import Vectrix
 
         db, storage = azure
@@ -213,7 +246,9 @@ class TestThroughVectrix:
 
         monkeypatch.setattr(FakeSearchClient, "search", spy)
 
-        memos = Vectrix("memos", storage_backend=db, path=str(tmp_path), mode="dense", policy=LENDING)
+        memos = Vectrix(
+            "memos", storage_backend=db, path=str(tmp_path), mode="dense", policy=LENDING
+        )
         assert memos.pushdown_mode is FilterPushdown.ENGINE
         memos.add([t for t, _ in MEMOS], metadata=[m for _, m in MEMOS])
 
@@ -235,7 +270,12 @@ class TestThroughVectrix:
         db, _ = azure
         sink = MemorySink(query_key=b"k", on_failure=DENY)
         memos = Vectrix(
-            "memos", storage_backend=db, path=str(tmp_path), mode="dense", policy=LENDING, on_retrieval=sink
+            "memos",
+            storage_backend=db,
+            path=str(tmp_path),
+            mode="dense",
+            policy=LENDING,
+            on_retrieval=sink,
         )
         memos.add([t for t, _ in MEMOS], metadata=[m for _, m in MEMOS])
         memos.as_principal({"clients": ["acme"], "clearance": 2}).search("covenant", limit=10)
@@ -251,7 +291,9 @@ class TestThroughVectrix:
 
         db, _ = azure
         walled = Policy([Excludes("client_id", "walls", scope=True)], require_pushdown=True)
-        memos = Vectrix("walled", storage_backend=db, path=str(tmp_path), mode="dense", policy=walled)
+        memos = Vectrix(
+            "walled", storage_backend=db, path=str(tmp_path), mode="dense", policy=walled
+        )
         memos.add(
             ["acme memo", "memo with a null client"],
             metadata=[{"client_id": "acme"}, {"client_id": None}],
@@ -264,7 +306,9 @@ class TestThroughVectrix:
 
         db, _ = azure
         policy = Policy([Present("client_id", scope=True)], require_pushdown=True)
-        memos = Vectrix("present", storage_backend=db, path=str(tmp_path), mode="dense", policy=policy)
+        memos = Vectrix(
+            "present", storage_backend=db, path=str(tmp_path), mode="dense", policy=policy
+        )
         assert memos.pushdown_mode is FilterPushdown.ENGINE
 
     def test_without_promoted_fields_it_is_post_and_the_option_refuses(self, azure_plain, tmp_path):
@@ -274,11 +318,15 @@ class TestThroughVectrix:
         with pytest.raises(PushdownUnavailable, match="AzureSearchStorage"):
             Vectrix("memos", storage_backend=db, path=str(tmp_path), mode="dense", policy=LENDING)
         relaxed = Policy([Overlap("client_id", "clients", scope=True)])
-        memos = Vectrix("memos2", storage_backend=db, path=str(tmp_path), mode="dense", policy=relaxed)
+        memos = Vectrix(
+            "memos2", storage_backend=db, path=str(tmp_path), mode="dense", policy=relaxed
+        )
         assert memos.pushdown_mode is FilterPushdown.POST
         memos.add([t for t, _ in MEMOS], metadata=[m for _, m in MEMOS])
         hits = memos.as_principal({"clients": ["acme"]}).search("covenant", limit=10)
-        assert {h.metadata["client_id"] for h in hits} == {"acme"}, "POST still enforces, it just cannot say the engine did"
+        assert {h.metadata["client_id"] for h in hits} == {"acme"}, (
+            "POST still enforces, it just cannot say the engine did"
+        )
 
     def test_a_policy_naming_an_unpromoted_field_is_post(self, azure, tmp_path):
         from vectrixdb import Vectrix
@@ -300,13 +348,18 @@ class TestThroughVectrix:
         seen = []
         original = FakeSearchClient.search
         monkeypatch.setattr(
-            FakeSearchClient, "search", lambda self, *a, **k: (seen.append(k.get("filter")), original(self, *a, **k))[1]
+            FakeSearchClient,
+            "search",
+            lambda self, *a, **k: (seen.append(k.get("filter")), original(self, *a, **k))[1],
         )
         docs = Vectrix("docs", storage_backend=db, path=str(tmp_path), mode="dense")
         docs.add([t for t, _ in MEMOS], metadata=[m for _, m in MEMOS])
         coll = docs._collection
         hits = coll.search(
-            query=np.zeros(coll.dimension, dtype=np.float32), limit=10, filter={"client_id": "zeta"}, use_backend=True
+            query=np.zeros(coll.dimension, dtype=np.float32),
+            limit=10,
+            filter={"client_id": "zeta"},
+            use_backend=True,
         )
         assert [h.metadata["client_id"] for h in hits.results] == ["zeta"]
         assert any(f and "f_client_id eq 'zeta'" in f for f in seen)

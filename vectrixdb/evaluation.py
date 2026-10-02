@@ -68,7 +68,19 @@ import time
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 from urllib.parse import urlparse
 
 from ._eval_chunking import (
@@ -189,7 +201,12 @@ class Question:
     evidence: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        out = {"id": self.id, "question": self.text, "reference": self.reference, "expected": list(self.expected)}
+        out = {
+            "id": self.id,
+            "question": self.text,
+            "reference": self.reference,
+            "expected": list(self.expected),
+        }
         if self.evidence:
             out["evidence"] = list(self.evidence)
         return out
@@ -222,7 +239,13 @@ def _bedrock_questions(text: str, where: str) -> List[Question]:
             if not prompt:
                 continue
             references = [_text_of(r) for r in item.get("referenceResponses") or []]
-            out.append(Question(text=prompt, reference=" ".join(r for r in references if r), id=f"q{number}.{turn}"))
+            out.append(
+                Question(
+                    text=prompt,
+                    reference=" ".join(r for r in references if r),
+                    id=f"q{number}.{turn}",
+                )
+            )
     return out
 
 
@@ -262,7 +285,11 @@ def _our_questions(text: str, where: str) -> Tuple[List[Question], int, int]:
                 reference=str(record.get("reference") or ""),
                 expected=[str(e) for e in ([expected] if isinstance(expected, str) else expected)],
                 id=record.get("id") or f"q{number}",
-                evidence=[" ".join(str(e).split()) for e in ([evidence] if isinstance(evidence, str) else evidence) if str(e).strip()],
+                evidence=[
+                    " ".join(str(e).split())
+                    for e in ([evidence] if isinstance(evidence, str) else evidence)
+                    if str(e).strip()
+                ],
             )
         )
     return out, unfilled, drafts
@@ -280,7 +307,10 @@ def load_questions(path: Union[str, Path], fetcher: Any = None) -> List[Question
 
 
 def save_questions(questions: Iterable[Question], path: Union[str, Path]) -> None:
-    Path(path).write_text("".join(json.dumps(q.to_dict(), ensure_ascii=False) + "\n" for q in questions), encoding="utf-8")
+    Path(path).write_text(
+        "".join(json.dumps(q.to_dict(), ensure_ascii=False) + "\n" for q in questions),
+        encoding="utf-8",
+    )
 
 
 # ============================================================================
@@ -393,7 +423,9 @@ def _unit_of(result: Any, by: str, paged: bool) -> str:
 # back, and was the answer right.
 
 
-def suggest_expected(db: Any, questions: Sequence[Question], by: str = "doc", top: int = 1, **search: Any) -> Dict[str, List[str]]:
+def suggest_expected(
+    db: Any, questions: Sequence[Question], by: str = "doc", top: int = 1, **search: Any
+) -> Dict[str, List[str]]:
     """For each question, the ids its *reference answer* retrieves.
 
     A starting point for labelling and nothing more. Searching with the
@@ -466,10 +498,17 @@ def retrieval_report(
         if positions:
             reciprocal += 1.0 / positions[0]
             dcg = sum(1.0 / math.log2(p + 1) for p in positions)
-            ideal = sum(1.0 / math.log2(i + 1) for i in range(1, min(len(wanted), deepest) + 1))
+            # Several ranked units can answer one expected entry (two chunks
+            # of one page), so the ideal ranking holds at least as many
+            # relevant units as came back; counting only the entries let
+            # nDCG pass 1.
+            relevant = max(len(wanted), len(positions))
+            ideal = sum(1.0 / math.log2(i + 1) for i in range(1, min(relevant, deepest) + 1))
             gain += dcg / ideal if ideal else 0.0
         else:
-            misses.append({"id": q.id, "question": q.text, "expected": sorted(wanted), "got": ranked[:5]})
+            misses.append(
+                {"id": q.id, "question": q.text, "expected": sorted(wanted), "got": ranked[:5]}
+            )
     n = len(labelled)
     return {
         "questions": len(questions),
@@ -480,7 +519,11 @@ def retrieval_report(
         "mrr": round(reciprocal / n, 4) if n else None,
         f"ndcg@{deepest}": round(gain / n, 4) if n else None,
         "misses": misses,
-        "search": {key: value for key, value in search.items() if isinstance(value, (str, int, float, bool, type(None)))},
+        "search": {
+            key: value
+            for key, value in search.items()
+            if isinstance(value, (str, int, float, bool, type(None)))
+        },
     }
 
 
@@ -516,9 +559,19 @@ def answer_report(
         sources = given.get("sources") if isinstance(given, Mapping) else None
         row: Dict[str, Any] = {"id": q.id}
         for metric in metrics:
-            score = float(judge(metric=metric, question=q.text, reference=q.reference, answer=str(answer), sources=sources))
+            score = float(
+                judge(
+                    metric=metric,
+                    question=q.text,
+                    reference=q.reference,
+                    answer=str(answer),
+                    sources=sources,
+                )
+            )
             if not 0.0 <= score <= 1.0:
-                raise ValueError(f"the judge scored {metric} {score} for {q.id}; a score is between 0 and 1")
+                raise ValueError(
+                    f"the judge scored {metric} {score} for {q.id}; a score is between 0 and 1"
+                )
             row[metric] = round(score, 4)
             totals[metric] += score
         rows.append(row)
@@ -599,7 +652,9 @@ def _blob_client(account_url: str) -> Any:
         from azure.identity import DefaultAzureCredential
         from azure.storage.blob import BlobServiceClient
     except ImportError as exc:
-        raise ImportError("A Blob address needs azure-storage-blob and azure-identity: pip install azure-storage-blob azure-identity") from exc
+        raise ImportError(
+            "A Blob address needs azure-storage-blob and azure-identity: pip install azure-storage-blob azure-identity"
+        ) from exc
     return BlobServiceClient(account_url=account_url, credential=DefaultAzureCredential())
 
 
@@ -651,7 +706,14 @@ def read_golden(source: Union[str, Path], fetcher: Any = None) -> Golden:
         questions, unfilled, drafts = _bedrock_questions(text, str(source)), 0, 0
     else:
         questions, unfilled, drafts = _our_questions(text, str(source))
-    return Golden(questions=questions, source=str(source), sha256=golden_hash(data), unfilled=unfilled, drafts=drafts, raw=data)
+    return Golden(
+        questions=questions,
+        source=str(source),
+        sha256=golden_hash(data),
+        unfilled=unfilled,
+        drafts=drafts,
+        raw=data,
+    )
 
 
 # ============================================================================
@@ -701,7 +763,10 @@ GOLDEN_SCHEMA: Dict[str, Any] = {
                 "td/report.pdf#page=41, the page's place in the file as its citation gives it."
             ),
         },
-        "reference": {"type": "string", "description": "The answer a person would accept, for scoring written answers."},
+        "reference": {
+            "type": "string",
+            "description": "The answer a person would accept, for scoring written answers.",
+        },
         "evidence": {
             "type": "array",
             "items": {"type": "string", "minLength": 1},
@@ -786,7 +851,9 @@ def _list_problems(key: str, value: List[Any], rule: Mapping[str, Any]) -> List[
         if len(item) < items.get("minLength", 0) or (key == "evidence" and not item.strip()):
             out.append(f"{key} has an empty {one} in it")
         elif pattern is not None and not pattern.search(item):
-            out.append(f"{item} should end in a page number from 1, like #page=41, or name the document alone")
+            out.append(
+                f"{item} should end in a page number from 1, like #page=41, or name the document alone"
+            )
         elif rule.get("uniqueItems") and item in seen:
             out.append(f"{key} names {item} twice")
         seen.add(item)
@@ -802,15 +869,27 @@ def _row_problems(record: Mapping[str, Any]) -> List[str]:
     misspelt = {_meant(key, list(fields)) for key in unknown}
     for key in GOLDEN_SCHEMA["required"]:
         if key not in record and key not in misspelt:
-            out.append(f"{key} is missing" + (": name the document that answers it" if key == "expected" else ""))
+            out.append(
+                f"{key} is missing"
+                + (": name the document that answers it" if key == "expected" else "")
+            )
     for key, rule in fields.items():
         if key not in record:
             continue
-        value, kinds = record[key], rule["type"] if isinstance(rule["type"], list) else [rule["type"]]
+        value, kinds = (
+            record[key],
+            rule["type"] if isinstance(rule["type"], list) else [rule["type"]],
+        )
         kind = _kind_of(value)
         if kind not in kinds:
-            example = f', like ["{value}"]' if key in ("expected", "evidence") and kind == "string" else ""
-            out.append(f"{key} should be {' or '.join(_KIND[k] for k in kinds)}, not {_KIND[kind]}{example}")
+            example = (
+                f', like ["{value}"]'
+                if key in ("expected", "evidence") and kind == "string"
+                else ""
+            )
+            out.append(
+                f"{key} should be {' or '.join(_KIND[k] for k in kinds)}, not {_KIND[kind]}{example}"
+            )
         elif kind == "string" and len(value) < rule.get("minLength", 0):
             out.append(f"{key} is empty")
         elif kind == "array":
@@ -860,13 +939,19 @@ class GoldenCheck:
         """The problems, then what is worth knowing, one a line, as a person reads them."""
         name = re.split(r"[\\/]", self.source.rstrip("/\\"))[-1] or self.source
         count = len(self.errors)
-        head = f"{name}: {count} problem{'s' if count != 1 else ''}" if count else f"{name}: {self.ready} question{'s' if self.ready != 1 else ''} ready"
+        head = (
+            f"{name}: {count} problem{'s' if count != 1 else ''}"
+            if count
+            else f"{name}: {self.ready} question{'s' if self.ready != 1 else ''} ready"
+        )
         width = max((len(str(p.line)) for p in self.errors + self.warnings if p.line), default=0)
         lines = [head]
         for p in self.errors:
             lines.append(f"  line {p.line:<{width}}  {p.message}" if p.line else f"  {p.message}")
         for p in self.warnings:
-            lines.append(f"  note  line {p.line}: {p.message}" if p.line else f"  note  {p.message}")
+            lines.append(
+                f"  note  line {p.line}: {p.message}" if p.line else f"  note  {p.message}"
+            )
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -904,10 +989,14 @@ def check_golden(source: Union[str, Path], db: Any = None, *, fetcher: Any = Non
     data = _fetch(source, fetcher)
     text = data.decode("utf-8-sig")
     check = GoldenCheck(source=str(source))
-    lines = [(number, line) for number, line in enumerate(text.splitlines(), start=1) if line.strip()]
+    lines = [
+        (number, line) for number, line in enumerate(text.splitlines(), start=1) if line.strip()
+    ]
     check.rows = len(lines)
     if not lines:
-        check.errors.append(GoldenProblem(None, "the file is empty: one question a line, each a JSON object"))
+        check.errors.append(
+            GoldenProblem(None, "the file is empty: one question a line, each a JSON object")
+        )
         return check
     if '"conversationTurns"' in lines[0][1]:
         check.errors.append(
@@ -928,10 +1017,14 @@ def check_golden(source: Union[str, Path], db: Any = None, *, fetcher: Any = Non
         try:
             record = json.loads(line)
         except json.JSONDecodeError as exc:
-            check.errors.append(GoldenProblem(number, f"is not JSON: {exc.msg.lower()} at character {exc.colno}"))
+            check.errors.append(
+                GoldenProblem(number, f"is not JSON: {exc.msg.lower()} at character {exc.colno}")
+            )
             continue
         if not isinstance(record, dict):
-            check.errors.append(GoldenProblem(number, "is not a JSON object: each line is one question, in braces"))
+            check.errors.append(
+                GoldenProblem(number, "is not a JSON object: each line is one question, in braces")
+            )
             continue
         problems = _row_problems(record)
         # An id or a question seen before is looked for on every row, so it
@@ -978,7 +1071,12 @@ def check_golden(source: Union[str, Path], db: Any = None, *, fetcher: Any = Non
             )
         )
     if check.unfilled and (check.ready or check.errors):
-        check.warnings.append(GoldenProblem(None, f"{check.unfilled} template row{'s are' if check.unfilled != 1 else ' is'} still waiting for a question"))
+        check.warnings.append(
+            GoldenProblem(
+                None,
+                f"{check.unfilled} template row{'s are' if check.unfilled != 1 else ' is'} still waiting for a question",
+            )
+        )
     if not check.errors and not check.ready:
         check.errors.append(
             GoldenProblem(
@@ -990,7 +1088,14 @@ def check_golden(source: Union[str, Path], db: Any = None, *, fetcher: Any = Non
     if check.errors:
         return check
     questions, unfilled, drafted = _our_questions(text, str(source))
-    check.golden = Golden(questions=questions, source=str(source), sha256=golden_hash(data), unfilled=unfilled, drafts=drafted, raw=data)
+    check.golden = Golden(
+        questions=questions,
+        source=str(source),
+        sha256=golden_hash(data),
+        unfilled=unfilled,
+        drafts=drafted,
+        raw=data,
+    )
     if db is not None:
         # Said here, in the check's own notes, rather than again as a warning.
         with warnings.catch_warnings():
@@ -1023,7 +1128,9 @@ def report_store(where: Any) -> ReportStore:
         parts = urlparse(text).path.lstrip("/").split("/", 1)
         if not parts[0]:
             raise ValueError(f"{text}: a Blob address names a container")
-        return ReportStore(BlobFiles(_blob_client(account), parts[0], parts[1] if len(parts) > 1 else ""))
+        return ReportStore(
+            BlobFiles(_blob_client(account), parts[0], parts[1] if len(parts) > 1 else "")
+        )
     return ReportStore(LocalFiles(text))
 
 
@@ -1104,7 +1211,14 @@ def _pages_in(markdown: str) -> List[Dict[str, Any]]:
     for i, (start, page) in enumerate(marks):
         end = marks[i + 1][0] if i + 1 < len(marks) else len(body)
         over = [title for offset, title in heads if offset < end]
-        out.append({"page": page, "label": labels.get(str(page)), "heading": over[-1] if over else None, "text": body[start:end]})
+        out.append(
+            {
+                "page": page,
+                "label": labels.get(str(page)),
+                "heading": over[-1] if over else None,
+                "text": body[start:end],
+            }
+        )
     return out
 
 
@@ -1174,7 +1288,13 @@ def golden_template(
     rows: List[Dict[str, Any]] = []
     for number, doc_id in enumerate(chosen, start=1):
         text = documents[doc_id]
-        row: Dict[str, Any] = {"id": f"g{number}", "question": "", "expected": [doc_id], "reference": "", "hint": _hint(text)}
+        row: Dict[str, Any] = {
+            "id": f"g{number}",
+            "question": "",
+            "expected": [doc_id],
+            "reference": "",
+            "hint": _hint(text),
+        }
         if writer is not None:
             drafted = str(writer(text) or "").strip()
             if drafted:
@@ -1182,7 +1302,9 @@ def golden_template(
                 row["draft"] = True
         rows.append(row)
     if path is not None:
-        Path(path).write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+        Path(path).write_text(
+            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8"
+        )
     return rows
 
 
@@ -1209,7 +1331,13 @@ def _page_template(
         chosen = [candidates[int(start + i * step)] for i in range(n)]
     rows: List[Dict[str, Any]] = []
     for number, (entry, hint, text) in enumerate(chosen, start=1):
-        row: Dict[str, Any] = {"id": f"g{number}", "question": "", "expected": [entry], "reference": "", "hint": hint}
+        row: Dict[str, Any] = {
+            "id": f"g{number}",
+            "question": "",
+            "expected": [entry],
+            "reference": "",
+            "hint": hint,
+        }
         if writer is not None:
             drafted = str(writer(text) or "").strip()
             if drafted:
@@ -1217,7 +1345,9 @@ def _page_template(
                 row["draft"] = True
         rows.append(row)
     if path is not None:
-        Path(path).write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+        Path(path).write_text(
+            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8"
+        )
     return rows
 
 
@@ -1249,7 +1379,9 @@ def _uncached(db: Any) -> Iterator[None]:
             collection._cache = saved
 
 
-def _first_right(hits: Iterable[Any], wanted: set, by: str, evidence: Iterable[Any] = ()) -> Optional[int]:
+def _first_right(
+    hits: Iterable[Any], wanted: set, by: str, evidence: Iterable[Any] = ()
+) -> Optional[int]:
     quotes = list(evidence)
     for position, hit in enumerate(hits, start=1):
         if _answers(hit, wanted, by, quotes):
@@ -1300,7 +1432,9 @@ def run_setup(
                     break
                 except Exception as exc:
                     if attempt == 2:
-                        result.update(ranks=[], times_ms=[], error=f"{q.id}: {type(exc).__name__}: {exc}")
+                        result.update(
+                            ranks=[], times_ms=[], error=f"{q.id}: {type(exc).__name__}: {exc}"
+                        )
                         return result
             ranks.append(_first_right(hits, set(q.expected), by, q.evidence))
             times.append(round(elapsed, 2))
@@ -1337,7 +1471,11 @@ class MissingDocumentsWarning(UserWarning):
 
 def _probes(expected: str, by: str) -> List[str]:
     """The ids a document is looked up by: its own, and its first chunks'."""
-    return [expected, f"{expected}:0", f"{expected}:1", f"{expected}:2"] if by != "chunk" else [expected]
+    return (
+        [expected, f"{expected}:0", f"{expected}:1", f"{expected}:2"]
+        if by != "chunk"
+        else [expected]
+    )
 
 
 def _not_held(db: Any, questions: Sequence[Question], by: str) -> List[str]:
@@ -1346,7 +1484,9 @@ def _not_held(db: Any, questions: Sequence[Question], by: str) -> List[str]:
     A page is looked up by its document: ``report.pdf#page=41`` is there when
     ``report.pdf`` is.
     """
-    wanted = sorted({_where(e)[0] if by != "chunk" else str(e) for q in questions for e in q.expected})
+    wanted = sorted(
+        {_where(e)[0] if by != "chunk" else str(e) for q in questions for e in q.expected}
+    )
     owners: Dict[str, List[str]] = {}
     for expected in wanted:
         for probe in _probes(expected, by):
@@ -1402,7 +1542,9 @@ def _missing_message(name: str, gone: Mapping[str, Any]) -> str:
     return text + f". Correct the expected {ids} in the golden file, or add {them}."
 
 
-def missing_documents(targets: Any, questions: Sequence[Question], *, by: str = "doc") -> Dict[str, Dict[str, Any]]:
+def missing_documents(
+    targets: Any, questions: Sequence[Question], *, by: str = "doc"
+) -> Dict[str, Dict[str, Any]]:
     """The expected documents each target does not hold, and the questions that leaves unfindable.
 
     A document removed, renamed or never added is a miss on every setup:
@@ -1435,7 +1577,8 @@ def missing_documents(targets: Any, questions: Sequence[Question], *, by: str = 
                 "questions": [
                     str(q.id) if q.id else f"question {n}"
                     for n, q in enumerate(questions, start=1)
-                    if q.expected and all((_where(e)[0] if by != "chunk" else str(e)) in lost for e in q.expected)
+                    if q.expected
+                    and all((_where(e)[0] if by != "chunk" else str(e)) in lost for e in q.expected)
                 ],
             }
         warnings.warn(_missing_message(name, out[name]), MissingDocumentsWarning, stacklevel=2)
@@ -1489,7 +1632,9 @@ def evaluate(
         gold = Golden(questions=list(golden), source="in memory")
     labelled = gold.labelled
     if not labelled:
-        raise ValueError("no labelled questions: every question needs the ids of the documents that answer it in 'expected'")
+        raise ValueError(
+            "no labelled questions: every question needs the ids of the documents that answer it in 'expected'"
+        )
     if by not in BY:
         raise ValueError(f"by is 'doc', 'chunk' or 'evidence', got {by!r}")
     wanted = set(only) if only is not None else None

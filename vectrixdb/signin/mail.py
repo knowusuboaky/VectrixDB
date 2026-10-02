@@ -62,7 +62,11 @@ class LogSender:
     configured = False
 
     def __call__(self, to: str, subject: str, text: str) -> None:
-        logger.warning("no mail server is configured, so the sign-in email for %s is here instead:\n%s", to, text)
+        logger.warning(
+            "no mail server is configured, so the sign-in email for %s is here instead:\n%s",
+            to,
+            text,
+        )
 
 
 class NoMailSender:
@@ -88,9 +92,13 @@ class SmtpSender:
     def __init__(self, url: str, sender: str, *, timeout: float = 15.0) -> None:
         parts = urlsplit(url)
         if parts.scheme not in ("smtp", "smtps") or not parts.hostname:
-            raise ConfigurationError("VECTRIXDB_SMTP_URL looks like smtp://user:password@host:587 or smtps://host:465")
+            raise ConfigurationError(
+                "VECTRIXDB_SMTP_URL looks like smtp://user:password@host:587 or smtps://host:465"
+            )
         if not sender or "@" not in sender:
-            raise ConfigurationError("VECTRIXDB_MAIL_FROM must be the address sign-in emails come from")
+            raise ConfigurationError(
+                "VECTRIXDB_MAIL_FROM must be the address sign-in emails come from"
+            )
         self.implicit_tls = parts.scheme == "smtps"
         self.host = parts.hostname
         self.port = parts.port or (465 if self.implicit_tls else 587)
@@ -105,7 +113,9 @@ class SmtpSender:
         message.set_content(text)
         context = ssl.create_default_context()
         if self.implicit_tls:
-            server: smtplib.SMTP = smtplib.SMTP_SSL(self.host, self.port, timeout=self.timeout, context=context)
+            server: smtplib.SMTP = smtplib.SMTP_SSL(
+                self.host, self.port, timeout=self.timeout, context=context
+            )
         else:
             server = smtplib.SMTP(self.host, self.port, timeout=self.timeout)
         with server:
@@ -128,8 +138,14 @@ class SmtpSender:
 # Short, plain, and the link is the whole message.
 
 
-def enrolment_email(link: str, minutes: int, product: str = "VectrixDB", passkeys: bool = True) -> tuple[str, str]:
-    how = "choose how you will sign in: a passkey, or an authenticator app" if passkeys else "set up the authenticator app you will sign in with"
+def enrolment_email(
+    link: str, minutes: int, product: str = "VectrixDB", passkeys: bool = True
+) -> tuple[str, str]:
+    how = (
+        "choose how you will sign in: a passkey, or an authenticator app"
+        if passkeys
+        else "set up the authenticator app you will sign in with"
+    )
     subject = f"Your sign-in link for {product}"
     text = (
         f"Somebody, we hope you, asked to sign in to {product} with this address.\n\n"

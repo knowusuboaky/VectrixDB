@@ -1,5 +1,5 @@
 {
-  "_note": "Where every file comes from, and which collection it lands in. 04_push_local_to_blob_cosmosdb.py fetches start into blob/data_db/ingestion/raw/<collection>/ and later onto the shelf, later/; 07_push_new_files_from local_to_blob_cosmosdb.py moves the shelf into the mirror. Each is uploaded to ingestion/raw/<collection>/<name>, and the function reads the collection from that first folder. A url is downloaded; a path is copied from this machine. Neither the files nor their content are in git: the TD reports are TD's, and the media came from a course.",
+  "_note": "Where every file comes from, and which collection it lands in. A path that starts with <your folder> is a placeholder: put the path of your own file there, or the file itself in the mirror folder its collection names, and 04 says which ones are still placeholders rather than calling them missing. 04_push_local_to_blob_cosmosdb.py fetches start into blob/data_db/ingestion/raw/<collection>/ and later onto the shelf, later/; 07_push_new_files_from local_to_blob_cosmosdb.py moves the shelf into the mirror. Each is uploaded to ingestion/raw/<collection>/<name>, and the function reads the collection from that first folder. A url is downloaded; a path is copied from this machine. Neither the files nor their content are in git: the TD reports are TD's, and the media came from a course.",
   "start": [
     {
       "name": "td-annual-report-2025.pdf",
@@ -9,25 +9,25 @@
     },
     {
       "name": "office.png",
-      "path": "~/Downloads/Studies AI/New AI Cohort - Free/Azure Studies/Works/react/playground/ai_react/azure_ai_server/data/office.png",
+      "path": "<your folder>/office.png",
       "what": "a photograph: Document Intelligence reads whatever words are in it",
       "collection": "misc"
     },
     {
       "name": "example.png",
-      "path": "~/Downloads/Studies AI/New AI Cohort - Free/Azure Studies/Works/react/playground/ai_react/azure_ai_server/data/example.png",
+      "path": "<your folder>/example.png",
       "what": "a second picture, to see whether two behave the same",
       "collection": "misc"
     },
     {
       "name": "male.wav",
-      "path": "~/Downloads/Studies AI/New AI Cohort - Free/Azure Studies/Works/react/playground/ai_react/azure_ai_server/data/male.wav",
+      "path": "<your folder>/male.wav",
       "what": "speech: Azure Speech transcribes it, and it is cited by the minute",
       "collection": "media"
     },
     {
       "name": "toddler.mp4",
-      "path": "~/Downloads/Studies AI/New AI Cohort - Free/Azure Studies/Works/react/playground/ai_react/azure_ai_server/data/toddler.mp4",
+      "path": "<your folder>/toddler.mp4",
       "what": "a video: ffmpeg takes the sound out, then Speech. Only the sound is read, never the picture",
       "collection": "media"
     }
@@ -35,7 +35,7 @@
   "later": [
     {
       "name": "video.mp4",
-      "path": "~/Downloads/Studies AI/New AI Cohort - Free/Azure Studies/Works/react/playground/ai_react/azure_ai_server/data/video.mp4",
+      "path": "<your folder>/video.mp4",
       "what": "the trigger test: dropped after the first batch is indexed, to watch the function wake by itself",
       "collection": "media"
     },

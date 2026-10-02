@@ -100,7 +100,9 @@ class FakeContainer:
     def _stored(self, body: dict) -> dict:
         assert not re.search(r"[/\\?#]", body["id"]), "an id may not hold / \\ ? or #"
         if body.get("expires") is not None:
-            assert isinstance(body.get("ttl"), int) and body["ttl"] >= 1, "an item that expires carries its own time to live"
+            assert isinstance(body.get("ttl"), int) and body["ttl"] >= 1, (
+                "an item that expires carries its own time to live"
+            )
         else:
             assert "ttl" not in body
         item = copy.deepcopy(body)
@@ -111,7 +113,9 @@ class FakeContainer:
     @staticmethod
     def _unchanged(found: dict, etag, match_condition) -> None:
         if etag is not None:
-            assert match_condition is not None, "the SDK ignores an etag sent without a match condition"
+            assert match_condition is not None, (
+                "the SDK ignores an etag sent without a match condition"
+            )
             if found["_etag"] != etag:
                 raise CosmosError(412)
 
@@ -145,13 +149,16 @@ class FakeContainer:
         del self.items[(partition_key, item)]
 
     def query_items(self, query, parameters, partition_key):
-        assert re.fullmatch(r"SELECT \* FROM c WHERE c\.kind = @kind( AND c\.ix[12] = @ix[12])*", query), query
+        assert re.fullmatch(
+            r"SELECT \* FROM c WHERE c\.kind = @kind( AND c\.ix[12] = @ix[12])*", query
+        ), query
         values = {p["name"]: p["value"] for p in parameters}
         wanted = re.findall(r"c\.(\w+) = (@\w+)", query)
         return [
             copy.deepcopy(item)
             for (kind, _), item in self.items.items()
-            if kind == partition_key and all(item.get(name) == values[value] for name, value in wanted)
+            if kind == partition_key
+            and all(item.get(name) == values[value] for name, value in wanted)
         ]
 
 
@@ -171,7 +178,9 @@ class FakeTable:
     def _holds(expression, names, values, old) -> bool:
         if expression == "attribute_not_exists(#k) OR #e <= :now":
             assert names == {"#k": "key", "#e": "expires_at"}
-            return old is None or (old.get("expires_at") is not None and old["expires_at"] <= values[":now"])
+            return old is None or (
+                old.get("expires_at") is not None and old["expires_at"] <= values[":now"]
+            )
         if expression == "#v = :v":
             assert names == {"#v": "ver"}
             return old is not None and old.get("ver") == values[":v"]
@@ -182,25 +191,59 @@ class FakeTable:
         found = self.items.get((Key["kind"], Key["key"]))
         return {"Item": copy.deepcopy(found)} if found else {}
 
-    def put_item(self, Item, ConditionExpression=None, ExpressionAttributeNames=None, ExpressionAttributeValues=None):  # noqa: N803
+    def put_item(
+        self,
+        Item,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):  # noqa: N803
         for name, value in Item.items():
             assert not isinstance(value, float), f"DynamoDB refuses a float: {name}"
         old = self.items.get((Item["kind"], Item["key"]))
-        if ConditionExpression and not self._holds(ConditionExpression, ExpressionAttributeNames or {}, ExpressionAttributeValues or {}, old):
+        if ConditionExpression and not self._holds(
+            ConditionExpression,
+            ExpressionAttributeNames or {},
+            ExpressionAttributeValues or {},
+            old,
+        ):
             raise DynamoError("ConditionalCheckFailedException")
         self.items[(Item["kind"], Item["key"])] = copy.deepcopy(Item)
         return {}
 
-    def delete_item(self, Key, ReturnValues=None, ConditionExpression=None, ExpressionAttributeNames=None, ExpressionAttributeValues=None):  # noqa: N803
+    def delete_item(
+        self,
+        Key,
+        ReturnValues=None,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):  # noqa: N803
         at = (Key["kind"], Key["key"])
         old = self.items.get(at)
-        if ConditionExpression and not self._holds(ConditionExpression, ExpressionAttributeNames or {}, ExpressionAttributeValues or {}, old):
+        if ConditionExpression and not self._holds(
+            ConditionExpression,
+            ExpressionAttributeNames or {},
+            ExpressionAttributeValues or {},
+            old,
+        ):
             raise DynamoError("ConditionalCheckFailedException")
         self.items.pop(at, None)
-        return {"Attributes": copy.deepcopy(old)} if old is not None and ReturnValues == "ALL_OLD" else {}
+        return (
+            {"Attributes": copy.deepcopy(old)}
+            if old is not None and ReturnValues == "ALL_OLD"
+            else {}
+        )
 
-    def query(self, KeyConditionExpression, ExpressionAttributeNames, ExpressionAttributeValues, IndexName=None,  # noqa: N803
-              ConsistentRead=False, ExclusiveStartKey=None):
+    def query(
+        self,
+        KeyConditionExpression,
+        ExpressionAttributeNames,
+        ExpressionAttributeValues,
+        IndexName=None,  # noqa: N803
+        ConsistentRead=False,
+        ExclusiveStartKey=None,
+    ):
         name, value = KeyConditionExpression.split(" = ")
         attribute = ExpressionAttributeNames[name]
         if IndexName is None:
@@ -208,11 +251,22 @@ class FakeTable:
         else:
             assert not ConsistentRead, "an index cannot be read consistently"
             assert {"ix1": "g1", "ix2": "g2"}[IndexName] == attribute
-        matched = sorted((i for i in self.items.values() if i.get(attribute) == ExpressionAttributeValues[value]), key=lambda i: (i["kind"], i["key"]))
+        matched = sorted(
+            (
+                i
+                for i in self.items.values()
+                if i.get(attribute) == ExpressionAttributeValues[value]
+            ),
+            key=lambda i: (i["kind"], i["key"]),
+        )
         start = 0
         if ExclusiveStartKey:
-            start = 1 + next(n for n, i in enumerate(matched) if (i["kind"], i["key"]) == (ExclusiveStartKey["kind"], ExclusiveStartKey["key"]))
-        page = matched[start:start + self.PAGE]
+            start = 1 + next(
+                n
+                for n, i in enumerate(matched)
+                if (i["kind"], i["key"]) == (ExclusiveStartKey["kind"], ExclusiveStartKey["key"])
+            )
+        page = matched[start : start + self.PAGE]
         answer: dict = {"Items": copy.deepcopy(page)}
         if start + self.PAGE < len(matched):
             answer["LastEvaluatedKey"] = {"kind": page[-1]["kind"], "key": page[-1]["key"]}

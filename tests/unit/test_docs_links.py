@@ -40,7 +40,11 @@ INSTALLED = {"node_modules", "dist", ".venv", "venv", "__pycache__"}
 
 
 def _markdown_files() -> list[Path]:
-    examples = [p for p in (ROOT / "examples").rglob("*.md") if not INSTALLED.intersection(p.relative_to(ROOT).parts)]
+    examples = [
+        p
+        for p in (ROOT / "examples").rglob("*.md")
+        if not INSTALLED.intersection(p.relative_to(ROOT).parts)
+    ]
     return [
         *sorted(ROOT.glob("*.md")),
         *sorted((ROOT / "docs").rglob("*.md")),
@@ -100,3 +104,29 @@ def test_the_readme_links_the_process_files():
     linked = {target.split("#")[0] for _, target in _relative_links(ROOT / "README.md")}
     missing = [name for name in PROCESS_FILES if name not in linked]
     assert not missing, f"in the repository but unreachable from the README: {missing}"
+
+
+#: `<img src="...">` and `![alt](target)`.
+IMAGE = re.compile(r"<img[^>]*\bsrc=\"([^\"]+)\"|!\[[^\]]*\]\(([^)\s]+)")
+
+
+def test_the_readme_shows_its_own_pictures_by_relative_path():
+    """The README's pictures were addresses on main, where they had never
+    been pushed, so GitHub drew a broken image on every branch; and a private
+    repository's raw addresses do not load for anyone. A relative path shows
+    on every branch, public or private. The PyPI page gets addresses on main
+    at build time, from the fancy-pypi-readme substitutions in pyproject.toml.
+    """
+    readme = ROOT / "README.md"
+    own = []
+    missing = []
+    for src in (a or b for a, b in IMAGE.findall(readme.read_text(encoding="utf-8"))):
+        if src.startswith(
+            ("https://raw.githubusercontent.com/knowusuboaky/", "https://github.com/knowusuboaky/")
+        ):
+            own.append(src)
+        elif not src.startswith(("http://", "https://")) and not (ROOT / src).exists():
+            missing.append(src)
+
+    assert not own, "use a relative path for the repository's own pictures:\n  " + "\n  ".join(own)
+    assert not missing, "these pictures are not in the repository:\n  " + "\n  ".join(missing)

@@ -29,7 +29,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 def built(tmp_path: Path) -> Path:
     """A build as Vite leaves one: the page, a hashed asset, and a copied page script."""
     (tmp_path / "assets").mkdir()
-    (tmp_path / "index.html").write_text("<!DOCTYPE html><title>Dashboard</title>", encoding="utf-8")
+    (tmp_path / "index.html").write_text(
+        "<!DOCTYPE html><title>Dashboard</title>", encoding="utf-8"
+    )
     (tmp_path / "assets" / "main-a1b2c3.js").write_text("export {}\n", encoding="utf-8")
     (tmp_path / "pages").mkdir()
     (tmp_path / "pages" / "app.js").write_text("function go() {}\n", encoding="utf-8")
@@ -50,7 +52,10 @@ class TestServingTheBuild:
     def test_a_hashed_asset_is_kept_for_a_year(self, built):
         with reader(built) as client:
             got = client.get("/assets/main-a1b2c3.js")
-        assert got.status_code == 200 and got.headers["cache-control"] == "public, max-age=31536000, immutable"
+        assert (
+            got.status_code == 200
+            and got.headers["cache-control"] == "public, max-age=31536000, immutable"
+        )
 
     def test_a_page_script_keeps_its_name_so_it_is_not_cached(self, built):
         """The copies under pages/ are not hashed: cached, an old one would outlive a deploy."""
@@ -69,7 +74,15 @@ class TestThePageGoesOutInTheCompanysBrand:
     """Set once on the retrieval service, and written into the page here, so both dashboards look the same."""
 
     PAGE = '<!DOCTYPE html><title>Dashboard</title><script id="vx-brand-data" type="application/json">{"name": "VectrixDB", "custom": false}</script>'
-    BRAND = {"name": "BMO", "custom": True, "logo": "/brand/logo", "logo_dark": None, "accent": "#1155cc", "wordmark": True, "copyright": "© 2026 BMO"}
+    BRAND = {
+        "name": "BMO",
+        "custom": True,
+        "logo": "/brand/logo",
+        "logo_dark": None,
+        "accent": "#1155cc",
+        "wordmark": True,
+        "copyright": "© 2026 BMO",
+    }
 
     def serve(self, built, answer):
         import httpx
@@ -83,14 +96,19 @@ class TestThePageGoesOutInTheCompanysBrand:
             return answer
 
         (built / "index.html").write_text(self.PAGE, encoding="utf-8")
-        app = build(Settings(upstream="https://retrieval.example.net", site=built), transport=httpx.MockTransport(handle))
+        app = build(
+            Settings(upstream="https://retrieval.example.net", site=built),
+            transport=httpx.MockTransport(handle),
+        )
         return TestClient(app), asked
 
     def told(self, page: str) -> dict:
         import json
         import re
 
-        return json.loads(re.search(r'id="vx-brand-data" type="application/json">(.*?)</script>', page).group(1))
+        return json.loads(
+            re.search(r'id="vx-brand-data" type="application/json">(.*?)</script>', page).group(1)
+        )
 
     def test_the_services_brand_is_written_into_the_page(self, built):
         import httpx
@@ -101,15 +119,23 @@ class TestThePageGoesOutInTheCompanysBrand:
         assert got.status_code == 200 and got.headers["cache-control"] == "no-store"
         assert self.told(got.text) == self.BRAND
         assert [str(r.url) for r in asked] == ["https://retrieval.example.net/brand.json"]
-        assert "api-key" not in asked[0].headers, "the brand is public: no key goes with the question"
+        assert "api-key" not in asked[0].headers, (
+            "the brand is public: no key goes with the question"
+        )
 
     def test_a_name_cannot_end_the_block(self, built):
         import httpx
 
-        client, _ = self.serve(built, httpx.Response(200, json={**self.BRAND, "name": "</script><script>alert(1)</script>"}))
+        client, _ = self.serve(
+            built,
+            httpx.Response(200, json={**self.BRAND, "name": "</script><script>alert(1)</script>"}),
+        )
         with client:
             page = client.get("/").text
-        assert page.count("</script>") == 1 and self.told(page)["name"] == "</script><script>alert(1)</script>"
+        assert (
+            page.count("</script>") == 1
+            and self.told(page)["name"] == "</script><script>alert(1)</script>"
+        )
 
     def test_it_is_asked_once_a_minute_not_once_a_page(self, built):
         import httpx
@@ -138,9 +164,14 @@ class TestThePageGoesOutInTheCompanysBrand:
     def test_a_page_without_the_block_is_not_asked_about(self, built):
         import httpx
 
-        (built / "index.html").write_text("<!DOCTYPE html><title>Dashboard</title>", encoding="utf-8")
+        (built / "index.html").write_text(
+            "<!DOCTYPE html><title>Dashboard</title>", encoding="utf-8"
+        )
         asked = []
-        app = build(Settings(upstream="https://retrieval.example.net", site=built), transport=httpx.MockTransport(lambda r: asked.append(r)))
+        app = build(
+            Settings(upstream="https://retrieval.example.net", site=built),
+            transport=httpx.MockTransport(lambda r: asked.append(r)),
+        )
         with TestClient(app) as client:
             assert client.get("/").text == "<!DOCTYPE html><title>Dashboard</title>"
         assert asked == []

@@ -97,9 +97,13 @@ class AccessPolicy:
                 "token lists security groups by id; store lists people by email, or a domain for everyone there"
             )
         if self.method not in METHODS:
-            raise ConfigurationError(f"a policy's method is {' or '.join(METHODS)}, not {self.method!r}")
+            raise ConfigurationError(
+                f"a policy's method is {' or '.join(METHODS)}, not {self.method!r}"
+            )
         if not isinstance(self.allow, (list, tuple)) or not self.allow:
-            raise ConfigurationError(f"a {self.method} policy needs an allow list with at least one entry, or nobody could ever retrieve")
+            raise ConfigurationError(
+                f"a {self.method} policy needs an allow list with at least one entry, or nobody could ever retrieve"
+            )
         cleaned: List[Dict[str, str]] = []
         seen: set = set()
         for entry in self.allow:
@@ -108,7 +112,9 @@ class AccessPolicy:
             if self.method == "token":
                 group = _clean(entry.get("id"))
                 if not group:
-                    raise ConfigurationError("each group needs its id, the group's object id at the identity provider, which is what the token carries; the name is for people")
+                    raise ConfigurationError(
+                        "each group needs its id, the group's object id at the identity provider, which is what the token carries; the name is for people"
+                    )
                 row = {"id": group}
                 if _clean(entry.get("name")):
                     row["name"] = _clean(entry.get("name"))
@@ -116,7 +122,9 @@ class AccessPolicy:
             else:
                 email, domain = _lower(entry.get("email")), _lower(entry.get("domain")).lstrip("@")
                 if bool(email) == bool(domain):
-                    raise ConfigurationError("each store entry is an email, or a domain for everyone there, and not both")
+                    raise ConfigurationError(
+                        "each store entry is an email, or a domain for everyone there, and not both"
+                    )
                 if email and ("@" not in email or email.startswith("@") or email.endswith("@")):
                     raise ConfigurationError(f"{email!r} is not an email address")
                 if domain and ("@" in domain or "." not in domain):
@@ -136,14 +144,20 @@ class AccessPolicy:
             raise ConfigurationError("people is a list, each person by email")
         if self.method == "store":
             if people:
-                raise ConfigurationError("a store policy lists its people in allow; people is the list beside a token policy's groups")
+                raise ConfigurationError(
+                    "a store policy lists its people in allow; people is the list beside a token policy's groups"
+                )
             return []
         listed: List[Dict[str, str]] = []
         for entry in people:
             if not isinstance(entry, Mapping):
-                raise ConfigurationError(f"each person on the list is an object with an email, not {entry!r}")
+                raise ConfigurationError(
+                    f"each person on the list is an object with an email, not {entry!r}"
+                )
             if _clean(entry.get("domain")):
-                raise ConfigurationError("a group's list names people, each by email; a domain would let everyone in the group at it search")
+                raise ConfigurationError(
+                    "a group's list names people, each by email; a domain would let everyone in the group at it search"
+                )
             email = _lower(entry.get("email"))
             if not email or "@" not in email or email.startswith("@") or email.endswith("@"):
                 raise ConfigurationError(f"{email or entry!r} is not an email address")
@@ -157,7 +171,10 @@ class AccessPolicy:
 
     def to_dict(self) -> Dict[str, Any]:
         """The policy as a person writes it."""
-        out: Dict[str, Any] = {"method": self.method, "allow": [dict(entry) for entry in self.allow]}
+        out: Dict[str, Any] = {
+            "method": self.method,
+            "allow": [dict(entry) for entry in self.allow],
+        }
         if self.method == "token":
             out["people"] = [dict(entry) for entry in self.people]
         return out
@@ -214,7 +231,12 @@ class Decision:
     method: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"allowed": self.allowed, "code": self.code, "because": self.because, "method": self.method}
+        return {
+            "allowed": self.allowed,
+            "code": self.code,
+            "because": self.because,
+            "method": self.method,
+        }
 
 
 def decide(
@@ -243,37 +265,91 @@ def decide(
     A ``store`` policy reads ``email``, the address they signed in with.
     """
     if policy is None:
-        return Decision(False, "no_policy", f"{collection} is unavailable to anyone yet: an admin sets its policy")
+        return Decision(
+            False,
+            "no_policy",
+            f"{collection} is unavailable to anyone yet: an admin sets its policy",
+        )
     about = policy.method
     if method == "key":
         if host_key:
-            return Decision(True, "host_key", "the server's own key, which is the host's own hand", about)
+            return Decision(
+                True, "host_key", "the server's own key, which is the host's own hand", about
+            )
         if collection in set(key_scope):
             return Decision(True, "key_scoped", f"a key an admin made for {collection}", about)
-        return Decision(False, "key_not_scoped", f"a key is nobody in particular, and this one was not made for {collection}", about)
+        return Decision(
+            False,
+            "key_not_scoped",
+            f"a key is nobody in particular, and this one was not made for {collection}",
+            about,
+        )
     if method == "guest" or not (email or subject):
-        return Decision(False, "not_signed_in", f"nobody signed in, and {collection} answers only people who did", about)
+        return Decision(
+            False,
+            "not_signed_in",
+            f"nobody signed in, and {collection} answers only people who did",
+            about,
+        )
     who = email or subject or "the caller"
     if policy.method == "store":
         address = _lower(email)
         if not address:
-            return Decision(False, "not_on_list", f"{who} signed in with no email address, and {collection} answers the addresses on its list", about)
+            return Decision(
+                False,
+                "not_on_list",
+                f"{who} signed in with no email address, and {collection} answers the addresses on its list",
+                about,
+            )
         for entry in policy.allow:
             if "email" in entry and entry["email"] == address:
-                return Decision(True, "on_list", f"{address} is on the list for {collection}", about)
+                return Decision(
+                    True, "on_list", f"{address} is on the list for {collection}", about
+                )
             if "domain" in entry and address.endswith("@" + entry["domain"]):
-                return Decision(True, "on_list", f"{address} is at {entry['domain']}, and everyone there may retrieve from {collection}", about)
-        return Decision(False, "not_on_list", f"{address} is not on the list for {collection}", about)
+                return Decision(
+                    True,
+                    "on_list",
+                    f"{address} is at {entry['domain']}, and everyone there may retrieve from {collection}",
+                    about,
+                )
+        return Decision(
+            False, "not_on_list", f"{address} is not on the list for {collection}", about
+        )
     held = [str(g) for g in groups]
     wanted = {g.lower() for g in policy.group_ids()}
     matched = next((g for g in held if g.lower() in wanted), None)
     if matched is None:
         if not held:
-            return Decision(False, "not_in_token", f"the token names no groups for {who}, and {collection} answers only its groups", about)
-        return Decision(False, "not_in_token", f"{who} is in none of the groups that may retrieve from {collection}", about)
-    name = next((entry.get("name") or entry["id"] for entry in policy.allow if entry["id"].lower() == matched.lower()), matched)
+            return Decision(
+                False,
+                "not_in_token",
+                f"the token names no groups for {who}, and {collection} answers only its groups",
+                about,
+            )
+        return Decision(
+            False,
+            "not_in_token",
+            f"{who} is in none of the groups that may retrieve from {collection}",
+            about,
+        )
+    name = next(
+        (
+            entry.get("name") or entry["id"]
+            for entry in policy.allow
+            if entry["id"].lower() == matched.lower()
+        ),
+        matched,
+    )
     address = _lower(email)
     if address and {"email": address} in policy.people:
-        return Decision(True, "in_token", f"{who} is in {name} and on the list, which may retrieve from {collection}", about)
+        return Decision(
+            True,
+            "in_token",
+            f"{who} is in {name} and on the list, which may retrieve from {collection}",
+            about,
+        )
     # In the group is not enough: not everyone in a security group may search.
-    return Decision(False, "not_on_list", f"{who} is in {name}, but not on the list for {collection}", about)
+    return Decision(
+        False, "not_on_list", f"{who} is in {name}, but not on the list for {collection}", about
+    )

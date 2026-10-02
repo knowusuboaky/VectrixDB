@@ -21,7 +21,7 @@ Nothing to sign up for, no API key, no service to run.
 </div>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/knowusuboaky/VectrixDB/main/docs/images/dashboard/search.png" alt="The VectrixDB dashboard: search results, each led by its relevance and what found it" width="860">
+  <img src="docs/images/dashboard/search.png" alt="The VectrixDB dashboard: search results, each led by its relevance and what found it" width="860">
 </p>
 
 ---
@@ -68,7 +68,7 @@ people who sign in as themselves, roles, masking, and a record of who read
 what. [Use the dashboard](docs/how-to/dashboard.md) walks every page.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/knowusuboaky/VectrixDB/main/docs/images/dashboard/evaluate.png" alt="The Evaluate page with a sample run: three picks, found in the top 10 against search time, and every setup ranked" width="860">
+  <img src="docs/images/dashboard/evaluate.png" alt="The Evaluate page with a sample run: three picks, found in the top 10 against search time, and every setup ranked" width="860">
   <br><sub>The run in this picture is sample data, drawn to show the page, not a measurement. <code>vectrixdb evaluate</code> on your own questions gives real numbers.</sub>
 </p>
 
@@ -238,8 +238,8 @@ pip install vectrixdb[viz]         # UMAP visualisation
 pip install vectrixdb[mcp]         # MCP server for agent memory
 pip install vectrixdb[nlp]         # spaCy, for better GraphRAG extraction
 
-pip install vectrixdb[all]         # every backend and model extra above;
-                                   # not mcp or nlp, which are separate
+pip install vectrixdb[all]         # every backend and model extra above,
+                                   # mcp included; not nlp, which is separate
 ```
 
 From source, or a specific version:

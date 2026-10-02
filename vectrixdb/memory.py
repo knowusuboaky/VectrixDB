@@ -446,7 +446,8 @@ class ConversationMemory:
     ) -> int:
         """Delete memories and return how many went.
 
-        ``ids`` names them outright. Otherwise the selection is the ``kinds``
+        ``ids`` names them outright; an id that is not a memory is left
+        alone. Otherwise the selection is the ``kinds``
         in ``session`` (None means every session) older than ``older_than``,
         a number of days or a datetime; ``superseded=True`` selects only
         memories that a correction or a contradiction has already replaced,
@@ -454,7 +455,15 @@ class ConversationMemory:
         this is the one memory operation that loses information on purpose.
         """
         if ids is not None:
-            targets = list(ids)
+            # Only memories, and only those that exist: an id is not a licence
+            # to delete a document the memory tools never wrote, and the count
+            # is what went, not what was asked for.
+            collection = self._collection()
+            targets = []
+            for id_ in dict.fromkeys(ids):
+                point = collection._get_raw(id_)
+                if point is not None and (point.metadata or {}).get(K_KIND) in KINDS:
+                    targets.append(id_)
             if targets:
                 self._db.delete(targets)
             return len(targets)
@@ -817,7 +826,9 @@ class ConversationMemory:
     def _claim_turn(self, session: Optional[str]) -> int:
         if session not in self._next_turns:
             existing = self._scan({K_SESSION: session, K_KIND: KIND_TURN})
-            highest = max((p.metadata.get(K_TURN) or -1 for p in existing), default=-1)
+            # Turn 0 is a turn; ``or -1`` read it as none and handed 0 out again.
+            turns = [p.metadata.get(K_TURN) for p in existing]
+            highest = max((t for t in turns if t is not None), default=-1)
             self._next_turns[session] = highest + 1
         turn = self._next_turns[session]
         self._next_turns[session] = turn + 1

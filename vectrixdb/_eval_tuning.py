@@ -22,7 +22,19 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    cast,
+)
 
 __all__ = ["answer_cutoff", "sweep", "sweep_markdown"]
 
@@ -134,7 +146,9 @@ def answer_cutoff(
         if hit is None or value is None:
             unmeasured += 1
             continue
-        (right if _answers(hit, q.expected, by, getattr(q, "evidence", None) or ()) else wrong).append(value)
+        (
+            right if _answers(hit, q.expected, by, getattr(q, "evidence", None) or ()) else wrong
+        ).append(value)
     outside = [str(text) for text in unanswerable if str(text).strip()]
     for text in outside:
         hit, value = top_of(text)
@@ -158,16 +172,24 @@ def answer_cutoff(
         "cutoff": None,
         "at_cutoff": None,
         "table": [],
-        "search": {k: v for k, v in search.items() if isinstance(v, (str, int, float, bool, type(None)))},
+        "search": {
+            k: v for k, v in search.items() if isinstance(v, (str, int, float, bool, type(None)))
+        },
     }
     if unmeasured and not right and not wrong:
-        reply["reason"] = f"no result carried a {measure}: a keyword search has none, and a distance that is not cosine has none"
+        reply["reason"] = (
+            f"no result carried a {measure}: a keyword search has none, and a distance that is not cosine has none"
+        )
         return reply
     if len(right) < FEWEST or len(wrong) < FEWEST:
         short = "answers" if len(right) < FEWEST else "near misses"
         reply["reason"] = (
             f"{len(right)} answers and {len(wrong)} near misses: too few {short} to place a cut-off. "
-            + ("Add questions the documents do not answer, as unanswerable=." if short == "near misses" else "Label more questions.")
+            + (
+                "Add questions the documents do not answer, as unanswerable=."
+                if short == "near misses"
+                else "Label more questions."
+            )
         )
         return reply
 
@@ -181,7 +203,9 @@ def answer_cutoff(
     reply["at_cutoff"] = best
     # The table is the candidates thinned to about a dozen, the chosen one kept.
     step = max(1, len(rows) // 12)
-    reply["table"] = sorted({id(r): r for r in [*rows[::step], rows[-1], best]}.values(), key=lambda r: r["cutoff"])
+    reply["table"] = sorted(
+        {id(r): r for r in [*rows[::step], rows[-1], best]}.values(), key=lambda r: r["cutoff"]
+    )
     return reply
 
 
@@ -250,8 +274,16 @@ def sweep(
 
     labelled = [q for q in questions if getattr(q, "expected", None)]
     if not labelled:
-        raise ValueError("no question names the documents that answer it, so there is nothing to score against")
-    for name, given in (("chunk", chunk), ("chunk_size", chunk_size), ("overlap", overlap), ("embed_heading", embed_heading), ("search", search)):
+        raise ValueError(
+            "no question names the documents that answer it, so there is nothing to score against"
+        )
+    for name, given in (
+        ("chunk", chunk),
+        ("chunk_size", chunk_size),
+        ("overlap", overlap),
+        ("embed_heading", embed_heading),
+        ("search", search),
+    ):
         if isinstance(given, (str, bytes)) or not list(given):
             raise ValueError(f"{name} is a list of the values to try, got {given!r}")
     sources = _sources(documents)
@@ -273,17 +305,27 @@ def sweep(
     if not builds:
         raise ValueError("every overlap given is at least as long as every chunk_size given")
     total = len(builds) * len(search)
-    scratch = Path(workdir) if workdir is not None else Path(tempfile.mkdtemp(prefix="vectrixdb-sweep-"))
+    scratch = (
+        Path(workdir) if workdir is not None else Path(tempfile.mkdtemp(prefix="vectrixdb-sweep-"))
+    )
     rows: List[Dict[str, Any]] = []
     done = 0
     try:
         for number, build in enumerate(builds):
             home = scratch / f"build-{number}"
-            db = Vectrix("sweep", path=str(home), mode=cast(Any, opened_as), embedding_cache=False, **dict(open_with or {}))
+            db = Vectrix(
+                "sweep",
+                path=str(home),
+                mode=cast(Any, opened_as),
+                embedding_cache=False,
+                **dict(open_with or {}),
+            )
             try:
                 began = time.perf_counter()
                 for doc_id, source in sources:
-                    db.add_document(source, doc_id=doc_id, progress=False, on_low_quality="allow", **build)
+                    db.add_document(
+                        source, doc_id=doc_id, progress=False, on_low_quality="allow", **build
+                    )
                 built = round(time.perf_counter() - began, 2)
                 chunks = db.count()
                 for how in search:
@@ -348,12 +390,37 @@ def _how(search: Mapping[str, Any]) -> str:
 def sweep_markdown(report: Mapping[str, Any]) -> str:
     """The sweep as a table, best first, for a pull request or a page."""
     ks = [f"@{x}" for x in report["k"]]
-    head = ["#", "chunker", "size", "overlap", "headings", "search", *[f"recall {x}" for x in ks], "MRR", "nDCG", "chunks", "build", "median"]
-    lines = ["| " + " | ".join(head) + " |", "| " + " | ".join("---" if i in (1, 5) else "---:" for i in range(len(head))) + " |"]
+    head = [
+        "#",
+        "chunker",
+        "size",
+        "overlap",
+        "headings",
+        "search",
+        *[f"recall {x}" for x in ks],
+        "MRR",
+        "nDCG",
+        "chunks",
+        "build",
+        "median",
+    ]
+    lines = [
+        "| " + " | ".join(head) + " |",
+        "| " + " | ".join("---" if i in (1, 5) else "---:" for i in range(len(head))) + " |",
+    ]
     for row in report["rows"]:
         cells = [
-            str(row["rank"]), row["chunk"], str(row["chunk_size"]), str(row["overlap"]), "yes" if row["embed_heading"] else "no", _how(row["search"]),
-            *[f"{row['recall'][x]:.3f}" for x in ks], f"{row['mrr']:.3f}", f"{row['ndcg']:.3f}", str(row["chunks"]), f"{row['build_s']:.1f} s",
+            str(row["rank"]),
+            row["chunk"],
+            str(row["chunk_size"]),
+            str(row["overlap"]),
+            "yes" if row["embed_heading"] else "no",
+            _how(row["search"]),
+            *[f"{row['recall'][x]:.3f}" for x in ks],
+            f"{row['mrr']:.3f}",
+            f"{row['ndcg']:.3f}",
+            str(row["chunks"]),
+            f"{row['build_s']:.1f} s",
             f"{row['median_ms']:.0f} ms" if row["median_ms"] is not None else "",
         ]
         lines.append("| " + " | ".join(cells) + " |")

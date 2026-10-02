@@ -48,7 +48,15 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from ..exceptions import ConfigurationError, DependencyError
 
-__all__ = ["CosmosRecords", "DynamoRecords", "Record", "Records", "SqlRecords", "describe_where", "open_records"]
+__all__ = [
+    "CosmosRecords",
+    "DynamoRecords",
+    "Record",
+    "Records",
+    "SqlRecords",
+    "describe_where",
+    "open_records",
+]
 
 
 # ============================================================================
@@ -123,7 +131,9 @@ class Records:
         """Remove a record; with ``version``, only if it is unchanged since it was read. Whether one went."""
         raise NotImplementedError
 
-    def query(self, kind: str, *, ix1: Optional[str] = None, ix2: Optional[str] = None) -> list[Record]:
+    def query(
+        self, kind: str, *, ix1: Optional[str] = None, ix2: Optional[str] = None
+    ) -> list[Record]:
         """The live records of a kind: all of them, or those with these index values."""
         raise NotImplementedError
 
@@ -167,7 +177,9 @@ class SqlRecords(Records):
         path: Optional[Path] = None,
     ) -> None:
         if not _NAME.match(table):
-            raise ConfigurationError(f"{table!r} cannot be the sign-in table's name: letters, digits and _, starting with a letter")
+            raise ConfigurationError(
+                f"{table!r} cannot be the sign-in table's name: letters, digits and _, starting with a letter"
+            )
         self._conn = connection
         self._placeholder = placeholder
         self._table = self.table = table
@@ -186,7 +198,14 @@ class SqlRecords(Records):
         return [
             f"CREATE TABLE IF NOT EXISTS {t} (kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, version BIGINT NOT NULL, "
             "ix1 TEXT, ix2 TEXT, expires DOUBLE PRECISION, PRIMARY KEY (kind, key))",
-            *(f"CREATE INDEX IF NOT EXISTS {t}_{name} ON {t} ({columns})" for name, columns in (("ix1", "kind, ix1"), ("ix2", "kind, ix2"), ("expires", "expires"))),
+            *(
+                f"CREATE INDEX IF NOT EXISTS {t}_{name} ON {t} ({columns})"
+                for name, columns in (
+                    ("ix1", "kind, ix1"),
+                    ("ix2", "kind, ix2"),
+                    ("expires", "expires"),
+                )
+            ),
         ]
 
     def _ensure_table(self) -> None:
@@ -210,10 +229,15 @@ class SqlRecords(Records):
     @classmethod
     def sqlite(cls, path: Any) -> "SqlRecords":
         if str(path) == ":memory:":
-            return cls(sqlite3.connect(":memory:", check_same_thread=False, isolation_level=None), where="SQLite in memory")
+            return cls(
+                sqlite3.connect(":memory:", check_same_thread=False, isolation_level=None),
+                where="SQLite in memory",
+            )
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(str(path), check_same_thread=False, timeout=10, isolation_level=None)
+        connection = sqlite3.connect(
+            str(path), check_same_thread=False, timeout=10, isolation_level=None
+        )
         try:
             path.chmod(0o600)
         except OSError:  # pragma: no cover - a file system without modes
@@ -221,7 +245,13 @@ class SqlRecords(Records):
         return cls(connection, where=f"SQLite file {path}", path=path)
 
     @classmethod
-    def postgres(cls, url: str, *, password: Optional[str] = None, connect: Optional[Callable[..., Any]] = None) -> "SqlRecords":
+    def postgres(
+        cls,
+        url: str,
+        *,
+        password: Optional[str] = None,
+        connect: Optional[Callable[..., Any]] = None,
+    ) -> "SqlRecords":
         if connect is None:
             try:
                 import psycopg2
@@ -239,7 +269,9 @@ class SqlRecords(Records):
             connection.autocommit = True
             return connection
 
-        return cls(fresh(), placeholder="%s", table=table, where=describe_where(url), reconnect=fresh)
+        return cls(
+            fresh(), placeholder="%s", table=table, where=describe_where(url), reconnect=fresh
+        )
 
     @property
     def sqlite_connection(self) -> Optional[sqlite3.Connection]:
@@ -260,7 +292,11 @@ class SqlRecords(Records):
                         cursor.close()
                 except Exception as exc:
                     # A database restarted or a connection dropped by the network: once more, on a new one.
-                    if attempt == 1 and self._reconnect is not None and type(exc).__name__ in ("OperationalError", "InterfaceError"):
+                    if (
+                        attempt == 1
+                        and self._reconnect is not None
+                        and type(exc).__name__ in ("OperationalError", "InterfaceError")
+                    ):
                         try:
                             self._conn.close()
                         except Exception:  # noqa: BLE001 - it is already broken
@@ -271,7 +307,11 @@ class SqlRecords(Records):
         raise AssertionError("unreachable")  # pragma: no cover
 
     def get(self, kind: str, key: str) -> Optional[Record]:
-        found = self._run(f"SELECT data, version, ix1, ix2, expires FROM {self._table} WHERE kind = ? AND key = ?", (kind, key), rows=True)
+        found = self._run(
+            f"SELECT data, version, ix1, ix2, expires FROM {self._table} WHERE kind = ? AND key = ?",
+            (kind, key),
+            rows=True,
+        )
         if not found:
             return None
         data, version, ix1, ix2, expires = found[0]
@@ -300,7 +340,15 @@ class SqlRecords(Records):
         got = self._run(
             f"UPDATE {self._table} SET data = ?, version = version + 1, ix1 = ?, ix2 = ?, expires = ? "
             "WHERE kind = ? AND key = ? AND version = ? RETURNING version",
-            (_dump(record.data), record.ix1, record.ix2, record.expires, record.kind, record.key, record.version),
+            (
+                _dump(record.data),
+                record.ix1,
+                record.ix2,
+                record.expires,
+                record.kind,
+                record.key,
+                record.version,
+            ),
             rows=True,
         )
         if not got:
@@ -323,10 +371,15 @@ class SqlRecords(Records):
         if version is None:
             gone = self._run(f"DELETE FROM {self._table} WHERE kind = ? AND key = ?", (kind, key))
         else:
-            gone = self._run(f"DELETE FROM {self._table} WHERE kind = ? AND key = ? AND version = ?", (kind, key, version))
+            gone = self._run(
+                f"DELETE FROM {self._table} WHERE kind = ? AND key = ? AND version = ?",
+                (kind, key, version),
+            )
         return bool(gone and gone > 0)
 
-    def query(self, kind: str, *, ix1: Optional[str] = None, ix2: Optional[str] = None) -> list[Record]:
+    def query(
+        self, kind: str, *, ix1: Optional[str] = None, ix2: Optional[str] = None
+    ) -> list[Record]:
         sql = f"SELECT key, data, version, ix1, ix2, expires FROM {self._table} WHERE kind = ? AND (expires IS NULL OR expires > ?)"
         params: list = [kind, time.time()]
         if ix1 is not None:
@@ -335,7 +388,10 @@ class SqlRecords(Records):
         if ix2 is not None:
             sql += " AND ix2 = ?"
             params.append(ix2)
-        return [Record(kind, k, json.loads(d), e, a, b, v) for k, d, v, a, b, e in self._run(sql, params, rows=True)]
+        return [
+            Record(kind, k, json.loads(d), e, a, b, v)
+            for k, d, v, a, b, e in self._run(sql, params, rows=True)
+        ]
 
     def purge(self) -> None:
         now = time.time()
@@ -406,7 +462,11 @@ def _iso(seconds: float) -> str:
     """A moment as a person reads it: 2026-09-23T14:02:11.204000Z."""
     from datetime import datetime, timezone
 
-    return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    return (
+        datetime.fromtimestamp(seconds, tz=timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def _seconds(value: Any) -> Optional[float]:
@@ -436,7 +496,9 @@ class CosmosRecords(Records):
         self._where = where
 
     @classmethod
-    def open(cls, url: str, *, key: Optional[str] = None, setting: str = SIGNIN_SETTING) -> "CosmosRecords":
+    def open(
+        cls, url: str, *, key: Optional[str] = None, setting: str = SIGNIN_SETTING
+    ) -> "CosmosRecords":
         try:
             from azure.cosmos import CosmosClient, PartitionKey
         except ImportError as exc:
@@ -444,7 +506,9 @@ class CosmosRecords(Records):
         parts = urlsplit(url)
         names = [p for p in parts.path.split("/") if p]
         if not parts.hostname or len(names) != 2:
-            raise ConfigurationError(f"For Cosmos DB, {setting} reads cosmos://<account>.documents.azure.com/<database>/<container>")
+            raise ConfigurationError(
+                f"For Cosmos DB, {setting} reads cosmos://<account>.documents.azure.com/<database>/<container>"
+            )
         credential: Any = key
         if not credential:
             try:
@@ -452,7 +516,9 @@ class CosmosRecords(Records):
             except ImportError as exc:
                 raise DependencyError("azure-identity", "azure") from exc
             credential = DefaultAzureCredential()
-        client = CosmosClient(f"https://{parts.hostname}:{parts.port or 443}/", credential=credential)
+        client = CosmosClient(
+            f"https://{parts.hostname}:{parts.port or 443}/", credential=credential
+        )
         database_name, container_name = names
         container = client.get_database_client(database_name).get_container_client(container_name)
         try:
@@ -462,7 +528,9 @@ class CosmosRecords(Records):
                 raise
             try:
                 database = client.create_database_if_not_exists(database_name)
-                container = database.create_container_if_not_exists(id=container_name, partition_key=PartitionKey(path="/kind"), default_ttl=-1)
+                container = database.create_container_if_not_exists(
+                    id=container_name, partition_key=PartitionKey(path="/kind"), default_ttl=-1
+                )
             except Exception as refused:
                 raise ConfigurationError(
                     f"The Cosmos DB container {database_name}/{container_name} is not there, and this server may not make it. "
@@ -486,8 +554,12 @@ class CosmosRecords(Records):
     def _body(self, record: Record) -> dict:
         now = time.time()
         body = {
-            "id": self._id(record.kind, record.key), "kind": record.kind, "key": record.key, "data": record.data,
-            "ix1": record.ix1, "ix2": record.ix2,
+            "id": self._id(record.kind, record.key),
+            "kind": record.kind,
+            "key": record.key,
+            "data": record.data,
+            "ix1": record.ix1,
+            "ix2": record.ix2,
             "expires": _iso(record.expires) if record.expires is not None else None,
             "expires_at": record.expires,
             "updated_at": _iso(now),
@@ -499,12 +571,26 @@ class CosmosRecords(Records):
     @staticmethod
     def _record(item: dict) -> Record:
         # expires_at is exact; an item written before it existed has only the number in expires.
-        expires = item.get("expires_at") if item.get("expires_at") is not None else _seconds(item.get("expires"))
-        return Record(item["kind"], item["key"], item.get("data") or {}, expires, item.get("ix1"), item.get("ix2"), item.get("_etag"))
+        expires = (
+            item.get("expires_at")
+            if item.get("expires_at") is not None
+            else _seconds(item.get("expires"))
+        )
+        return Record(
+            item["kind"],
+            item["key"],
+            item.get("data") or {},
+            expires,
+            item.get("ix1"),
+            item.get("ix2"),
+            item.get("_etag"),
+        )
 
     def _read(self, kind: str, key: str) -> Optional[Record]:
         try:
-            return self._record(self._container.read_item(item=self._id(kind, key), partition_key=kind))
+            return self._record(
+                self._container.read_item(item=self._id(kind, key), partition_key=kind)
+            )
         except Exception as exc:
             if _status(exc) == 404:
                 return None
@@ -531,7 +617,10 @@ class CosmosRecords(Records):
     def replace(self, record: Record) -> bool:
         try:
             item = self._container.replace_item(
-                item=self._id(record.kind, record.key), body=self._body(record), etag=record.version, match_condition=_if_unchanged()
+                item=self._id(record.kind, record.key),
+                body=self._body(record),
+                etag=record.version,
+                match_condition=_if_unchanged(),
             )
         except Exception as exc:
             if _status(exc) in (404, 412):
@@ -544,7 +633,9 @@ class CosmosRecords(Records):
         record.version = self._container.upsert_item(body=self._body(record)).get("_etag")
 
     def delete(self, kind: str, key: str, version: Any = None) -> bool:
-        condition = {"etag": version, "match_condition": _if_unchanged()} if version is not None else {}
+        condition = (
+            {"etag": version, "match_condition": _if_unchanged()} if version is not None else {}
+        )
         try:
             self._container.delete_item(item=self._id(kind, key), partition_key=kind, **condition)
         except Exception as exc:
@@ -553,13 +644,19 @@ class CosmosRecords(Records):
             raise
         return True
 
-    def query(self, kind: str, *, ix1: Optional[str] = None, ix2: Optional[str] = None) -> list[Record]:
+    def query(
+        self, kind: str, *, ix1: Optional[str] = None, ix2: Optional[str] = None
+    ) -> list[Record]:
         clauses, parameters = ["c.kind = @kind"], [{"name": "@kind", "value": kind}]
         for name, value in (("ix1", ix1), ("ix2", ix2)):
             if value is not None:
                 clauses.append(f"c.{name} = @{name}")
                 parameters.append({"name": f"@{name}", "value": value})
-        items = self._container.query_items(query="SELECT * FROM c WHERE " + " AND ".join(clauses), parameters=parameters, partition_key=kind)
+        items = self._container.query_items(
+            query="SELECT * FROM c WHERE " + " AND ".join(clauses),
+            parameters=parameters,
+            partition_key=kind,
+        )
         now = time.time()
         return [r for r in (self._record(i) for i in items) if r.live(now)]
 
@@ -605,8 +702,12 @@ class DynamoRecords(Records):
         name = parts.netloc or parts.path.strip("/")
         options = {k: v[0] for k, v in parse_qs(parts.query).items()}
         if not name:
-            raise ConfigurationError(f"For DynamoDB, {setting} reads dynamodb://<table>?region=<region>")
-        resource = boto3.resource("dynamodb", region_name=options.get("region"), endpoint_url=options.get("endpoint"))
+            raise ConfigurationError(
+                f"For DynamoDB, {setting} reads dynamodb://<table>?region=<region>"
+            )
+        resource = boto3.resource(
+            "dynamodb", region_name=options.get("region"), endpoint_url=options.get("endpoint")
+        )
         table = resource.Table(name)
         try:
             table.load()
@@ -622,15 +723,27 @@ class DynamoRecords(Records):
             table = resource.create_table(
                 TableName=name,
                 BillingMode="PAY_PER_REQUEST",
-                KeySchema=[{"AttributeName": "kind", "KeyType": "HASH"}, {"AttributeName": "key", "KeyType": "RANGE"}],
-                AttributeDefinitions=[{"AttributeName": a, "AttributeType": "S"} for a in ("kind", "key", "g1", "g2")],
+                KeySchema=[
+                    {"AttributeName": "kind", "KeyType": "HASH"},
+                    {"AttributeName": "key", "KeyType": "RANGE"},
+                ],
+                AttributeDefinitions=[
+                    {"AttributeName": a, "AttributeType": "S"} for a in ("kind", "key", "g1", "g2")
+                ],
                 GlobalSecondaryIndexes=[
-                    {"IndexName": index, "KeySchema": [{"AttributeName": attribute, "KeyType": "HASH"}], "Projection": {"ProjectionType": "ALL"}}
+                    {
+                        "IndexName": index,
+                        "KeySchema": [{"AttributeName": attribute, "KeyType": "HASH"}],
+                        "Projection": {"ProjectionType": "ALL"},
+                    }
                     for index, attribute in (("ix1", "g1"), ("ix2", "g2"))
                 ],
             )
             table.wait_until_exists()
-            resource.meta.client.update_time_to_live(TableName=name, TimeToLiveSpecification={"Enabled": True, "AttributeName": "expires_at"})
+            resource.meta.client.update_time_to_live(
+                TableName=name,
+                TimeToLiveSpecification={"Enabled": True, "AttributeName": "expires_at"},
+            )
             return table
         except Exception as refused:
             raise ConfigurationError(
@@ -642,7 +755,12 @@ class DynamoRecords(Records):
     @staticmethod
     def _item(record: Record, version: int) -> dict:
         # The data as JSON text: DynamoDB turns numbers into Decimals and refuses floats.
-        item: dict = {"kind": record.kind, "key": record.key, "data": _dump(record.data), "ver": version}
+        item: dict = {
+            "kind": record.kind,
+            "key": record.key,
+            "data": _dump(record.data),
+            "ver": version,
+        }
         if record.ix1 is not None:
             item.update(ix1=record.ix1, g1=f"{record.kind}|{record.ix1}")
         if record.ix2 is not None:
@@ -655,8 +773,13 @@ class DynamoRecords(Records):
     def _record(item: dict) -> Record:
         expires = item.get("expires_at")
         return Record(
-            item["kind"], item["key"], json.loads(item["data"]), float(expires) if expires is not None else None,
-            item.get("ix1"), item.get("ix2"), item.get("ver"),
+            item["kind"],
+            item["key"],
+            json.loads(item["data"]),
+            float(expires) if expires is not None else None,
+            item.get("ix1"),
+            item.get("ix2"),
+            item.get("ver"),
         )
 
     def get(self, kind: str, key: str) -> Optional[Record]:
@@ -685,7 +808,10 @@ class DynamoRecords(Records):
 
     def replace(self, record: Record) -> bool:
         return self._write(
-            record, ConditionExpression="#v = :v", ExpressionAttributeNames={"#v": "ver"}, ExpressionAttributeValues={":v": record.version}
+            record,
+            ConditionExpression="#v = :v",
+            ExpressionAttributeNames={"#v": "ver"},
+            ExpressionAttributeValues={":v": record.version},
         )
 
     def put(self, record: Record) -> None:
@@ -694,25 +820,45 @@ class DynamoRecords(Records):
     def delete(self, kind: str, key: str, version: Any = None) -> bool:
         condition: dict = {}
         if version is not None:
-            condition = {"ConditionExpression": "#v = :v", "ExpressionAttributeNames": {"#v": "ver"}, "ExpressionAttributeValues": {":v": version}}
+            condition = {
+                "ConditionExpression": "#v = :v",
+                "ExpressionAttributeNames": {"#v": "ver"},
+                "ExpressionAttributeValues": {":v": version},
+            }
         try:
-            gone = self._table.delete_item(Key={"kind": kind, "key": key}, ReturnValues="ALL_OLD", **condition)
+            gone = self._table.delete_item(
+                Key={"kind": kind, "key": key}, ReturnValues="ALL_OLD", **condition
+            )
         except Exception as exc:
             if _code(exc) == "ConditionalCheckFailedException":
                 return False
             raise
         return bool(gone.get("Attributes"))
 
-    def query(self, kind: str, *, ix1: Optional[str] = None, ix2: Optional[str] = None) -> list[Record]:
+    def query(
+        self, kind: str, *, ix1: Optional[str] = None, ix2: Optional[str] = None
+    ) -> list[Record]:
         if ix1 is not None:
-            args: dict = {"IndexName": "ix1", "KeyConditionExpression": "#g = :g", "ExpressionAttributeNames": {"#g": "g1"},
-                          "ExpressionAttributeValues": {":g": f"{kind}|{ix1}"}}
+            args: dict = {
+                "IndexName": "ix1",
+                "KeyConditionExpression": "#g = :g",
+                "ExpressionAttributeNames": {"#g": "g1"},
+                "ExpressionAttributeValues": {":g": f"{kind}|{ix1}"},
+            }
         elif ix2 is not None:
-            args = {"IndexName": "ix2", "KeyConditionExpression": "#g = :g", "ExpressionAttributeNames": {"#g": "g2"},
-                    "ExpressionAttributeValues": {":g": f"{kind}|{ix2}"}}
+            args = {
+                "IndexName": "ix2",
+                "KeyConditionExpression": "#g = :g",
+                "ExpressionAttributeNames": {"#g": "g2"},
+                "ExpressionAttributeValues": {":g": f"{kind}|{ix2}"},
+            }
         else:
-            args = {"KeyConditionExpression": "#p = :p", "ExpressionAttributeNames": {"#p": "kind"},
-                    "ExpressionAttributeValues": {":p": kind}, "ConsistentRead": True}
+            args = {
+                "KeyConditionExpression": "#p = :p",
+                "ExpressionAttributeNames": {"#p": "kind"},
+                "ExpressionAttributeValues": {":p": kind},
+                "ConsistentRead": True,
+            }
         items: list = []
         while True:
             page = self._table.query(**args)
@@ -722,7 +868,11 @@ class DynamoRecords(Records):
             args["ExclusiveStartKey"] = page["LastEvaluatedKey"]
         now = time.time()
         found = (self._record(i) for i in items)
-        return [r for r in found if r.live(now) and (ix1 is None or r.ix1 == ix1) and (ix2 is None or r.ix2 == ix2)]
+        return [
+            r
+            for r in found
+            if r.live(now) and (ix1 is None or r.ix1 == ix1) and (ix2 is None or r.ix2 == ix2)
+        ]
 
     def describe(self) -> str:
         return self._where
@@ -741,8 +891,10 @@ class DynamoRecords(Records):
 
 def _sqlite_path(url: str) -> str:
     if not url.lower().startswith("sqlite:///"):
-        raise ConfigurationError("A SQLite address reads sqlite:///relative/path.db or sqlite:////absolute/path.db")
-    return url[len("sqlite:///"):]
+        raise ConfigurationError(
+            "A SQLite address reads sqlite:///relative/path.db or sqlite:////absolute/path.db"
+        )
+    return url[len("sqlite:///") :]
 
 
 def describe_where(where: Any) -> str:
@@ -765,11 +917,15 @@ def describe_where(where: Any) -> str:
         return f"Cosmos DB {host}{parts.path}"
     if scheme == "dynamodb":
         region = parse_qs(parts.query).get("region", [""])[0]
-        return f"DynamoDB table {parts.netloc or parts.path.strip('/')}" + (f" in {region}" if region else "")
+        return f"DynamoDB table {parts.netloc or parts.path.strip('/')}" + (
+            f" in {region}" if region else ""
+        )
     return f"{scheme}:// (not a store this knows)"
 
 
-def open_records(where: Any, *, key: Optional[str] = None, setting: str = SIGNIN_SETTING) -> Records:
+def open_records(
+    where: Any, *, key: Optional[str] = None, setting: str = SIGNIN_SETTING
+) -> Records:
     """The records at ``where``: a path to a SQLite file, an address, or records already open.
 
     ``setting`` is the name the address was given under, for what an address

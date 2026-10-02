@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from starlette.datastructures import Headers  # noqa: E402
 from starlette.websockets import WebSocketDisconnect  # noqa: E402
 
-from app.api.live import CANNOT_REACH, handshake, ws_url  # noqa: E402
+from app.api.live import CANNOT_REACH, POLICY_VIOLATION, handshake, ws_url  # noqa: E402
 from app.core.settings import Settings  # noqa: E402
 from app.main import build  # noqa: E402
 
@@ -49,9 +49,13 @@ class TestWhereTheSocketOpens:
 
 class TestWhatTheSocketOpensWith:
     def test_the_caller_is_who_the_service_sees(self):
-        headers = Headers({"cookie": "vx_sid=abc", "user-agent": "a browser", "sec-websocket-key": "k"})
+        headers = Headers(
+            {"cookie": "vx_sid=abc", "user-agent": "a browser", "sec-websocket-key": "k"}
+        )
         passing = handshake(headers)
-        assert passing == {"cookie": "vx_sid=abc"}, "only what says who this is, never the handshake's own headers"
+        assert passing == {"cookie": "vx_sid=abc"}, (
+            "only what says who this is, never the handshake's own headers"
+        )
 
     def test_our_key_is_added_when_the_caller_sent_none(self):
         assert handshake(Headers({}), key="ours", key_header="x-api-key")["x-api-key"] == "ours"
@@ -69,3 +73,18 @@ class TestWithNoServiceToOpenTo:
                 with reader.websocket_connect("/ws"):
                     pass
         assert closed.value.code == CANNOT_REACH
+
+
+class TestASocketFromAnotherSite:
+    def test_it_is_closed_before_our_key_goes_anywhere(self):
+        """A socket is not covered by CORS: any page may open one, and ours would carry UPSTREAM_KEY."""
+        where = Settings(
+            upstream="https://retrieval.example.net",
+            key="ours",
+            site=Path(__file__).parent / "no-build-here",
+        )
+        with TestClient(build(where)) as reader:
+            with pytest.raises(WebSocketDisconnect) as closed:
+                with reader.websocket_connect("/ws", headers={"Origin": "https://evil.example"}):
+                    pass
+        assert closed.value.code == POLICY_VIOLATION

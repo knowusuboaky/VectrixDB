@@ -125,7 +125,8 @@ def frontier(setups: Sequence[Mapping[str, Any]]) -> List[str]:
     keep = []
     for s in ok:
         beaten = any(
-            (_top10(t) >= _top10(s) and _ms(t) <= _ms(s)) and (_top10(t) > _top10(s) or _ms(t) < _ms(s))
+            (_top10(t) >= _top10(s) and _ms(t) <= _ms(s))
+            and (_top10(t) > _top10(s) or _ms(t) < _ms(s))
             for t in ok
             if t is not s
         )
@@ -135,7 +136,9 @@ def frontier(setups: Sequence[Mapping[str, Any]]) -> List[str]:
     return [str(s["key"]) for s in keep]
 
 
-def choose(setups: Sequence[Mapping[str, Any]], balance: float = 4, time_points: float = 8) -> Dict[str, Optional[str]]:
+def choose(
+    setups: Sequence[Mapping[str, Any]], balance: float = 4, time_points: float = 8
+) -> Dict[str, Optional[str]]:
     """The three picks, by key.
 
     ``finds_the_most`` finds the right answer in the top 10 for the most
@@ -177,12 +180,24 @@ def choose(setups: Sequence[Mapping[str, Any]], balance: float = 4, time_points:
 # Two methods that differ by one step, and how the step reads from each side.
 # (from, to): (what changes, how the other one works)
 _METHOD_STEPS: Dict[Tuple[str, str], Tuple[str, str]] = {
-    ("keyword_semantic", "keyword"): ("Without the semantic ranker", "the words, in the engine's order"),
+    ("keyword_semantic", "keyword"): (
+        "Without the semantic ranker",
+        "the words, in the engine's order",
+    ),
     ("keyword", "keyword_semantic"): ("With the semantic ranker", "Azure reorders the words"),
-    ("hybrid_semantic", "hybrid_reranked"): ("Without the semantic ranker", "MiniLM reranks instead"),
-    ("hybrid_reranked", "hybrid_semantic"): ("With the semantic ranker", "Azure reranks instead of MiniLM"),
+    ("hybrid_semantic", "hybrid_reranked"): (
+        "Without the semantic ranker",
+        "MiniLM reranks instead",
+    ),
+    ("hybrid_reranked", "hybrid_semantic"): (
+        "With the semantic ranker",
+        "Azure reranks instead of MiniLM",
+    ),
     ("hybrid_bedrock", "hybrid_reranked"): ("Without Bedrock's reranker", "MiniLM reranks instead"),
-    ("hybrid_reranked", "hybrid_bedrock"): ("With Bedrock's reranker", "Bedrock reranks instead of MiniLM"),
+    ("hybrid_reranked", "hybrid_bedrock"): (
+        "With Bedrock's reranker",
+        "Bedrock reranks instead of MiniLM",
+    ),
     ("hybrid_reranked", "hybrid"): ("Without the reranker", "the fused list as it is"),
     ("hybrid", "hybrid_reranked"): ("With the reranker", "MiniLM reranks the fused list"),
     ("ultimate", "hybrid_reranked"): ("Without ColBERT", "the reranker alone"),
@@ -205,7 +220,9 @@ def _models_key(s: Mapping[str, Any]) -> Tuple[str, ...]:
     return tuple(sorted(str(m.get("key")) for m in s.get("models") or []))
 
 
-def neighbours(setup: Mapping[str, Any], setups: Sequence[Mapping[str, Any]]) -> List[Dict[str, str]]:
+def neighbours(
+    setup: Mapping[str, Any], setups: Sequence[Mapping[str, Any]]
+) -> List[Dict[str, str]]:
     """The setups one change away from ``setup``: the ranker, a model, the engine.
 
     Each is ``{"key", "change", "detail"}``, where ``change`` is what is
@@ -230,16 +247,41 @@ def neighbours(setup: Mapping[str, Any], setups: Sequence[Mapping[str, Any]]) ->
         theirs = {str(m.get("key")): m for m in s.get("models") or []}
         if not mine or not theirs or set(theirs) == set(mine):
             continue
-        gone, added = [mine[k] for k in mine if k not in theirs], [theirs[k] for k in theirs if k not in mine]
+        gone, added = (
+            [mine[k] for k in mine if k not in theirs],
+            [theirs[k] for k in theirs if k not in mine],
+        )
         if gone and not added:
             kept = [theirs[k] for k in theirs]
             only = kept[0]
-            detail = f"{only.get('label')}'s vectors only" if only.get("kind") != "builtin" else "the built-in model only"
-            out.append({"key": str(s["key"]), "change": f"Without {_model_phrase(gone[0])}", "detail": detail})
+            detail = (
+                f"{only.get('label')}'s vectors only"
+                if only.get("kind") != "builtin"
+                else "the built-in model only"
+            )
+            out.append(
+                {
+                    "key": str(s["key"]),
+                    "change": f"Without {_model_phrase(gone[0])}",
+                    "detail": detail,
+                }
+            )
         elif added and not gone:
-            out.append({"key": str(s["key"]), "change": f"With {_model_phrase(added[0])} as well", "detail": "a vector from each, merged"})
+            out.append(
+                {
+                    "key": str(s["key"]),
+                    "change": f"With {_model_phrase(added[0])} as well",
+                    "detail": "a vector from each, merged",
+                }
+            )
         elif len(gone) == 1 and len(added) == 1 and len(mine) == 1:
-            out.append({"key": str(s["key"]), "change": f"{added[0].get('label')} instead", "detail": f"{added[0].get('name') or added[0].get('label')}"})
+            out.append(
+                {
+                    "key": str(s["key"]),
+                    "change": f"{added[0].get('label')} instead",
+                    "detail": f"{added[0].get('name') or added[0].get('label')}",
+                }
+            )
 
     others = sorted({str(s.get("engine_kind")) for s in ok if s.get("engine_kind") != engine})
     for other in others:
@@ -247,13 +289,25 @@ def neighbours(setup: Mapping[str, Any], setups: Sequence[Mapping[str, Any]]) ->
         if not same_models:
             continue
         same_method = [s for s in same_models if s.get("method") == method]
-        target = same_method[0] if same_method else max(same_models, key=lambda s: (_top10(s), _first(s), -_ms(s)))
-        how = "the same two models" if len(models) > 1 else "the same model" if models else "the words only"
-        out.append({
-            "key": str(target["key"]),
-            "change": f"On {target.get('engine')} instead",
-            "detail": f"{target.get('method_label')}, {how}",
-        })
+        target = (
+            same_method[0]
+            if same_method
+            else max(same_models, key=lambda s: (_top10(s), _first(s), -_ms(s)))
+        )
+        how = (
+            "the same two models"
+            if len(models) > 1
+            else "the same model"
+            if models
+            else "the words only"
+        )
+        out.append(
+            {
+                "key": str(target["key"]),
+                "change": f"On {target.get('engine')} instead",
+                "detail": f"{target.get('method_label')}, {how}",
+            }
+        )
     return out
 
 
@@ -270,7 +324,9 @@ def neighbours(setup: Mapping[str, Any], setups: Sequence[Mapping[str, Any]]) ->
 
 
 def _run_id(created: float, golden_sha: str) -> str:
-    return time.strftime("%Y%m%d-%H%M%S", time.gmtime(created)) + ("-" + golden_sha[:6] if golden_sha else "")
+    return time.strftime("%Y%m%d-%H%M%S", time.gmtime(created)) + (
+        "-" + golden_sha[:6] if golden_sha else ""
+    )
 
 
 def build_report(
@@ -401,9 +457,17 @@ class ReportStore:
         """
         run = str(report["id"])
         sha = str((report.get("golden") or {}).get("sha256") or "")
-        if golden and sha and hashlib.sha256(golden).hexdigest() == sha and not self.has_golden(sha):
+        if (
+            golden
+            and sha
+            and hashlib.sha256(golden).hexdigest() == sha
+            and not self.has_golden(sha)
+        ):
             self.files.write(f"{self.GOLDEN}{sha}.jsonl", bytes(golden))
-        self.files.write(f"{self.PREFIX}{run}/report.json", json.dumps(report, ensure_ascii=False).encode("utf-8"))
+        self.files.write(
+            f"{self.PREFIX}{run}/report.json",
+            json.dumps(report, ensure_ascii=False).encode("utf-8"),
+        )
         return run
 
     def _read(self, key: str, missing: str) -> bytes:
@@ -436,7 +500,10 @@ class ReportStore:
             return True
         try:
             # Kept before, in the folder it used to go in, is kept: not written twice.
-            kept = any(bool(self.files.exists(f"{folder}{sha256}.jsonl")) for folder in (self.GOLDEN, *self.GOLDEN_EARLIER))
+            kept = any(
+                bool(self.files.exists(f"{folder}{sha256}.jsonl"))
+                for folder in (self.GOLDEN, *self.GOLDEN_EARLIER)
+            )
         except Exception:  # a store that cannot say is a store that has not got it
             kept = False
         if kept:
@@ -445,7 +512,11 @@ class ReportStore:
 
     def _where(self) -> str:
         describe = getattr(self.files, "describe", None)
-        return str(describe()) if callable(describe) else f"{type(self.files).__name__}@{id(self.files)}"
+        return (
+            str(describe())
+            if callable(describe)
+            else f"{type(self.files).__name__}@{id(self.files)}"
+        )
 
     def _folders(self) -> Tuple[str, ...]:
         """Where runs are looked for: the folder new ones go in, then where they went before."""
@@ -456,7 +527,7 @@ class ReportStore:
         found = set()
         for folder in self._folders():
             for rel in self.files.list(folder):
-                parts = str(rel)[len(folder):].split("/")
+                parts = str(rel)[len(folder) :].split("/")
                 if len(parts) == 2 and parts[1] == "report.json" and parts[0]:
                     found.add(parts[0])
         return sorted(found, reverse=True)
@@ -518,11 +589,21 @@ class ReportStore:
 
 def collections_of(targets: Optional[Mapping[str, Any]]) -> List[str]:
     """The collections a run's targets name, sorted, each once; a target with no collection counts under its name."""
-    return sorted({str(t.get("collection") or name) for name, t in (targets or {}).items() if isinstance(t, Mapping)})
+    return sorted(
+        {
+            str(t.get("collection") or name)
+            for name, t in (targets or {}).items()
+            if isinstance(t, Mapping)
+        }
+    )
 
 
 def _history_entry(report: Mapping[str, Any]) -> Dict[str, Any]:
-    ok = [s for s in report.get("setups") or [] if not s.get("error") and s.get("summary", {}).get("questions")]
+    ok = [
+        s
+        for s in report.get("setups") or []
+        if not s.get("error") and s.get("summary", {}).get("questions")
+    ]
     return {
         "id": report.get("id"),
         "created_at": report.get("created_at"),

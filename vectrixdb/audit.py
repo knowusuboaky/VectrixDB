@@ -1028,7 +1028,9 @@ def describe_audit_store(where: Any) -> str:
     return urlunsplit((parts.scheme, parts.hostname or "", parts.path, "", ""))
 
 
-def audit_sink_at(where: Any, *, query_key: bytes, on_failure: Any, retain_days: Optional[int] = None) -> AuditSink:
+def audit_sink_at(
+    where: Any, *, query_key: bytes, on_failure: Any, retain_days: Optional[int] = None
+) -> AuditSink:
     """The sink an address names, whichever store it is in.
 
         a path                                                         a JSON line a record, in a file
@@ -1095,7 +1097,9 @@ def audit_records_at(where: Any) -> Optional[list[dict[str, Any]]]:
 
         parsed = urlparse(text)
         prefix = parsed.path.strip("/")
-        return read_locked(S3ObjectLockStore(parsed.netloc), f"{prefix}/" if prefix else "vectrixdb-audit/")
+        return read_locked(
+            S3ObjectLockStore(parsed.netloc), f"{prefix}/" if prefix else "vectrixdb-audit/"
+        )
     from .append_log import FileLog, open_append_log
 
     if scheme:

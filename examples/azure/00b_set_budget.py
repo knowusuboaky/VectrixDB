@@ -31,7 +31,20 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from _common import Az, arguments, begin, done, finish, links, note, settings, state, step, stop, subscription_link
+from _common import (
+    Az,
+    arguments,
+    begin,
+    done,
+    finish,
+    links,
+    note,
+    settings,
+    state,
+    step,
+    stop,
+    subscription_link,
+)
 
 
 # ============================================================================
@@ -63,9 +76,17 @@ FORECAST_AT = 100
 
 
 def options(parser) -> None:
-    parser.add_argument("--amount", type=float, default=25.0, help="the budget, in the subscription's own currency")
-    parser.add_argument("--email", default=None, help="who is told; the signed-in account by default")
-    parser.add_argument("--show", action="store_true", help="show the budget and what has been spent, change nothing")
+    parser.add_argument(
+        "--amount", type=float, default=25.0, help="the budget, in the subscription's own currency"
+    )
+    parser.add_argument(
+        "--email", default=None, help="who is told; the signed-in account by default"
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="show the budget and what has been spent, change nothing",
+    )
     parser.add_argument("--remove", action="store_true", help="take the budget off again")
     parser.add_argument("--name", default=NAME, help="the budget's name, to keep more than one")
 
@@ -78,7 +99,10 @@ def months(start: datetime, ahead: int = 12) -> Dict[str, str]:
     """A monthly budget runs from the first of a month. Azure refuses any other start."""
     first = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     end = first.replace(year=first.year + 1) if ahead >= 12 else first + timedelta(days=30 * ahead)
-    return {"startDate": first.strftime("%Y-%m-%dT00:00:00Z"), "endDate": end.strftime("%Y-%m-%dT00:00:00Z")}
+    return {
+        "startDate": first.strftime("%Y-%m-%dT00:00:00Z"),
+        "endDate": end.strftime("%Y-%m-%dT00:00:00Z"),
+    }
 
 
 def alerts(amount: float, emails: List[str]) -> Dict[str, Any]:
@@ -115,7 +139,16 @@ def alerts(amount: float, emails: List[str]) -> Dict[str, Any]:
 
 
 def show(az: Az, subscription: str, name: str) -> int:
-    found = az("rest", "--method", "get", "--url", url(subscription, name), reads=True, quiet=True, allow_fail=True)
+    found = az(
+        "rest",
+        "--method",
+        "get",
+        "--url",
+        url(subscription, name),
+        reads=True,
+        quiet=True,
+        allow_fail=True,
+    )
     if not found:
         note(f"there is no budget called {name} on this subscription")
         note("  python 00b_set_budget.py        sets one at 25 a month")
@@ -124,20 +157,39 @@ def show(az: Az, subscription: str, name: str) -> int:
     spent = about.get("currentSpend") or {}
     amount = about.get("amount")
     step(f"{name}")
-    print(f"       budget      {amount} {spent.get('unit', '')} a {str(about.get('timeGrain', '')).lower()}")
+    print(
+        f"       budget      {amount} {spent.get('unit', '')} a {str(about.get('timeGrain', '')).lower()}"
+    )
     if spent:
         used = float(spent.get("amount") or 0)
         share = (100 * used / float(amount)) if amount else 0
-        print(f"       spent       {used:.2f} {spent.get('unit', '')} so far, {share:.0f} percent of it")
+        print(
+            f"       spent       {used:.2f} {spent.get('unit', '')} so far, {share:.0f} percent of it"
+        )
     forecast = about.get("forecastSpend") or {}
     if forecast:
         unit = forecast.get("unit") or spent.get("unit") or ""
-        print(f"       forecast    {float(forecast.get('amount') or 0):.2f} {unit} by the end of the month".rstrip())
-    told = sorted({e for n in (about.get("notifications") or {}).values() for e in (n.get("contactEmails") or [])})
-    print(f"       alerts      {', '.join(f'{s}%' for s in SPENT_AT)} of what is spent, and {FORECAST_AT}% of the forecast")
+        print(
+            f"       forecast    {float(forecast.get('amount') or 0):.2f} {unit} by the end of the month".rstrip()
+        )
+    told = sorted(
+        {
+            e
+            for n in (about.get("notifications") or {}).values()
+            for e in (n.get("contactEmails") or [])
+        }
+    )
+    print(
+        f"       alerts      {', '.join(f'{s}%' for s in SPENT_AT)} of what is spent, and {FORECAST_AT}% of the forecast"
+    )
     print(f"       told        {', '.join(told) or 'nobody'}")
     note("what a budget reports lags a few hours behind, the way all Azure billing does")
-    links(("this budget in the portal", subscription_link("budgets", {**state(), "subscription": subscription})))
+    links(
+        (
+            "this budget in the portal",
+            subscription_link("budgets", {**state(), "subscription": subscription}),
+        )
+    )
     return 0
 
 
@@ -159,9 +211,15 @@ def main() -> int:
     args = arguments(__doc__, options)
     settings()  # read, so a broken settings.env is found here rather than later
     az = Az(args.dry_run)
-    begin("00b", "A budget", "Nothing is created that costs anything. This is the guard on the credit.")
+    begin(
+        "00b",
+        "A budget",
+        "Nothing is created that costs anything. This is the guard on the credit.",
+    )
 
-    who = az("account", "show", reads=True, quiet=True, allow_fail=True) if not args.dry_run else None
+    who = (
+        az("account", "show", reads=True, quiet=True, allow_fail=True) if not args.dry_run else None
+    )
     if who is None and not args.dry_run:
         stop("Not signed in. Run 00_login.py first.")
     subscription = (who or {}).get("id", "<your subscription>")
@@ -174,7 +232,9 @@ def main() -> int:
         step(f"Taking off {args.name}")
         az("rest", "--method", "delete", "--url", url(subscription, args.name), allow_fail=True)
         done("gone, and nothing else changed")
-        note("the resources it was watching are still there: 99_delete_everything.py is what removes those")
+        note(
+            "the resources it was watching are still there: 99_delete_everything.py is what removes those"
+        )
         return 0
 
     if args.dry_run and not email:
@@ -196,23 +256,38 @@ def main() -> int:
         }
     }
     print(f"       covers      the whole subscription, not one resource group")
-    print(f"       alerts      {', '.join(f'{s}%' for s in SPENT_AT)} of what is spent, and {FORECAST_AT}% of the forecast")
+    print(
+        f"       alerts      {', '.join(f'{s}%' for s in SPENT_AT)} of what is spent, and {FORECAST_AT}% of the forecast"
+    )
     print(f"       emails      {email}")
     az(
         "rest",
-        "--method", "put",
-        "--url", url(subscription, args.name),
-        "--headers", "Content-Type=application/json",
-        "--body", json.dumps(body),
-        "--output", "none",
+        "--method",
+        "put",
+        "--url",
+        url(subscription, args.name),
+        "--headers",
+        "Content-Type=application/json",
+        "--body",
+        json.dumps(body),
+        "--output",
+        "none",
     )
     done(f"{args.name} is set")
-    note("Azure does not switch anything off when you pass a budget; it tells you, which is the point")
+    note(
+        "Azure does not switch anything off when you pass a budget; it tells you, which is the point"
+    )
     note("run this again with another --amount to change it: one budget, replaced, never two")
 
     links(
-        ("the budget in the portal", subscription_link("budgets", {**state(), "subscription": subscription})),
-        ("what it has cost so far", subscription_link("cost", {**state(), "subscription": subscription})),
+        (
+            "the budget in the portal",
+            subscription_link("budgets", {**state(), "subscription": subscription}),
+        ),
+        (
+            "what it has cost so far",
+            subscription_link("cost", {**state(), "subscription": subscription}),
+        ),
     )
     finish(
         f"The credit is watched. An email goes to {email} at {SPENT_AT[0]} percent of {args.amount:g}.",

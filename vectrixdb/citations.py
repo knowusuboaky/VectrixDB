@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from pathlib import PurePath
+from pathlib import PurePath, PureWindowsPath
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 __all__ = [
@@ -87,7 +87,16 @@ def _slides(name: str) -> bool:
 
 
 def _source_name(source: Any, fallback: str) -> str:
-    """A short name for a source: a file's basename, a label as given, else the id."""
+    """A short name for a source, without square brackets.
+
+    A file's basename, a label as given, else the id. The brackets go for the
+    reason they go from a heading: ``Invoice [final].pdf`` written inside a
+    citation's own brackets would end it early.
+    """
+    return re.sub(r"[\[\]]", "", _source_label(source, fallback)).strip() or fallback
+
+
+def _source_label(source: Any, fallback: str) -> str:
     if isinstance(source, PurePath):
         return source.name
     if isinstance(source, str) and source.strip():
@@ -95,7 +104,11 @@ def _source_name(source: Any, fallback: str) -> str:
         looks_like_path = ("/" in text or "\\" in text) or (
             "." in text and " " not in text and len(text) < 260
         )
-        return PurePath(text).name if looks_like_path else text
+        if not looks_like_path:
+            return text
+        # A Windows path is named by its last part on every platform, so a
+        # citation written on Linux for C:\docs\q3.pdf still reads q3.pdf.
+        return PureWindowsPath(text).name if "\\" in text else PurePath(text).name
     return fallback
 
 
@@ -186,7 +199,10 @@ def readable_citation_for(
             # printed number to a place in the file would mean nothing.
             first, last = str(page_label), str(page_label_end) if runs_on else ""
         else:
-            first, last = str(int(page)), str(int(page_end)) if runs_on and page_end is not None else ""
+            first, last = (
+                str(int(page)),
+                str(int(page_end)) if runs_on and page_end is not None else "",
+            )
         if _slides(name):
             where = f"slides {first}-{last}" if last else f"slide {first}"
         else:

@@ -52,18 +52,30 @@ def docx_bytes(paragraphs=("Hello from Word.",), body_xml=None):
 
 class TestAFileIsReadAsWhatItIs:
     def test_a_macro_enabled_word_file_is_a_word_file(self, tmp_path):
-        (tmp_path / "policy.docm").write_bytes(docx_bytes(["Remote work is allowed two days a week."]))
+        (tmp_path / "policy.docm").write_bytes(
+            docx_bytes(["Remote work is allowed two days a week."])
+        )
         doc = load(tmp_path / "policy.docm")
-        assert doc.metadata["kind"] == "docx" and "two days a week" in doc.text and "PK" not in doc.text
+        assert (
+            doc.metadata["kind"] == "docx"
+            and "two days a week" in doc.text
+            and "PK" not in doc.text
+        )
 
     def test_a_docx_renamed_doc_is_a_docx(self, tmp_path):
         (tmp_path / "renamed.doc").write_bytes(docx_bytes(["Read as what it is."]))
         assert load(tmp_path / "renamed.doc").text.strip() == "Read as what it is."
 
     def test_rtf_named_doc_is_rtf(self, tmp_path):
-        (tmp_path / "minutes.doc").write_bytes(b"{\\rtf1\\ansi{\\fonttbl{\\f0 Arial;}}\\f0 Board minutes\\par The board approved the plan.\\par}")
+        (tmp_path / "minutes.doc").write_bytes(
+            b"{\\rtf1\\ansi{\\fonttbl{\\f0 Arial;}}\\f0 Board minutes\\par The board approved the plan.\\par}"
+        )
         doc = load(tmp_path / "minutes.doc")
-        assert doc.metadata["kind"] == "rtf" and "Board minutes\nThe board approved the plan." in doc.text and "Arial" not in doc.text
+        assert (
+            doc.metadata["kind"] == "rtf"
+            and "Board minutes\nThe board approved the plan." in doc.text
+            and "Arial" not in doc.text
+        )
 
     def test_a_zip_archive_is_not_a_document(self, tmp_path):
         buffer = io.BytesIO()
@@ -101,7 +113,11 @@ class TestAFileIsReadAsWhatItIs:
 
     def test_the_first_bytes_alone_name_the_kind(self):
         assert media_kind_of(b"%PDF-1.7") == "pdf"
-        assert media_kind_of(b"PK\x03\x04") == media_kind_of(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") == "office"
+        assert (
+            media_kind_of(b"PK\x03\x04")
+            == media_kind_of(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+            == "office"
+        )
         assert media_kind_of(b"{\\rtf1\\ansi") == "rtf"
         assert media_kind_of(b"\x89PNG\r\n") == "image"
         assert media_kind_of(b"RIFF\x00\x00\x00\x00WAVEfmt ") == "audio"
@@ -134,7 +150,10 @@ class TestTextInTheEncodingItIsIn:
         assert load(tmp_path / "policy.md").metadata["title"] == "Café policy"
 
     def test_a_form_feed_is_where_a_page_ends(self, tmp_path):
-        (tmp_path / "report.txt").write_text("Page one about liquidity.\fPage two about capital.\fPage three about funding.", encoding="utf-8")
+        (tmp_path / "report.txt").write_text(
+            "Page one about liquidity.\fPage two about capital.\fPage three about funding.",
+            encoding="utf-8",
+        )
         doc = load(tmp_path / "report.txt")
         assert doc.metadata["pages"] == 3 and [n for _o, n in doc.pages] == [1, 2, 3]
 
@@ -148,22 +167,32 @@ class TestTextInTheEncodingItIsIn:
 
 class TestADelimitedFileInWhateverItUses:
     def test_a_semicolon_file_keeps_its_decimal_commas(self, tmp_path):
-        (tmp_path / "eu.csv").write_text("Region;Year;Revenue\nEMEA;2024;1200,50\nAPAC;2024;950,25\n", encoding="utf-8")
+        (tmp_path / "eu.csv").write_text(
+            "Region;Year;Revenue\nEMEA;2024;1200,50\nAPAC;2024;950,25\n", encoding="utf-8"
+        )
         assert "Region: EMEA; Year: 2024; Revenue: 1200,50" in load(tmp_path / "eu.csv").text
 
     def test_excels_sep_line_says_the_delimiter_and_is_not_a_header(self, tmp_path):
-        (tmp_path / "excel.csv").write_text("sep=;\nRegion;Revenue\nEMEA;1200\nAPAC;950\n", encoding="utf-8")
+        (tmp_path / "excel.csv").write_text(
+            "sep=;\nRegion;Revenue\nEMEA;1200\nAPAC;950\n", encoding="utf-8"
+        )
         text = load(tmp_path / "excel.csv").text
         assert "Region: EMEA; Revenue: 1200" in text and "sep" not in text
 
-    @pytest.mark.parametrize("delimiter,name", [("\t", "data.tsv"), ("|", "data.csv"), ("\t", "data.csv")])
+    @pytest.mark.parametrize(
+        "delimiter,name", [("\t", "data.tsv"), ("|", "data.csv"), ("\t", "data.csv")]
+    )
     def test_tabs_and_pipes(self, tmp_path, delimiter, name):
         rows = ["Region", "Revenue"], ["EMEA", "1200"], ["APAC", "950"]
-        (tmp_path / name).write_text("\n".join(delimiter.join(r) for r in rows) + "\n", encoding="utf-8")
+        (tmp_path / name).write_text(
+            "\n".join(delimiter.join(r) for r in rows) + "\n", encoding="utf-8"
+        )
         assert "Region: EMEA; Revenue: 1200" in load(tmp_path / name).text
 
     def test_a_windows_1252_csv(self, tmp_path):
-        (tmp_path / "w.csv").write_bytes("Branch,City\nCafé René,Montréal\nLes Halles,Québec\n".encode("cp1252"))
+        (tmp_path / "w.csv").write_bytes(
+            "Branch,City\nCafé René,Montréal\nLes Halles,Québec\n".encode("cp1252")
+        )
         assert "Branch: Café René; City: Montréal" in load(tmp_path / "w.csv").text
 
 
@@ -231,9 +260,14 @@ class TestOpenDocument:
         )
         doc = load(tmp_path / "policy.odt")
         assert doc.text.startswith("# Remote work\n\nStaff may work from home.")
-        assert "- Two days a week\n\n- With a manager's approval" in doc.text or "- Two days a week" in doc.text
+        assert (
+            "- Two days a week\n\n- With a manager's approval" in doc.text
+            or "- Two days a week" in doc.text
+        )
         assert "Region: EMEA; Revenue: 1200" in doc.text
-        assert doc.metadata["title"] == "Remote Work Policy" and [h[1] for h in doc.headings] == ["Remote work"]
+        assert doc.metadata["title"] == "Remote Work Policy" and [h[1] for h in doc.headings] == [
+            "Remote work"
+        ]
 
 
 # ============================================================ excel ===
@@ -296,7 +330,13 @@ class TestEveryRowOfAWorkbook:
         import builtins
 
         real = builtins.__import__
-        monkeypatch.setattr(builtins, "__import__", lambda name, *a, **k: (_ for _ in ()).throw(ImportError(name)) if name == "xlrd" else real(name, *a, **k))
+        monkeypatch.setattr(
+            builtins,
+            "__import__",
+            lambda name, *a, **k: (
+                (_ for _ in ()).throw(ImportError(name)) if name == "xlrd" else real(name, *a, **k)
+            ),
+        )
         with pytest.raises(DependencyError, match="xlrd"):
             _load_xls(tmp_path / "old.xls")
 
@@ -308,17 +348,21 @@ class TestWhatThePageDoesNotShowIsNotRead:
     def test_hidden_word_text_is_not_read(self, tmp_path):
         body = (
             '<w:p><w:r><w:t xml:space="preserve">The policy applies to all staff. </w:t></w:r>'
-            '<w:r><w:rPr><w:vanish/></w:rPr><w:t>Drafting note: remove before publishing.</w:t></w:r></w:p>'
+            "<w:r><w:rPr><w:vanish/></w:rPr><w:t>Drafting note: remove before publishing.</w:t></w:r></w:p>"
             '<w:p><w:r><w:rPr><w:vanish w:val="false"/></w:rPr><w:t>Shown, the switch is off.</w:t></w:r></w:p>'
         )
         (tmp_path / "h.docx").write_bytes(docx_bytes(body_xml=body))
         text = load(tmp_path / "h.docx").text
-        assert "Drafting note" not in text and "applies to all staff" in text and "Shown, the switch is off." in text
+        assert (
+            "Drafting note" not in text
+            and "applies to all staff" in text
+            and "Shown, the switch is off." in text
+        )
 
     def test_a_content_control_showing_its_placeholder_is_not_read(self, tmp_path):
         body = (
-            '<w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent><w:p><w:r><w:t>Click or tap here to enter text.</w:t></w:r></w:p></w:sdtContent></w:sdt>'
-            '<w:sdt><w:sdtPr/><w:sdtContent><w:p><w:r><w:t>Filled in by the author.</w:t></w:r></w:p></w:sdtContent></w:sdt>'
+            "<w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent><w:p><w:r><w:t>Click or tap here to enter text.</w:t></w:r></w:p></w:sdtContent></w:sdt>"
+            "<w:sdt><w:sdtPr/><w:sdtContent><w:p><w:r><w:t>Filled in by the author.</w:t></w:r></w:p></w:sdtContent></w:sdt>"
         )
         (tmp_path / "c.docx").write_bytes(docx_bytes(body_xml=body))
         text = load(tmp_path / "c.docx").text
@@ -327,7 +371,11 @@ class TestWhatThePageDoesNotShowIsNotRead:
     def test_a_markdown_comment_is_not_read_but_code_is_code(self):
         text = "# Notes\n\n<!-- internal: the margin is 42% -->\n\nVisible.\n\n```html\n<!-- a comment in code stays -->\n```\n"
         cleaned = _markdown_without_comments(text)
-        assert "margin is 42%" not in cleaned and "Visible." in cleaned and "a comment in code stays" in cleaned
+        assert (
+            "margin is 42%" not in cleaned
+            and "Visible." in cleaned
+            and "a comment in code stays" in cleaned
+        )
 
 
 # ============================================================ the quality gate ===
@@ -339,13 +387,17 @@ class TestTheGateJudgesProseNotTables:
         assert extraction_quality(rows).usable
 
     def test_a_pdf_table_row_shape_is_usable(self):
-        rows = "\n".join(f"Line item {i}; 2025 Q3: {i * 7:,}; 2024 Q3: ({i * 3:,})" for i in range(30))
+        rows = "\n".join(
+            f"Line item {i}; 2025 Q3: {i * 7:,}; 2024 Q3: ({i * 3:,})" for i in range(30)
+        )
         assert extraction_quality(rows).usable
 
     def test_prose_with_a_semicolon_and_a_colon_is_still_prose(self):
         from vectrixdb.quality import _is_row
 
-        assert not _is_row("Rates rose sharply through the spring; however: the bank held its forecast for the year unchanged.")
+        assert not _is_row(
+            "Rates rose sharply through the spring; however: the bank held its forecast for the year unchanged."
+        )
 
     def test_the_words_a_chart_prints_are_not_prose(self):
         """A chart's axis values and labels on one line score as a list, not as garbled sentences: as prose, this page fails."""
@@ -361,7 +413,9 @@ class TestTheGateJudgesProseNotTables:
         from vectrixdb.quality import degrade
 
         prose = "The committee reviewed the quarterly liquidity position and concluded that the bank remains well capitalised under every stress scenario considered this year."
-        text = "Region: EMEA; Revenue: 1200\n" + degrade(prose, 0.6, 3) + "\n" + degrade(prose, 0.6, 4)
+        text = (
+            "Region: EMEA; Revenue: 1200\n" + degrade(prose, 0.6, 3) + "\n" + degrade(prose, 0.6, 4)
+        )
         assert not extraction_quality(text).usable
 
 
@@ -375,8 +429,25 @@ class TestSpeechWhenItIsBusy:
         def transport(method, url, headers, body, timeout):
             return answers.pop(0)
 
-        ok = (200, {}, json.dumps({"phrases": [{"offsetMilliseconds": 0, "durationMilliseconds": 1000, "text": "Hello.", "locale": "fr-CA"}]}).encode())
-        return AzureSpeech("https://s.cognitiveservices.azure.com", "k", transport=transport, sleep=waits.append), ok
+        ok = (
+            200,
+            {},
+            json.dumps(
+                {
+                    "phrases": [
+                        {
+                            "offsetMilliseconds": 0,
+                            "durationMilliseconds": 1000,
+                            "text": "Hello.",
+                            "locale": "fr-CA",
+                        }
+                    ]
+                }
+            ).encode(),
+        )
+        return AzureSpeech(
+            "https://s.cognitiveservices.azure.com", "k", transport=transport, sleep=waits.append
+        ), ok
 
     def test_a_busy_answer_is_asked_again_after_the_wait_it_names(self):
         waits = []
@@ -417,8 +488,15 @@ class TestAVideoWithNoSound:
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **k: Done())
         heard = []
-        doc = Video(audio=lambda data, name: heard.append(name))(b"\x00\x00\x00\x18ftypmp42", "slides.mp4")
-        assert doc.text == "" and doc.metadata["speech"] == "none" and doc.metadata["sound_track"] is False and heard == []
+        doc = Video(audio=lambda data, name: heard.append(name))(
+            b"\x00\x00\x00\x18ftypmp42", "slides.mp4"
+        )
+        assert (
+            doc.text == ""
+            and doc.metadata["speech"] == "none"
+            and doc.metadata["sound_track"] is False
+            and heard == []
+        )
 
 
 # ============================================================ the extraction app ===
@@ -444,7 +522,10 @@ def one_line_pdf(text: str) -> bytes:
     xref = len(out)
     out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(bodies) + 1)
     out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
-    return out + b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(bodies) + 1, xref)
+    return out + b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(bodies) + 1,
+        xref,
+    )
 
 
 @pytest.fixture
@@ -456,15 +537,32 @@ def app(monkeypatch, tmp_path):
     from vectrixdb.ingest import LoadedDocument
 
     monkeypatch.setenv("VECTRIXDB_API_KEY", "k")
-    for name in ("VECTRIXDB_SIGNIN", "VECTRIXDB_ALLOW_OPEN", "VECTRIXDB_EXTRACT_PREFIX", "VECTRIXDB_EXTRACT_GATEWAY_PATHS"):
+    for name in (
+        "VECTRIXDB_SIGNIN",
+        "VECTRIXDB_ALLOW_OPEN",
+        "VECTRIXDB_EXTRACT_PREFIX",
+        "VECTRIXDB_EXTRACT_GATEWAY_PATHS",
+    ):
         monkeypatch.delenv(name, raising=False)
 
     def speech_network(method, url, headers, body, timeout):
-        phrases = [{"offsetMilliseconds": 0, "durationMilliseconds": 3000, "text": "Call me at 416-555-0198 or sarah.mitchell@example.com."}]
+        phrases = [
+            {
+                "offsetMilliseconds": 0,
+                "durationMilliseconds": 3000,
+                "text": "Call me at 416-555-0198 or sarah.mitchell@example.com.",
+            }
+        ]
         return 200, {}, json.dumps({"phrases": phrases}).encode()
 
     pdf_bytes = one_line_pdf("Served as octet-stream, read as a PDF.")
-    pages = {"https://files.example.test/download?id=7": (200, {"Content-Type": "application/octet-stream"}, pdf_bytes)}
+    pages = {
+        "https://files.example.test/download?id=7": (
+            200,
+            {"Content-Type": "application/octet-stream"},
+            pdf_bytes,
+        )
+    }
 
     class Inline:
         def submit(self, fn, *args):
@@ -493,6 +591,10 @@ class TestTheAppAfterTheAudit:
 
     def test_a_file_served_as_octet_stream_is_read_by_its_bytes(self, app):
         pytest.importorskip("pypdfium2")
-        reply = app.post("/transcribe/auto", json={"url": "https://files.example.test/download?id=7"}, headers={"api-key": "k"})
+        reply = app.post(
+            "/transcribe/auto",
+            json={"url": "https://files.example.test/download?id=7"},
+            headers={"api-key": "k"},
+        )
         assert reply.status_code == 200, reply.text
         assert "read as a PDF" in reply.text and "%PDF" not in reply.text

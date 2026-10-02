@@ -15,12 +15,36 @@ import ast
 import builtins
 import importlib
 import sys
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.9 and 3.10
+    import tomli as tomllib  # type: ignore[no-redef]
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _stdlib_names() -> frozenset:
+    """The standard library's top-level names; Python 3.10 lists them, 3.9 is asked module by module."""
+    listed = getattr(sys, "stdlib_module_names", None)
+    if listed is not None:
+        return frozenset(listed)
+    import sysconfig
+
+    stdlib = Path(sysconfig.get_paths()["stdlib"]).resolve()
+    names = set(sys.builtin_module_names)
+    for entry in stdlib.iterdir():
+        if entry.suffix == ".py" or (entry.is_dir() and not entry.name.startswith("site-packages")):
+            names.add(entry.stem)
+    for entry in (stdlib / "lib-dynload").glob("*.so"):
+        names.add(entry.name.split(".")[0])
+    return frozenset(names)
+
+
+STDLIB = _stdlib_names()
 
 #: The one subpackage allowed to import an extra's packages at module scope.
 #: It earns that because nothing reaches it except through its `__init__`,
@@ -99,7 +123,7 @@ def test_no_module_level_import_of_an_undeclared_package():
             elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
                 names = [node.module.split(".")[0]]
             for name in names:
-                if name in sys.stdlib_module_names or name.startswith("vectrixdb"):
+                if name in STDLIB or name.startswith("vectrixdb"):
                     continue
                 if name in core or name in guarded:
                     continue

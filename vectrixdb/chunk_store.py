@@ -40,7 +40,20 @@ import hashlib
 import json
 import os
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, Iterable, Iterator, List, Mapping, Optional, Protocol, Sequence, Tuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    cast,
+)
 from urllib.parse import urlsplit
 
 from ._time import parse_iso, utcnow, utcnow_iso
@@ -73,7 +86,11 @@ class CollectionChunks(Protocol):
     """
 
     def put(
-        self, ids: Sequence[str], texts: Sequence[Optional[str]], metadata: Sequence[Mapping[str, Any]], written: str
+        self,
+        ids: Sequence[str],
+        texts: Sequence[Optional[str]],
+        metadata: Sequence[Mapping[str, Any]],
+        written: str,
     ) -> None:
         """These chunks, replacing any under the same ids. One already here keeps the time it was first written; a new one takes ``written``."""
 
@@ -186,7 +203,9 @@ def _weight(operation: Tuple[str, Tuple[Any, ...]]) -> int:
     return len(json.dumps(args[0], default=str)) if kind == "upsert" else 100
 
 
-def _batches(operations: Sequence[Tuple[str, Tuple[Any, ...]]]) -> Iterator[List[Tuple[str, Tuple[Any, ...]]]]:
+def _batches(
+    operations: Sequence[Tuple[str, Tuple[Any, ...]]],
+) -> Iterator[List[Tuple[str, Tuple[Any, ...]]]]:
     """Operations cut into batches Cosmos takes: a hundred at most, and under a megabyte."""
     group: List[Tuple[str, Tuple[Any, ...]]] = []
     size = 0
@@ -242,7 +261,9 @@ class CosmosChunks:
             except ImportError as exc:
                 raise DependencyError("azure-identity", "azure") from exc
             credential = DefaultAzureCredential()
-        client = CosmosClient(f"https://{parts.hostname}:{parts.port or 443}/", credential=credential)
+        client = CosmosClient(
+            f"https://{parts.hostname}:{parts.port or 443}/", credential=credential
+        )
         database_name, container_name = names
         container = client.get_database_client(database_name).get_container_client(container_name)
         try:
@@ -253,7 +274,9 @@ class CosmosChunks:
             try:
                 database = client.create_database_if_not_exists(database_name)
                 container = database.create_container_if_not_exists(
-                    id=container_name, partition_key=PartitionKey(path="/collection"), indexing_policy=INDEXING
+                    id=container_name,
+                    partition_key=PartitionKey(path="/collection"),
+                    indexing_policy=INDEXING,
                 )
             except Exception as refused:
                 raise ConfigurationError(
@@ -294,7 +317,11 @@ class _CosmosCollection:
     # -------------------------------------------------------------- writes
 
     def put(
-        self, ids: Sequence[str], texts: Sequence[Optional[str]], metadata: Sequence[Mapping[str, Any]], written: str
+        self,
+        ids: Sequence[str],
+        texts: Sequence[Optional[str]],
+        metadata: Sequence[Mapping[str, Any]],
+        written: str,
     ) -> None:
         rows: Dict[str, Tuple[str, Optional[str], Mapping[str, Any]]] = {}
         for point_id, text, meta in zip(ids, texts, metadata):
@@ -304,7 +331,10 @@ class _CosmosCollection:
             return
         first = self._held(list(rows))
         self._write(
-            [("upsert", (self._item(key, point, text, meta, first.get(key) or written),)) for key, (point, text, meta) in rows.items()]
+            [
+                ("upsert", (self._item(key, point, text, meta, first.get(key) or written),))
+                for key, (point, text, meta) in rows.items()
+            ]
         )
 
     def delete(self, ids: Sequence[str]) -> int:
@@ -321,10 +351,20 @@ class _CosmosCollection:
                 if _status(exc) == 404:
                     return False
                 raise
-            changed = {**dict(item.get("metadata") or {}), **dict(metadata)} if merge else dict(metadata)
-            body = self._item(key, str(item.get("point") or id), item.get("text"), changed, str(item.get("written") or utcnow_iso()))
+            changed = (
+                {**dict(item.get("metadata") or {}), **dict(metadata)} if merge else dict(metadata)
+            )
+            body = self._item(
+                key,
+                str(item.get("point") or id),
+                item.get("text"),
+                changed,
+                str(item.get("written") or utcnow_iso()),
+            )
             try:
-                self._container.replace_item(item=key, body=body, etag=item.get("_etag"), match_condition=_if_unchanged())
+                self._container.replace_item(
+                    item=key, body=body, etag=item.get("_etag"), match_condition=_if_unchanged()
+                )
             except Exception as exc:
                 if _status(exc) == 404:
                     return False
@@ -340,7 +380,9 @@ class _CosmosCollection:
         self._write([("delete", (key,)) for key in keys])
         return len(keys)
 
-    def _item(self, key: str, point_id: str, text: Optional[str], meta: Mapping[str, Any], written: str) -> Dict[str, Any]:
+    def _item(
+        self, key: str, point_id: str, text: Optional[str], meta: Mapping[str, Any], written: str
+    ) -> Dict[str, Any]:
         from .documents import _plain
 
         metadata = _plain(dict(meta or {}))
@@ -442,11 +484,15 @@ class _CosmosCollection:
             metadata=dict(item.get("metadata") or {}),
             text=item.get("text"),
             created_at=parse_iso(item.get("written")) or utcnow(),
-            updated_at=datetime.fromtimestamp(changed, timezone.utc) if changed is not None else None,
+            updated_at=datetime.fromtimestamp(changed, timezone.utc)
+            if changed is not None
+            else None,
         )
 
     def ids(self, limit: int, offset: int) -> List[str]:
-        return [str(value) for value in self._query(_PAGE_OF_IDS, offset=int(offset), limit=int(limit))]
+        return [
+            str(value) for value in self._query(_PAGE_OF_IDS, offset=int(offset), limit=int(limit))
+        ]
 
     def each(self) -> Iterator[Tuple[str, Dict[str, Any]]]:
         for row in self._query(_EACH):

@@ -1,12 +1,12 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-fancy-pypi-readme>=24"]
 build-backend = "hatchling.build"
 
 [project]
 name = "vectrixdb"
 version = "2.2.0"
 description = "Where vectors come alive - A lightweight, visual-first vector database with embedded ML models"
-readme = "README.md"
+dynamic = ["readme"]
 license = "Apache-2.0"
 requires-python = ">=3.9"
 authors = [
@@ -71,6 +71,17 @@ dev = [
     # FastAPI's TestClient is built on it. The mcp extra happened to bring it,
     # so a test job without mcp stopped at collection, before a single test ran.
     "httpx>=0.24.0",
+    # Draws the PDFs the layout tests read, and nothing else: the reader under
+    # test is PDFium. Without it the sixty tests of the PDF reader skipped
+    # everywhere, CI included, and seven faults in what a PDF reads as went
+    # unnoticed. Not a runtime dependency, and AGPL, so it stays here.
+    "pymupdf>=1.24.0",
+    # The blank-page tests draw their pages with it; the library only needs it
+    # when asked to tell a blank scan from a page.
+    "pillow>=10.0.0",
+    # Three tests read pyproject.toml; tomllib arrived in Python 3.11, and the
+    # 3.9 and 3.10 jobs stopped at collection without this.
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
 # REST API server and built-in dashboard
 api = [
@@ -242,6 +253,23 @@ Documentation = "https://knowusuboaky.github.io/VectrixDB/"
 Repository = "https://github.com/knowusuboaky/VectrixDB"
 Changelog = "https://github.com/knowusuboaky/VectrixDB/blob/main/CHANGELOG.md"
 Issues = "https://github.com/knowusuboaky/VectrixDB/issues"
+
+# The README's images and links are relative, so they show on GitHub on every
+# branch and while the repository is private. PyPI has no repository to resolve
+# them against, so the long description gets them as addresses on main.
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = 'src="((?:docs|examples)/[^"]+)"'
+replacement = 'src="https://raw.githubusercontent.com/knowusuboaky/VectrixDB/main/\1"'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\((?!https?://|#|mailto:)([^)\s]+)\)'
+replacement = '](https://github.com/knowusuboaky/VectrixDB/blob/main/\1)'
 
 [tool.hatch.build.targets.wheel]
 packages = ["vectrixdb"]

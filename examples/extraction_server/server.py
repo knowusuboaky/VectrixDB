@@ -56,7 +56,14 @@ try:  # the two reply helpers and the key check need none of it
 except ImportError:  # pragma: no cover - only create_app needs it, and says so
     FastAPI = None  # type: ignore[assignment,misc]
 
-__all__ = ["azure_engines", "create_app", "key_is_right", "minutes_reply", "pages_reply", "presented_key"]
+__all__ = [
+    "azure_engines",
+    "create_app",
+    "key_is_right",
+    "minutes_reply",
+    "pages_reply",
+    "presented_key",
+]
 
 #: bytes and the file's name in; the text of each page out, in order, one string a page.
 ReadPages = Callable[[bytes, str], Sequence[str]]
@@ -69,7 +76,9 @@ MAX_BYTES = 200 * 1024 * 1024
 # ------------------------------------------------------------- the replies ---
 
 
-def pages_reply(page_texts: Sequence[str], metadata: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+def pages_reply(
+    page_texts: Sequence[str], metadata: Optional[Mapping[str, Any]] = None
+) -> Dict[str, Any]:
     """The JSON reply for a paged document: the text, and where each page starts in it.
 
     ``pages`` is a list of ``[offset, page number]``: the character in
@@ -186,7 +195,10 @@ def create_app(
 
     async def body_of(request: Request) -> Tuple[bytes, str]:
         if expected and not key_is_right(presented_key(request.headers), expected):
-            raise HTTPException(status_code=401, detail="A key is needed: send it as api-key or as Authorization: Bearer.")
+            raise HTTPException(
+                status_code=401,
+                detail="A key is needed: send it as api-key or as Authorization: Bearer.",
+            )
         said = request.headers.get("content-length")
         if said and said.isdigit() and int(said) > max_bytes:
             raise HTTPException(status_code=413, detail=f"The file is over {max_bytes} bytes.")
@@ -194,14 +206,20 @@ def create_app(
         if len(data) > max_bytes:
             raise HTTPException(status_code=413, detail=f"The file is over {max_bytes} bytes.")
         if not data:
-            raise HTTPException(status_code=400, detail="The request has no body. Send the file's bytes as the body.")
+            raise HTTPException(
+                status_code=400,
+                detail="The request has no body. Send the file's bytes as the body.",
+            )
         # The name says what the file is, and nothing is ever opened by it.
         name = os.path.basename(request.headers.get("x-filename", "").replace("\\", "/")) or "file"
         return data, name
 
     @app.get("/health")
     def health() -> Dict[str, Any]:
-        return {"status": "ok", "routes": sorted(r.path for r in app.routes if r.path.startswith(("/ocr", "/asr")))}
+        return {
+            "status": "ok",
+            "routes": sorted(r.path for r in app.routes if r.path.startswith(("/ocr", "/asr"))),
+        }
 
     if read_pdf is not None:
 
@@ -244,12 +262,18 @@ def azure_engines() -> Tuple[ReadPages, ReadPages, Transcribe]:
         from azure.core.credentials import AzureKeyCredential
 
         client = DocumentIntelligenceClient(
-            os.environ["AZURE_DOCINTEL_ENDPOINT"], AzureKeyCredential(os.environ["AZURE_DOCINTEL_KEY"])
+            os.environ["AZURE_DOCINTEL_ENDPOINT"],
+            AzureKeyCredential(os.environ["AZURE_DOCINTEL_KEY"]),
         )
-        result = client.begin_analyze_document("prebuilt-read", body=data, content_type="application/octet-stream").result()
+        result = client.begin_analyze_document(
+            "prebuilt-read", body=data, content_type="application/octet-stream"
+        ).result()
         # One string a page, in the page's own order, and an empty one for a
         # page with nothing on it: the numbering is what a citation rests on.
-        texts = {page.page_number: "\n".join(line.content for line in page.lines or []) for page in result.pages or []}
+        texts = {
+            page.page_number: "\n".join(line.content for line in page.lines or [])
+            for page in result.pages or []
+        }
         return [texts.get(n, "") for n in range(1, max(texts, default=0) + 1)]
 
     def transcribe(data: bytes, name: str) -> List[Tuple[float, float, str]]:
@@ -258,12 +282,18 @@ def azure_engines() -> Tuple[ReadPages, ReadPages, Transcribe]:
 
         import azure.cognitiveservices.speech as speech
 
-        config = speech.SpeechConfig(subscription=os.environ["AZURE_SPEECH_KEY"], region=os.environ["AZURE_SPEECH_REGION"])
-        with tempfile.NamedTemporaryFile(suffix=os.path.splitext(name)[1] or ".wav", delete=False) as handle:
+        config = speech.SpeechConfig(
+            subscription=os.environ["AZURE_SPEECH_KEY"], region=os.environ["AZURE_SPEECH_REGION"]
+        )
+        with tempfile.NamedTemporaryFile(
+            suffix=os.path.splitext(name)[1] or ".wav", delete=False
+        ) as handle:
             handle.write(data)
             path = handle.name
         try:
-            recognizer = speech.SpeechRecognizer(speech_config=config, audio_config=speech.audio.AudioConfig(filename=path))
+            recognizer = speech.SpeechRecognizer(
+                speech_config=config, audio_config=speech.audio.AudioConfig(filename=path)
+            )
             heard: List[Tuple[float, float, str]] = []
             finished = threading.Event()
 

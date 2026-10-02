@@ -38,7 +38,17 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from ..exceptions import ConfigurationError, DependencyError
 from .engines import ComprehendEngine, LanguageEngine, PresidioEngine, download_models
 from .normalize import normalize
-from .patterns import DEFAULT_TYPES, IN_PLACE, MASK, TYPES, WEIGHTS, Found, RegexEngine, apply, score_of
+from .patterns import (
+    DEFAULT_TYPES,
+    IN_PLACE,
+    MASK,
+    TYPES,
+    WEIGHTS,
+    Found,
+    RegexEngine,
+    apply,
+    score_of,
+)
 
 __all__ = [
     "DEFAULT_TYPES",
@@ -92,8 +102,6 @@ LANGUAGES_ENV = "VECTRIXDB_MASKING_LANGUAGES"
 _regex = RegexEngine()
 
 
-
-
 def mask_text(text: str) -> str:
     """``text`` with its email addresses, phone numbers and card numbers masked where they stand, by their shape."""
     if not text:
@@ -101,7 +109,9 @@ def mask_text(text: str) -> str:
     return apply(text, _regex.find(text, ("credit_card", "phone", "email")))
 
 
-def mask_value(value: Any, keep: Callable[[str], bool] = lambda key: False, _key: Optional[str] = None) -> Any:
+def mask_value(
+    value: Any, keep: Callable[[str], bool] = lambda key: False, _key: Optional[str] = None
+) -> Any:
     """Every string inside ``value`` masked: a result, its metadata, a list of highlights.
 
     ``keep`` names the keys whose values are left as they are, whole subtrees
@@ -178,7 +188,9 @@ def types_of(given: Union[None, bool, str, Iterable[str]]) -> Tuple[str, ...]:
         if cleaned == "all":
             return TYPES
         if cleaned not in TYPES and cleaned not in ("national_id", "organization"):
-            raise ConfigurationError(f"{cleaned!r} is not a type that can be masked: {', '.join(TYPES)}")
+            raise ConfigurationError(
+                f"{cleaned!r} is not a type that can be masked: {', '.join(TYPES)}"
+            )
         if cleaned not in out:
             out.append(cleaned)
     return tuple(out)
@@ -213,7 +225,14 @@ def mask(
         else:
             regex_only = True
     found.extend(_regex.find(folded, wanted, language))
-    return Masked(apply(folded, found), _settle(found), score_of(found), chosen.name if chosen is not None else "regex", language, regex_only)
+    return Masked(
+        apply(folded, found),
+        _settle(found),
+        score_of(found),
+        chosen.name if chosen is not None else "regex",
+        language,
+        regex_only,
+    )
 
 
 def _settle(found: Sequence[Found]) -> List[Found]:
@@ -254,7 +273,10 @@ def _secret(env: Mapping[str, str], name: str) -> Optional[str]:
 def languages_from_env(env: Optional[Mapping[str, str]] = None) -> Tuple[str, ...]:
     """The languages the documents are in, ``VECTRIXDB_MASKING_LANGUAGES``, ``en,fr`` unless said."""
     source = os.environ if env is None else env
-    named = [part.strip().lower().split("-")[0] for part in str(source.get(LANGUAGES_ENV) or "en,fr").split(",")]
+    named = [
+        part.strip().lower().split("-")[0]
+        for part in str(source.get(LANGUAGES_ENV) or "en,fr").split(",")
+    ]
     out = []
     for lang in named:
         if lang and lang not in out:
@@ -281,7 +303,9 @@ def engine_from_env(env: Optional[Mapping[str, str]] = None) -> Any:
     source = os.environ if env is None else env
     name = str(source.get(ENGINE_ENV) or "auto").strip().lower()
     if name not in ENGINES:
-        raise ConfigurationError(f"{ENGINE_ENV} is {name!r}. It can be {', '.join(ENGINES[:-1])} or {ENGINES[-1]}")
+        raise ConfigurationError(
+            f"{ENGINE_ENV} is {name!r}. It can be {', '.join(ENGINES[:-1])} or {ENGINES[-1]}"
+        )
     endpoint = str(source.get("AZURE_LANGUAGE_ENDPOINT") or "").strip()
     languages = languages_from_env(source)
     if name == "auto":
@@ -295,13 +319,20 @@ def engine_from_env(env: Optional[Mapping[str, str]] = None) -> Any:
         return _regex
     if name == "language":
         if not endpoint:
-            raise ConfigurationError(f"{ENGINE_ENV}=language needs AZURE_LANGUAGE_ENDPOINT, the Language resource's address")
+            raise ConfigurationError(
+                f"{ENGINE_ENV}=language needs AZURE_LANGUAGE_ENDPOINT, the Language resource's address"
+            )
         return LanguageEngine(endpoint, _secret(source, "AZURE_LANGUAGE_KEY"), languages=languages)
     if name == "presidio":
         if not _presidio_installed():
-            raise DependencyError("VECTRIXDB_MASKING_ENGINE=presidio needs Presidio: pip install 'vectrixdb[masking]', then vectrixdb download-models --type masking")
+            raise DependencyError(
+                "VECTRIXDB_MASKING_ENGINE=presidio needs Presidio: pip install 'vectrixdb[masking]', then vectrixdb download-models --type masking"
+            )
         return PresidioEngine(languages=languages)
-    return ComprehendEngine(region=str(source.get("AWS_REGION") or source.get("AWS_DEFAULT_REGION") or "").strip() or None)
+    return ComprehendEngine(
+        region=str(source.get("AWS_REGION") or source.get("AWS_DEFAULT_REGION") or "").strip()
+        or None
+    )
 
 
 def describe_engine(engine: Any, languages: Optional[Sequence[str]] = None) -> Dict[str, Any]:
@@ -310,7 +341,9 @@ def describe_engine(engine: Any, languages: Optional[Sequence[str]] = None) -> D
     name = getattr(engine, "name", "regex")
     return {
         "engine": name,
-        "languages": {lang: bool(engine.covers(lang)) if engine is not None else True for lang in langs},
+        "languages": {
+            lang: bool(engine.covers(lang)) if engine is not None else True for lang in langs
+        },
         "patterns_last": True,
         "types": list(TYPES),
         "default_types": list(DEFAULT_TYPES),

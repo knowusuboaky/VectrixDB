@@ -67,9 +67,35 @@ __all__ = [
 #: the third decimal with ``varied`` switched off, which is the point of it
 #: scaling the score rather than being weighed in. The first cut of that
 #: signal did cost recall: it took a table's row of "yes yes yes yes" for a
-#: loop. Re-run the script before changing this, and
-#: calibrate() against your own labelled set if your documents are not
-#: English prose.
+#: loop. Measured again on 2026-10-02, tokens now stripped of the punctuation
+#: at their edges so "ratio," and "**Docs:**" read as words: clean mean 0.978
+#: (min 0.737), 20% max 0.878; at 0.78 precision 0.933, recall 0.998,
+#: balanced accuracy 0.909, AUC 0.998; the best threshold for the set is now
+#: 0.87, left unmoved so that terse clean Markdown stays usable.
+#:
+#: Whether to raise it was settled on 2026-10-02 against a second set the
+#: eval does not hold: twenty clean documents of the shapes the docs prose
+#: is not, scored with :func:`extraction_quality` (they are the corpus in
+#: tests/unit/test_quality.py, ``TestTheShapesCleanTextTakes``). On the eval
+#: set, ``python scripts/quality_eval.py --threshold T``: 0.78 precision
+#: 0.933 recall 0.998 balanced accuracy 0.909; 0.80 0.954 / 0.995 / 0.938;
+#: 0.81 0.968 / 0.994 / 0.955; 0.82 0.977 / 0.992 / 0.966; 0.83 0.985 /
+#: 0.992 / 0.976. On the clean shapes: an email 0.967, legal prose 0.990, a
+#: memo 1.000, a FAQ 0.966, a product page 0.867, an API reference 0.885, a
+#: recipe 0.837, terse Markdown with headings and bullets 0.819, a bulleted
+#: requirements list 0.813, a Markdown table 0.780 (its rows set aside, too
+#: little prose left to judge), a slide outline of two-to-five-word lines
+#: 0.766, a changelog 0.765, meeting minutes 0.741, dated log notes 0.740,
+#: a six-line bullet checklist 0.721, a code-heavy README 0.641, a bare
+#: CSV 0.537; and, with no English in them, German 0.741, Spanish 0.718,
+#: French 0.661. So the gain at 0.80 to 0.83 is bought with terse clean
+#: Markdown (0.81 to 0.82 is the band it sits in), and no threshold above
+#: 0.78 clears every clean English shape by 0.02; the threshold stays. The
+#: shapes under the line are the known limit: short lines with few function
+#: words, code, tables, and prose in a language the ``known_words`` list
+#: does not hold. Re-run the script and the corpus test before changing
+#: this, and calibrate() against your own labelled set if your documents
+#: are not English prose.
 DEFAULT_THRESHOLD = 0.78
 
 # Common English words. Function words and the most frequent content words:
@@ -108,6 +134,9 @@ _COMMON = frozenset(
 )
 
 _TOKEN = re.compile(r"\S+")
+# Punctuation a clean word carries at its edges: "ratio," and "(pending" are
+# words, and markdown's **bold**, _emphasis_ and `code` marks are not noise.
+_EDGES = ".,;:!?'\"()\u2018\u2019\u201c\u201d*_`-"
 _ALPHA = re.compile(r"^[A-Za-z]+$")
 _MIXED = re.compile(r"(?=.*\d)(?=.*[A-Za-z])")
 _PLAIN = re.compile(r"[A-Za-z0-9\s.,;:!?'\"()\-‘’“”/&%$]")
@@ -228,12 +257,24 @@ def extraction_quality(text: str, threshold: float = DEFAULT_THRESHOLD) -> Extra
         return _prose_quality(text, threshold)
     prose = "\n".join(line for line in lines if not _is_row(line))
     judged = _prose_quality(prose, threshold)
-    total = len(_TOKEN.findall(text))
+    total = len(_words(text))
     if judged.tokens < 5:
         # Too little prose to judge: usable, with the signals of the whole text reported.
         whole = _prose_quality(text, threshold)
-        return ExtractionQuality(score=max(whole.score, threshold), threshold=threshold, signals=whole.signals, tokens=total)
-    return ExtractionQuality(score=judged.score, threshold=threshold, signals=judged.signals, tokens=total)
+        return ExtractionQuality(
+            score=max(whole.score, threshold),
+            threshold=threshold,
+            signals=whole.signals,
+            tokens=total,
+        )
+    return ExtractionQuality(
+        score=judged.score, threshold=threshold, signals=judged.signals, tokens=total
+    )
+
+
+def _words(text: str) -> list:
+    """Whitespace tokens with their edge punctuation stripped; a bare bullet is no token."""
+    return [w for w in (t.strip(_EDGES) for t in _TOKEN.findall(text)) if w]
 
 
 def _prose_quality(text: str, threshold: float = DEFAULT_THRESHOLD) -> ExtractionQuality:
@@ -256,7 +297,7 @@ def _prose_quality(text: str, threshold: float = DEFAULT_THRESHOLD) -> Extractio
     the signals it could compute, because a two-word heading is not an OCR
     failure and refusing it would be the heuristic nobody trusts.
     """
-    tokens = _TOKEN.findall(text)
+    tokens = _words(text)
     count = len(tokens)
     if count == 0:
         return ExtractionQuality(score=0.0, threshold=threshold, signals={}, tokens=0)

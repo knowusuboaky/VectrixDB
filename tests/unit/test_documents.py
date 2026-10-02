@@ -46,11 +46,21 @@ def rows(db):
 
 class TestFrontMatter:
     def test_a_document_reads_back_exactly(self):
-        source = CONTRACT + "\n![Fees by tier](fees.png)\n\n> **Figure 1.** Bar chart, three tiers.\n"
-        doc = markdown_document(source, pages=[(0, 1), (CONTRACT.index("## Late"), 2)], metadata={"source": "a.pdf"})
-        back = LoadedDocument.from_markdown(doc.to_markdown({"doc_id": "a.pdf", "extractor": "ocr"}))
+        source = (
+            CONTRACT + "\n![Fees by tier](fees.png)\n\n> **Figure 1.** Bar chart, three tiers.\n"
+        )
+        doc = markdown_document(
+            source, pages=[(0, 1), (CONTRACT.index("## Late"), 2)], metadata={"source": "a.pdf"}
+        )
+        back = LoadedDocument.from_markdown(
+            doc.to_markdown({"doc_id": "a.pdf", "extractor": "ocr"})
+        )
         assert (back.text, back.pages, back.headings, back.figures, back.metadata) == (
-            doc.text, doc.pages, doc.headings, doc.figures, doc.metadata,
+            doc.text,
+            doc.pages,
+            doc.headings,
+            doc.figures,
+            doc.metadata,
         )
 
     def test_the_file_opens_in_any_front_matter_reader(self):
@@ -66,18 +76,29 @@ class TestFrontMatter:
             "classification: 2\nreviewed: 2026-05-25\nactive: true\nnested:\n  deep: value\n---\n\n# Program\n"
         )
         assert front == {
-            "doc_id": "wildfire-deferment", "title": "Payment Deferment", "events": ["wildfire", "flood"],
-            "audience": ["personal", "wealth"], "classification": 2, "reviewed": "2026-05-25", "active": True,
+            "doc_id": "wildfire-deferment",
+            "title": "Payment Deferment",
+            "events": ["wildfire", "flood"],
+            "audience": ["personal", "wealth"],
+            "classification": 2,
+            "reviewed": "2026-05-25",
+            "active": True,
             "nested": None,
         }
         assert body == "# Program\n"
 
     def test_no_front_matter_is_no_front_matter(self):
-        assert split_front_matter("# Title\n\n---\n\nA rule is not front matter.") == ({}, "# Title\n\n---\n\nA rule is not front matter.")
+        assert split_front_matter("# Title\n\n---\n\nA rule is not front matter.") == (
+            {},
+            "# Title\n\n---\n\nA rule is not front matter.",
+        )
 
     def test_a_files_own_front_matter_becomes_every_chunks_metadata(self, tmp_path):
         page = tmp_path / "deferment.md"
-        page.write_text("---\ndoc_id: deferment\nclient_id: acme\nclassification: 2\n---\n\n" + CONTRACT, encoding="utf-8")
+        page.write_text(
+            "---\ndoc_id: deferment\nclient_id: acme\nclassification: 2\n---\n\n" + CONTRACT,
+            encoding="utf-8",
+        )
         db = open_db(tmp_path)
         try:
             db.add_document(page, chunk="markdown", metadata={"classification": 3})
@@ -89,12 +110,17 @@ class TestFrontMatter:
             db.close()
 
     def test_an_extracted_file_dropped_among_the_originals_indexes_as_its_source(self, tmp_path):
-        kept = markdown_document(CONTRACT, metadata={"source": "s3://inbox/scan.pdf", "filename": "scan.pdf"})
+        kept = markdown_document(
+            CONTRACT, metadata={"source": "s3://inbox/scan.pdf", "filename": "scan.pdf"}
+        )
         stray = tmp_path / "scan.pdf.md"
         stray.write_text(kept.to_markdown({"doc_id": "scan.pdf"}), encoding="utf-8")
         doc = load(stray)
         assert doc.text == kept.text and "vectrixdb" not in doc.metadata
-        assert doc.metadata["filename"] == "scan.pdf" and doc.metadata["source"] == "s3://inbox/scan.pdf"
+        assert (
+            doc.metadata["filename"] == "scan.pdf"
+            and doc.metadata["source"] == "s3://inbox/scan.pdf"
+        )
         assert doc.metadata["doc_id"] == "scan.pdf"
 
 
@@ -105,7 +131,10 @@ class TestStoredName:
             ("scan.pdf", "scan.pdf.md"),
             ("notes.md", "notes.md.md"),
             ("s3://inbox/acme/scan.pdf", "inbox/acme/scan.pdf.md"),
-            ("https://acct.blob.core.windows.net/docs/acme/q3 report.pdf", "acct.blob.core.windows.net/docs/acme/q3 report.pdf.md"),
+            (
+                "https://acct.blob.core.windows.net/docs/acme/q3 report.pdf",
+                "acct.blob.core.windows.net/docs/acme/q3 report.pdf.md",
+            ),
             ("C:\\inbox\\acme\\a.pdf", "C%3A/inbox/acme/a.pdf.md"),
             ("../../etc/passwd", "etc/passwd.md"),
             ("what?.pdf", "what%3F.pdf.md"),
@@ -123,14 +152,23 @@ class TestKeepSource:
     def test_the_markdown_is_kept_beside_the_collection(self, tmp_path):
         db = open_db(tmp_path, keep_source=True)
         try:
-            db.add_document(CONTRACT, doc_id="contracts/acme-msa.pdf", chunk="markdown",
-                            metadata={"client_id": "acme"}, source_version="etag-1")
+            db.add_document(
+                CONTRACT,
+                doc_id="contracts/acme-msa.pdf",
+                chunk="markdown",
+                metadata={"client_id": "acme"},
+                source_version="etag-1",
+            )
             root = tmp_path / "db" / "docs.documents"
             assert (root / "contracts" / "acme-msa.pdf.md").is_file()
             listing = json.loads((root / "_index.json").read_text(encoding="utf-8"))
             entry = listing["documents"]["contracts/acme-msa.pdf"]
-            assert entry["file"] == "contracts/acme-msa.pdf.md" and entry["source_version"] == "etag-1"
-            assert entry["chunking"]["chunk"] == "markdown" and entry["user_metadata"] == {"client_id": "acme"}
+            assert (
+                entry["file"] == "contracts/acme-msa.pdf.md" and entry["source_version"] == "etag-1"
+            )
+            assert entry["chunking"]["chunk"] == "markdown" and entry["user_metadata"] == {
+                "client_id": "acme"
+            }
             assert db.document("contracts/acme-msa.pdf").text == markdown_document(CONTRACT).text
             assert "contracts/acme-msa.pdf" in db.documents and len(db.documents) == 1
         finally:
@@ -167,14 +205,18 @@ class TestKeepSource:
             db.close()
 
     def test_delete_moves_it_aside_and_retention_removes_it(self, tmp_path):
-        db = open_db(tmp_path, keep_source=DocumentStore(LocalFiles(tmp_path / "kept"), retain_days=0))
+        db = open_db(
+            tmp_path, keep_source=DocumentStore(LocalFiles(tmp_path / "kept"), retain_days=0)
+        )
         try:
             db.add_document(CONTRACT, doc_id="a.pdf")
             db.delete_document("a.pdf")
             kept = tmp_path / "kept"
             assert not (kept / "a.pdf.md").exists() and db.documents.ids() == []
             moved = list((kept / "_deleted").rglob("a.pdf.md"))
-            assert len(moved) == 1 and moved[0].read_text(encoding="utf-8").startswith("---\nvectrixdb")
+            assert len(moved) == 1 and moved[0].read_text(encoding="utf-8").startswith(
+                "---\nvectrixdb"
+            )
             assert db.documents.purge_deleted() == 1 and not list((kept / "_deleted").rglob("*.md"))
             with pytest.raises(DocumentNotFoundError):
                 db.document("a.pdf")
@@ -206,25 +248,38 @@ class TestRechunk:
         scan.write_bytes(b"%PDF")
         db = open_db(tmp_path, keep_source=True, extractors={".pdf": reader})
         try:
-            db.add_document(scan, doc_id="scan.pdf", chunk="markdown", metadata={"client_id": "acme"})
+            db.add_document(
+                scan, doc_id="scan.pdf", chunk="markdown", metadata={"client_id": "acme"}
+            )
             before = db.index_build_id
             assert len(rows(db)) == 2
             written = db.rechunk("scan.pdf", chunk="sentence", chunk_size=70, overlap=0)
             after = rows(db)
             assert calls == ["scan.pdf"], "the extractor ran once, at the first ingestion"
             assert written == len(after) > 2
-            assert all(r[2]["client_id"] == "acme" and r[2]["_vx_chunk_strategy"] == "sentence" for r in after)
+            assert all(
+                r[2]["client_id"] == "acme" and r[2]["_vx_chunk_strategy"] == "sentence"
+                for r in after
+            )
             assert {r[2]["page"] for r in after} == {1, 2}
             assert db.index_build_id != before
             assert db.documents.entry("scan.pdf")["chunking"]["chunk_size"] == 70
-            assert db.rechunk("scan.pdf") == written, "what was asked for last time is the default next time"
+            assert db.rechunk("scan.pdf") == written, (
+                "what was asked for last time is the default next time"
+            )
         finally:
             db.close()
 
     def test_an_empty_index_is_filled_from_the_store_alone(self, tmp_path):
         first = open_db(tmp_path, keep_source=tmp_path / "kept")
-        first.add_document(CONTRACT, doc_id="a.pdf", chunk="markdown", metadata={"client_id": "acme"})
-        first.add_document("# Other\n\nA second document about basalt and how it forms.", doc_id="b.pdf", chunk="markdown")
+        first.add_document(
+            CONTRACT, doc_id="a.pdf", chunk="markdown", metadata={"client_id": "acme"}
+        )
+        first.add_document(
+            "# Other\n\nA second document about basalt and how it forms.",
+            doc_id="b.pdf",
+            chunk="markdown",
+        )
         first.close()
 
         fresh = open_db(tmp_path, name="rebuilt", keep_source=tmp_path / "kept")
@@ -232,7 +287,10 @@ class TestRechunk:
             assert fresh.count() == 0
             assert fresh.rechunk() == 3
             assert {r[2]["_vx_doc"] for r in rows(fresh)} == {"a.pdf", "b.pdf"}
-            assert [r[2].get("client_id") for r in rows(fresh) if r[2]["_vx_doc"] == "a.pdf"] == ["acme", "acme"]
+            assert [r[2].get("client_id") for r in rows(fresh) if r[2]["_vx_doc"] == "a.pdf"] == [
+                "acme",
+                "acme",
+            ]
         finally:
             fresh.close()
 
@@ -240,7 +298,9 @@ class TestRechunk:
         db = open_db(tmp_path, keep_source=True)
         try:
             db.add_document(CONTRACT, doc_id="a.pdf", chunk="markdown")
-            db.add_document("# B\n\nSomething else entirely, about granite.", doc_id="b.pdf", chunk="markdown")
+            db.add_document(
+                "# B\n\nSomething else entirely, about granite.", doc_id="b.pdf", chunk="markdown"
+            )
             assert db.rechunk(where=lambda e: e["doc_id"].startswith("b")) == 1
             with pytest.raises(TypeError, match="does not take metadata"):
                 db.rechunk("a.pdf", metadata={"client_id": "zeta"})
@@ -261,7 +321,10 @@ class TestReextract:
         def reader(data, name):
             state["calls"].append(name)
             suffix = " Improved reading." if state["label"] == "ocr-v2" else ""
-            return LoadedDocument(text=f"The covenant in {name} is tested quarterly.{suffix}", metadata={"extractor": state["label"]})
+            return LoadedDocument(
+                text=f"The covenant in {name} is tested quarterly.{suffix}",
+                metadata={"extractor": state["label"]},
+            )
 
         db = open_db(tmp_path, keep_source=True, extractors={".pdf": reader})
         try:
@@ -287,7 +350,9 @@ class TestGuards:
 
         return IngestWorker(db, LocalFetcher(), chunk="markdown")
 
-    @pytest.mark.parametrize("layout", ["store inside watched", "watched inside store", "the same folder"])
+    @pytest.mark.parametrize(
+        "layout", ["store inside watched", "watched inside store", "the same folder"]
+    )
     def test_a_watcher_refuses_a_folder_that_overlaps_the_store(self, tmp_path, layout):
         from vectrixdb.worker import LocalWatcher
 
@@ -314,7 +379,11 @@ class TestGuards:
             before = db.count()
             kept_file = tmp_path / "kept" / "a.pdf.md"
             outcome = self._worker(db).handle(IngestEvent("created", str(kept_file)))
-            assert outcome.action == "ignored" and db.count() == before and db.documents.ids() == ["a.pdf"]
+            assert (
+                outcome.action == "ignored"
+                and db.count() == before
+                and db.documents.ids() == ["a.pdf"]
+            )
         finally:
             db.close()
 
@@ -362,9 +431,14 @@ class TestTwoStageVersioning:
         db, worker, fetcher, extractions = self._setup(tmp_path)
         try:
             fetcher.objects["s3://inbox/a.pdf"] = b"v1 bytes"
-            assert worker.handle(IngestEvent("created", "s3://inbox/a.pdf", version="etag-1")).action == "created"
+            assert (
+                worker.handle(IngestEvent("created", "s3://inbox/a.pdf", version="etag-1")).action
+                == "created"
+            )
             again = worker.handle(IngestEvent("created", "s3://inbox/a.pdf", version="etag-1"))
-            assert again.action == "unchanged" and len(fetcher.fetched) == 1 and len(extractions) == 1
+            assert (
+                again.action == "unchanged" and len(fetcher.fetched) == 1 and len(extractions) == 1
+            )
         finally:
             db.close()
 
@@ -374,14 +448,33 @@ class TestTwoStageVersioning:
         db, worker, fetcher, extractions = self._setup(tmp_path)
         try:
             fetcher.objects["s3://inbox/a.pdf"] = b"v1 bytes"
-            assert worker.handle(IngestEvent("created", "s3://inbox/a.pdf", version="etag-1")).action == "created"
-            saved_again = worker.handle(IngestEvent("created", "s3://inbox/a.pdf", version="etag-2"))
-            assert saved_again.action == "unchanged" and len(fetcher.fetched) == 2 and len(extractions) == 1, "fetched to hash it, not extracted again"
+            assert (
+                worker.handle(IngestEvent("created", "s3://inbox/a.pdf", version="etag-1")).action
+                == "created"
+            )
+            saved_again = worker.handle(
+                IngestEvent("created", "s3://inbox/a.pdf", version="etag-2")
+            )
+            assert (
+                saved_again.action == "unchanged"
+                and len(fetcher.fetched) == 2
+                and len(extractions) == 1
+            ), "fetched to hash it, not extracted again"
             store = getattr(db, "_kept", None) or getattr(db, "kept", None)
-            entry = store.entry(worker.doc_id_of("s3://inbox/a.pdf")) if store is not None and hasattr(store, "entry") else None
+            entry = (
+                store.entry(worker.doc_id_of("s3://inbox/a.pdf"))
+                if store is not None and hasattr(store, "entry")
+                else None
+            )
             if entry is not None:
-                assert entry["source_version"] == "etag-2" and len(entry["source_sha"]) == 16, "the new version is noted with the bytes' hash"
-            assert worker.handle(IngestEvent("created", "s3://inbox/a.pdf", version="etag-2")).action == "unchanged" and len(fetcher.fetched) == 2, "and the new version is not even fetched next time"
+                assert entry["source_version"] == "etag-2" and len(entry["source_sha"]) == 16, (
+                    "the new version is noted with the bytes' hash"
+                )
+            assert (
+                worker.handle(IngestEvent("created", "s3://inbox/a.pdf", version="etag-2")).action
+                == "unchanged"
+                and len(fetcher.fetched) == 2
+            ), "and the new version is not even fetched next time"
         finally:
             db.close()
 
@@ -393,7 +486,9 @@ class TestTwoStageVersioning:
             fetcher.objects["inbox/a.pdf"] = b"v1 bytes"
             worker.handle(IngestEvent("created", "inbox/a.pdf"))
             assert worker.handle(IngestEvent("created", "inbox/a.pdf")).action == "unchanged"
-            assert len(fetcher.fetched) == 2 and len(extractions) == 1, "fetched to hash it, not extracted again"
+            assert len(fetcher.fetched) == 2 and len(extractions) == 1, (
+                "fetched to hash it, not extracted again"
+            )
         finally:
             db.close()
 
@@ -407,9 +502,16 @@ class TestTwoStageVersioning:
             build = db.index_build_id
             fetcher.objects["inbox/a.pdf"] = b"v2 saved again"
             outcome = worker.handle(IngestEvent("created", "inbox/a.pdf", version="etag-2"))
-            assert outcome.action == "unchanged" and len(extractions) == 2 and db.index_build_id == build
+            assert (
+                outcome.action == "unchanged"
+                and len(extractions) == 2
+                and db.index_build_id == build
+            )
             assert db.documents.entry("inbox/a.pdf")["source_version"] == "etag-2"
-            assert worker.handle(IngestEvent("created", "inbox/a.pdf", version="etag-2")).action == "unchanged"
+            assert (
+                worker.handle(IngestEvent("created", "inbox/a.pdf", version="etag-2")).action
+                == "unchanged"
+            )
             assert len(extractions) == 2
         finally:
             db.close()
@@ -494,7 +596,11 @@ class FakeBlobService:
 
         class Container:
             def list_blobs(self, name_starts_with=""):
-                return [{"name": b} for c, b in sorted(service.blobs) if c == container and b.startswith(name_starts_with)]
+                return [
+                    {"name": b}
+                    for c, b in sorted(service.blobs)
+                    if c == container and b.startswith(name_starts_with)
+                ]
 
         return Container()
 

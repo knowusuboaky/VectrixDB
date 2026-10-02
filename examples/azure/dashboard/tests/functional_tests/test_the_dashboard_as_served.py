@@ -56,7 +56,9 @@ SCRIPTS = ("app.js", "trends.js", "evaluate.js", "chunking.js", "theme.js", "sso
 def browser():
     """The Backend serving the real build, with nothing upstream to call."""
     served = Settings(upstream="https://retrieval.example.net", site=DIST)
-    answers = httpx.MockTransport(lambda request: httpx.Response(200, json={"reached": request.url.path}))
+    answers = httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"reached": request.url.path})
+    )
     with TestClient(build(served, transport=answers)) as client:
         yield client
 
@@ -79,19 +81,25 @@ class TestThePageABrowserIsHanded:
             assert f'data-page="{name}"' in page, f"the {name} page is missing from the build"
 
     def test_the_brand_is_data_the_page_reads(self, page):
-        found = re.search(r'<script id="vx-brand-data" type="application/json">(.*?)</script>', page, re.S)
+        found = re.search(
+            r'<script id="vx-brand-data" type="application/json">(.*?)</script>', page, re.S
+        )
         assert found, "the brand block is gone, so the page has no name to show"
         assert json.loads(found.group(1))["name"], "a brand with no name leaves the sidebar blank"
 
     def test_it_names_our_own_module_as_well_as_the_copied_pages(self, page):
         for script in SCRIPTS:
             assert f'src="/pages/{script}"' in page
-        assert re.search(r'src="/assets/index-[A-Za-z0-9_-]+\.js"', page), "the Vite build's own module is not linked"
+        assert re.search(r'src="/assets/index-[A-Za-z0-9_-]+\.js"', page), (
+            "the Vite build's own module is not linked"
+        )
 
     def test_nothing_it_names_of_its_own_is_missing(self, browser, page):
         named = set(re.findall(r'(?:src|href)="(/[^"]+)"', page))
         for path in sorted(named):
-            assert browser.get(path).status_code == 200, f"{path} is named by the page and not served"
+            assert browser.get(path).status_code == 200, (
+                f"{path} is named by the page and not served"
+            )
         assert len(named) >= len(SCRIPTS) + 2, "the page names fewer files than the build has"
 
     @pytest.mark.parametrize("path", ["/", "/pages/app.js"])
@@ -102,10 +110,18 @@ class TestThePageABrowserIsHanded:
 
     def test_a_server_holding_nothing_says_so(self, browser, page):
         """Where the library's pages offered to load a demo collection, ours say what to do instead."""
-        assert "Create collection" in page and "Open the guide" not in page and 'data-page="learn"' not in page
+        assert (
+            "Create collection" in page
+            and "Open the guide" not in page
+            and 'data-page="learn"' not in page
+        )
         served = browser.get("/pages/app.js").text
-        assert "Nothing is indexed yet" in served, "the Overview has nothing to say on an empty server"
-        assert "No collections yet" in served, "the Collections page has nothing to say on an empty server"
+        assert "Nothing is indexed yet" in served, (
+            "the Overview has nothing to say on an empty server"
+        )
+        assert "No collections yet" in served, (
+            "the Collections page has nothing to say on an empty server"
+        )
 
 
 class TestWhatIsCachedAndWhatIsNot:
@@ -117,7 +133,9 @@ class TestWhatIsCachedAndWhatIsNot:
     def test_a_name_that_stays_the_same_is_never_cached(self, browser, path):
         got = browser.get(path)
         assert got.status_code == 200
-        assert got.headers["cache-control"] == NEVER, f"{path} keeps its name, so a deploy must be seen"
+        assert got.headers["cache-control"] == NEVER, (
+            f"{path} keeps its name, so a deploy must be seen"
+        )
 
 
 class TestWhatTheMountDoesNotTakeOver:

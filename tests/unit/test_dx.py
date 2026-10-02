@@ -78,7 +78,10 @@ class TestOpenAIEmbedder:
         monkeypatch.setitem(sys.modules, "openai", None)
         with pytest.raises(DependencyError) as caught:
             OpenAIEmbedder("m", api_key="k")
-        assert str(caught.value) == "'openai' is required for this feature. Install it with: pip install openai"
+        assert (
+            str(caught.value)
+            == "'openai' is required for this feature. Install it with: pip install openai"
+        )
 
     def test_vectrix_takes_an_openai_reference(self, tmp_path, monkeypatch):
         import vectrixdb.models.openai_compat as mod
