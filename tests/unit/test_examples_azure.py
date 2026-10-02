@@ -2858,7 +2858,10 @@ class TestEveryPartSaysWhatItNeeds:
         )
 
     def test_every_extra_a_list_asks_for_is_one_the_library_offers(self):
-        import tomllib
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # Python 3.9 and 3.10
+            import tomli as tomllib  # type: ignore[no-redef]
 
         offered = set(
             tomllib.loads((AZURE.parents[1] / "pyproject.toml").read_text(encoding="utf-8"))[
@@ -5213,6 +5216,7 @@ class TestTheIngestAppAsksForTheKey:
     @pytest.fixture
     def lean(self, monkeypatch):
         pytest.importorskip("fastapi")
+        pytest.importorskip("azure.functions")
         from unittest import mock
 
         from fastapi.testclient import TestClient

@@ -3549,7 +3549,9 @@ class Collection:
             if self._backend == "usearch":
                 # An index that was never saved comes back without this
                 # key; the point is still a point, with no vector to show.
-                held = self._index.get(idx)
+                # Asked first whether it holds the key: usearch before 2.26
+                # answered get() for a removed key with the vector it had.
+                held = self._index.get(idx) if self._index.contains(idx) else None
                 vector = held.tolist() if held is not None else None
 
             return Point(

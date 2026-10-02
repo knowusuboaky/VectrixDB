@@ -319,11 +319,10 @@ def probe(url: str, fetch: Optional[Fetch] = None, *, gateway: Any = None) -> Li
                 "error",
                 f"two Access-Control-Allow-Origin values came back ({allow}): the gateway and the server are both adding CORS, and a browser refuses that. Keep it in the gateway policy and leave VECTRIXDB_CORS_ORIGINS unset",
             )
-        elif allow == "*":
-            say(
-                "warn",
-                "any origin is allowed (Access-Control-Allow-Origin: *). The dashboard is same-origin and needs none; name the origins that do",
-            )
         else:
+            # "*" or the asking origin echoed back: which of the two a server
+            # that allows any origin sends depends on the Starlette release,
+            # so the two read the same. A keys-only server allows any origin
+            # on purpose; with sign-in on it names them or sends none.
             say("ok", "one CORS answer at most, so a browser is not given two")
     return found

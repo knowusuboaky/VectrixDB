@@ -79,6 +79,9 @@ dev = [
     # The blank-page tests draw their pages with it; the library only needs it
     # when asked to tell a blank scan from a page.
     "pillow>=10.0.0",
+    # Three tests read pyproject.toml; tomllib arrived in Python 3.11, and the
+    # 3.9 and 3.10 jobs stopped at collection without this.
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
 # REST API server and built-in dashboard
 api = [

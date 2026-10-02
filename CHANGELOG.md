@@ -504,6 +504,20 @@ may change at any time.
     short lines, an invoice, left a line a line.
   - `looks_blank()` read every page as not blank under Pillow 12, whose
     deprecation of `getdata()` raised where warnings are errors.
+  - Three tests imported `tomllib`, which arrived in Python 3.11, so the 3.9
+    and 3.10 jobs stopped at collection; they fall back to `tomli`, now in
+    the `dev` extra for those versions. The clean-install test asked
+    `sys.stdlib_module_names`, which 3.9 lacks; it lists the standard
+    library itself there.
+  - `get()` on a point whose key an index had lost returned the vector it
+    had on usearch before 2.26, which answers `get()` for a removed key; the
+    index is asked whether it holds the key first.
+  - `vectrixdb probe` warned "any origin is allowed" on one Starlette release
+    and not another, because a server allowing any origin sends `*` on the
+    old and the asking origin on the new; the two read the same now, one
+    CORS answer, and only two answers is an error.
+  - The Azure example tests skip without `azure-functions` rather than
+    erroring in a job that does not install the extra.
 
 - **The docs no longer describe what left with visibility.** The dashboard
   page gave a collection six tabs and showed its Settings tab, the sign-in

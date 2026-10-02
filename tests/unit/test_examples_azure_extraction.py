@@ -44,6 +44,7 @@ DEPLOYED = {
 def _import(monkeypatch, env):
     """The app's module, imported fresh with ``env`` as the whole of its VECTRIXDB_ and AZURE_ settings."""
     pytest.importorskip("fastapi")
+    pytest.importorskip("azure.functions")
     for name in FAKED:
         monkeypatch.setitem(sys.modules, name, mock.MagicMock())
     monkeypatch.syspath_prepend(str(EXTRACTION_APP))
