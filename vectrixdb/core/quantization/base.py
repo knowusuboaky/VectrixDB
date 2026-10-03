@@ -12,17 +12,36 @@ from typing import Optional, Dict, Any
 import numpy as np
 
 
+__all__ = [
+    "QuantizationType",
+    "QuantizationConfig",
+    "BaseQuantizer",
+]
+
+
+# ============================================================================
+# THE TYPES, AND THE CONFIG
+# ============================================================================
+#
+# INPUT   a choice of quantization
+# OUTPUT  the enum; the configuration
+#
+# Scalar, binary or product.
+
+
 class QuantizationType(str, Enum):
     """Supported quantization types."""
+
     NONE = "none"
-    SCALAR = "scalar"      # 8-bit scalar quantization
-    BINARY = "binary"      # 1-bit binary quantization
-    PRODUCT = "product"    # Product quantization
+    SCALAR = "scalar"  # 8-bit scalar quantization
+    BINARY = "binary"  # 1-bit binary quantization
+    PRODUCT = "product"  # Product quantization
 
 
 @dataclass
 class QuantizationConfig:
     """Configuration for vector quantization."""
+
     type: QuantizationType = QuantizationType.NONE
 
     # Scalar quantization settings
@@ -67,6 +86,17 @@ class QuantizationConfig:
             pq_train_size=data.get("pq_train_size", 50000),
             pq_iterations=data.get("pq_iterations", 20),
         )
+
+
+# ============================================================================
+# THE BASE QUANTIZER
+# ============================================================================
+#
+# INPUT   float32 vectors
+# OUTPUT  what every quantizer implements: train, quantize, dequantize,
+#         distance
+#
+# Abstract, so the index does not know which it has.
 
 
 class BaseQuantizer(ABC):
@@ -154,10 +184,7 @@ class BaseQuantizer(ABC):
 
     @abstractmethod
     def compute_distances(
-        self,
-        query: np.ndarray,
-        codes: np.ndarray,
-        metric: str = "cosine"
+        self, query: np.ndarray, codes: np.ndarray, metric: str = "cosine"
     ) -> np.ndarray:
         """
         Compute distances between query and quantized vectors.

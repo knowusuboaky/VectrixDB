@@ -4,15 +4,47 @@ VectrixDB Types - Data structures and enums.
 Advanced filtering, indexing options, and search configurations
 that match and exceed Qdrant's capabilities.
 
-Author: Daddy Nyame Owusu - Boakye
+Author: Kwadwo Daddy Nyame Owusu - Boakye
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from .._time import ensure_aware, parse_iso, utcnow
 from enum import Enum
 from typing import Any, Optional, Union, List, Dict
 import numpy as np
 import re
+
+
+__all__ = [
+    "DistanceMetric",
+    "IndexType",
+    "SearchMode",
+    "QuantizationType",
+    "SparseVector",
+    "IndexConfig",
+    "Point",
+    "SearchResult",
+    "SearchResults",
+    "CollectionInfo",
+    "DatabaseInfo",
+    "FilterOperator",
+    "FilterCondition",
+    "Filter",
+    "SearchQuery",
+    "BatchResult",
+]
+
+
+# ============================================================================
+# METRICS, INDEX TYPES, MODES, PUSHDOWN, AND QUANTIZATION
+# ============================================================================
+#
+# INPUT   a choice
+# OUTPUT  the enums a collection is configured with
+#
+# Where a filter actually runs is an enum too, so a policy can require the
+# engine's side.
 
 
 class DistanceMetric(str, Enum):
@@ -54,6 +86,20 @@ class SearchMode(str, Enum):
     SPARSE = "sparse"  # Sparse vector search (BM25-like)
 
 
+class FilterPushdown(str, Enum):
+    """Where a filter actually runs.
+
+    The difference matters to an entitlement policy and to almost nothing
+    else. ``ENGINE`` means the store evaluated it and only matching rows came
+    back. ``POST`` means rows came back and were filtered here, which returns
+    the same documents while leaving the work done proportional to how
+    selective the filter was, and that is measurable from outside.
+    """
+
+    ENGINE = "engine"
+    POST = "post"
+
+
 class QuantizationType(str, Enum):
     """Quantization types for memory optimization."""
 
@@ -63,9 +109,15 @@ class QuantizationType(str, Enum):
     PRODUCT = "product"  # Product quantization
 
 
-# =============================================================================
-# Sparse Vector Support (Qdrant-style)
-# =============================================================================
+# ============================================================================
+# SPARSE VECTORS, AND THE INDEX CONFIG
+# ============================================================================
+#
+# INPUT   indices and values; an index's options
+# OUTPUT  a sparse vector for efficient storage and retrieval; the
+#         configuration of an index
+#
+# Qdrant-style sparse vectors, in the same point as the dense one.
 
 
 @dataclass
@@ -94,9 +146,13 @@ class SparseVector:
 
     def __post_init__(self):
         if len(self.indices) != len(self.values):
-            raise ValueError(f"indices ({len(self.indices)}) and values ({len(self.values)}) must have same length")
+            raise ValueError(
+                f"indices ({len(self.indices)}) and values ({len(self.values)}) must have same length"
+            )
         # Sort by index for efficient operations
-        if self.indices and not all(self.indices[i] <= self.indices[i+1] for i in range(len(self.indices)-1)):
+        if self.indices and not all(
+            self.indices[i] <= self.indices[i + 1] for i in range(len(self.indices) - 1)
+        ):
             sorted_pairs = sorted(zip(self.indices, self.values))
             self.indices = [p[0] for p in sorted_pairs]
             self.values = [p[1] for p in sorted_pairs]
@@ -111,7 +167,9 @@ class SparseVector:
         return cls(indices=indices, values=values)
 
     @classmethod
-    def from_dense(cls, dense: Union[list[float], np.ndarray], threshold: float = 1e-6) -> "SparseVector":
+    def from_dense(
+        cls, dense: Union[list[float], np.ndarray], threshold: float = 1e-6
+    ) -> "SparseVector":
         """Convert dense vector to sparse, keeping only non-zero values."""
         if isinstance(dense, list):
             dense = np.array(dense)
@@ -139,10 +197,12 @@ class SparseVector:
         """
         # Tokenize
         import re
-        tokens = re.findall(r'\b[a-z0-9]+\b', text.lower())
+
+        tokens = re.findall(r"\b[a-z0-9]+\b", text.lower())
 
         # Count term frequencies
         from collections import Counter
+
         tf = Counter(tokens)
 
         # Build sparse vector
@@ -212,10 +272,7 @@ class SparseVector:
         n = self.norm()
         if n == 0:
             return SparseVector(indices=self.indices.copy(), values=self.values.copy())
-        return SparseVector(
-            indices=self.indices.copy(),
-            values=[v / n for v in self.values]
-        )
+        return SparseVector(indices=self.indices.copy(), values=[v / n for v in self.values])
 
     def cosine_similarity(self, other: "SparseVector") -> float:
         """Compute cosine similarity with another sparse vector."""
@@ -285,6 +342,18 @@ class IndexConfig:
         }
 
 
+# ============================================================================
+# POINTS, RESULTS, AND INFORMATION
+# ============================================================================
+#
+# INPUT   an id, vectors and metadata
+# OUTPUT  a point; one result with its scores from each search mode; a list of
+#         results with its metadata; what is known about a collection and a
+#         database
+#
+# The shapes every route and every page reads.
+
+
 @dataclass
 class Point:
     """
@@ -311,7 +380,7 @@ class Point:
     payload: dict[str, Any] = field(default_factory=dict)  # Alias for metadata (Qdrant compat)
     sparse_vector: Optional[Union[SparseVector, dict[int, float]]] = None  # Sparse representation
     text: Optional[str] = None  # Original text for hybrid search
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=utcnow)
     updated_at: Optional[datetime] = None
 
     def __post_init__(self):
@@ -362,8 +431,9 @@ class Point:
             metadata=data.get("metadata", data.get("payload", {})),
             sparse_vector=sparse,
             text=data.get("text"),
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.utcnow(),
-            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None,
+            created_at=(parse_iso(data["created_at"]) if data.get("created_at") else None)
+            or utcnow(),
+            updated_at=parse_iso(data["updated_at"]) if data.get("updated_at") else None,
         )
 
     def has_sparse(self) -> bool:
@@ -388,6 +458,10 @@ class SearchResult:
     vector: Optional[list[float]] = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    # The indexed text. A result that cannot say what it matched is not much
+    # use, and the REST API returned empty strings because this did not exist.
+    text: Optional[str] = None
+
     # Individual scores for transparency
     dense_score: Optional[float] = None  # Dense vector similarity
     sparse_score: Optional[float] = None  # Sparse vector similarity
@@ -396,6 +470,17 @@ class SearchResult:
     # Text search extras
     highlights: Optional[list[str]] = None  # Text snippets
 
+    # How well this matches, from 0 to 1, meaning the same thing whichever
+    # engine answered, and None when there is no honest number. ``score``
+    # orders the list and differs by engine and mode; this carries a
+    # threshold. See vectrixdb.core.relevance.
+    relevance: Optional[float] = None
+    relevance_kind: Optional[str] = None  # similarity, reranker, distance, relative
+    matched_by: Optional[list[str]] = None  # "meaning", "keywords"
+    relevances: Optional[dict[str, float]] = (
+        None  # per dense vector, when a store holds more than one
+    )
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         result = {
@@ -403,6 +488,8 @@ class SearchResult:
             "score": self.score,
             "metadata": self.metadata,
         }
+        if self.text is not None:
+            result["text"] = self.text
         if self.vector is not None:
             result["vector"] = self.vector
         if self.dense_score is not None:
@@ -413,6 +500,13 @@ class SearchResult:
             result["text_score"] = self.text_score
         if self.highlights:
             result["highlights"] = self.highlights
+        if self.relevance is not None:
+            result["relevance"] = self.relevance
+            result["relevance_kind"] = self.relevance_kind
+        if self.matched_by:
+            result["matched_by"] = list(self.matched_by)
+        if self.relevances:
+            result["relevances"] = dict(self.relevances)
         return result
 
 
@@ -425,8 +519,24 @@ class SearchResults:
     total_searched: int
     search_mode: SearchMode = SearchMode.VECTOR
 
+    #: How many candidates an entitlement policy was evaluated against, and
+    #: how many it withheld, split by whether the principal may be told. None
+    #: when no policy was in force, or when the search ran on a storage
+    #: backend that filtered before these could be counted: None is "not
+    #: measured" and zero is "none withheld", and a decision record needs to
+    #: tell them apart.
+    policy_candidates: Optional[int] = None
+    policy_withheld_disclosable: Optional[int] = None
+    policy_withheld_undisclosable: Optional[int] = None
+
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
+        """Convert to dictionary.
+
+        The withheld counts are deliberately absent. They are audit material:
+        the undisclosable one confirms that documents exist outside a scope
+        the caller was refused, which is the thing an ethical wall exists to
+        prevent. They reach a decision record and nothing else.
+        """
         return {
             "results": [r.to_dict() for r in self.results],
             "query_time_ms": self.query_time_ms,
@@ -501,9 +611,17 @@ class DatabaseInfo:
         }
 
 
-# =============================================================================
-# Advanced Filtering System (Better than Qdrant)
-# =============================================================================
+# ============================================================================
+# FILTERING: operators, conditions, and composite filters
+# ============================================================================
+#
+# INPUT   a field, an operator and a value; AND, OR and NOT of them
+# OUTPUT  the filter a search runs, with the absence of a field told from a
+#         null
+#
+# MISSING is not None: a document without the field and a document whose field
+# is null are different documents.
+
 
 class FilterOperator(str, Enum):
     """All supported filter operators."""
@@ -545,6 +663,73 @@ class FilterOperator(str, Enum):
     DATE_RANGE = "date_range"  # Date within range
 
 
+#: Every operator ``Filter.from_dict`` accepts. A name outside this set is a
+#: caller's mistake and is reported when the filter is built, rather than
+#: raising out of the middle of a search against whichever document reached
+#: the dispatch first.
+KNOWN_OPERATORS = frozenset(
+    {
+        "eq",
+        "ne",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "in",
+        "nin",
+        "all",
+        "any",
+        "contains",
+        "icontains",
+        "starts_with",
+        "ends_with",
+        "regex",
+        "between",
+        "date_range",
+        "exists",
+        "is_null",
+        "is_empty",
+        "geo_radius",
+        "geo_box",
+    }
+)
+
+
+class _Missing:
+    """The absence of a field, which is not the same as a null value."""
+
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "MISSING"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+#: Returned when a filter path does not resolve. A stored value can be None;
+#: it can never be this.
+MISSING = _Missing()
+
+
+def _as_datetime(value: Any) -> Optional[datetime]:
+    """An aware datetime from an ISO string or a datetime, else None.
+
+    Bounds given as datetime objects used to crash in ``parse_iso``, and a
+    naive datetime field never compared against the aware bounds.
+    """
+    if isinstance(value, datetime):
+        return ensure_aware(value)
+    if isinstance(value, str):
+        return parse_iso(value)
+    return None
+
+
 @dataclass
 class FilterCondition:
     """A filter condition for metadata queries."""
@@ -553,27 +738,57 @@ class FilterCondition:
     operator: str  # eq, ne, gt, gte, lt, lte, in, nin, contains, etc.
     value: Any
 
+    def _is_member(self, field_value: Any) -> bool:
+        """Whether the field's value is one of ``self.value``.
+
+        A list-valued field matches when it shares at least one value with
+        the operand, which is what every other store means by membership and
+        what makes ``$nin`` the exact negation of ``$in``.
+        """
+        operand = self.value if isinstance(self.value, (list, tuple, set)) else [self.value]
+        if isinstance(field_value, (list, tuple, set)):
+            return any(v in operand for v in field_value)
+        return field_value in operand
+
     def matches(self, metadata: dict[str, Any]) -> bool:
-        """Check if metadata matches this condition."""
+        """Check if metadata matches this condition.
+
+        The semantics docs/reference/filters.md documents, in short: an
+        absent field matches no comparison operator, ``ne`` and ``nin``
+        included (``exists`` is the one operator that sees absence); a
+        present null takes part in equality and membership, not ordering.
+        ``contains`` and ``icontains`` are a substring test against a string
+        field, and against a list field they ask whether an element equals
+        the value: ``"an"`` is in the string ``"banana"`` and is not in the
+        list ``["banana"]``, where it used to match by way of ``str(list)``.
+        """
         # Handle nested field access with dot notation
         field_value = self._get_nested_value(metadata, self.field)
 
-        # Handle existence checks
+        # Existence checks. "present", "null" and "empty" are three different
+        # things and each of these used to conflate two of them.
         if self.operator == "exists":
-            return (field_value is not None) == self.value
+            return (field_value is not MISSING) == self.value
 
         if self.operator == "is_null":
+            # Present and set to null. An absent field is not null.
             return (field_value is None) == self.value
 
         if self.operator == "is_empty":
-            if field_value is None:
-                return self.value
+            # Present and zero-length. Neither absent nor null is empty.
             if isinstance(field_value, (str, list, dict)):
                 return (len(field_value) == 0) == self.value
+            return not self.value
+
+        # An absent field matches no comparison operator.
+        if field_value is MISSING:
             return False
 
-        # For other operators, field must exist
-        if field_value is None:
+        # A present null takes part in equality and membership, where it is a
+        # value like any other, but not in ordering, where it has no place.
+        # Returning False for both eq and ne, as this did, is a contradiction
+        # a caller cannot work around.
+        if field_value is None and self.operator not in ("eq", "ne", "in", "nin"):
             return False
 
         # Comparison operators
@@ -581,20 +796,32 @@ class FilterCondition:
             return field_value == self.value
         elif self.operator == "ne":
             return field_value != self.value
-        elif self.operator == "gt":
-            return field_value > self.value
-        elif self.operator == "gte":
-            return field_value >= self.value
-        elif self.operator == "lt":
-            return field_value < self.value
-        elif self.operator == "lte":
-            return field_value <= self.value
+        elif self.operator in ("gt", "gte", "lt", "lte"):
+            # A metadata field that is a number in some documents and a string
+            # in others used to raise TypeError from whichever row reached
+            # here first, which is a data-dependent crash in the middle of a
+            # search. Values that cannot be ordered against each other simply
+            # do not match.
+            try:
+                if self.operator == "gt":
+                    return bool(field_value > self.value)
+                if self.operator == "gte":
+                    return bool(field_value >= self.value)
+                if self.operator == "lt":
+                    return bool(field_value < self.value)
+                return bool(field_value <= self.value)
+            except TypeError:
+                return False
 
-        # Array operators
+        # Array operators. When the field itself holds a list, membership is
+        # an overlap test: the document matches if the field shares any value
+        # with the operand. Asking `field_value in self.value` put the whole
+        # list inside the operand, which is false for every list field, so
+        # $in matched nothing and $nin, its negation, excluded nothing.
         elif self.operator == "in":
-            return field_value in self.value
+            return self._is_member(field_value)
         elif self.operator == "nin":
-            return field_value not in self.value
+            return not self._is_member(field_value)
         elif self.operator == "all":
             if not isinstance(field_value, list):
                 return False
@@ -604,10 +831,16 @@ class FilterCondition:
                 return field_value in self.value
             return any(v in self.value for v in field_value)
 
-        # String operators
+        # String operators. Against a list, an element that equals the value;
+        # the substring test ran over str(list) and matched its brackets,
+        # commas and the inside of every element.
         elif self.operator == "contains":
+            if isinstance(field_value, (list, tuple, set)):
+                return any(v == self.value or str(v) == str(self.value) for v in field_value)
             return str(self.value) in str(field_value)
         elif self.operator == "icontains":
+            if isinstance(field_value, (list, tuple, set)):
+                return any(str(v).lower() == str(self.value).lower() for v in field_value)
             return str(self.value).lower() in str(field_value).lower()
         elif self.operator == "starts_with":
             return str(field_value).startswith(str(self.value))
@@ -622,21 +855,25 @@ class FilterCondition:
         # Range operator
         elif self.operator == "between":
             if isinstance(self.value, (list, tuple)) and len(self.value) == 2:
-                return self.value[0] <= field_value <= self.value[1]
+                try:
+                    return bool(self.value[0] <= field_value <= self.value[1])
+                except TypeError:
+                    return False
             return False
 
         # Date range
         elif self.operator == "date_range":
             try:
-                if isinstance(field_value, str):
-                    field_date = datetime.fromisoformat(field_value.replace("Z", "+00:00"))
-                elif isinstance(field_value, datetime):
-                    field_date = field_value
-                else:
+                field_date = _as_datetime(field_value)
+                if field_date is None:
                     return False
 
-                start = datetime.fromisoformat(self.value[0].replace("Z", "+00:00"))
-                end = datetime.fromisoformat(self.value[1].replace("Z", "+00:00"))
+                if not isinstance(self.value, (list, tuple)) or len(self.value) != 2:
+                    return False
+                start = _as_datetime(self.value[0])
+                end = _as_datetime(self.value[1])
+                if start is None or end is None:
+                    return False
                 return start <= field_date <= end
             except (ValueError, TypeError):
                 return False
@@ -653,7 +890,13 @@ class FilterCondition:
             raise ValueError(f"Unknown operator: {self.operator}")
 
     def _get_nested_value(self, data: dict, field_path: str) -> Any:
-        """Get value from nested dict using dot notation."""
+        """The value at a dotted path, or ``MISSING`` if the path is not there.
+
+        Returning ``None`` for a path that does not resolve made an absent
+        field indistinguishable from one explicitly set to null, so
+        ``$exists``, ``$is_null`` and ``$is_empty`` were each wrong about one
+        of the two. ``MISSING`` is a sentinel no caller can store.
+        """
         keys = field_path.split(".")
         value = data
         for key in keys:
@@ -664,9 +907,9 @@ class FilterCondition:
                 if 0 <= idx < len(value):
                     value = value[idx]
                 else:
-                    return None
+                    return MISSING
             else:
-                return None
+                return MISSING
         return value
 
     def _geo_radius_match(self, point: Any, params: dict) -> bool:
@@ -695,16 +938,26 @@ class FilterCondition:
             return False
 
     def _geo_box_match(self, point: Any, box: dict) -> bool:
-        """Check if point is within bounding box."""
+        """Whether a point lies inside a bounding box.
+
+        A box may cross the antimeridian, which is what ``min_lon`` greater
+        than ``max_lon`` means: from 179 east through 180 to -179. Comparing
+        the two bounds directly made such a box match nothing at all, so the
+        strip either side of the date line was unreachable.
+        """
         try:
             if not isinstance(point, dict) or "lat" not in point or "lon" not in point:
                 return False
 
             lat, lon = point["lat"], point["lon"]
-            return (
-                box["min_lat"] <= lat <= box["max_lat"] and
-                box["min_lon"] <= lon <= box["max_lon"]
-            )
+            if not (box["min_lat"] <= lat <= box["max_lat"]):
+                return False
+
+            min_lon, max_lon = box["min_lon"], box["max_lon"]
+            if min_lon <= max_lon:
+                return bool(min_lon <= lon <= max_lon)
+            # The box wraps: inside means east of min_lon or west of max_lon.
+            return bool(lon >= min_lon or lon <= max_lon)
         except (KeyError, TypeError):
             return False
 
@@ -771,80 +1024,120 @@ class Filter:
                 ]
             }
         """
-        # Handle Qdrant-style filter
-        if any(k in filter_dict for k in ["must", "should", "must_not"]):
-            return cls._from_qdrant_format(filter_dict)
+        # A filter is a dict at every level. Anything else is refused with
+        # TypeError, the documented error for a malformed filter, rather
+        # than escaping as an AttributeError from deep inside the parser.
+        if not isinstance(filter_dict, dict):
+            raise TypeError(f"filter must be a dict, got {type(filter_dict).__name__}")
 
-        # Handle extended format with $and/$or
-        if "$and" in filter_dict:
-            nested = [cls.from_dict(f) for f in filter_dict["$and"]]
-            return cls(nested=nested, logic="and")
-
-        if "$or" in filter_dict:
-            nested = [cls.from_dict(f) for f in filter_dict["$or"]]
-            return cls(nested=nested, logic="or")
-
-        if "$not" in filter_dict:
-            inner = cls.from_dict(filter_dict["$not"])
-            inner.negate = True
-            return inner
+        # Combinators. Every part of the dict is ANDed: keys beside a
+        # combinator used to be dropped silently, and $not set ``negate`` on
+        # the inner filter instead of wrapping it, so a double $not stayed
+        # negated.
+        qdrant_keys = [k for k in ("must", "should", "must_not") if k in filter_dict]
+        if qdrant_keys or any(k in filter_dict for k in ("$and", "$or", "$not")):
+            rest = dict(filter_dict)
+            parts: list["Filter"] = []
+            if qdrant_keys:
+                parts.append(cls._from_qdrant_format({k: rest.pop(k) for k in qdrant_keys}))
+            if "$and" in rest:
+                clauses = cls._clauses(rest.pop("$and"), "$and")
+                parts.append(cls(nested=[cls.from_dict(f) for f in clauses], logic="and"))
+            if "$or" in rest:
+                clauses = cls._clauses(rest.pop("$or"), "$or")
+                parts.append(cls(nested=[cls.from_dict(f) for f in clauses], logic="or"))
+            if "$not" in rest:
+                parts.append(cls(nested=[cls.from_dict(rest.pop("$not"))], negate=True))
+            if rest:
+                parts.append(cls.from_dict(rest))
+            return parts[0] if len(parts) == 1 else cls(nested=parts, logic="and")
 
         # Handle extended single condition
         if "field" in filter_dict and "op" in filter_dict:
-            return cls(conditions=[FilterCondition(
-                field=filter_dict["field"],
-                operator=filter_dict["op"],
-                value=filter_dict.get("value")
-            )])
+            return cls(
+                conditions=[
+                    FilterCondition(
+                        field=filter_dict["field"],
+                        operator=filter_dict["op"],
+                        value=filter_dict.get("value"),
+                    )
+                ]
+            )
 
         # Simple format
         conditions = []
-        for field, value in filter_dict.items():
-            if isinstance(value, dict):
-                # Complex condition like {"$lt": 100}
+        for field_name, value in filter_dict.items():
+            # Only a dict whose keys are operators is an operator map. Any
+            # dict used to be read as one, so {"dims": {"w": 20}} became the
+            # operator "w" and raised while matching a document.
+            if isinstance(value, dict) and any(str(k).startswith("$") for k in value):
                 for op, v in value.items():
-                    operator = op.lstrip("$")
-                    conditions.append(FilterCondition(field=field, operator=operator, value=v))
+                    operator = str(op).lstrip("$")
+                    if operator not in KNOWN_OPERATORS:
+                        raise ValueError(
+                            f"Unknown filter operator {op!r} on field {field_name!r}. "
+                            f"Known operators: {', '.join(sorted(KNOWN_OPERATORS))}."
+                        )
+                    if operator in ("between", "date_range") and (
+                        not isinstance(v, (list, tuple)) or len(v) != 2
+                    ):
+                        raise ValueError(
+                            f"${operator} on field {field_name!r} takes a two-element "
+                            f"[start, end]; got {v!r}. This used to raise KeyError or "
+                            f"IndexError from inside the search instead."
+                        )
+                    conditions.append(FilterCondition(field=field_name, operator=operator, value=v))
             else:
-                # Simple equality
-                conditions.append(FilterCondition(field=field, operator="eq", value=value))
+                # Simple equality, including against a nested dict.
+                conditions.append(FilterCondition(field=field_name, operator="eq", value=value))
 
         return cls(conditions=conditions)
+
+    @staticmethod
+    def _clauses(value: Any, key: str) -> list:
+        """The list of sub-filters under a combinator key, or TypeError."""
+        if isinstance(value, dict):
+            return [value]
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        raise TypeError(f"{key} takes a list of filters, got {type(value).__name__}")
 
     @classmethod
     def _from_qdrant_format(cls, filter_dict: dict) -> "Filter":
         """Parse Qdrant-style filter format."""
         nested_filters = []
 
-        # Handle "must" (AND conditions)
-        if "must" in filter_dict:
-            must_conditions = []
-            for cond in filter_dict["must"]:
-                must_conditions.append(cls._parse_qdrant_condition(cond))
-            if must_conditions:
-                nested_filters.append(cls(conditions=must_conditions, logic="and"))
+        for key in ("must", "should", "must_not"):
+            if key in filter_dict:
+                filter_dict = dict(filter_dict)
+                filter_dict[key] = cls._clauses(filter_dict[key], key)
 
-        # Handle "should" (OR conditions)
-        if "should" in filter_dict:
-            should_conditions = []
-            for cond in filter_dict["should"]:
-                should_conditions.append(cls._parse_qdrant_condition(cond))
-            if should_conditions:
-                nested_filters.append(cls(conditions=should_conditions, logic="or"))
-
-        # Handle "must_not" (negated AND)
-        if "must_not" in filter_dict:
-            must_not_conditions = []
-            for cond in filter_dict["must_not"]:
-                must_not_conditions.append(cls._parse_qdrant_condition(cond))
-            if must_not_conditions:
-                nested_filters.append(cls(conditions=must_not_conditions, logic="and", negate=True))
+        # must: all of; should: any of; must_not: none of, which is
+        # NOT(a OR b). It was built as NOT(a AND b), so a document matching
+        # only one excluded condition got through.
+        for key, logic, negate in (
+            ("must", "and", False),
+            ("should", "or", False),
+            ("must_not", "or", True),
+        ):
+            if key not in filter_dict or not filter_dict[key]:
+                continue
+            group = cls(logic=logic, negate=negate)
+            for cond in filter_dict[key]:
+                parsed = cls._parse_qdrant_condition(cond)
+                if isinstance(parsed, Filter):
+                    group.nested.append(parsed)
+                else:
+                    group.conditions.append(parsed)
+            nested_filters.append(group)
 
         return cls(nested=nested_filters, logic="and")
 
     @classmethod
-    def _parse_qdrant_condition(cls, cond: dict) -> FilterCondition:
+    def _parse_qdrant_condition(cls, cond: dict) -> Union[FilterCondition, "Filter"]:
         """Parse a single Qdrant-style condition."""
+        if not isinstance(cond, dict):
+            raise TypeError(f"a Qdrant condition is a dict, got {type(cond).__name__}")
         key = cond.get("key", "")
 
         if "match" in cond:
@@ -857,22 +1150,34 @@ class Filter:
                 return FilterCondition(field=key, operator="any", value=match["any"])
 
         if "range" in cond:
+            # Every bound applies: a range with gte and lte used to keep only
+            # the first, so it was a half-open range.
             range_cond = cond["range"]
-            for op in ["gt", "gte", "lt", "lte"]:
-                if op in range_cond:
-                    return FilterCondition(field=key, operator=op, value=range_cond[op])
+            bounds = [
+                FilterCondition(field=key, operator=op, value=range_cond[op])
+                for op in ("gt", "gte", "lt", "lte")
+                if op in range_cond
+            ]
+            if len(bounds) == 1:
+                return bounds[0]
+            if bounds:
+                return cls(conditions=bounds, logic="and")
 
         if "geo_radius" in cond:
             return FilterCondition(field=key, operator="geo_radius", value=cond["geo_radius"])
 
         if "geo_bounding_box" in cond:
             box = cond["geo_bounding_box"]
-            return FilterCondition(field=key, operator="geo_box", value={
-                "min_lat": box["bottom_right"]["lat"],
-                "max_lat": box["top_left"]["lat"],
-                "min_lon": box["top_left"]["lon"],
-                "max_lon": box["bottom_right"]["lon"],
-            })
+            return FilterCondition(
+                field=key,
+                operator="geo_box",
+                value={
+                    "min_lat": box["bottom_right"]["lat"],
+                    "max_lat": box["top_left"]["lat"],
+                    "min_lon": box["top_left"]["lon"],
+                    "max_lon": box["bottom_right"]["lon"],
+                },
+            )
 
         if "is_null" in cond:
             return FilterCondition(field=key, operator="is_null", value=cond["is_null"]["value"])
@@ -881,6 +1186,16 @@ class Filter:
             return FilterCondition(field=key, operator="is_empty", value=cond["is_empty"]["value"])
 
         raise ValueError(f"Unknown Qdrant condition format: {cond}")
+
+
+# ============================================================================
+# THE QUERY, AND A BATCH RESULT
+# ============================================================================
+#
+# INPUT   everything a search takes
+# OUTPUT  one query configuration; what a batch operation did
+#
+# The complete search, as one object.
 
 
 @dataclass

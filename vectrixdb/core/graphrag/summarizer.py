@@ -12,6 +12,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .graph.knowledge_graph import KnowledgeGraph
 from .graph.community import Community, CommunityHierarchy
 from .config import GraphRAGConfig, LLMProvider
+from .extractor.base import Entity
+
+
+__all__ = [
+    "CommunitySummarizer",
+    "summarize_communities",
+]
+
+
+# ============================================================================
+# THE SUMMARIZER
+# ============================================================================
+#
+# INPUT   communities
+# OUTPUT  a summary for each, by LLM or template, bottom-up from level 0; a
+#         factory over the whole hierarchy
+#
+# Higher levels are summarised from the summaries below them.
 
 
 class CommunitySummarizer:
@@ -19,7 +37,7 @@ class CommunitySummarizer:
     Generate summaries for communities in the knowledge graph.
 
     Strategies:
-    - LLM-based: High-quality summaries using GPT/Claude/Llama
+    - LLM-based: High-quality summaries using GPT or Llama
     - Template-based: Fast, free summaries using templates
 
     Summaries are generated bottom-up:
@@ -67,19 +85,18 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
         self.max_entities = max_entities_per_summary
         self.max_relationships = max_relationships_per_summary
 
-        self._llm_client = None
+        self._llm_client: Any = None
         if use_llm:
             self._init_llm()
 
     def _init_llm(self):
         """Initialize LLM client."""
         provider = self.config.llm_provider
-        if isinstance(provider, LLMProvider):
-            provider = provider.value
+        provider_name = provider.value if isinstance(provider, LLMProvider) else provider
 
-        if provider == "openai":
+        if provider_name == "openai":
             self._init_openai()
-        elif provider == "ollama":
+        elif provider_name == "ollama":
             self._init_ollama()
         else:
             self.use_llm = False
@@ -88,7 +105,14 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
         """Initialize OpenAI client."""
         try:
             from openai import OpenAI
-            api_key = self.config.llm_api_key or os.environ.get("OPENAI_API_KEY")
+
+            # ``is not None``: an explicit key, empty included, is the one to
+            # use. Same rule as the extractor's clients.
+            api_key = (
+                self.config.llm_api_key
+                if self.config.llm_api_key is not None
+                else os.environ.get("OPENAI_API_KEY")
+            )
             if api_key:
                 self._llm_client = OpenAI(api_key=api_key)
                 self._call_llm = self._call_openai
@@ -101,16 +125,15 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
         """Initialize Ollama client."""
         try:
             import ollama
+
             self._llm_client = ollama
             self._call_llm = self._call_ollama
         except ImportError:
-            try:
-                import requests
-                self._llm_client = requests
-                self._endpoint = self.config.llm_endpoint or "http://localhost:11434"
-                self._call_llm = self._call_ollama_requests
-            except Exception:
-                self.use_llm = False
+            # Without the ollama package, its HTTP API with the standard library.
+            # This used to need requests, which the package never declared.
+            self._llm_client = None
+            self._endpoint = self.config.llm_endpoint or "http://localhost:11434"
+            self._call_llm = self._call_ollama_http
 
     def _call_openai(self, prompt: str) -> str:
         """Call OpenAI API."""
@@ -125,47 +148,38 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
     def _call_ollama(self, prompt: str) -> str:
         """Call Ollama API."""
         response = self._llm_client.generate(
-            model=self.config.llm_model,
-            prompt=prompt,
-            options={"temperature": 0.3}
+            model=self.config.llm_model, prompt=prompt, options={"temperature": 0.3}
         )
-        return response['response'].strip()
+        return response["response"].strip()
 
-    def _call_ollama_requests(self, prompt: str) -> str:
-        """Call Ollama via requests."""
-        response = self._llm_client.post(
+    def _call_ollama_http(self, prompt: str) -> str:
+        """Ollama's /api/generate over plain HTTP."""
+        from ..._net import post_json
+
+        reply = post_json(
             f"{self._endpoint}/api/generate",
-            json={
+            {
                 "model": self.config.llm_model,
                 "prompt": prompt,
                 "stream": False,
-                "options": {"temperature": 0.3}
-            }
+                "options": {"temperature": 0.3},
+            },
         )
-        response.raise_for_status()
-        return response.json()['response'].strip()
+        return reply["response"].strip()
 
-    def _format_entities_for_prompt(
-        self,
-        graph: KnowledgeGraph,
-        entity_ids: List[str]
-    ) -> str:
+    def _format_entities_for_prompt(self, graph: KnowledgeGraph, entity_ids: List[str]) -> str:
         """Format entities for the prompt."""
-        lines = []
-        for eid in entity_ids[:self.max_entities]:
+        lines: List[str] = []
+        for eid in entity_ids[: self.max_entities]:
             entity = graph.get_entity(eid)
             if entity:
                 lines.append(f"- {entity.name} ({entity.type}): {entity.description}")
         return "\n".join(lines) if lines else "No entities"
 
-    def _format_relationships_for_prompt(
-        self,
-        graph: KnowledgeGraph,
-        entity_ids: List[str]
-    ) -> str:
+    def _format_relationships_for_prompt(self, graph: KnowledgeGraph, entity_ids: List[str]) -> str:
         """Format relationships for the prompt."""
         entity_set = set(entity_ids)
-        lines = []
+        lines: List[str] = []
 
         for eid in entity_ids:
             for rel in graph.get_relationships_for_entity(eid):
@@ -181,13 +195,13 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
 
         return "\n".join(lines) if lines else "No relationships"
 
-    def _generate_template_summary(
-        self,
-        graph: KnowledgeGraph,
-        entity_ids: List[str]
-    ) -> str:
+    def _generate_template_summary(self, graph: KnowledgeGraph, entity_ids: List[str]) -> str:
         """Generate a template-based summary (no LLM)."""
-        entities = [graph.get_entity(eid) for eid in entity_ids if graph.get_entity(eid)]
+        entities: List[Entity] = []
+        for eid in entity_ids:
+            entity = graph.get_entity(eid)
+            if entity:
+                entities.append(entity)
 
         if not entities:
             return "Empty community"
@@ -200,7 +214,9 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
             names.append(entity.name)
 
         # Build summary
-        type_summary = ", ".join(f"{count} {t}s" for t, count in sorted(type_counts.items(), key=lambda x: -x[1]))
+        type_summary = ", ".join(
+            f"{count} {t}s" for t, count in sorted(type_counts.items(), key=lambda x: -x[1])
+        )
         name_sample = ", ".join(names[:5])
         if len(names) > 5:
             name_sample += f", and {len(names) - 5} more"
@@ -211,7 +227,7 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
         self,
         graph: KnowledgeGraph,
         community: Community,
-        hierarchy: Optional[CommunityHierarchy] = None
+        hierarchy: Optional[CommunityHierarchy] = None,
     ) -> str:
         """
         Generate a summary for a single community.
@@ -231,11 +247,7 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
         # For higher levels, aggregate child summaries
         return self._summarize_from_children(community, hierarchy)
 
-    def _summarize_from_entities(
-        self,
-        graph: KnowledgeGraph,
-        community: Community
-    ) -> str:
+    def _summarize_from_entities(self, graph: KnowledgeGraph, community: Community) -> str:
         """Summarize from entities and relationships."""
         if not self.use_llm or not self._llm_client:
             return self._generate_template_summary(graph, community.entity_ids)
@@ -245,8 +257,7 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
             relationships_text = self._format_relationships_for_prompt(graph, community.entity_ids)
 
             prompt = self.SUMMARY_PROMPT.format(
-                entities=entities_text,
-                relationships=relationships_text
+                entities=entities_text, relationships=relationships_text
             )
 
             return self._call_llm(prompt)
@@ -254,11 +265,7 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
             # Fallback to template
             return self._generate_template_summary(graph, community.entity_ids)
 
-    def _summarize_from_children(
-        self,
-        community: Community,
-        hierarchy: CommunityHierarchy
-    ) -> str:
+    def _summarize_from_children(self, community: Community, hierarchy: CommunityHierarchy) -> str:
         """Summarize by aggregating child community summaries."""
         # Get child summaries
         child_summaries = []
@@ -272,7 +279,9 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
 
         if not self.use_llm or not self._llm_client:
             # Template aggregation
-            return f"Aggregated community ({len(child_summaries)} subcommunities): " + " ".join(child_summaries[:3])
+            return f"Aggregated community ({len(child_summaries)} subcommunities): " + " ".join(
+                child_summaries[:3]
+            )
 
         try:
             summaries_text = "\n".join(f"- {s}" for s in child_summaries)
@@ -282,10 +291,7 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
             return f"Aggregated community ({len(child_summaries)} subcommunities)."
 
     def summarize_hierarchy(
-        self,
-        graph: KnowledgeGraph,
-        hierarchy: CommunityHierarchy,
-        max_workers: int = 4
+        self, graph: KnowledgeGraph, hierarchy: CommunityHierarchy, max_workers: int = 4
     ) -> CommunityHierarchy:
         """
         Generate summaries for all communities in the hierarchy.
@@ -308,9 +314,7 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
                 # Parallel summarization
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = {
-                        executor.submit(
-                            self.summarize_community, graph, c, hierarchy
-                        ): c
+                        executor.submit(self.summarize_community, graph, c, hierarchy): c
                         for c in communities
                     }
 
@@ -319,7 +323,9 @@ Write a unified summary (2-3 sentences) that captures the broader theme:"""
                         try:
                             community.summary = future.result()
                         except Exception:
-                            community.summary = f"Community with {len(community.entity_ids)} entities."
+                            community.summary = (
+                                f"Community with {len(community.entity_ids)} entities."
+                            )
             else:
                 # Sequential summarization
                 for community in communities:
@@ -335,7 +341,7 @@ def summarize_communities(
     graph: KnowledgeGraph,
     hierarchy: CommunityHierarchy,
     config: Optional[GraphRAGConfig] = None,
-    use_llm: bool = True
+    use_llm: bool = True,
 ) -> CommunityHierarchy:
     """
     Factory function to summarize all communities.

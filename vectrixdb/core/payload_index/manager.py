@@ -16,6 +16,22 @@ from .tag import TagIndex
 from .geo import GeoIndex
 
 
+__all__ = [
+    "PayloadIndexManager",
+]
+
+
+# ============================================================================
+# THE MANAGER
+# ============================================================================
+#
+# INPUT   a collection's fields
+# OUTPUT  every payload index created, queried and persisted through one
+#         interface
+#
+# The collection asks it, never an index directly.
+
+
 class PayloadIndexManager:
     """
     Manages payload indexes for a collection.
@@ -77,12 +93,7 @@ class PayloadIndexManager:
 
         return "string"
 
-    def create_index(
-        self,
-        field: str,
-        index_type: str = "auto",
-        **kwargs
-    ) -> BasePayloadIndex:
+    def create_index(self, field: str, index_type: str = "auto", **kwargs) -> BasePayloadIndex:
         """
         Create an index on a field.
 
@@ -103,8 +114,7 @@ class PayloadIndexManager:
 
         if index_type not in self.INDEX_TYPES:
             raise ValueError(
-                f"Unknown index type: {index_type}. "
-                f"Available: {list(self.INDEX_TYPES.keys())}"
+                f"Unknown index type: {index_type}. Available: {list(self.INDEX_TYPES.keys())}"
             )
 
         # Create index
@@ -151,7 +161,7 @@ class PayloadIndexManager:
     def _get_nested_value(self, data: Dict[str, Any], field: str) -> Any:
         """Get value from nested dict using dot notation."""
         parts = field.split(".")
-        value = data
+        value: Any = data
 
         for part in parts:
             if isinstance(value, dict):
@@ -269,11 +279,7 @@ class PayloadIndexManager:
     def list_indexes(self) -> List[Dict[str, Any]]:
         """List all indexes with statistics."""
         return [
-            {
-                "field": field,
-                "type": self._field_types.get(field, "unknown"),
-                **index.get_stats()
-            }
+            {"field": field, "type": self._field_types.get(field, "unknown"), **index.get_stats()}
             for field, index in self._indexes.items()
         ]
 
@@ -294,6 +300,9 @@ class PayloadIndexManager:
 
     def _load_config(self) -> None:
         """Load index configuration."""
+        if not self.path:
+            return
+
         config_path = self.path / "config.json"
         if not config_path.exists():
             return

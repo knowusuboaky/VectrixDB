@@ -1,7 +1,7 @@
 """
 VectrixDB Core - Vector engine and storage.
 
-Author: Daddy Nyame Owusu - Boakye
+Author: Kwadwo Daddy Nyame Owusu - Boakye
 """
 
 from .database import VectrixDB

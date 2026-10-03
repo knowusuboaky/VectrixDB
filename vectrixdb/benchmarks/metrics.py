@@ -7,13 +7,32 @@ Collects and computes benchmark metrics during execution.
 import time
 import tracemalloc
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import numpy as np
+
+
+__all__ = [
+    "MetricsSnapshot",
+    "MetricsCollector",
+    "ThroughputTracker",
+]
+
+
+# ============================================================================
+# SNAPSHOTS, THE COLLECTOR, AND THROUGHPUT
+# ============================================================================
+#
+# INPUT   a benchmark running
+# OUTPUT  metrics at a point in time; collected and computed as it runs;
+#         throughput over time
+#
+# Latency percentiles and memory, sampled while the run goes.
 
 
 @dataclass
 class MetricsSnapshot:
     """Snapshot of metrics at a point in time."""
+
     timestamp: float
     memory_mb: float
     latency_ms: Optional[float] = None
@@ -112,7 +131,9 @@ class MetricsCollector:
         Returns:
             MetricsSnapshot
         """
-        elapsed = time.perf_counter() - self._start_time if self._start_time else 0
+        # ``is not None``: a start time of exactly zero is a real start,
+        # not an unset one, and reported elapsed time of 0 either way.
+        elapsed = time.perf_counter() - self._start_time if self._start_time is not None else 0
         memory = self.sample_memory()
 
         snapshot = MetricsSnapshot(
@@ -154,17 +175,19 @@ class MetricsCollector:
         # Latency stats
         if self._latencies:
             latencies = np.array(self._latencies)
-            metrics.update({
-                "latency_count": len(latencies),
-                "latency_mean_ms": float(np.mean(latencies)),
-                "latency_std_ms": float(np.std(latencies)),
-                "latency_min_ms": float(np.min(latencies)),
-                "latency_max_ms": float(np.max(latencies)),
-                "latency_p50_ms": float(np.percentile(latencies, 50)),
-                "latency_p95_ms": float(np.percentile(latencies, 95)),
-                "latency_p99_ms": float(np.percentile(latencies, 99)),
-                "throughput_ops": len(latencies) / total_time if total_time > 0 else 0,
-            })
+            metrics.update(
+                {
+                    "latency_count": len(latencies),
+                    "latency_mean_ms": float(np.mean(latencies)),
+                    "latency_std_ms": float(np.std(latencies)),
+                    "latency_min_ms": float(np.min(latencies)),
+                    "latency_max_ms": float(np.max(latencies)),
+                    "latency_p50_ms": float(np.percentile(latencies, 50)),
+                    "latency_p95_ms": float(np.percentile(latencies, 95)),
+                    "latency_p99_ms": float(np.percentile(latencies, 99)),
+                    "throughput_ops": len(latencies) / total_time if total_time > 0 else 0,
+                }
+            )
 
         # Custom metrics
         for name, values in self._custom_metrics.items():
@@ -174,7 +197,7 @@ class MetricsCollector:
 
         return metrics
 
-    def get_latency_histogram(self, bins: int = 50) -> Dict[str, any]:
+    def get_latency_histogram(self, bins: int = 50) -> Dict[str, Any]:
         """
         Get latency histogram data.
 
@@ -190,7 +213,7 @@ class MetricsCollector:
         counts, bin_edges = np.histogram(self._latencies, bins=bins)
 
         return {
-            "bins": [(bin_edges[i], bin_edges[i+1]) for i in range(len(counts))],
+            "bins": [(bin_edges[i], bin_edges[i + 1]) for i in range(len(counts))],
             "counts": counts.tolist(),
             "total": len(self._latencies),
         }
@@ -267,5 +290,7 @@ class ThroughputTracker:
             "current_throughput": self.get_current_throughput(),
             "average_throughput": self.get_average_throughput(),
             "total_operations": len(self._operations),
-            "elapsed_seconds": time.perf_counter() - self._start_time if self._start_time else 0,
+            "elapsed_seconds": (
+                time.perf_counter() - self._start_time if self._start_time is not None else 0
+            ),
         }

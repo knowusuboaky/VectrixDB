@@ -1,0 +1,27 @@
+{
+  "dataset": "scifact",
+  "fast": false,
+  "results": {
+    "dense": {
+      "ndcg@10": 0.6496,
+      "recall@100": 0.9053,
+      "p50_ms": 170.7,
+      "queries": 300,
+      "build_s": 657.7
+    },
+    "hybrid": {
+      "ndcg@10": 0.7225,
+      "recall@100": 0.9587,
+      "p50_ms": 748.3,
+      "queries": 300,
+      "build_s": 687.2
+    },
+    "hybrid+rerank": {
+      "ndcg@10": 0.6949,
+      "recall@100": 0.9587,
+      "p50_ms": 3357.2,
+      "queries": 300,
+      "build_s": 0.0
+    }
+  }
+}

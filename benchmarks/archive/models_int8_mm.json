@@ -1,0 +1,15 @@
+{
+  "dataset": "scifact",
+  "rows": [
+    {
+      "model": "bge_small_int8_mm",
+      "label": "bge-small-en-v1.5 INT8 (MatMul only, per-channel)",
+      "variant": "bare",
+      "mrr": 0.9474,
+      "recall1": 0.9167,
+      "ndcg@10": 0.7144,
+      "recall@100": 0.9533,
+      "embed_s": 788.0
+    }
+  ]
+}

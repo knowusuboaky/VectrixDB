@@ -1,12 +1,12 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-fancy-pypi-readme>=24"]
 build-backend = "hatchling.build"
 
 [project]
 name = "vectrixdb"
-version = "2.1.7"
+version = "2.2.0"
 description = "Where vectors come alive - A lightweight, visual-first vector database with embedded ML models"
-readme = "README.md"
+dynamic = ["readme"]
 license = "Apache-2.0"
 requires-python = ">=3.9"
 authors = [
@@ -31,24 +31,22 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Database",
 ]
+# Kept deliberately small: a `pip install vectrixdb` should give you vector
+# search and nothing else. The REST API, dashboards and cloud backends are extras.
+# aiosqlite, httpx, orjson, websockets and tokenizers were declared here but are
+# not imported anywhere in the package; they were removed in 2.2.0.
 dependencies = [
     "numpy>=1.24.0",
     "usearch>=2.0.0",
-    "fastapi>=0.109.0",
-    "uvicorn[standard]>=0.27.0",
-    "pydantic>=2.0.0",
-    "aiosqlite>=0.19.0",
-    "httpx>=0.26.0",
+    # Embedded ONNX models, so search works offline with no API keys
+    "onnxruntime>=1.15.0",
+    # Required by the `vectrixdb` console script declared in [project.scripts]
     "rich>=13.0.0",
     "typer>=0.9.0",
-    "websockets>=12.0",
-    "orjson>=3.9.0",
-    # Embedded models (no network calls after setup)
-    "onnxruntime>=1.15.0",
-    "tokenizers>=0.15.0",
 ]
 
 [project.optional-dependencies]
@@ -56,10 +54,80 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.0.0",
+    "hypothesis>=6.90.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "pre-commit>=3.5.0",
+    # The BM25 implementation is verified against this reference. Without it
+    # that test skipped everywhere, CI included, while the docs claimed the
+    # check was being made.
+    "rank-bm25>=0.2.2",
+    # Not a runtime dependency: the library works without it and reports no
+    # memory readings. It is here so CI exercises the branch that does take a
+    # reading. Every developer machine happened to have it, which is exactly
+    # why an unguarded import of it shipped.
+    "psutil>=5.9.0",
+    # FastAPI's TestClient is built on it. The mcp extra happened to bring it,
+    # so a test job without mcp stopped at collection, before a single test ran.
+    "httpx>=0.24.0",
+    # Draws the PDFs the layout tests read, and nothing else: the reader under
+    # test is PDFium. Without it the sixty tests of the PDF reader skipped
+    # everywhere, CI included, and seven faults in what a PDF reads as went
+    # unnoticed. Not a runtime dependency, and AGPL, so it stays here.
+    "pymupdf>=1.24.0",
+    # The blank-page tests draw their pages with it; the library only needs it
+    # when asked to tell a blank scan from a page.
+    "pillow>=10.0.0",
+    # Three tests read pyproject.toml; tomllib arrived in Python 3.11, and the
+    # 3.9 and 3.10 jobs stopped at collection without this.
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
+# REST API server and built-in dashboard
+api = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.0.0",
+]
+# Signing people in to the server and its dashboard: single sign-on through an
+# identity provider, or an email allowlist with an authenticator app. pyjwt
+# and cryptography verify identity tokens and seal authenticator secrets;
+# qrcode draws the enrolment code on the server, as SVG, with no image library.
+signin = [
+    "pyjwt[crypto]>=2.8.0",
+    "qrcode>=7.4",
+]
+# MCP server, so an assistant can use a collection as a tool
+mcp = [
+    "mcp>=1.0.0",
+]
+# Masking names, addresses and national ids in a document before it is indexed,
+# in this process: Microsoft Presidio over spaCy. The models are a separate
+# step, one a language: vectrixdb download-models --type masking
+masking = [
+    "presidio-analyzer>=2.2.0",
+    "spacy>=3.7.0",
+]
+# spaCy for graph-mode entity extraction on ordinary prose. Without it the
+# extractor falls back to a regex that only sees capitalised phrases, acronyms,
+# quoted terms and repeated phrases. Models are a separate step:
+#   python -m spacy download en_core_web_sm
+nlp = [
+    "spacy>=3.7.0",
+]
+docs = [
+    "mkdocs>=1.5.0,<2",  # 2.0 drops the plugin system mkdocstrings and material need
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.24.0",
+]
+# Everything the test suite exercises without a network, cloud services through
+# fakes that speak their SDKs' types. CI's coverage job installs exactly this and
+# the coverage baseline is measured with exactly this, so the two agree. What is
+# installed decides which tests run and so moves the number: an environment
+# missing these read 2.7 points lower, because a test whose extra is absent
+# skips. Measured with this extra, a clean environment and a developer's own
+# both read 85.1%.
+test = ["vectrixdb[dev,api,mcp,signin,documents,azure]"]
 viz = [
     "umap-learn>=0.5.0",
     "scikit-learn>=1.3.0",
@@ -90,22 +158,130 @@ aws = [
     "requests-aws4auth>=1.2.0",
     "psycopg2-binary>=2.9.0",
 ]
-all = ["vectrixdb[dev,viz,hf,fastembed,aws]"]
+# Azure backends: Cosmos DB and AI Search (azure-identity for keyless auth,
+# openai for the second vector, which calls an Azure OpenAI deployment)
+azure = [
+    "azure-cosmos>=4.5.0",
+    "azure-search-documents>=11.4.0",
+    "azure-identity>=1.15.0",
+    "openai>=1.0.0",
+]
+# Databricks Delta Lake / Lakebase backends
+databricks = [
+    "databricks-sql-connector>=3.0.0",
+]
+postgres = [
+    "psycopg2-binary>=2.9.0",
+]
+# Reading files. Each extra is named for what the file becomes, not for whose
+# model does it. The readers for HTML, Markdown, CSV, PPTX and text need
+# nothing; a page fetched by address needs nothing either.
+documents = [
+    "pypdf>=4.0.0",
+    # PDFium, the engine inside Chrome: every run of a PDF's text with where
+    # it sits, so columns, tables, headings and running lines are read as a
+    # person sees them. BSD and Apache licensed, like this library.
+    "pypdfium2>=4.20.0",
+    "python-docx>=1.0.0",
+    "openpyxl>=3.1.0",
+    # Word 97-2003 .doc, in pure Python, so it installs where no program can.
+    "olefile>=0.46",
+    # Excel 97-2003 .xls, in pure Python.
+    "xlrd>=2.0.1",
+]
+# Images and scanned PDF pages to text, on this machine.
+ocr = [
+    "rapidocr-onnxruntime>=1.3.0",
+    "pypdfium2>=4.20.0",
+    "pillow>=10.0.0",
+    "pypdf>=4.0.0",
+]
+# Speech to text, on this machine.
+# The extraction service's long jobs on Azure: a record a job in a blob
+# container, the work on a storage queue a function app's trigger reads.
+jobs-azure = [
+    "azure-storage-blob>=12.19.0",
+    "azure-storage-queue>=12.9.0",
+    "azure-identity>=1.15.0",
+]
+# A YouTube video's sound, for load_youtube. Its own extra, because yt-dlp
+# changes as often as YouTube does and nobody else should have to carry it.
+youtube = [
+    "yt-dlp>=2024.1.0",
+]
+asr = [
+    "faster-whisper>=1.0.0",
+]
+# ffmpeg and nothing else, the binary imageio-ffmpeg ships: the sound out of
+# a video, and a long recording cut into pieces, for a host whose transcribing
+# is done by a service. About 90 MB, so it is nobody's unless asked for.
+ffmpeg = [
+    "imageio-ffmpeg>=0.4.9",
+]
+# The sound of a video, handed to asr on this machine.
+video = [
+    "vectrixdb[ffmpeg]",
+    "faster-whisper>=1.0.0",
+]
+# Every local reader.
+extract = ["vectrixdb[documents,ocr,asr,video]"]
+# The same jobs by a cloud service the host already has. The suffix is the
+# SDK that gets installed, nothing else.
+ocr-azure = [
+    "azure-ai-documentintelligence>=1.0.0",
+]
+# Azure Speech fast transcription is one HTTPS request; no SDK is needed.
+asr-azure = []
+ocr-aws = [
+    "boto3>=1.28.0",
+]
+asr-aws = [
+    "boto3>=1.28.0",
+]
+# Everything a user might want at runtime. Deliberately excludes `dev`, `docs`
+# and `test`, which are contributor tooling rather than features, and the local
+# readers in `extract`, whose speech models are large enough to ask for by name.
+all = ["vectrixdb[api,signin,mcp,documents,viz,hf,fastembed,aws,azure,databricks,postgres]"]
 
 [project.scripts]
 vectrixdb = "vectrixdb.cli:app"
+vectrixdb-mcp = "vectrixdb.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/knowusuboaky/VectrixDB"
-Documentation = "https://github.com/knowusuboaky/VectrixDB#readme"
+Documentation = "https://knowusuboaky.github.io/VectrixDB/"
 Repository = "https://github.com/knowusuboaky/VectrixDB"
+Changelog = "https://github.com/knowusuboaky/VectrixDB/blob/main/CHANGELOG.md"
+Issues = "https://github.com/knowusuboaky/VectrixDB/issues"
+
+# The README's images and links are relative, so they show on GitHub on every
+# branch and while the repository is private. PyPI has no repository to resolve
+# them against, so the long description gets them as addresses on main.
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = 'src="((?:docs|examples)/[^"]+)"'
+replacement = 'src="https://raw.githubusercontent.com/knowusuboaky/VectrixDB/main/\1"'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\((?!https?://|#|mailto:)([^)\s]+)\)'
+replacement = '](https://github.com/knowusuboaky/VectrixDB/blob/main/\1)'
 
 [tool.hatch.build.targets.wheel]
 packages = ["vectrixdb"]
-# Exclude models that are auto-downloaded from GitHub
-# Bundled: dense_en, reranker_en, colbert, sparse (English models, ~99MB total)
+artifacts = ["vectrixdb/py.typed"]
+# Models fetched from GitHub releases rather than shipped. dense_en is
+# e5-small-v2, the English default before 2.2: collections written with it
+# still open, and the first search fetches it once, because 21.5 MiB of a
+# 100 MiB wheel for a model nothing new is built with was the wrong trade.
+# Bundled: bge_small_en, reranker_en, colbert, sparse.
 exclude = [
     "vectrixdb/models/data/dense",
+    "vectrixdb/models/data/dense_en",
     "vectrixdb/models/data/reranker",
     "vectrixdb/models/data/bge-m3",
     "vectrixdb/models/data/rebel",
@@ -114,6 +290,7 @@ exclude = [
 [tool.hatch.build.targets.sdist]
 exclude = [
     "vectrixdb/models/data/dense",
+    "vectrixdb/models/data/dense_en",
     "vectrixdb/models/data/reranker",
     "vectrixdb/models/data/bge-m3",
     "vectrixdb/models/data/rebel",
@@ -125,13 +302,92 @@ target-version = ["py39", "py310", "py311", "py312", "py313"]
 
 [tool.ruff]
 line-length = 100
-select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
-ignore = ["E501"]
+target-version = "py39"
+# Demo notebooks are documentation, not library code.
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+# Enforced today, and CI fails on any of these. The set is what the codebase
+# actually holds to, so a green run means something.
+select = [
+    "E4", "E7", "E9",  # imports, statements, syntax
+    "F",               # pyflakes: undefined names, shadowing, bad f-strings
+    "B",               # bugbear: mutable defaults, loop-variable capture
+    "C4",              # comprehension correctness
+]
+ignore = [
+    "E501",  # line length is the formatter's job
+    "B008",  # FastAPI's Depends()/Query() defaults are idiomatic
+    # --- Ratchet -------------------------------------------------------------
+    # Real but cosmetic, and numerous in the pre-2.2 code. Remove an entry here,
+    # fix what it reports, and it stays fixed. Counts at the time of writing:
+    "F401",  # 112x unused imports, mostly intentional re-exports
+    "F541",  #  32x f-strings with no placeholders
+    "F841",  #  20x assigned-but-unused locals
+    "B007",  #  15x unused loop control variables
+    "B904",  #  93x raise-without-from inside except; storage.py is already done,
+             #      the rest should follow so tracebacks keep their cause
+    "B027",  #   3x non-abstract empty methods on an ABC
+    "E741",  #   1x ambiguous variable name
+    "E402",  #   1x module import not at top of file
+    "C420",  #   1x dict comprehension that should be dict.fromkeys
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"vectrixdb/__init__.py" = ["F401", "E402"]  # re-exports, and imports after __version__
+"vectrixdb/*/__init__.py" = ["F401"]
+"tests/*" = ["N802"]
 
 [tool.mypy]
-python_version = "3.10"
-strict = true
+# Checked as 3.12, the version CI checks on: numpy's own stubs use the 3.12
+# type statement, and an older target stops at them. Ruff holds the syntax
+# to 3.9, which the package supports.
+python_version = "3.12"
+# Ratcheting toward strict. Modules are moved out of the relaxed list below as
+# they are annotated; do not add new entries without a follow-up issue.
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Fully typed today; these must not regress.
+module = [
+    "vectrixdb.exceptions",
+    "vectrixdb._time",
+    "vectrixdb._tokens",
+    "vectrixdb._ranking",
+    "vectrixdb.memory",
+    "vectrixdb.mcp_server",
+    "vectrixdb._net",
+    "vectrixdb.models.checksums",
+    "vectrixdb.aio",
+    "vectrixdb.snapshot",
+]
+disallow_untyped_defs = true
+strict_equality = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    "error::DeprecationWarning:vectrixdb.*",
+]
+markers = [
+    "slow: deselect with -m 'not slow'",
+    "backend: requires a live storage backend",
+    "perf: a timing bound; loose, and run on its own in the nightly job",
+]
+
+# Mutation testing on the small pure modules, whose tests run in seconds.
+# Run weekly from .github/workflows/nightly.yml; locally: pip install mutmut && mutmut run
+[tool.mutmut]
+paths_to_mutate = "vectrixdb/_ranking.py,vectrixdb/_tokens.py,vectrixdb/_net.py"
+tests_dir = "tests/unit/"
+runner = "python -m pytest -q -x tests/unit/test_token_budget.py tests/unit/test_offline.py tests/unit/test_properties.py"

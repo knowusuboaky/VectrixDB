@@ -10,9 +10,36 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import numpy as np
 
 
+__all__ = [
+    "EmbeddingConfig",
+    "BaseEmbeddingProvider",
+    "RandomEmbeddingProvider",
+    "CallableEmbeddingProvider",
+    "CachedEmbeddingProvider",
+    "EmbeddingManager",
+    "SemanticProcessor",
+    "EmbeddedDenseProvider",
+    "EmbeddedSparseProvider",
+    "EmbeddedRerankerProvider",
+    "get_embedded_provider",
+]
+
+
+# ============================================================================
+# THE CONFIG, AND THE PROVIDERS
+# ============================================================================
+#
+# INPUT   texts, and a provider
+# OUTPUT  vectors: random for tests, from a callable, or cached in front of
+#         any
+#
+# A provider is anything that turns texts into vectors.
+
+
 @dataclass
 class EmbeddingConfig:
     """Configuration for embedding generation."""
+
     model_name: str = "default"
     dimension: int = 384
     normalize: bool = True
@@ -157,7 +184,7 @@ class CachedEmbeddingProvider(BaseEmbeddingProvider):
 
     def embed(self, texts: List[str]) -> np.ndarray:
         """Embed with caching."""
-        results = []
+        results: List[Optional[np.ndarray]] = []
         texts_to_embed = []
         indices_to_fill = []
 
@@ -199,6 +226,17 @@ class CachedEmbeddingProvider(BaseEmbeddingProvider):
         return len(self._cache)
 
 
+# ============================================================================
+# THE MANAGER, AND SEMANTIC PROCESSING
+# ============================================================================
+#
+# INPUT   texts
+# OUTPUT  text to vector through whichever provider is configured; semantic
+#         utilities over them
+#
+# The one object a search asks for a vector.
+
+
 class EmbeddingManager:
     """
     High-level embedding manager with multiple providers.
@@ -235,7 +273,7 @@ class EmbeddingManager:
             RandomEmbeddingProvider(
                 dimension=self.config.dimension,
                 normalize=self.config.normalize,
-            )
+            ),
         )
 
     def register_provider(
@@ -326,7 +364,7 @@ class EmbeddingManager:
         all_embeddings = []
 
         for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
+            batch = texts[i : i + batch_size]
             embeddings = provider_instance.embed(batch)
             all_embeddings.append(embeddings)
 
@@ -408,7 +446,11 @@ class SemanticProcessor:
             List of chunks
         """
         chunk_size = chunk_size or self.chunk_size
-        overlap = overlap or self.chunk_overlap
+        # ``is None``: overlap=0 asks for chunks that do not repeat each
+        # other, and reading it as absent gave the default fifty, so a
+        # thousand characters came back as twenty chunks sharing nine
+        # hundred and fifty of them.
+        overlap = self.chunk_overlap if overlap is None else overlap
 
         if len(text) <= chunk_size:
             return [text]
@@ -422,7 +464,7 @@ class SemanticProcessor:
             # Try to break at sentence boundary
             if end < len(text):
                 # Look for period, question mark, or exclamation
-                for sep in ['. ', '? ', '! ', '\n']:
+                for sep in [". ", "? ", "! ", "\n"]:
                     break_point = text.rfind(sep, start + chunk_size // 2, end)
                     if break_point != -1:
                         end = break_point + 1
@@ -456,9 +498,7 @@ class SemanticProcessor:
         emb2 = embeddings[1]
 
         # Cosine similarity
-        similarity = np.dot(emb1, emb2) / (
-            np.linalg.norm(emb1) * np.linalg.norm(emb2) + 1e-8
-        )
+        similarity = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2) + 1e-8)
 
         return float(similarity)
 
@@ -544,9 +584,16 @@ class SemanticProcessor:
         return [text for text, k in zip(texts, keep) if k]
 
 
-# =============================================================================
-# Embedded Model Providers (No Network Calls)
-# =============================================================================
+# ============================================================================
+# EMBEDDED PROVIDERS: no network calls
+# ============================================================================
+#
+# INPUT   texts, a query and candidates
+# OUTPUT  dense vectors, BM25 sparse vectors and cross-encoder scores from the
+#         bundled ONNX models; the provider asked for by type
+#
+# The bundled models, wrapped as providers.
+
 
 class EmbeddedDenseProvider(BaseEmbeddingProvider):
     """
@@ -567,8 +614,8 @@ class EmbeddedDenseProvider(BaseEmbeddingProvider):
         self,
         model_dir=None,
         device: str = "cpu",
-        language: str = None,
-        model: str = None,
+        language: Optional[str] = None,
+        model: Optional[str] = None,
     ):
         """
         Initialize embedded provider.
@@ -582,6 +629,7 @@ class EmbeddedDenseProvider(BaseEmbeddingProvider):
                    "multilingual". Overrides language parameter if specified.
         """
         from ...models import DenseEmbedder
+
         self._embedder = DenseEmbedder(
             model_dir=model_dir,
             device=device,
@@ -616,6 +664,7 @@ class EmbeddedSparseProvider:
             b: BM25 b parameter
         """
         from ...models import SparseEmbedder
+
         self._embedder = SparseEmbedder(model_dir=model_dir, k1=k1, b=b)
 
     def embed(self, texts: List[str]) -> List[Dict[int, float]]:
@@ -644,19 +693,15 @@ class EmbeddedRerankerProvider:
             model_dir: Path to model directory (default: bundled)
             device: "cpu" or "cuda"
         """
-        from ...models import CrossEncoderReranker
-        self._reranker = CrossEncoderReranker(model_dir=model_dir, device=device)
+        from ...models import RerankerEmbedder
+
+        self._reranker = RerankerEmbedder(model_dir=model_dir, device=device)
 
     def score(self, query: str, documents: List[str]) -> np.ndarray:
         """Score query-document pairs."""
         return self._reranker.score(query, documents)
 
-    def rerank(
-        self,
-        query: str,
-        documents: List[str],
-        top_k: int = None
-    ) -> List[tuple]:
+    def rerank(self, query: str, documents: List[str], top_k: Optional[int] = None) -> List[tuple]:
         """Rerank documents by relevance to query."""
         return self._reranker.rerank(query, documents, top_k=top_k)
 
@@ -664,8 +709,8 @@ class EmbeddedRerankerProvider:
 def get_embedded_provider(
     provider_type: str = "dense",
     device: str = "cpu",
-    language: str = None,
-    model: str = None,
+    language: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> Union[EmbeddedDenseProvider, EmbeddedSparseProvider, EmbeddedRerankerProvider]:
     """
     Get an embedded model provider.

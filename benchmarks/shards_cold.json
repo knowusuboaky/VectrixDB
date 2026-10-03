@@ -1,0 +1,50 @@
+{
+  "vectors": 20000,
+  "dims": 128,
+  "queries": 200,
+  "k": 10,
+  "deleted": 0.0,
+  "cold": true,
+  "ef": 100,
+  "seed": 0,
+  "vectrixdb": "2.2.0",
+  "usearch": "2.26.0",
+  "numpy": "2.3.4",
+  "date": "2026-09-19",
+  "machine": "AMD64 Windows Python 3.13.14",
+  "rows": [
+    {
+      "shards": 1,
+      "shard_size": 20000,
+      "ef": 100,
+      "build_s": 2.87,
+      "seal_s": 0.0,
+      "p50_ms": 0.709,
+      "p99_ms": 1.686,
+      "recall@10": 0.634,
+      "live": 20000
+    },
+    {
+      "shards": 10,
+      "shard_size": 2000,
+      "ef": 100,
+      "build_s": 1.18,
+      "seal_s": 0.006,
+      "p50_ms": 2.795,
+      "p99_ms": 4.312,
+      "recall@10": 0.98,
+      "live": 20000
+    },
+    {
+      "shards": 50,
+      "shard_size": 400,
+      "ef": 100,
+      "build_s": 1.56,
+      "seal_s": 0.002,
+      "p50_ms": 5.096,
+      "p99_ms": 7.757,
+      "recall@10": 0.983,
+      "live": 20000
+    }
+  ]
+}

@@ -1,0 +1,194 @@
+[
+  {
+    "document": "Sourdough starter is flour and water kept alive by wild yeast and bacteria.",
+    "question": "how is that bread leavened without packet yeast"
+  },
+  {
+    "document": "Basalt forms when lava cools quickly at the surface of the earth.",
+    "question": "which rock comes from fast-chilled molten material"
+  },
+  {
+    "document": "The Nobel Prize was awarded for research on radioactivity.",
+    "question": "what honour did the work on unstable atoms receive"
+  },
+  {
+    "document": "Rust guarantees memory safety without a garbage collector.",
+    "question": "a systems language that avoids dangling pointers with no GC"
+  },
+  {
+    "document": "Go compiles quickly and ships goroutines for cheap concurrency.",
+    "question": "lightweight threads in a fast-building language"
+  },
+  {
+    "document": "Python uses indentation to delimit blocks instead of braces.",
+    "question": "which language makes whitespace significant"
+  },
+  {
+    "document": "A sonnet has fourteen lines, usually in iambic pentameter.",
+    "question": "the poem form with 14 lines"
+  },
+  {
+    "document": "The Treaty of Westphalia ended the Thirty Years' War in 1648.",
+    "question": "what agreement closed the long central European conflict"
+  },
+  {
+    "document": "Photosynthesis converts light energy into chemical energy in plants.",
+    "question": "how do leaves turn sunlight into food"
+  },
+  {
+    "document": "Insulin lowers blood glucose by moving sugar into cells.",
+    "question": "the hormone that brings sugar levels down"
+  },
+  {
+    "document": "The Amazon is the largest river by discharge volume.",
+    "question": "which waterway carries the most water"
+  },
+  {
+    "document": "Kilimanjaro is the highest mountain in Africa.",
+    "question": "tallest peak on the African continent"
+  },
+  {
+    "document": "A haiku has three lines of five, seven and five syllables.",
+    "question": "short Japanese poem with a 5-7-5 pattern"
+  },
+  {
+    "document": "Copper conducts electricity better than aluminium.",
+    "question": "which of the two common wire metals has lower resistance"
+  },
+  {
+    "document": "The mitochondrion produces most of a cell's ATP.",
+    "question": "where does a cell make its energy currency"
+  },
+  {
+    "document": "Mount Vesuvius buried Pompeii in 79 AD.",
+    "question": "the eruption that entombed a Roman town"
+  },
+  {
+    "document": "A prime number has exactly two divisors, one and itself.",
+    "question": "integers divisible only by 1 and themselves"
+  },
+  {
+    "document": "The Great Barrier Reef lies off the coast of Queensland.",
+    "question": "large coral system near northeastern Australia"
+  },
+  {
+    "document": "Espresso is brewed by forcing hot water through fine grounds under pressure.",
+    "question": "coffee made with pressurised water"
+  },
+  {
+    "document": "Chess ends in checkmate when the king cannot escape attack.",
+    "question": "how does the board game finish"
+  },
+  {
+    "document": "The Dead Sea is so salty that swimmers float easily.",
+    "question": "a lake where you cannot sink"
+  },
+  {
+    "document": "Honey never spoils because of its low water content.",
+    "question": "which food stays edible for centuries"
+  },
+  {
+    "document": "A leap year adds February 29th every four years, with exceptions.",
+    "question": "when does the calendar get an extra day"
+  },
+  {
+    "document": "The speed of light is about 300,000 kilometres per second.",
+    "question": "how fast does a photon travel"
+  },
+  {
+    "document": "Venus is the hottest planet due to its thick carbon dioxide atmosphere.",
+    "question": "which world has the highest surface temperature"
+  },
+  {
+    "document": "Bees communicate the location of flowers with a waggle dance.",
+    "question": "how do pollinators tell each other where nectar is"
+  },
+  {
+    "document": "The Rosetta Stone let scholars decode Egyptian hieroglyphs.",
+    "question": "what artefact unlocked an ancient writing system"
+  },
+  {
+    "document": "Octopuses have three hearts and blue blood.",
+    "question": "a sea creature with more than one heart"
+  },
+  {
+    "document": "A marathon is 42.195 kilometres long.",
+    "question": "how far is the classic long-distance race"
+  },
+  {
+    "document": "The Eiffel Tower was built for the 1889 World's Fair.",
+    "question": "why was the Paris iron landmark constructed"
+  },
+  {
+    "document": "Vaccines train the immune system using a harmless piece of a pathogen.",
+    "question": "how does inoculation teach the body to fight disease"
+  },
+  {
+    "document": "Antarctica holds about 70 percent of the world's fresh water as ice.",
+    "question": "where is most drinkable water frozen"
+  },
+  {
+    "document": "The cello is tuned in fifths: C, G, D and A.",
+    "question": "how are the strings of the large bowed instrument pitched"
+  },
+  {
+    "document": "Tectonic plates move a few centimetres per year.",
+    "question": "how quickly do continents drift"
+  },
+  {
+    "document": "A byte is eight bits.",
+    "question": "how many binary digits make the basic unit of storage"
+  },
+  {
+    "document": "The Silk Road linked China to the Mediterranean for trade.",
+    "question": "ancient route that carried goods between east and west"
+  },
+  {
+    "document": "Sharks have skeletons made of cartilage rather than bone.",
+    "question": "a fish with no bony skeleton"
+  },
+  {
+    "document": "Jazz emerged in New Orleans in the early twentieth century.",
+    "question": "where did the improvised American music genre begin"
+  },
+  {
+    "document": "Coral reefs are built by tiny animals called polyps.",
+    "question": "what organisms construct undersea limestone structures"
+  },
+  {
+    "document": "The Hubble telescope orbits above the atmosphere for sharper images.",
+    "question": "why is the space observatory placed outside the air"
+  },
+  {
+    "document": "Baking soda reacts with acid to release carbon dioxide.",
+    "question": "what makes a cake rise chemically"
+  },
+  {
+    "document": "The Nile flows north into the Mediterranean.",
+    "question": "which direction does Egypt's river run"
+  },
+  {
+    "document": "Saturn's rings are mostly ice with some rock.",
+    "question": "what are the planet's famous bands made of"
+  },
+  {
+    "document": "A sommelier is a trained wine professional.",
+    "question": "the expert who pairs drinks with a menu"
+  },
+  {
+    "document": "Glass is made by melting sand with soda ash and lime.",
+    "question": "how is window material manufactured from minerals"
+  },
+  {
+    "document": "Migrating monarch butterflies travel thousands of kilometres to Mexico.",
+    "question": "which insect makes a long journey south each year"
+  },
+  {
+    "document": "The pancreas releases enzymes that digest fat and protein.",
+    "question": "which organ secretes digestive juices into the gut"
+  },
+  {
+    "document": "A palindrome reads the same backwards and forwards.",
+    "question": "words like level and radar are examples of what"
+  }
+]

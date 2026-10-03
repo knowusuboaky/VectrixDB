@@ -10,11 +10,12 @@ Features:
 - Efficient top-k retrieval using heap
 - Memory-efficient storage
 
-Author: Daddy Nyame Owusu - Boakye
+Author: Kwadwo Daddy Nyame Owusu - Boakye
 """
 
 import heapq
 import json
+import os
 import pickle
 import sqlite3
 import threading
@@ -28,9 +29,28 @@ import numpy as np
 from .types import SparseVector
 
 
+__all__ = [
+    "SparseSearchResult",
+    "SparseIndex",
+    "HybridSparseIndex",
+]
+
+
+# ============================================================================
+# THE RESULT, THE INDEX, AND THE HYBRID
+# ============================================================================
+#
+# INPUT   sparse vectors, and a query
+# OUTPUT  results from an inverted index; dense and sparse combined, Qdrant-
+#         style
+#
+# An inverted index, so a sparse search touches only the terms the query has.
+
+
 @dataclass
 class SparseSearchResult:
     """Result from sparse vector search."""
+
     id: str
     score: float
 
@@ -232,10 +252,7 @@ class SparseIndex:
             else:
                 top_k = heapq.nlargest(limit, scores.items(), key=lambda x: x[1])
 
-            return [
-                SparseSearchResult(id=doc_id, score=score)
-                for doc_id, score in top_k
-            ]
+            return [SparseSearchResult(id=doc_id, score=score) for doc_id, score in top_k]
 
     def search_cosine(
         self,
@@ -261,8 +278,12 @@ class SparseIndex:
         if query_norm == 0:
             return []
 
-        # Get dot products
-        dot_results = self.search(query, limit=limit * 2, doc_ids=doc_ids)
+        # Every document the query touches, not a truncated prefetch.
+        # Ranking the top 2k dot products by cosine can miss the true top
+        # cosine: a short document scores a small dot product and a large
+        # cosine, so it never reached the rerank. The accumulation pass is
+        # the same either way; only the heap is bigger.
+        dot_results = self.search(query, limit=max(len(self._norms), 1), doc_ids=doc_ids)
 
         # Normalize by document norms
         cosine_results = []
@@ -308,47 +329,103 @@ class SparseIndex:
         return docs_memory + index_memory
 
     def save(self) -> None:
-        """Save index to disk."""
+        """Save index to disk.
+
+        Written as ``sparse_index.npz``: the documents' ids, their indices and
+        values laid flat with offsets, and their norms, plus a JSON line of
+        the counts. NumPy reads it with ``allow_pickle=False``, so a file that
+        arrived in a snapshot from somewhere else is data and never code.
+        The inverted index is derived from the documents and rebuilt on load.
+        """
         if not self.path:
             return
 
         self.path.mkdir(parents=True, exist_ok=True)
 
         with self._lock:
-            # Save using pickle for efficiency
-            data = {
-                "inverted_index": dict(self._inverted_index),
-                "docs": {
-                    doc_id: {"indices": sv.indices, "values": sv.values}
-                    for doc_id, sv in self._docs.items()
-                },
-                "norms": self._norms,
-                "count": self._count,
-                "total_nnz": self._total_nnz,
-                "normalize": self.normalize,
-            }
+            doc_ids = list(self._docs)
+            lengths = [len(self._docs[doc_id].indices) for doc_id in doc_ids]
+            indptr = np.zeros(len(doc_ids) + 1, dtype=np.int64)
+            if lengths:
+                indptr[1:] = np.cumsum(lengths)
+            indices = np.array(
+                [i for doc_id in doc_ids for i in self._docs[doc_id].indices], dtype=np.int64
+            )
+            values = np.array(
+                [v for doc_id in doc_ids for v in self._docs[doc_id].values], dtype=np.float64
+            )
+            norms = np.array([self._norms.get(doc_id, 0.0) for doc_id in doc_ids], dtype=np.float64)
+            meta = json.dumps(
+                {"count": self._count, "total_nnz": self._total_nnz, "normalize": self.normalize}
+            )
 
-            with open(self.path / "sparse_index.pkl", "wb") as f:
-                pickle.dump(data, f)
+            # Beside the target and renamed over it, so a crash mid-write
+            # leaves the last good file rather than a truncated one.
+            target = self.path / "sparse_index.npz"
+            tmp = self.path / "sparse_index.npz.tmp"
+            with open(tmp, "wb") as f:
+                np.savez(
+                    f,
+                    doc_ids=np.array(doc_ids, dtype=str),
+                    indptr=indptr,
+                    indices=indices,
+                    values=values,
+                    norms=norms,
+                    meta=np.array(meta),
+                )
+            os.replace(tmp, target)
+            # The pickle this index was read from, if any, is now out of date
+            # and the one file here that could run code: gone with it.
+            old = self.path / "sparse_index.pkl"
+            if old.exists():
+                old.unlink()
 
     def _load(self) -> None:
-        """Load index from disk."""
-        pkl_path = self.path / "sparse_index.pkl"
-        if not pkl_path.exists():
+        """Load index from disk: the ``.npz``, or the ``.pkl`` an older
+        version wrote, read once so the collection opens and replaced by the
+        ``.npz`` on the next save."""
+        if not self.path:
             return
 
-        with open(pkl_path, "rb") as f:
-            data = pickle.load(f)
+        npz_path = self.path / "sparse_index.npz"
+        pkl_path = self.path / "sparse_index.pkl"
+        if npz_path.exists():
+            with np.load(npz_path, allow_pickle=False) as data:
+                doc_ids = [str(d) for d in data["doc_ids"]]
+                indptr, indices, values, norms = (
+                    data["indptr"],
+                    data["indices"],
+                    data["values"],
+                    data["norms"],
+                )
+                meta = json.loads(str(data["meta"]))
+            docs = {
+                doc_id: SparseVector(
+                    indices=[int(i) for i in indices[indptr[n] : indptr[n + 1]]],
+                    values=[float(v) for v in values[indptr[n] : indptr[n + 1]]],
+                )
+                for n, doc_id in enumerate(doc_ids)
+            }
+            self._norms = {doc_id: float(norms[n]) for n, doc_id in enumerate(doc_ids)}
+        elif pkl_path.exists():
+            with open(pkl_path, "rb") as f:
+                meta = pickle.load(f)  # noqa: S301 - the format before 2.2, read for migration only
+            docs = {
+                doc_id: SparseVector(indices=sv["indices"], values=sv["values"])
+                for doc_id, sv in meta["docs"].items()
+            }
+            self._norms = dict(meta["norms"])
+        else:
+            return
 
-        self._inverted_index = defaultdict(list, data["inverted_index"])
-        self._docs = {
-            doc_id: SparseVector(indices=sv["indices"], values=sv["values"])
-            for doc_id, sv in data["docs"].items()
-        }
-        self._norms = data["norms"]
-        self._count = data["count"]
-        self._total_nnz = data["total_nnz"]
-        self.normalize = data.get("normalize", False)
+        self._docs = docs
+        self._inverted_index = defaultdict(list)
+        for doc_id, sv in docs.items():
+            for idx, val in zip(sv.indices, sv.values):
+                self._inverted_index[idx].append((doc_id, val))
+        self._count = int(meta["count"])
+        self._total_nnz = int(meta["total_nnz"])
+        self.normalize = bool(meta.get("normalize", False))
 
     def clear(self) -> None:
         """Clear all data from index."""
@@ -448,13 +525,15 @@ class HybridSparseIndex:
             sparse_score = sparse_results.get(doc_id, 0.0)
 
             # RRF fusion
-            dense_rank = self._get_rank(doc_id, dense_results) if dense_score > 0 else float('inf')
-            sparse_rank = self._get_rank(doc_id, sparse_results) if sparse_score > 0 else float('inf')
+            dense_rank = self._get_rank(doc_id, dense_results) if dense_score > 0 else float("inf")
+            sparse_rank = (
+                self._get_rank(doc_id, sparse_results) if sparse_score > 0 else float("inf")
+            )
 
             rrf_score = 0.0
-            if dense_rank < float('inf'):
+            if dense_rank < float("inf"):
                 rrf_score += dense_weight / (self.rrf_k + dense_rank)
-            if sparse_rank < float('inf'):
+            if sparse_rank < float("inf"):
                 rrf_score += sparse_weight / (self.rrf_k + sparse_rank)
 
             combined.append((doc_id, rrf_score, dense_score, sparse_score))
@@ -473,10 +552,10 @@ class HybridSparseIndex:
         # This is a placeholder - actual implementation depends on dense index type
         return []
 
-    def _get_rank(self, doc_id: str, scores: Dict[str, float]) -> int:
+    def _get_rank(self, doc_id: str, scores: Dict[str, float]) -> float:
         """Get rank of document in sorted scores."""
         sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
         try:
             return sorted_ids.index(doc_id) + 1
         except ValueError:
-            return float('inf')
+            return float("inf")

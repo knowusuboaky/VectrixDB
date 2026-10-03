@@ -11,6 +11,22 @@ from typing import Dict, List, Optional, Any
 from .runner import BenchmarkResult
 
 
+__all__ = [
+    "BenchmarkReport",
+    "compare_results",
+]
+
+
+# ============================================================================
+# REPORTS, AND A COMPARISON
+# ============================================================================
+#
+# INPUT   results
+# OUTPUT  a report in each format; two sets compared, baseline against current
+#
+# What a benchmark run ends with.
+
+
 class BenchmarkReport:
     """
     Generate benchmark reports in various formats.
@@ -60,12 +76,14 @@ class BenchmarkReport:
             lines.extend([self.description, ""])
 
         # Summary table
-        lines.extend([
-            "## Summary",
-            "",
-            "| Benchmark | Ops/sec | Latency P50 | Latency P99 | Memory Peak |",
-            "|-----------|---------|-------------|-------------|-------------|",
-        ])
+        lines.extend(
+            [
+                "## Summary",
+                "",
+                "| Benchmark | Ops/sec | Latency P50 | Latency P99 | Memory Peak |",
+                "|-----------|---------|-------------|-------------|-------------|",
+            ]
+        )
 
         for result in self.results:
             lines.append(
@@ -82,25 +100,27 @@ class BenchmarkReport:
         lines.extend(["## Detailed Results", ""])
 
         for result in self.results:
-            lines.extend([
-                f"### {result.name}",
-                "",
-                f"- **Duration:** {result.duration_ms:.2f}ms",
-                f"- **Operations/sec:** {result.operations_per_second:,.2f}",
-                f"- **Throughput items:** {result.throughput_items:,}",
-                "",
-                "**Latency:**",
-                f"- Mean: {result.latency_mean_ms:.3f}ms",
-                f"- Std: {result.latency_std_ms:.3f}ms",
-                f"- P50: {result.latency_p50_ms:.3f}ms",
-                f"- P95: {result.latency_p95_ms:.3f}ms",
-                f"- P99: {result.latency_p99_ms:.3f}ms",
-                "",
-                "**Memory:**",
-                f"- Peak: {result.memory_peak_mb:.2f}MB",
-                f"- Delta: {result.memory_delta_mb:.2f}MB",
-                "",
-            ])
+            lines.extend(
+                [
+                    f"### {result.name}",
+                    "",
+                    f"- **Duration:** {result.duration_ms:.2f}ms",
+                    f"- **Operations/sec:** {result.operations_per_second:,.2f}",
+                    f"- **Throughput items:** {result.throughput_items:,}",
+                    "",
+                    "**Latency:**",
+                    f"- Mean: {result.latency_mean_ms:.3f}ms",
+                    f"- Std: {result.latency_std_ms:.3f}ms",
+                    f"- P50: {result.latency_p50_ms:.3f}ms",
+                    f"- P95: {result.latency_p95_ms:.3f}ms",
+                    f"- P99: {result.latency_p99_ms:.3f}ms",
+                    "",
+                    "**Memory:**",
+                    f"- Peak: {result.memory_peak_mb:.2f}MB",
+                    f"- Delta: {result.memory_delta_mb:.2f}MB",
+                    "",
+                ]
+            )
 
             if result.recall_at_k is not None:
                 lines.append(f"**Recall@k:** {result.recall_at_k:.4f}")
@@ -165,7 +185,7 @@ class BenchmarkReport:
 </head>
 <body>
     <h1>{self.title}</h1>
-    <p class="timestamp">Generated: {self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}</p>
+    <p class="timestamp">Generated: {self.timestamp.strftime("%Y-%m-%d %H:%M:%S")}</p>
     {"<p>" + self.description + "</p>" if self.description else ""}
 
     <h2>Summary</h2>
@@ -318,7 +338,7 @@ def compare_results(
     current_map = {r.name: r for r in current}
 
     all_names = set(baseline_map.keys()) | set(current_map.keys())
-    comparisons = {}
+    comparisons: Dict[str, Dict[str, Any]] = {}
 
     for name in all_names:
         base = baseline_map.get(name)
@@ -326,14 +346,27 @@ def compare_results(
 
         if base and curr:
             # Calculate improvements
-            ops_change = ((curr.operations_per_second - base.operations_per_second) /
-                         base.operations_per_second * 100) if base.operations_per_second else 0
+            ops_change = (
+                (
+                    (curr.operations_per_second - base.operations_per_second)
+                    / base.operations_per_second
+                    * 100
+                )
+                if base.operations_per_second
+                else 0
+            )
 
-            latency_change = ((base.latency_p50_ms - curr.latency_p50_ms) /
-                             base.latency_p50_ms * 100) if base.latency_p50_ms else 0
+            latency_change = (
+                ((base.latency_p50_ms - curr.latency_p50_ms) / base.latency_p50_ms * 100)
+                if base.latency_p50_ms
+                else 0
+            )
 
-            memory_change = ((base.memory_peak_mb - curr.memory_peak_mb) /
-                            base.memory_peak_mb * 100) if base.memory_peak_mb else 0
+            memory_change = (
+                ((base.memory_peak_mb - curr.memory_peak_mb) / base.memory_peak_mb * 100)
+                if base.memory_peak_mb
+                else 0
+            )
 
             comparisons[name] = {
                 "baseline_ops": base.operations_per_second,

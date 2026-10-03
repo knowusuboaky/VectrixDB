@@ -1,0 +1,15 @@
+{
+  "dataset": "scifact",
+  "rows": [
+    {
+      "model": "bge_small_int8",
+      "label": "bge-small-en-v1.5 INT8 (dynamic)",
+      "variant": "bare",
+      "mrr": 0.9531,
+      "recall1": 0.9167,
+      "ndcg@10": 0.7013,
+      "recall@100": 0.9333,
+      "embed_s": 995.5
+    }
+  ]
+}

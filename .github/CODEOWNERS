@@ -1,0 +1,23 @@
+# Review routing. One maintainer today; the split below is where a second
+# reviewer would take over first.
+
+*                                   @knowusuboaky
+
+# Search quality: any change here should come with a recall or MRR number.
+/vectrixdb/core/collection.py       @knowusuboaky
+/vectrixdb/core/search/             @knowusuboaky
+/vectrixdb/easy.py                  @knowusuboaky
+/tests/fixtures/recall_baseline.json @knowusuboaky
+
+# Storage backends: the contract suite is the definition of done.
+/vectrixdb/core/storage.py          @knowusuboaky
+/vectrixdb/core/storage_azure.py    @knowusuboaky
+/tests/unit/test_storage_contract.py @knowusuboaky
+
+# Bundled models and their checksums.
+/vectrixdb/models/                  @knowusuboaky
+
+# Release and CI.
+/.github/workflows/                 @knowusuboaky
+/scripts/release.py                 @knowusuboaky
+/pyproject.toml                     @knowusuboaky

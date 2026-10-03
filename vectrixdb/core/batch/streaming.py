@@ -11,7 +11,32 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar
 
 from .parallel import BatchResult
 
-T = TypeVar('T')
+
+__all__ = [
+    "StreamingBatchProcessor",
+    "StreamingReader",
+    "VectorFileReader",
+]
+
+
+# ============================================================================
+# SETTINGS: the type variable
+# ============================================================================
+#
+# Whatever a stream carries.
+
+T = TypeVar("T")
+
+
+# ============================================================================
+# STREAMS, FILES, AND VECTOR FILES
+# ============================================================================
+#
+# INPUT   a stream of items; a large file; a file of vectors
+# OUTPUT  processed without loading everything into memory; read a piece at a
+#         time; vectors read row by row
+#
+# Memory-efficient by construction: nothing here holds the whole input.
 
 
 class StreamingBatchProcessor:
@@ -122,10 +147,7 @@ class StreamingReader:
     """
 
     @staticmethod
-    def read_jsonl(
-        path: Path,
-        batch_size: int = 1000
-    ) -> Iterator[List[Dict[str, Any]]]:
+    def read_jsonl(path: Path, batch_size: int = 1000) -> Iterator[List[Dict[str, Any]]]:
         """
         Stream JSONL file in batches.
 
@@ -159,10 +181,7 @@ class StreamingReader:
             yield batch
 
     @staticmethod
-    def read_json_array(
-        path: Path,
-        batch_size: int = 1000
-    ) -> Iterator[List[Dict[str, Any]]]:
+    def read_json_array(path: Path, batch_size: int = 1000) -> Iterator[List[Dict[str, Any]]]:
         """
         Stream JSON array file in batches.
 
@@ -216,6 +235,7 @@ class StreamingReader:
             Batches of dicts (header keys -> values)
         """
         import csv
+
         path = Path(path)
 
         with open(path, "r", encoding="utf-8", newline="") as f:
@@ -304,14 +324,15 @@ class StreamingReader:
             Batches of numpy arrays
         """
         import numpy as np
+
         path = Path(path)
 
         # Load with mmap for memory efficiency
-        data = np.load(path, mmap_mode='r')
+        data = np.load(path, mmap_mode="r")
 
         for i in range(0, len(data), batch_size):
             # Copy batch to avoid mmap issues
-            yield np.array(data[i:i + batch_size])
+            yield np.array(data[i : i + batch_size])
 
     @staticmethod
     def count_lines(path: Path) -> int:
@@ -427,7 +448,8 @@ class VectorFileReader:
             else:
                 # Include all non-special fields
                 meta = {
-                    k: v for k, v in record.items()
+                    k: v
+                    for k, v in record.items()
                     if k not in [self.vector_field, self.id_field, self.text_field]
                 }
             metadata_list.append(meta)

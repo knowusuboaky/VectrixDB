@@ -7,26 +7,35 @@ Manages collections and provides a unified interface with:
 - Auto-scaling and resource management
 - Thread-safe operations
 
-Author: Daddy Nyame Owusu - Boakye
+Author: Kwadwo Daddy Nyame Owusu - Boakye
 """
 
 import json
+import logging
 import os
 import sqlite3
 import threading
-import asyncio
+import warnings
 from datetime import datetime
+from .._time import utcnow
 from pathlib import Path
-from typing import Optional, Union, Callable, Any, List
+from typing import TYPE_CHECKING, Optional, Union, Callable, Any, Dict, List
 
 from .collection import Collection
 from .types import CollectionInfo, DatabaseInfo, DistanceMetric, IndexConfig
+from ..exceptions import (
+    CollectionLoadWarning,
+    InvalidCollectionName,
+    StorageOperationError,
+)
 from .storage import (
+    RESERVED_DATABASE_NAMES,
     StorageBackend,
     StorageConfig,
     BaseStorage,
     create_storage,
 )
+
 from .cache import (
     CacheBackend,
     CacheConfig,
@@ -48,23 +57,132 @@ from .document_index import (
     ChunkInfo,
 )
 
-# GraphRAG support (optional import)
-try:
-    from .graphrag import (
-        GraphRAGConfig,
-        GraphRAGPipeline,
-        GraphSearchResult,
-        create_pipeline,
-    )
-    GRAPHRAG_AVAILABLE = True
-except ImportError:
-    GRAPHRAG_AVAILABLE = False
-    GraphRAGConfig = None
-    GraphRAGPipeline = None
-    GraphSearchResult = None
+
+__all__ = [
+    "VectrixDB",
+]
+
+
+# ============================================================================
+# SETTINGS: the logger, and the names Windows reserves
+# ============================================================================
+#
+# One logger for the database's lines, and the device names a collection
+# cannot be called on Windows.
+
+logger = logging.getLogger(__name__)
+
+# Windows keeps these as device names whatever the extension, so a collection
+# called "con" would be a file that cannot be created or opened.
+_RESERVED_NAMES = {"con", "prn", "aux", "nul"} | {
+    f"{stem}{n}" for stem in ("com", "lpt") for n in range(1, 10)
+}
+
+
+# ============================================================================
+# A COLLECTION'S NAME
+# ============================================================================
+#
+# INPUT   a name
+# OUTPUT  checked as safe for a directory name, or refused with the reason
+#
+# A name that cannot be a directory is refused before anything is made.
+
+
+def validate_collection_name(name: str) -> str:
+    """Check a collection name is safe to use as a directory name.
+
+    The name becomes a path under the database directory. Unvalidated, a
+    name containing a separator or a parent reference wrote the collection's
+    files outside the directory the caller designated, and the REST create
+    route accepted one over the wire.
+    """
+    if not isinstance(name, str):
+        raise InvalidCollectionName(f"Collection name must be a string, got {type(name).__name__}.")
+    if not name.strip():
+        raise InvalidCollectionName("Collection name must not be empty or only whitespace.")
+    if name != name.strip():
+        raise InvalidCollectionName(
+            f"Collection name must not start or end with whitespace: {name!r}"
+        )
+    if "\x00" in name:
+        raise InvalidCollectionName("Collection name must not contain a null byte.")
+    if "/" in name or "\\" in name:
+        raise InvalidCollectionName(
+            f"Collection name must not contain a path separator: {name!r}. "
+            f"The name is used as a directory under the database path."
+        )
+    if name in (".", "..") or name.startswith(".."):
+        raise InvalidCollectionName(f"Collection name must not be a parent reference: {name!r}")
+    if ":" in name:
+        raise InvalidCollectionName(
+            f"Collection name must not contain a drive or stream separator: {name!r}"
+        )
+    lowered = name.lower()
+    if lowered in RESERVED_DATABASE_NAMES:
+        raise InvalidCollectionName(
+            f"{name!r} is reserved: VectrixDB keeps its own {name}.db beside the collections."
+        )
+    # A collection's files sit beside the others' in the database directory:
+    # "docs.db" is the file of a collection "docs", and "docs.documents" its
+    # documents, so a name ending like that collided with them.
+    for suffix in (".db", ".db-wal", ".db-shm", ".db-journal", ".documents"):
+        if lowered.endswith(suffix):
+            raise InvalidCollectionName(
+                f"Collection name must not end in {suffix!r}: {name!r} would collide "
+                f"with another collection's files."
+            )
+    if name.split(".")[0].lower() in _RESERVED_NAMES:
+        raise InvalidCollectionName(f"{name!r} is a reserved device name on Windows.")
+    if len(name) > 255:
+        raise InvalidCollectionName(
+            f"Collection name must be 255 characters or fewer, got {len(name)}."
+        )
+    return name
+
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .graphrag import GraphRAGConfig, GraphRAGPipeline, GraphSearchResult
+
+
+# ============================================================================
+# GRAPHRAG ON FIRST USE
+# ============================================================================
+#
+# INPUT   nothing
+# OUTPUT  the GraphRAG package, imported once, or None when it cannot be
+#
+# Imported when a graph is first asked for, so a database without one pays
+# nothing for it.
+
+
+def _graphrag():
+    """The GraphRAG package on first use, or None when it cannot be imported.
+
+    Importing it eagerly cost every user of this module the whole GraphRAG
+    import tree, extractors included, whether or not a graph was ever built.
+    """
+    try:
+        from . import graphrag
+    except ImportError:
+        return None
+    return graphrag
+
 
 # Version - imported from main package
 from .. import __version__
+
+
+# ============================================================================
+# THE DATABASE
+# ============================================================================
+#
+# INPUT   a path and a storage configuration
+# OUTPUT  collections made, opened, listed and deleted over one backend:
+#         memory, SQLite, Cosmos DB, Lakebase, Delta Lake, OpenSearch, Aurora
+#         or Azure AI Search, with caching and auto-scaling
+#
+# Thread-safe, and the one interface the easy API and the server build on.
 
 
 class VectrixDB:
@@ -121,6 +239,10 @@ class VectrixDB:
         cache_config: Optional[CacheConfig] = None,
         scaling_config: Optional[ScalingConfig] = None,
         graphrag_config: Optional["GraphRAGConfig"] = None,
+        readonly: bool = False,
+        chunk_store: Any = None,
+        collection_store: Any = None,
+        follow_shared: bool = False,
     ):
         """
         Initialize VectrixDB.
@@ -130,6 +252,21 @@ class VectrixDB:
             storage_config: Storage backend configuration (overrides path).
             cache_config: Caching layer configuration.
             scaling_config: Auto-scaling configuration.
+            chunk_store: Where every collection keeps a copy of its chunks for
+                the collection pages, when more than one process writes:
+                cosmos://<account>.documents.azure.com/<database>/<container>,
+                or a store of your own. See vectrixdb.chunk_store.
+            collection_store: Where every collection's rules are kept, its
+                policy, visibility and masking, shared by every server: a
+                path, sqlite:///, postgresql://, cosmos:// or dynamodb://, or
+                a store already made. See vectrixdb.collection_records.
+            follow_shared: Open the collections a shared backend holds as
+                they are asked for, the ones another process made: at start,
+                in ``list_collections`` and on a lookup by name. What a server
+                beside an ingest worker wants. Off by default, so a handle
+                that creates its collection on first use, as ``Vectrix``
+                does, still creates it with its own options. See
+                ``open_shared``.
 
         Example:
             # Persistent database with SQLite
@@ -152,8 +289,9 @@ class VectrixDB:
         """
         self.path = Path(path) if path else None
         self._collections: dict[str, Collection] = {}
+        self._failed_collections: dict[str, str] = {}
         self._lock = threading.RLock()
-        self._created_at = datetime.utcnow()
+        self._created_at = utcnow()
 
         # Configuration
         self._storage_config = storage_config
@@ -190,9 +328,26 @@ class VectrixDB:
                 resource_monitor=self._resource_monitor,
             )
 
+        # Read-only opens map each index file instead of loading it, so a
+        # collection larger than memory can still be searched. Set before the
+        # storage opens, which writes nothing when it is set.
+        self.readonly = readonly
         # Initialize main database storage
         self._init_storage()
+        # The copy of every chunk the collection pages read when more than one
+        # process writes. Opened once; each collection gets its own view of it.
+        from ..chunk_store import open_chunk_store
+
+        self._chunk_store: Any = open_chunk_store(chunk_store)
+        # Every collection's rules, shared by every server. Opened once, before
+        # the collections, so the first search of any of them already has it.
+        from ..collection_records import open_collection_store
+
+        self._collection_store: Any = open_collection_store(collection_store)
         self._load_collections()
+        self._follow_shared = follow_shared
+        if follow_shared:
+            self.open_shared()
 
         # Start auto-scaler if enabled
         if self._auto_scaler:
@@ -201,7 +356,7 @@ class VectrixDB:
         # Initialize GraphRAG if configured
         self._graphrag_config = graphrag_config
         self._graphrag_pipeline: Optional["GraphRAGPipeline"] = None
-        if graphrag_config and GRAPHRAG_AVAILABLE:
+        if graphrag_config and _graphrag() is not None:
             if graphrag_config.enabled:
                 self._init_graphrag()
 
@@ -213,9 +368,16 @@ class VectrixDB:
         if self.path:
             os.makedirs(self.path, exist_ok=True)
             db_path = self.path / "_vectrixdb.db"
-            self._db = sqlite3.connect(str(db_path), check_same_thread=False)
-            # Enable WAL mode for crash recovery
-            self._db.execute("PRAGMA journal_mode=WAL")
+            # timeout is the busy handler: another process holding the write
+            # lock makes this connection wait, not fail with "database is
+            # locked". Readers that open while a writer is mid-transaction
+            # were failing exactly that way.
+            self._db = sqlite3.connect(str(db_path), check_same_thread=False, timeout=30.0)
+            # Enable WAL mode for crash recovery. Changing the journal mode
+            # takes an exclusive lock, so only ask when it is not WAL already.
+            mode = self._db.execute("PRAGMA journal_mode").fetchone()[0]
+            if str(mode).lower() != "wal":
+                self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=NORMAL")
         else:
             self._db = sqlite3.connect(":memory:", check_same_thread=False)
@@ -249,14 +411,20 @@ class VectrixDB:
             );
         """)
 
-        # Store version and config
+        # Store version and config. Not on a read-only open, which writes
+        # nothing.
+        if getattr(self, "readonly", False):
+            return
         self._db.execute(
             "INSERT OR REPLACE INTO database_meta (key, value) VALUES (?, ?)",
             ("version", __version__),
         )
         self._db.execute(
             "INSERT OR REPLACE INTO database_meta (key, value) VALUES (?, ?)",
-            ("storage_backend", self._storage_config.backend.value if self._storage_config else "sqlite"),
+            (
+                "storage_backend",
+                self._storage_config.backend.value if self._storage_config else "sqlite",
+            ),
         )
         self._db.execute(
             "INSERT OR REPLACE INTO database_meta (key, value) VALUES (?, ?)",
@@ -283,16 +451,29 @@ class VectrixDB:
             try:
                 # Parse index config if available
                 index_config = None
+                text_boosts = None
+                text_language = "en"
+                shard_size = None
+                # A row written before this was kept opens with the text
+                # index, which is what every such collection had.
+                enable_text_index = True
                 if row["index_config"]:
                     try:
                         config_data = json.loads(row["index_config"])
                         from .types import IndexType
+
                         index_config = IndexConfig(
                             index_type=IndexType(config_data.get("type", "hnsw")),
                             hnsw_m=config_data.get("m", 16),
                             hnsw_ef_construction=config_data.get("ef_construction", 200),
                             hnsw_ef_search=config_data.get("ef_search", 50),
                         )
+                        text_boosts = config_data.get("text_boosts") or None
+                        text_language = config_data.get("text_language") or "en"
+                        # How the collection was built. A row written before
+                        # sharding existed has none, and opens unsharded.
+                        shard_size = config_data.get("shard_size")
+                        enable_text_index = bool(config_data.get("enable_text_index", True))
                     except (json.JSONDecodeError, KeyError):
                         pass
 
@@ -305,6 +486,9 @@ class VectrixDB:
                         tags = []
 
                 # Skip demo collections - they should not persist across restarts
+                if tags and "demo" in tags and self.readonly:
+                    # Skipped, not deleted: a read-only open writes nothing.
+                    continue
                 if tags and "demo" in tags:
                     # Delete demo collection from database and files
                     self._db.execute("DELETE FROM collections WHERE name = ?", (row["name"],))
@@ -313,20 +497,29 @@ class VectrixDB:
                         collection_path = self.path / row["name"]
                         if collection_path.exists():
                             import shutil
+
                             shutil.rmtree(collection_path)
-                    print(f"[VectrixDB] Removed demo collection: {row['name']}")
+                    logger.info("removed demo collection %r", row["name"])
                     continue
 
                 collection = Collection(
+                    shard_size=shard_size,
                     name=row["name"],
                     dimension=row["dimension"],
                     path=self.path / row["name"] if self.path else None,
                     metric=DistanceMetric(row["metric"]),
                     description=row["description"],
+                    index_config=index_config,
                     ef_construction=index_config.hnsw_ef_construction if index_config else 200,
                     m=index_config.hnsw_m if index_config else 16,
+                    enable_text_index=enable_text_index,
                     tags=tags,
                     storage_backend=self._storage,  # Pass storage backend for vector persistence
+                    text_boosts=text_boosts,
+                    text_language=text_language,
+                    readonly=self.readonly,
+                    chunk_store=self._chunks_for(row["name"]),
+                    collection_store=getattr(self, "_collection_store", None),
                 )
 
                 # Integrate cache
@@ -334,7 +527,109 @@ class VectrixDB:
 
                 self._collections[row["name"]] = collection
             except Exception as e:
-                print(f"Warning: Failed to load collection '{row['name']}': {e}")
+                # A collection that will not load used to be dropped from the
+                # database object after a printed line, so listing it showed
+                # nothing and a caller could reasonably conclude the data was
+                # gone and re-ingest over it. One bad collection should not
+                # stop the others opening, so this still carries on, but the
+                # failure is recorded, warned about, and raised by name if
+                # anyone asks for that collection.
+                self._failed_collections[row["name"]] = f"{type(e).__name__}: {e}"
+                logger.warning("collection %r failed to load: %s", row["name"], e, exc_info=True)
+                warnings.warn(
+                    f"Collection {row['name']!r} failed to load and is not available: {e}. "
+                    f"The data on disk was left alone. See VectrixDB.failed_collections.",
+                    CollectionLoadWarning,
+                    stacklevel=2,
+                )
+
+    #: Backends that live with this process alone. Every other one is shared,
+    #: and what another process made in it is this one's to open.
+    _LOCAL_BACKENDS = (StorageBackend.SQLITE, StorageBackend.MEMORY)
+
+    def open_shared(self, name: Optional[str] = None) -> List[str]:
+        """Open the collections a shared backend holds that this process has not: the ones another process made.
+
+        Each process keeps its own list of collections, beside it on disk. A
+        server and an ingest worker reading one Azure AI Search service are
+        two readers of one index, but the server knew only what it had made
+        itself: it listed none of the worker's collections and answered a
+        search on one with "not found". A database made with
+        ``follow_shared=True``, as the server's is, calls this at start, when
+        it lists collections, and on a lookup of a name it does not know.
+
+        ``name`` reads that one collection's record rather than the whole
+        list. Returns the names opened. A backend on this machine alone,
+        SQLite or memory, has nothing another process made, and is left
+        alone. A backend that cannot be read leaves what is open alone; a
+        record that will not open goes in ``failed_collections``, as a local
+        collection that will not load does.
+
+        Nothing here is written to this process's own list, so a collection
+        another process deletes is not kept alive here after a restart, and
+        opening one with ``Vectrix`` still creates it with that handle's
+        options when it is not open.
+        """
+        backend = getattr(self._storage_config, "backend", None)
+        if self._storage is None or backend in self._LOCAL_BACKENDS:
+            return []
+        try:
+            names = [name] if name is not None else list(self._storage.list_collections())
+        except Exception as exc:  # noqa: BLE001 - an unreachable backend leaves what is open alone
+            logger.warning("the collections in the shared backend could not be listed: %s", exc)
+            return []
+        opened: List[str] = []
+        for each in names:
+            with self._lock:
+                if each in self._collections or each in self._failed_collections:
+                    continue
+            try:
+                config = self._storage.get_collection_config(each)
+            except Exception as exc:  # noqa: BLE001 - one record that cannot be read leaves the others
+                logger.warning(
+                    "collection %r in the shared backend could not be read: %s", each, exc
+                )
+                continue
+            if not config:
+                continue
+            try:
+                self._open_shared(each, config)
+                opened.append(each)
+            except Exception as exc:  # noqa: BLE001 - one bad record must not stop the others opening
+                with self._lock:
+                    self._failed_collections[each] = f"{type(exc).__name__}: {exc}"
+                logger.warning(
+                    "collection %r in the shared backend failed to open: %s",
+                    each,
+                    exc,
+                    exc_info=True,
+                )
+        return opened
+
+    def _open_shared(self, name: str, config: Dict[str, Any]) -> None:
+        """One collection from its record in a shared backend, opened as ``_load_collections`` opens a local one."""
+        if not config.get("dimension"):
+            raise ValueError("its record in the backend names no dimension")
+        collection_path = self.path / name if self.path else None
+        if collection_path:
+            os.makedirs(collection_path, exist_ok=True)
+        tags = config.get("tags") or None
+        collection = Collection(
+            name=name,
+            dimension=int(config["dimension"]),
+            path=collection_path,
+            metric=DistanceMetric(config.get("metric") or DistanceMetric.COSINE.value),
+            description=config.get("description") or None,
+            tags=list(tags) if tags else None,
+            storage_backend=self._storage,
+            readonly=self.readonly,
+            chunk_store=self._chunks_for(name),
+            collection_store=getattr(self, "_collection_store", None),
+        )
+        collection._cache = self._vector_cache
+        with self._lock:
+            # Another thread may have opened it while this one read the record.
+            self._collections.setdefault(name, collection)
 
     def create_collection(
         self,
@@ -347,6 +642,9 @@ class VectrixDB:
         m: int = 16,
         enable_text_index: bool = False,
         tags: Optional[List[str]] = None,
+        text_boosts: Optional[dict] = None,
+        shard_size: Optional[int] = None,
+        text_language: str = "en",
     ) -> Collection:
         """
         Create a new collection.
@@ -393,12 +691,15 @@ class VectrixDB:
                 index_config=index_config
             )
         """
+        validate_collection_name(name)
+
         if isinstance(metric, str):
             metric = DistanceMetric(metric)
 
         # Build index config from legacy params if not provided
         if index_config is None:
             from .types import IndexType
+
             index_config = IndexConfig(
                 index_type=IndexType.HNSW,
                 hnsw_m=m,
@@ -408,6 +709,13 @@ class VectrixDB:
         with self._lock:
             if name in self._collections:
                 raise ValueError(f"Collection '{name}' already exists")
+            if name in self._failed_collections:
+                # Registered and on disk, just not loadable. Making it again
+                # here opened the same broken files.
+                raise ValueError(
+                    f"Collection '{name}' already exists but failed to load "
+                    f"({self._failed_collections[name]}); delete_collection() it first"
+                )
 
             # Create collection directory
             collection_path = self.path / name if self.path else None
@@ -416,41 +724,68 @@ class VectrixDB:
 
             # Create collection with cache integration and storage backend
             collection = Collection(
+                shard_size=shard_size,
                 name=name,
                 dimension=dimension,
                 path=collection_path,
                 metric=metric,
                 description=description,
+                # The whole config, or its ef_search never reached the index.
+                index_config=index_config,
                 ef_construction=index_config.hnsw_ef_construction,
                 m=index_config.hnsw_m,
                 enable_text_index=enable_text_index,
                 tags=tags,
                 storage_backend=self._storage,  # Pass storage backend for vector persistence
+                text_boosts=text_boosts,
+                text_language=text_language,
+                chunk_store=self._chunks_for(name),
+                collection_store=getattr(self, "_collection_store", None),
             )
 
             # Integrate cache with collection
             collection._cache = self._vector_cache
 
             # Store in database
-            now = datetime.utcnow().isoformat()
-            index_config_json = json.dumps({
-                "type": index_config.index_type.value,
-                "m": index_config.hnsw_m,
-                "ef_construction": index_config.hnsw_ef_construction,
-                "ef_search": index_config.hnsw_ef_search,
-            })
+            now = utcnow().isoformat()
+            index_config_json = json.dumps(
+                {
+                    "type": index_config.index_type.value,
+                    "m": index_config.hnsw_m,
+                    "ef_construction": index_config.hnsw_ef_construction,
+                    "ef_search": index_config.hnsw_ef_search,
+                    # Kept with the index config so the text index is rebuilt
+                    # with the same weights on every open.
+                    "text_boosts": dict(text_boosts or {}),
+                    # And with the same tokenisation: a collection cut for
+                    # German must not be reopened with English stemming.
+                    "text_language": text_language,
+                    # And so a sharded collection reopens sharded.
+                    "shard_size": shard_size,
+                    # And with or without its text index, as it was made.
+                    "enable_text_index": bool(enable_text_index),
+                }
+            )
 
             # Store tags as JSON
             tags_json = json.dumps(tags) if tags else None
 
-            self._db.execute(
-                """
-                INSERT INTO collections (name, dimension, metric, description, index_config, tags, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (name, dimension, metric.value, description, index_config_json, tags_json, now),
-            )
-            self._db.commit()
+            try:
+                self._db.execute(
+                    """
+                    INSERT INTO collections (name, dimension, metric, description, index_config, tags, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (name, dimension, metric.value, description, index_config_json, tags_json, now),
+                )
+                self._db.commit()
+            except sqlite3.IntegrityError as exc:
+                # Another process registered the same name between our
+                # in-memory check and this insert. Say so in the same words
+                # the in-memory check uses rather than leaking a UNIQUE
+                # constraint traceback.
+                self._db.rollback()
+                raise ValueError(f"Collection '{name}' already exists") from exc
 
             # Persist to storage backend (Lakebase/CosmosDB/DeltaLake)
             if self._storage:
@@ -465,15 +800,23 @@ class VectrixDB:
                             mode = "ultimate"
                         elif "hybrid" in tags_lower:
                             mode = "hybrid"
-                    self._storage.create_collection(name, {
-                        "dimension": dimension,
-                        "description": description or "",
-                        "metric": metric.value,
-                        "tags": tags,
-                        "mode": mode,
-                    })
+                    self._storage.create_collection(
+                        name,
+                        {
+                            "dimension": dimension,
+                            "description": description or "",
+                            "metric": metric.value,
+                            "tags": tags,
+                            "mode": mode,
+                        },
+                    )
                 except Exception as e:
-                    print(f"[VectrixDB] Warning: Failed to persist collection to storage backend: {e}")
+                    logger.warning(
+                        "collection %r was created locally but could not be persisted "
+                        "to the storage backend: %s",
+                        name,
+                        e,
+                    )
 
             self._collections[name] = collection
 
@@ -499,10 +842,80 @@ class VectrixDB:
         Raises:
             KeyError: If collection doesn't exist
         """
+        self._follow(name)
         with self._lock:
             if name not in self._collections:
+                # "failed to open" and "never existed" are different answers
+                # and the caller needs to know which one they got.
+                if name in self._failed_collections:
+                    raise StorageOperationError(
+                        "load",
+                        "collection",
+                        f"{self._failed_collections[name]}. Its data on disk was not touched.",
+                        collection=name,
+                    )
                 raise KeyError(f"Collection '{name}' not found")
             return self._collections[name]
+
+    @property
+    def failed_collections(self) -> dict[str, str]:
+        """Collections that are registered but would not open, and why.
+
+        Empty in the ordinary case. A name in here is on disk and was left
+        alone; it is simply not loaded.
+        """
+        with self._lock:
+            return dict(self._failed_collections)
+
+    @property
+    def chunk_store(self) -> Any:
+        """Where the collections here keep the copy of their chunks the pages read, or None. See vectrixdb.chunk_store."""
+        return getattr(self, "_chunk_store", None)
+
+    def use_chunk_store(self, where: Any, *, key: Optional[str] = None) -> Any:
+        """Keep a copy of every chunk in ``where`` from now on, for every collection here.
+
+        An address, ``cosmos://<account>.documents.azure.com/<database>/<container>``,
+        or a store of your own; None stops it. This is how a database opened
+        by somebody else gets one: ``Vectrix(chunk_store=...)`` handed a
+        database as its storage backend. What was written before is not
+        copied. Returns the store.
+        """
+        from ..chunk_store import open_chunk_store
+
+        store = open_chunk_store(where, key=key)
+        with self._lock:
+            self._chunk_store = store
+            for name, collection in self._collections.items():
+                collection._chunk_store = store.collection(name) if store is not None else None
+        return store
+
+    def _chunks_for(self, name: str) -> Any:
+        """One collection's view of the chunk store, or None when there is no store."""
+        store = getattr(self, "_chunk_store", None)
+        return store.collection(name) if store is not None else None
+
+    @property
+    def collection_store(self) -> Any:
+        """Where every collection's rules are kept, shared by every server, or None. See vectrixdb.collection_records."""
+        return getattr(self, "_collection_store", None)
+
+    def use_collection_store(self, where: Any, *, key: Optional[str] = None) -> Any:
+        """Read every collection's rules from ``where`` from now on, for every collection here.
+
+        An address or a store already made; None goes back to each collection
+        keeping its policy in its own metadata. This is how a database opened
+        by somebody else gets one: ``Vectrix(collection_store=...)`` handed a
+        database as its storage backend. Returns the store.
+        """
+        from ..collection_records import open_collection_store
+
+        store = open_collection_store(where, key=key)
+        with self._lock:
+            self._collection_store = store
+            for collection in self._collections.values():
+                collection._collection_store = store
+        return store
 
     def get_or_create_collection(
         self,
@@ -539,16 +952,43 @@ class VectrixDB:
             True if deleted, False if not found
         """
         with self._lock:
+            if name in self._failed_collections and name not in self._collections:
+                # Nothing to close, but its record and files are there, and
+                # this was the only way to remove them.
+                self._delete_failed_collection(name)
+                return True
             if name not in self._collections:
                 return False
 
             collection = self._collections[name]
+
+            # The chunk store's rows first, or a collection made again under
+            # this name shows the old one's chunks on every page. First, so a
+            # store that refuses leaves the collection as it was, and asking
+            # again starts from the beginning rather than from a closed one.
+            if getattr(collection, "_chunk_store", None) is not None:
+                collection._share("delete_collection", lambda store: store.clear())
+
+            # Its record, in the store every server reads, or one made again
+            # under this name, by any server, starts with the old one's rules.
+            # Gone, the new one answers nobody until it is given a policy,
+            # which is the safe way to start. Before anything is closed, for
+            # the same reason as the chunks.
+            if getattr(self, "_collection_store", None) is not None:
+                self._collection_store.delete(name)
 
             # Unregister from auto-scaler
             if self._auto_scaler:
                 self._auto_scaler.unregister_index(name)
 
             collection.close()
+
+            # The store holds this collection's vector rows, and nothing else
+            # removes them. Left behind, they outlive the collection: an empty
+            # index defers to the store, so a collection cleared or recreated
+            # under the same name answered with the old ids and no text.
+            if self._storage is not None:
+                self._storage.delete_collection(name)
 
             # Remove from database
             self._db.execute("DELETE FROM collections WHERE name = ?", (name,))
@@ -557,16 +997,47 @@ class VectrixDB:
             # Invalidate cache entries for this collection
             self._cache.delete(f"vectrix:{name}:*")
             self._cache.delete("vectrix:collections:list")
+            # The line above asks an exact-match cache for a wildcard, so it
+            # never removed a cached search. This does.
+            try:
+                self._vector_cache.invalidate_collection(name)
+            except Exception:  # pragma: no cover - a cache that is down
+                pass
 
             # Remove files
             if self.path:
                 collection_path = self.path / name
                 if collection_path.exists():
                     import shutil
+
                     shutil.rmtree(collection_path)
 
             del self._collections[name]
             return True
+
+    def _delete_failed_collection(self, name: str) -> None:
+        """What delete_collection does, for one that never opened."""
+        chunks = self._chunks_for(name)
+        if chunks is not None:
+            chunks.clear()
+        if getattr(self, "_collection_store", None) is not None:
+            self._collection_store.delete(name)
+        if self._storage is not None:
+            self._storage.delete_collection(name)
+        self._db.execute("DELETE FROM collections WHERE name = ?", (name,))
+        self._db.commit()
+        self._cache.delete("vectrix:collections:list")
+        try:
+            self._vector_cache.invalidate_collection(name)
+        except Exception:  # pragma: no cover - a cache that is down
+            pass
+        if self.path:
+            collection_path = self.path / name
+            if collection_path.exists():
+                import shutil
+
+                shutil.rmtree(collection_path)
+        del self._failed_collections[name]
 
     def list_collections(self) -> list[CollectionInfo]:
         """
@@ -575,12 +1046,24 @@ class VectrixDB:
         Returns:
             List of CollectionInfo
         """
+        if getattr(self, "_follow_shared", False):
+            self.open_shared()
         with self._lock:
             return [c.info() for c in self._collections.values()]
 
     def has_collection(self, name: str) -> bool:
         """Check if a collection exists."""
+        self._follow(name)
         return name in self._collections
+
+    def _follow(self, name: str) -> None:
+        """With ``follow_shared``, a name this process does not know is looked for in the shared backend."""
+        if (
+            getattr(self, "_follow_shared", False)
+            and name not in self._collections
+            and name not in self._failed_collections
+        ):
+            self.open_shared(name)
 
     def info(self) -> DatabaseInfo:
         """
@@ -589,7 +1072,7 @@ class VectrixDB:
         Returns:
             DatabaseInfo with stats
         """
-        total_vectors = sum(c.count() for c in self._collections.values())
+        total_vectors = sum(c._count_raw() for c in self._collections.values())
         total_size = 0
 
         if self.path:
@@ -622,7 +1105,7 @@ class VectrixDB:
         resource_stats = self._resource_monitor.get_current_stats()
 
         # Get scaling stats if enabled
-        scaling_stats = None
+        scaling_stats: Optional[Dict[str, Any]] = None
         if self._auto_scaler:
             scaling_stats = {
                 "strategy": self._scaling_config.strategy.value,
@@ -695,11 +1178,11 @@ class VectrixDB:
                 collection.close()
 
             # Close cache
-            if hasattr(self._cache, 'close'):
+            if hasattr(self._cache, "close"):
                 self._cache.close()
 
             # Close storage
-            if hasattr(self._storage, 'close'):
+            if hasattr(self._storage, "close"):
                 self._storage.close()
 
             # Close metadata database
@@ -711,13 +1194,13 @@ class VectrixDB:
 
     def _init_graphrag(self) -> None:
         """Initialize GraphRAG pipeline."""
-        if not GRAPHRAG_AVAILABLE:
+        graphrag = _graphrag()
+        if graphrag is None:
             raise ImportError(
-                "GraphRAG components not available. "
-                "Ensure all GraphRAG dependencies are installed."
+                "GraphRAG components not available. Ensure all GraphRAG dependencies are installed."
             )
 
-        self._graphrag_pipeline = create_pipeline(
+        self._graphrag_pipeline = graphrag.create_pipeline(
             config=self._graphrag_config,
             path=self.path,
         )
@@ -815,12 +1298,17 @@ class VectrixDB:
             )
 
         import numpy as np
-        qv = np.array(query_vector, dtype=np.float32) if query_vector else None
+
+        # ``is not None``: every embedder returns a numpy array, and an
+        # array in a boolean context raises rather than answering. An
+        # empty list was also silently dropped to None.
+        qv = np.array(query_vector, dtype=np.float32) if query_vector is not None else None
 
         # Convert search_type string to enum if provided
         st = None
         if search_type:
             from .graphrag import GraphSearchType
+
             st = GraphSearchType(search_type)
 
         return self._graphrag_pipeline.search(
@@ -1084,10 +1572,11 @@ class VectrixDB:
         """
         collection = self.get_collection(collection_name)
         # Run in executor to not block event loop
+        import asyncio  # only the async API needs it
+
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None,
-            lambda: collection.search(query, limit=limit, filter=filter)
+            None, lambda: collection.search(query, limit=limit, filter=filter)
         )
 
     async def async_add(
@@ -1110,11 +1599,10 @@ class VectrixDB:
             Number of vectors added
         """
         collection = self.get_collection(collection_name)
+        import asyncio  # only the async API needs it
+
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: collection.add(ids, vectors, metadata)
-        )
+        return await loop.run_in_executor(None, lambda: collection.add(ids, vectors, metadata))
 
     # Convenience factory methods
     @classmethod
@@ -1320,6 +1808,13 @@ class VectrixDB:
         aws_secret_access_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
         cache_config: Optional[CacheConfig] = None,
+        filter_fields: Optional[dict] = None,
+        knn_engine: str = "nmslib",
+        embeddings: str = "vectrixdb",
+        embed_fn: Any = None,
+        embed_dimensions: Optional[int] = None,
+        vector_weights: Optional[dict] = None,
+        score_formula: str = "auto",
     ) -> "VectrixDB":
         """
         Create database with AWS OpenSearch Serverless storage.
@@ -1339,6 +1834,25 @@ class VectrixDB:
             aws_session_token: AWS session token (for temporary credentials)
             cache_config: Optional cache configuration
 
+        ``filter_fields`` names metadata paths to map as filterable index
+        fields, path to kind (``"string"``, ``"strings"``, ``"number"``,
+        ``"boolean"``), so a filter or an entitlement policy over them runs
+        inside OpenSearch; decided when the index is created. ``knn_engine``
+        is the engine for new indexes: ``"nmslib"`` filters after the search
+        and ``"lucene"`` or ``"faiss"`` during it, which keeps recall under a
+        selective filter.
+
+        ``embeddings`` says whose dense vectors the index holds:
+        ``"vectrixdb"``, the collection's own model; ``"bedrock"``, a Bedrock
+        model in its place; or ``"both"``, side by side and fused by rank, so
+        a search can ask for either with ``vectors=``. ``embed_fn`` is the
+        Bedrock embedder, ``vectrixdb.models.bedrock.BedrockEmbedder`` built
+        around your ``bedrock-runtime`` client, and ``embed_dimensions`` its
+        width when it does not say. OpenSearch has nothing here that embeds a
+        question for it, so Bedrock is called from this process at ingest
+        and at query. ``vector_weights``, ``{"vectrixdb": 1.0, "bedrock":
+        2.0}``, is how much each counts in the fusion.
+
         Example:
             db = VectrixDB.with_opensearch(
                 endpoint="https://xxx.us-east-1.aoss.amazonaws.com",
@@ -1354,6 +1868,75 @@ class VectrixDB:
             opensearch_aws_access_key_id=aws_access_key_id,
             opensearch_aws_secret_access_key=aws_secret_access_key,
             opensearch_aws_session_token=aws_session_token,
+            opensearch_filter_fields=filter_fields,
+            opensearch_knn_engine=knn_engine,
+            opensearch_embeddings=embeddings,
+            opensearch_embed_fn=embed_fn,
+            opensearch_embed_dimensions=embed_dimensions,
+            opensearch_vector_weights=vector_weights,
+            opensearch_score_formula=score_formula,
+        )
+        return cls(storage_config=storage_config, cache_config=cache_config)
+
+    @classmethod
+    def with_azure_search(
+        cls,
+        endpoint: str,
+        key: Optional[str] = None,
+        index_prefix: str = "vectrix",
+        semantic: bool = False,
+        cache_config: Optional[CacheConfig] = None,
+        filter_fields: Optional[dict] = None,
+        embeddings: str = "vectrixdb",
+        azure_embedding: Optional[dict] = None,
+        embed_fn: Any = None,
+        vector_weights: Optional[dict] = None,
+        relevance: bool = True,
+    ) -> "VectrixDB":
+        """
+        Create database with Azure AI Search storage.
+
+        One Azure index per collection with vector, BM25 and hybrid queries
+        served by the service; dense and hybrid modes. Pass ``key`` (an admin
+        key) or leave it None to authenticate with ``DefaultAzureCredential``
+        from azure-identity (managed identity, CLI login, environment).
+        ``semantic=True`` adds Azure's semantic ranker to text and hybrid
+        queries, which needs a tier that includes it. ``filter_fields`` names
+        metadata paths to promote to filterable index fields, path to kind
+        (``"string"``, ``"strings"``, ``"number"``, ``"boolean"``), so a filter or
+        a policy over them runs inside the service.
+
+        ``embeddings`` says whose dense vectors the index holds.
+        ``"vectrixdb"``, the default, is the collection's own model.
+        ``"azure"`` is an Azure OpenAI deployment: the collection embeds with
+        it at ingest and the service embeds the question itself. ``"both"``
+        keeps the two side by side in one index, and the service fuses them
+        in one request, under one filter and one ranker; a search can then
+        ask for either with ``vectors=``. Azure AI Search owns no embedding
+        model: ``azure_embedding`` names the deployment, ``{"endpoint": ...,
+        "deployment": ..., "dimensions": 3072}``, with ``api_key`` when it is
+        not keyless. ``embed_fn`` replaces the client built from it, texts to
+        vectors. ``vector_weights``, ``{"vectrixdb": 1.0, "azure": 2.0}``, is
+        how much each counts in the service's fusion.
+
+        Example:
+            db = VectrixDB.with_azure_search(
+                endpoint="https://my-service.search.windows.net",
+                key=os.environ["AZURE_SEARCH_KEY"],
+            )
+        """
+        storage_config = StorageConfig(
+            backend=StorageBackend.AZURE_SEARCH,
+            azure_search_endpoint=endpoint,
+            azure_search_key=key,
+            azure_search_index_prefix=index_prefix,
+            azure_search_semantic=semantic,
+            azure_search_filter_fields=filter_fields,
+            azure_search_embeddings=embeddings,
+            azure_search_vectorizer=azure_embedding,
+            azure_search_embed_fn=embed_fn,
+            azure_search_vector_weights=vector_weights,
+            azure_search_relevance=relevance,
         )
         return cls(storage_config=storage_config, cache_config=cache_config)
 
@@ -1423,13 +2006,9 @@ class VectrixDB:
         """
         scaling_config = ScalingConfig(
             strategy=strategy,
-            max_memory_percent=max_memory_percent,
+            memory_high_watermark=max_memory_percent,
         )
-        return cls(
-            path=path,
-            scaling_config=scaling_config,
-            cache_config=cache_config
-        )
+        return cls(path=path, scaling_config=scaling_config, cache_config=cache_config)
 
     @classmethod
     def with_graphrag(
@@ -1477,10 +2056,8 @@ class VectrixDB:
             >>> # NLP-only (completely free)
             >>> db = VectrixDB.with_graphrag("./my_kb", extractor="nlp")
         """
-        if not GRAPHRAG_AVAILABLE:
-            raise ImportError(
-                "GraphRAG not available. Ensure graphrag dependencies are installed."
-            )
+        if _graphrag() is None:
+            raise ImportError("GraphRAG not available. Ensure graphrag dependencies are installed.")
 
         from .graphrag import GraphRAGConfig, LLMProvider, ExtractorType
 

@@ -14,9 +14,26 @@ from ..extractor.base import Entity, Relationship
 from ..config import GraphRAGConfig
 
 
+__all__ = [
+    "LocalSearchResult",
+    "LocalSearcher",
+]
+
+
+# ============================================================================
+# LOCAL SEARCH: by entity
+# ============================================================================
+#
+# INPUT   a specific, fact-finding query
+# OUTPUT  the result; relevant entities expanded through their connections
+#
+# For a question with one answer.
+
+
 @dataclass
 class LocalSearchResult:
     """Result from local entity-based search."""
+
     entities: List[Tuple[Entity, float]]  # (entity, score)
     relationships: List[Relationship]
     subgraph: Optional[SubGraph] = None
@@ -42,7 +59,9 @@ class LocalSearchResult:
         if self.relationships:
             lines.append("\n## Relationships\n")
             for rel in self.relationships[:max_rels]:
-                lines.append(f"- {rel.description or f'{rel.source_id} --[{rel.type}]--> {rel.target_id}'}")
+                lines.append(
+                    f"- {rel.description or f'{rel.source_id} --[{rel.type}]--> {rel.target_id}'}"
+                )
 
         return "\n".join(lines)
 
@@ -67,7 +86,7 @@ class LocalSearcher:
         self,
         graph: KnowledgeGraph,
         config: Optional[GraphRAGConfig] = None,
-        entity_embeddings: Optional[Dict[str, np.ndarray]] = None
+        entity_embeddings: Optional[Dict[str, np.ndarray]] = None,
     ):
         """
         Initialize local searcher.
@@ -87,7 +106,7 @@ class LocalSearcher:
         query_vector: Optional[np.ndarray] = None,
         k: int = 10,
         depth: int = 2,
-        include_relationships: bool = True
+        include_relationships: bool = True,
     ) -> LocalSearchResult:
         """
         Search for relevant entities using local search.
@@ -115,12 +134,7 @@ class LocalSearcher:
         expanded_ids = self._expand_seeds(seed_entities, depth)
 
         # Stage 3: Score all entities
-        scored_entities = self._score_entities(
-            expanded_ids,
-            query,
-            query_vector,
-            seed_entities
-        )
+        scored_entities = self._score_entities(expanded_ids, query, query_vector, seed_entities)
 
         # Stage 4: Get top k
         top_entities = sorted(scored_entities, key=lambda x: -x[1])[:k]
@@ -132,23 +146,17 @@ class LocalSearcher:
             relationships = self._get_relationships(entity_ids)
 
         # Build subgraph
-        subgraph = self.graph.get_subgraph(
-            [e.id for e, _ in top_entities[:5]],
-            depth=1
-        )
+        subgraph = self.graph.get_subgraph([e.id for e, _ in top_entities[:5]], depth=1)
 
         return LocalSearchResult(
             entities=top_entities,
             relationships=relationships,
             subgraph=subgraph,
-            context=self._build_context(top_entities, relationships)
+            context=self._build_context(top_entities, relationships),
         )
 
     def _find_seed_entities(
-        self,
-        query: str,
-        query_vector: Optional[np.ndarray],
-        k: int
+        self, query: str, query_vector: Optional[np.ndarray], k: int
     ) -> List[Tuple[Entity, float]]:
         """Find initial seed entities by name/embedding similarity."""
         candidates: List[Tuple[Entity, float]] = []
@@ -183,17 +191,17 @@ class LocalSearcher:
         # Embedding-based matching
         if query_vector is not None and self.entity_embeddings:
             for entity_id, entity_emb in self.entity_embeddings.items():
-                entity = self.graph.get_entity(entity_id)
-                if entity:
+                embedding_entity = self.graph.get_entity(entity_id)
+                if embedding_entity:
                     sim = self._cosine_similarity(query_vector, entity_emb)
                     # Check if already added
                     existing = next((c for c in candidates if c[0].id == entity_id), None)
                     if existing:
                         # Boost score
                         idx = candidates.index(existing)
-                        candidates[idx] = (entity, min(1.0, existing[1] + sim * 0.3))
+                        candidates[idx] = (embedding_entity, min(1.0, existing[1] + sim * 0.3))
                     else:
-                        candidates.append((entity, sim * 0.7))
+                        candidates.append((embedding_entity, sim * 0.7))
 
         # Sort and deduplicate
         seen = set()
@@ -205,13 +213,9 @@ class LocalSearcher:
 
         return unique_candidates[:k]
 
-    def _expand_seeds(
-        self,
-        seeds: List[Tuple[Entity, float]],
-        depth: int
-    ) -> Set[str]:
+    def _expand_seeds(self, seeds: List[Tuple[Entity, float]], depth: int) -> Set[str]:
         """Expand seed entities via graph traversal."""
-        expanded = set()
+        expanded: Set[str] = set()
 
         for entity, _ in seeds:
             neighbors = self.graph.get_neighbors(entity.id, depth=depth)
@@ -224,7 +228,7 @@ class LocalSearcher:
         entity_ids: Set[str],
         query: str,
         query_vector: Optional[np.ndarray],
-        seeds: List[Tuple[Entity, float]]
+        seeds: List[Tuple[Entity, float]],
     ) -> List[Tuple[Entity, float]]:
         """Score expanded entities by relevance."""
         seed_ids = {e.id for e, _ in seeds}
@@ -244,12 +248,12 @@ class LocalSearcher:
                 score += seed_scores[entity_id] * 0.4
             else:
                 # Distance from nearest seed
-                min_dist = float('inf')
+                min_dist = float("inf")
                 for seed_id in seed_ids:
                     neighbors = self.graph.get_neighbors(seed_id, depth=3)
                     if entity_id in neighbors:
                         min_dist = min(min_dist, neighbors[entity_id])
-                if min_dist < float('inf'):
+                if min_dist < float("inf"):
                     score += 0.3 * (1 / (1 + min_dist))
 
             # Description relevance
@@ -290,9 +294,7 @@ class LocalSearcher:
         return sorted(relationships, key=lambda r: -r.strength)
 
     def _build_context(
-        self,
-        entities: List[Tuple[Entity, float]],
-        relationships: List[Relationship]
+        self, entities: List[Tuple[Entity, float]], relationships: List[Relationship]
     ) -> str:
         """Build a context string from search results."""
         lines = []
@@ -308,7 +310,9 @@ class LocalSearcher:
                 source = self.graph.get_entity(rel.source_id)
                 target = self.graph.get_entity(rel.target_id)
                 if source and target:
-                    lines.append(f"{source.name} --[{rel.type}]--> {target.name}: {rel.description}")
+                    lines.append(
+                        f"{source.name} --[{rel.type}]--> {target.name}: {rel.description}"
+                    )
 
         return "\n".join(lines)
 

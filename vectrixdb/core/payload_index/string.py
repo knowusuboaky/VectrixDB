@@ -13,6 +13,22 @@ from typing import Any, Dict, List, Optional, Set
 from .base import BasePayloadIndex
 
 
+__all__ = [
+    "StringIndex",
+]
+
+
+# ============================================================================
+# THE STRING INDEX
+# ============================================================================
+#
+# INPUT   string fields
+# OUTPUT  exact matches by hash, prefix, and contains or fuzzy matches by
+#         trigram
+#
+# Two structures, one field.
+
+
 class StringIndex(BasePayloadIndex):
     """
     Index for string fields supporting various string operations.
@@ -68,7 +84,7 @@ class StringIndex(BasePayloadIndex):
         value = self._normalize(value)
         # Pad with spaces for edge trigrams
         padded = f"  {value}  "
-        return {padded[i:i+3] for i in range(len(padded) - 2)}
+        return {padded[i : i + 3] for i in range(len(padded) - 2)}
 
     def add(self, doc_id: str, value: Any) -> None:
         """Add a string value to the index."""
@@ -187,13 +203,24 @@ class StringIndex(BasePayloadIndex):
         if not case_sensitive:
             substring = substring.lower()
 
-        # Use trigram index to find candidates
-        trigrams = self._get_trigrams(substring) if not case_sensitive else {
-            f"  {substring}  "[i:i+3] for i in range(len(substring) + 1)
-        }
+        # Trigrams of the query itself, unpadded.
+        #
+        # Stored values are indexed with boundary padding ("  green  ") so that
+        # prefix and suffix trigrams exist. Padding the *query* too made every
+        # search anchored at both ends: "gre" produced the trigrams "re " and
+        # "e  ", which "green" does not contain, so the intersection was empty.
+        # The operator therefore behaved as an exact match, and only appeared to
+        # work when the query happened to be the whole value.
+        trigrams = {substring[i : i + 3] for i in range(len(substring) - 2)}
 
         if not trigrams:
-            return set(self._doc_to_value.keys())
+            # Shorter than a trigram, so the index cannot answer it. Scan rather
+            # than silently returning nothing.
+            return {
+                doc_id
+                for doc_id, value in self._doc_to_value.items()
+                if substring in (value if case_sensitive else value.lower())
+            }
 
         # Find intersection of all trigram matches
         candidates = None
@@ -203,6 +230,19 @@ class StringIndex(BasePayloadIndex):
                 candidates = matches.copy()
             else:
                 candidates &= matches
+
+        # Trigram overlap is necessary but not sufficient, so verify.
+        if candidates:
+            candidates = {
+                doc_id
+                for doc_id in candidates
+                if substring
+                in (
+                    self._doc_to_value[doc_id]
+                    if case_sensitive
+                    else self._doc_to_value[doc_id].lower()
+                )
+            }
             if not candidates:
                 return set()
 
@@ -276,11 +316,13 @@ class StringIndex(BasePayloadIndex):
     def get_stats(self) -> Dict[str, Any]:
         """Get index statistics."""
         stats = super().get_stats()
-        stats.update({
-            "unique_values": len(self._exact_index),
-            "trigrams": len(self._trigram_index),
-            "case_sensitive": self.case_sensitive,
-        })
+        stats.update(
+            {
+                "unique_values": len(self._exact_index),
+                "trigrams": len(self._trigram_index),
+                "case_sensitive": self.case_sensitive,
+            }
+        )
         return stats
 
     def save(self, path: Path) -> None:

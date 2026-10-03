@@ -13,6 +13,26 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from .base import BasePayloadIndex
 
 
+__all__ = [
+    "encode_geohash",
+    "decode_geohash",
+    "get_geohash_neighbors",
+    "haversine_distance",
+    "GeoIndex",
+]
+
+
+# ============================================================================
+# GEOHASHES, AND DISTANCE
+# ============================================================================
+#
+# INPUT   a latitude and longitude; two points
+# OUTPUT  a geohash and back; the eight neighbours; the distance in
+#         kilometres; the width of a cell by prefix length
+#
+# A prefix filter covers a radius only when the cell is wider than it.
+
+
 def encode_geohash(lat: float, lon: float, precision: int = 6) -> str:
     """
     Encode latitude/longitude to geohash string.
@@ -30,7 +50,7 @@ def encode_geohash(lat: float, lon: float, precision: int = 6) -> str:
     lat_range = [-90.0, 90.0]
     lon_range = [-180.0, 180.0]
 
-    geohash = []
+    geohash: List[str] = []
     bits = 0
     bit = 0
     ch = 0
@@ -40,14 +60,14 @@ def encode_geohash(lat: float, lon: float, precision: int = 6) -> str:
         if is_lon:
             mid = (lon_range[0] + lon_range[1]) / 2
             if lon >= mid:
-                ch |= (1 << (4 - bit))
+                ch |= 1 << (4 - bit)
                 lon_range[0] = mid
             else:
                 lon_range[1] = mid
         else:
             mid = (lat_range[0] + lat_range[1]) / 2
             if lat >= mid:
-                ch |= (1 << (4 - bit))
+                ch |= 1 << (4 - bit)
                 lat_range[0] = mid
             else:
                 lat_range[1] = mid
@@ -105,6 +125,11 @@ def decode_geohash(geohash: str) -> Tuple[float, float]:
     return lat, lon
 
 
+#: Approximate width of a geohash cell, in kilometres, by prefix length. Used to
+#: decide whether a prefix filter can safely cover a search radius.
+_GEOHASH_CELL_KM = {1: 5000.0, 2: 1250.0, 3: 156.0, 4: 39.0, 5: 4.9, 6: 1.2, 7: 0.153}
+
+
 def get_geohash_neighbors(geohash: str) -> List[str]:
     """Get all 8 neighboring geohashes."""
     # Simplified: just get prefixes for a broader area
@@ -132,11 +157,20 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
 
-    a = (math.sin(dlat / 2) ** 2 +
-         math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2)
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
     return R * c
+
+
+# ============================================================================
+# THE GEO INDEX
+# ============================================================================
+#
+# INPUT   location fields
+# OUTPUT  radius and bounding-box queries over a geohash grid
+#
+# Candidates by prefix, then the exact distance.
 
 
 class GeoIndex(BasePayloadIndex):
@@ -283,19 +317,20 @@ class GeoIndex(BasePayloadIndex):
         center_lon = float(center_lon)
         radius_km = float(radius_km)
 
-        # Get center geohash
-        center_geohash = encode_geohash(center_lat, center_lon, self.precision)
-
-        # Determine which geohashes to check based on radius
-        # For simplicity, check all geohashes with matching prefix
-        prefix_len = max(1, self.precision - int(math.log10(radius_km + 1)) - 1)
-        prefix = center_geohash[:prefix_len]
-
-        # Get candidate documents from matching geohashes
-        candidates = set()
-        for geohash, doc_ids in self._geohash_index.items():
-            if geohash.startswith(prefix):
-                candidates |= doc_ids
+        # Every stored point is checked against the exact haversine distance.
+        #
+        # There was a geohash prefix pre-filter here, but it was unsound: it
+        # derived a prefix length from log10(radius), which bears no relation to
+        # a geohash cell's size, so a 600 km radius narrowed to a 156 km cell and
+        # silently dropped points that were well inside the circle. The obvious
+        # repair, expanding to the neighbouring cells, is not available either:
+        # `get_geohash_neighbors` returns the parent prefix rather than the eight
+        # surrounding cells, so it cannot bound a circle.
+        #
+        # A correct linear scan is better than a fast wrong answer for a filter
+        # whose whole job is deciding which documents exist. Restoring the
+        # optimisation needs a real neighbour implementation first.
+        candidates = set(self._doc_to_location)
 
         # Filter by exact distance
         result = set()
@@ -350,18 +385,22 @@ class GeoIndex(BasePayloadIndex):
     def get_stats(self) -> Dict[str, Any]:
         """Get index statistics."""
         stats = super().get_stats()
-        stats.update({
-            "precision": self.precision,
-            "unique_geohashes": len(self._geohash_index),
-        })
+        stats.update(
+            {
+                "precision": self.precision,
+                "unique_geohashes": len(self._geohash_index),
+            }
+        )
 
         if self._doc_to_location:
             lats = [loc[0] for loc in self._doc_to_location.values()]
             lons = [loc[1] for loc in self._doc_to_location.values()]
-            stats.update({
-                "lat_range": (min(lats), max(lats)),
-                "lon_range": (min(lons), max(lons)),
-            })
+            stats.update(
+                {
+                    "lat_range": (min(lats), max(lats)),
+                    "lon_range": (min(lons), max(lons)),
+                }
+            )
 
         return stats
 

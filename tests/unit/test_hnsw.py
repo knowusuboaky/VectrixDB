@@ -17,11 +17,11 @@ class TestDistanceFunctions:
 
     def test_cosine_method_exists(self):
         """Test cosine method exists."""
-        assert hasattr(DistanceFunctions, 'cosine')
+        assert hasattr(DistanceFunctions, "cosine")
 
     def test_euclidean_method_exists(self):
         """Test euclidean method exists."""
-        assert hasattr(DistanceFunctions, 'euclidean')
+        assert hasattr(DistanceFunctions, "euclidean")
 
 
 class TestNativeHNSWIndex:
@@ -42,8 +42,8 @@ class TestIndexType:
 
     def test_flat_exists(self):
         """Test FLAT index type exists."""
-        assert hasattr(IndexType, 'FLAT')
+        assert hasattr(IndexType, "FLAT")
 
     def test_hnsw_exists(self):
         """Test HNSW index type exists."""
-        assert hasattr(IndexType, 'HNSW')
+        assert hasattr(IndexType, "HNSW")

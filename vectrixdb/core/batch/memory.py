@@ -7,8 +7,26 @@ Memory-mapped operations for processing datasets larger than RAM.
 import os
 import tempfile
 from pathlib import Path
-from typing import Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 import numpy as np
+from numpy.lib.format import open_memmap
+
+
+__all__ = [
+    "MemoryEfficientBatcher",
+    "LargeDatasetProcessor",
+]
+
+
+# ============================================================================
+# MEMORY-MAPPED BATCHES, AND LARGE DATASETS
+# ============================================================================
+#
+# INPUT   a dataset larger than RAM
+# OUTPUT  batches served through memory maps; the dataset processed without
+#         loading it whole
+#
+# For datasets that do not fit in memory.
 
 
 class MemoryEfficientBatcher:
@@ -39,7 +57,7 @@ class MemoryEfficientBatcher:
         self.max_memory_mb = max_memory_mb
         self.max_memory_bytes = max_memory_mb * 1024 * 1024
         self.temp_dir = Path(temp_dir) if temp_dir else Path(tempfile.gettempdir())
-        self._temp_files = []
+        self._temp_files: List[Path] = []
 
     def estimate_memory(
         self,
@@ -105,11 +123,13 @@ class MemoryEfficientBatcher:
         filepath = self.temp_dir / filename
         self._temp_files.append(filepath)
 
-        # Create memory-mapped file
-        mmap = np.memmap(
+        # open_memmap, not np.memmap: it writes a real .npy header, so the
+        # file this returns can be read back by load_vectors_mmap, which
+        # calls np.load. A raw memmap under a .npy name could not.
+        mmap = open_memmap(
             filepath,
-            dtype=dtype,
-            mode='w+',
+            dtype=np.dtype(dtype),
+            mode="w+",
             shape=(n_vectors, dimension),
         )
 
@@ -130,7 +150,15 @@ class MemoryEfficientBatcher:
         Returns:
             Memory-mapped numpy array
         """
-        return np.load(path, mmap_mode='r')
+        # np.load reads the dtype from the .npy header, so the array comes
+        # back as it was written. The argument was documented as "expected
+        # data type" and never checked, which made it decoration; it is a
+        # check now, and a mismatch is worth knowing about before the numbers
+        # are used.
+        array = np.load(path, mmap_mode="r")
+        if dtype and np.dtype(dtype) != array.dtype:
+            raise ValueError(f"{path} holds {array.dtype}, not the {np.dtype(dtype)} expected")
+        return array
 
     def chunk_vectors(
         self,
@@ -152,7 +180,7 @@ class MemoryEfficientBatcher:
         vectors_per_chunk = max(1, chunk_size_bytes // bytes_per_vector)
 
         for i in range(0, len(vectors), vectors_per_chunk):
-            yield vectors[i:i + vectors_per_chunk]
+            yield vectors[i : i + vectors_per_chunk]
 
     def chunk_by_count(
         self,
@@ -170,7 +198,7 @@ class MemoryEfficientBatcher:
             Vector chunks
         """
         for i in range(0, len(vectors), chunk_size):
-            yield vectors[i:i + chunk_size]
+            yield vectors[i : i + chunk_size]
 
     def optimal_chunk_size(
         self,
@@ -218,31 +246,34 @@ class MemoryEfficientBatcher:
         Returns:
             Merged array (memory-mapped)
         """
-        # Load first chunk to get shape
-        first = np.load(chunk_paths[0], mmap_mode='r')
+        # Read the shape from the first chunk and let the mapping go: a
+        # mapped file cannot be deleted on Windows, and delete_chunks below
+        # deletes this one.
+        first = np.load(chunk_paths[0], mmap_mode="r")
         dimension = first.shape[1] if first.ndim > 1 else first.shape[0]
         dtype = first.dtype
+        del first
 
         # Calculate total size
-        total_vectors = sum(
-            len(np.load(p, mmap_mode='r'))
-            for p in chunk_paths
-        )
+        total_vectors = sum(len(np.load(p, mmap_mode="r")) for p in chunk_paths)
 
-        # Create output mmap
-        output = np.memmap(
+        # A real .npy again, so the merged file loads the way its inputs did.
+        output = open_memmap(
             output_path,
-            dtype=dtype,
-            mode='w+',
+            dtype=np.dtype(dtype),
+            mode="w+",
             shape=(total_vectors, dimension),
         )
 
         # Copy chunks
         offset = 0
         for chunk_path in chunk_paths:
-            chunk = np.load(chunk_path, mmap_mode='r')
-            output[offset:offset + len(chunk)] = chunk
+            chunk = np.load(chunk_path, mmap_mode="r")
+            output[offset : offset + len(chunk)] = chunk
             offset += len(chunk)
+            # The copy is done, so release the mapping before the file is
+            # deleted. Windows refuses to unlink a file that is still mapped.
+            del chunk
 
             if delete_chunks:
                 Path(chunk_path).unlink()
@@ -307,7 +338,7 @@ class LargeDatasetProcessor:
         """
         vectors = self.batcher.load_vectors_mmap(input_path)
 
-        stats = {
+        stats: Dict[str, Any] = {
             "total_vectors": len(vectors),
             "chunks_processed": 0,
             "errors": [],
@@ -370,15 +401,9 @@ class LargeDatasetProcessor:
         for i in range(0, n_vectors, batch_size):
             end = min(i + batch_size, n_vectors)
 
-            batch_ids = (
-                ids[i:end].tolist() if ids is not None
-                else [str(j) for j in range(i, end)]
-            )
+            batch_ids = ids[i:end].tolist() if ids is not None else [str(j) for j in range(i, end)]
             batch_vectors = vectors[i:end].copy()  # Copy from mmap
-            batch_metadata = (
-                metadata[i:end].tolist() if metadata is not None
-                else None
-            )
+            batch_metadata = metadata[i:end].tolist() if metadata is not None else None
 
             try:
                 collection.add(

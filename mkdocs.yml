@@ -1,0 +1,102 @@
+site_name: VectrixDB
+site_description: The vector database that works offline, with no API keys
+site_url: https://knowusuboaky.github.io/VectrixDB/
+repo_url: https://github.com/knowusuboaky/VectrixDB
+repo_name: knowusuboaky/VectrixDB
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_root_heading: true
+            docstring_style: google
+            members_order: source
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+# Structured on Diataxis: a tutorial to learn by, how-to guides to get a job
+# done, reference to look things up in, and explanation for why it works the way
+# it does. Each answers a different question; mixing them serves nobody.
+nav:
+  - Home: index.md
+  - Tutorial:
+      - Getting started: tutorial/getting-started.md
+  - How-to guides:
+      - Handle errors: how-to/handle-errors.md
+      - Choose a storage backend: how-to/storage-backends.md
+      - Run the REST API: how-to/rest-api.md
+      - Build an app on it: how-to/build-an-app.md
+      - Sign people in: how-to/sign-in.md
+      - Put your company's name on it: how-to/branding.md
+      - Deploy the server: how-to/deploy.md
+      - Put it behind a gateway: how-to/behind-a-gateway.md
+      - Use the dashboard: how-to/dashboard.md
+      - Tips and tricks: how-to/tips.md
+      - Restrict what a search can see: how-to/entitlements.md
+      - Trace an answer to its source: how-to/lineage.md
+      - Keep conversation memory: how-to/conversation-memory.md
+      - Use it from an assistant over MCP: how-to/mcp-server.md
+      - Run without a network: how-to/offline.md
+      - Back up, move and restore: how-to/export-import.md
+      - Ingest documents: how-to/ingest-documents.md
+      - Extract, keep, index: how-to/extract-keep-index.md
+      - Ingest when a file lands: how-to/ingest-on-event.md
+      - Run an extraction service: how-to/extraction-service.md
+      - Measure retrieval: how-to/measure-retrieval.md
+      - Evaluate every setup: how-to/evaluate-setups.md
+      - LangChain, LlamaIndex, plugins, CLI: how-to/integrations.md
+      - Work with the knowledge graph: how-to/knowledge-graph.md
+  - Reference:
+      - Easy API: reference/easy.md
+      - Exceptions: reference/exceptions.md
+      - Filters: reference/filters.md
+      - Command line: reference/cli.md
+      - Settings: reference/settings.md
+      - REST API: reference/rest-api.md
+      - Errors: reference/errors.md
+  - Explanation:
+      - Why VectrixDB: explanation/why-vectrixdb.md
+      - What it does not do: explanation/limits.md
+      - Benchmarks: explanation/benchmarks.md
+      - Search modes: explanation/search-modes.md
+      - Score and relevance: explanation/relevance.md
+      - HNSW and its limits: explanation/hnsw.md
+      - Threads and processes: explanation/concurrency.md
+      - Memory per vector: explanation/memory.md
+      - Writing past RAM: explanation/larger-than-ram.md
+  - Changelog: https://github.com/knowusuboaky/VectrixDB/blob/main/CHANGELOG.md

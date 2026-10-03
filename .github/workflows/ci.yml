@@ -1,0 +1,255 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call: # so the release workflow can require this to pass first
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install tooling
+        run: python -m pip install --upgrade pip ruff mypy
+
+      # The whole repository: the scripts and examples are run by people and by
+      # the test suite, so they are held to the same rules as the package.
+      - name: Ruff (lint)
+        run: ruff check .
+
+      # The codebase was formatted once before 2.2 shipped, so this is a gate:
+      # `ruff format vectrixdb tests scripts examples` before committing.
+      - name: Ruff (format check)
+        run: ruff format --check vectrixdb tests scripts examples
+
+      # The package type-checks clean as of 2.2, so this is a cliff again: any
+      # new error fails the build. The ratchet below stays as the second gate
+      # and its baseline is 0, which is the same rule said twice; keep both so
+      # that a deliberate, temporary regression can be recorded rather than
+      # argued about.
+      - name: Mypy (the whole package must be clean)
+        run: mypy vectrixdb
+
+      - name: Mypy (ratchet, baseline 0)
+        run: python scripts/mypy_ratchet.py
+
+  test:
+    name: py${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Full version sweep on Linux, plus the newest version on macOS and
+        # Windows. That catches the two failure modes that actually happen:
+        # syntax or typing that needs a newer Python, and path/encoding bugs.
+        os: [ubuntu-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        experimental: [false]
+        include:
+          - os: macos-latest
+            python-version: "3.13"
+            experimental: false
+          - os: windows-latest
+            python-version: "3.13"
+            experimental: false
+          # Free-threaded build. Advisory until numpy, onnxruntime and usearch
+          # all ship wheels for it; a failure here is information, not a block.
+          - os: ubuntu-latest
+            python-version: "3.14t"
+            experimental: true
+          - os: ubuntu-24.04-arm
+            python-version: "3.13"
+            experimental: false
+    continue-on-error: ${{ matrix.experimental }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true # embedded ONNX models are stored in Git LFS
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # signin is the server's own sign-in, so it is tested on every version.
+      # Without an extra, a test that needs it skips; a failure here is a bug.
+      - name: Install package and test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,api,signin]"
+
+      # `import vectrixdb` resolves names lazily; this keeps it that way.
+      - name: Import time stays under 300 ms
+        run: python scripts/import_time.py --check 300
+
+      - name: Run tests
+        run: pytest tests/unit -q --cov=vectrixdb --cov-report=term-missing
+
+  import-check:
+    # The core install must not need the API or CLI extras. This job proves that
+    # `pip install vectrixdb` is genuinely enough to import and search.
+    name: bare install imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install without extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+
+      - name: Import and round-trip on a clean install
+        run: |
+          python - <<'PY'
+          import vectrixdb
+          print("version:", vectrixdb.__version__)
+          # The exception hierarchy must be importable without any extra.
+          from vectrixdb import VectrixError, StorageOperationError
+          assert issubclass(StorageOperationError, VectrixError)
+          # Asking for the API without the extra must explain itself clearly.
+          try:
+              import vectrixdb.api  # noqa: F401
+          except vectrixdb.DependencyError as exc:
+              print("expected:", exc)
+          else:
+              print("api extra present in this environment")
+          PY
+
+  coverage:
+    name: Coverage does not drop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Exactly the `test` extra, which is also what the baseline is measured
+      # with, so this job and a developer's run read the same number. Without
+      # it, tests whose extra is missing skip and the number falls 2.7 points.
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      # .coverage-baseline records the percentage; a drop beyond half a point
+      # fails, a rise asks to be locked in with --update.
+      - run: python scripts/coverage_ratchet.py
+
+  typing-marker:
+    name: py.typed is packaged
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true # without the models the wheel-size check measures pointers
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel and assert the marker is inside
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist/
+          python - <<'PY'
+          import pathlib, zipfile, sys
+          wheel = next(pathlib.Path("dist").glob("*.whl"))
+          names = zipfile.ZipFile(wheel).namelist()
+          if "vectrixdb/py.typed" not in names:
+              sys.exit("py.typed missing from the wheel: downstream type checking would silently do nothing")
+          print("py.typed present in", wheel.name)
+          PY
+
+      # The wheel bundles the English models so the package works offline;
+      # PyPI refuses files over 100 MB, so that decision is checked here.
+      - name: Wheel stays under the upload limit
+        run: python scripts/check_wheel_size.py --limit-mb 100
+
+  changelog:
+    name: CHANGELOG has an entry
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a changelog line when the package changed
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "$base" HEAD | grep -q '^vectrixdb/'; then
+            if ! git diff --name-only "$base" HEAD | grep -q '^CHANGELOG.md$'; then
+              echo "vectrixdb/ changed but CHANGELOG.md did not. Add a line under the unreleased section."
+              exit 1
+            fi
+          fi
+          python scripts/release.py --check
+
+  wheel:
+    name: wheel installs on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - run: git lfs pull
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+      - name: The wheel is pure Python
+        shell: bash
+        run: |
+          ls dist
+          ls dist/*.whl | grep -q 'py3-none-any.whl' || { echo "expected a py3-none-any wheel"; exit 1; }
+      # The environment has the five declared dependencies and nothing else,
+      # which is the check that catches an undeclared one: psutil was imported
+      # at module scope and declared nowhere, and `import vectrixdb` alone
+      # still succeeded because names bind lazily. Creating a collection is
+      # what finds it.
+      - name: Install the wheel alone and run the README's own first example
+        shell: bash
+        run: |
+          python -m venv wheelenv
+          if [ -d wheelenv/Scripts ]; then PY=wheelenv/Scripts/python; else PY=wheelenv/bin/python; fi
+          $PY -m pip install --upgrade pip
+          $PY -m pip install dist/*.whl
+          # The README's example rather than a copy of it written here, so
+          # the thing a new reader types is the thing this proved works.
+          $PY scripts/readme_smoke.py
+          $PY -m vectrixdb.cli --help > /dev/null
+          # Both console scripts land on the path, and the one whose extra is
+          # not installed says what to install instead of raising a traceback.
+          if [ -d wheelenv/Scripts ]; then BIN=wheelenv/Scripts; else BIN=wheelenv/bin; fi
+          test -x "$BIN/vectrixdb" || test -f "$BIN/vectrixdb.exe"
+          test -x "$BIN/vectrixdb-mcp" || test -f "$BIN/vectrixdb-mcp.exe"

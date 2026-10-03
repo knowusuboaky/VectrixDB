@@ -80,9 +80,7 @@ class TestWithConfigs:
         """Test with memory storage."""
         from vectrixdb import StorageConfig, StorageBackend
 
-        db = VectrixDB(
-            storage_config=StorageConfig(backend=StorageBackend.MEMORY)
-        )
+        db = VectrixDB(storage_config=StorageConfig(backend=StorageBackend.MEMORY))
 
         coll = db.create_collection("test", dimension=4)
         coll.add(ids=["v1"], vectors=[[0.1, 0.2, 0.3, 0.4]])
@@ -94,9 +92,7 @@ class TestWithConfigs:
         """Test with cache enabled."""
         from vectrixdb import CacheConfig, CacheBackend
 
-        db = VectrixDB(
-            cache_config=CacheConfig(backend=CacheBackend.MEMORY)
-        )
+        db = VectrixDB(cache_config=CacheConfig(backend=CacheBackend.MEMORY))
 
         coll = db.create_collection("test", dimension=4)
         coll.add(ids=["v1"], vectors=[[0.1, 0.2, 0.3, 0.4]])
@@ -157,11 +153,7 @@ class TestDistanceMetrics:
     def test_cosine_metric(self, temp_dir):
         """Test cosine distance metric."""
         db = VectrixDB(path=temp_dir)
-        coll = db.create_collection(
-            "cosine_test",
-            dimension=4,
-            metric=DistanceMetric.COSINE
-        )
+        coll = db.create_collection("cosine_test", dimension=4, metric=DistanceMetric.COSINE)
 
         coll.add(ids=["v1"], vectors=[[1.0, 0.0, 0.0, 0.0]])
 
@@ -171,11 +163,7 @@ class TestDistanceMetrics:
     def test_euclidean_metric(self, temp_dir):
         """Test Euclidean distance metric."""
         db = VectrixDB(path=temp_dir)
-        coll = db.create_collection(
-            "euclidean_test",
-            dimension=4,
-            metric=DistanceMetric.EUCLIDEAN
-        )
+        coll = db.create_collection("euclidean_test", dimension=4, metric=DistanceMetric.EUCLIDEAN)
 
         coll.add(ids=["v1"], vectors=[[0.0, 0.0, 0.0, 0.0]])
 

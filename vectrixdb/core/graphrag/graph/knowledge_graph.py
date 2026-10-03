@@ -9,14 +9,33 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional, Tuple, Iterator, Any
-from difflib import SequenceMatcher
+from difflib import SequenceMatcher  # noqa: F401  (kept for callers)
 
 from ..extractor.base import Entity, Relationship, ExtractionResult
+from .resolution import EntityResolver
+
+
+__all__ = [
+    "SubGraph",
+    "KnowledgeGraph",
+]
+
+
+# ============================================================================
+# THE GRAPH
+# ============================================================================
+#
+# INPUT   entities and relationships
+# OUTPUT  a subset of the graph; the in-memory graph with entity deduplication
+#         and incremental updates
+#
+# LightRAG-style: add to it without rebuilding it.
 
 
 @dataclass
 class SubGraph:
     """A subset of the knowledge graph."""
+
     entities: List[Entity]
     relationships: List[Relationship]
     center_entity_id: Optional[str] = None
@@ -51,14 +70,26 @@ class KnowledgeGraph:
         ... ))
     """
 
-    def __init__(self, similarity_threshold: float = 0.85):
+    def __init__(
+        self, similarity_threshold: float = 0.85, schemas: Optional[Dict[str, Any]] = None
+    ):
         """
         Initialize the knowledge graph.
 
         Args:
             similarity_threshold: Threshold for entity deduplication (0-1).
+            schemas: Per-type resolution rules (``EntitySchema`` by type name).
+                With schemas, an entity only merges into one of the same
+                type (or a type whose schema allows cross-type merging), and
+                each type uses its own threshold and subset rule.
         """
         self.similarity_threshold = similarity_threshold
+        self._resolver = EntityResolver(threshold=similarity_threshold)
+        self.schemas: Dict[str, Any] = dict(schemas or {})
+        self._typed_resolvers: Dict[str, EntityResolver] = {
+            name: EntityResolver(threshold=s.threshold, allow_subset=s.allow_subset)
+            for name, s in self.schemas.items()
+        }
 
         # Core storage
         self.nodes: Dict[str, Entity] = {}
@@ -67,8 +98,12 @@ class KnowledgeGraph:
         # Index structures
         self._name_to_entity: Dict[str, str] = {}  # normalized_name -> entity_id
         self._entity_edges: Dict[str, Set[str]] = defaultdict(set)  # entity_id -> set of edge_ids
-        self._outgoing_edges: Dict[str, Set[str]] = defaultdict(set)  # entity_id -> outgoing edge_ids
-        self._incoming_edges: Dict[str, Set[str]] = defaultdict(set)  # entity_id -> incoming edge_ids
+        self._outgoing_edges: Dict[str, Set[str]] = defaultdict(
+            set
+        )  # entity_id -> outgoing edge_ids
+        self._incoming_edges: Dict[str, Set[str]] = defaultdict(
+            set
+        )  # entity_id -> incoming edge_ids
 
         # Statistics
         self._entity_count = 0
@@ -87,27 +122,67 @@ class KnowledgeGraph:
 
     def _normalize_name(self, name: str) -> str:
         """Normalize entity name for matching."""
-        return name.lower().strip()
+        return self._resolver.normalize(name)
 
     def _compute_similarity(self, name1: str, name2: str) -> float:
-        """Compute similarity between two names."""
-        return SequenceMatcher(None, name1.lower(), name2.lower()).ratio()
+        """Similarity between two names, 0-1.
 
-    def _find_similar_entity(self, name: str) -> Optional[str]:
-        """Find an existing entity with a similar name."""
+        Retained for callers that want the score on its own; matching itself
+        goes through the resolver, which weighs token structure rather than
+        character overlap alone.
+        """
+        return self._resolver.compare(name1, name2).score
+
+    def _find_similar_entity(self, name: str, entity_type: Optional[str] = None) -> Optional[str]:
+        """Find an existing entity denoting the same thing, or None.
+
+        Character similarity alone used to decide this, which missed the common
+        cases: "Curie" scores 0.625 against "Marie Curie" and "M. Curie" 0.737,
+        both below any usable threshold, so one person became three nodes. The
+        resolver adds token-subset and initial-form rules, with guards against
+        merging names that merely look alike.
+        """
         normalized = self._normalize_name(name)
 
-        # Exact match first
+        # Exact lookup may hit a canonical name or a previously merged alias.
         if normalized in self._name_to_entity:
-            return self._name_to_entity[normalized]
+            candidate = self._name_to_entity[normalized]
+            if self._types_compatible(candidate, entity_type):
+                return candidate
+        if entity_type and f"{normalized}|{entity_type}" in self._name_to_entity:
+            return self._name_to_entity[f"{normalized}|{entity_type}"]
 
-        # Fuzzy match if threshold is less than 1.0
-        if self.similarity_threshold < 1.0:
-            for existing_name, entity_id in self._name_to_entity.items():
-                if self._compute_similarity(normalized, existing_name) >= self.similarity_threshold:
-                    return entity_id
+        # Fuzzy matching considers canonical names only. Matching against
+        # accumulated aliases lets a short one act as a magnet: once "Curie" is
+        # an alias of "Marie Curie", the subset rule pulls "Pierre Curie" in too,
+        # silently fusing two people.
+        canonical = {
+            self._normalize_name(e.name): eid
+            for eid, e in self.nodes.items()
+            if self._types_compatible(eid, entity_type)
+        }
+        resolver = self._typed_resolvers.get(entity_type or "", self._resolver)
+        match = resolver.find_match(normalized, canonical.keys())
+        if match is not None:
+            return canonical[match[0]]
 
         return None
+
+    def _types_compatible(self, existing_id: str, entity_type: Optional[str]) -> bool:
+        """Whether an incoming entity of ``entity_type`` may merge into ``existing_id``.
+
+        Without schemas every type is compatible, which is the old behaviour.
+        With them, the same type always is, and a different type only when
+        either side's schema allows merging across types.
+        """
+        if not self.schemas or entity_type is None:
+            return True
+        existing = self.nodes.get(existing_id)
+        if existing is None or existing.type == entity_type:
+            return True
+        mine = self.schemas.get(entity_type)
+        theirs = self.schemas.get(existing.type)
+        return bool((mine and mine.merge_across_types) or (theirs and theirs.merge_across_types))
 
     def add_entity(self, entity: Entity, merge_if_exists: bool = True) -> str:
         """
@@ -121,7 +196,7 @@ class KnowledgeGraph:
             The entity ID (may be existing entity if merged).
         """
         # Check for existing similar entity
-        existing_id = self._find_similar_entity(entity.name)
+        existing_id = self._find_similar_entity(entity.name, entity.type)
 
         if existing_id and merge_if_exists:
             # Merge with existing entity
@@ -134,9 +209,13 @@ class KnowledgeGraph:
 
             return existing_id
         else:
-            # Add as new entity
+            # Add as new entity. A same-named entity of an incompatible type
+            # keeps the plain name key; this one is reachable by name and type.
             self.nodes[entity.id] = entity
-            self._name_to_entity[self._normalize_name(entity.name)] = entity.id
+            key = self._normalize_name(entity.name)
+            if key in self._name_to_entity and self._name_to_entity[key] in self.nodes:
+                key = f"{key}|{entity.type}"
+            self._name_to_entity[key] = entity.id
 
             # Add aliases to index
             for alias in entity.aliases:
@@ -145,7 +224,12 @@ class KnowledgeGraph:
             self._entity_count += 1
             return entity.id
 
-    def add_relationship(self, relationship: Relationship, merge_if_exists: bool = True) -> str:
+    def add_relationship(
+        self,
+        relationship: Relationship,
+        merge_if_exists: bool = True,
+        supersedes: Optional[str] = None,
+    ) -> Optional[str]:
         """
         Add a relationship to the graph.
 
@@ -154,17 +238,38 @@ class KnowledgeGraph:
             merge_if_exists: Whether to merge with existing similar relationship.
 
         Returns:
-            The relationship ID.
+            The relationship ID, or None when the edge was not added because an
+            endpoint is missing from the graph or both endpoints are the same
+            entity after merging.
         """
-        # Check if source and target entities exist
+        # An endpoint that is not in the graph means the entity was merged into
+        # another and this relationship still carries the pre-merge id. Callers
+        # must remap through the id returned by add_entity; see
+        # GraphRAGPipeline.add_documents.
+        #
+        # This used to `return relationship.id` with a "Try to find by name"
+        # comment and no lookup after it, so the edge was silently discarded
+        # while the caller saw a plausible id back. Returning None makes the
+        # drop countable.
         if relationship.source_id not in self.nodes or relationship.target_id not in self.nodes:
-            # Try to find by name
-            return relationship.id
+            return None
 
-        # Check for existing similar relationship
+        # Resolution merges entities, so an edge between two surface forms of one
+        # thing collapses to a self-loop. That is an artefact of merging, not a
+        # fact from the text, and keeping it would let over-merging look like
+        # rich connectivity.
+        if relationship.source_id == relationship.target_id:
+            return None
+
+        # Check for existing similar relationship. A superseding edge is a new
+        # fact, never a repeat sighting of the old one, so it skips the merge.
         existing_key = (relationship.source_id, relationship.target_id, relationship.type)
 
         for edge_id, edge in self.edges.items():
+            if supersedes is not None:
+                break
+            if edge.superseded_by:
+                continue
             if (edge.source_id, edge.target_id, edge.type) == existing_key:
                 if merge_if_exists:
                     merged = edge.merge_with(relationship)
@@ -183,6 +288,8 @@ class KnowledgeGraph:
         self._incoming_edges[relationship.target_id].add(relationship.id)
 
         self._relationship_count += 1
+        if supersedes is not None:
+            self.supersede_relationship(supersedes, relationship.id)
         return relationship.id
 
     def get_entity(self, entity_id: str) -> Optional[Entity]:
@@ -200,20 +307,33 @@ class KnowledgeGraph:
         """Get a relationship by ID."""
         return self.edges.get(relationship_id)
 
-    def get_relationships_for_entity(self, entity_id: str) -> List[Relationship]:
-        """Get all relationships involving an entity."""
+    def get_relationships_for_entity(
+        self, entity_id: str, include_superseded: bool = False
+    ) -> List[Relationship]:
+        """Relationships touching an entity; superseded ones only when asked."""
         edge_ids = self._entity_edges.get(entity_id, set())
-        return [self.edges[eid] for eid in edge_ids if eid in self.edges]
+        out = [self.edges[eid] for eid in edge_ids if eid in self.edges]
+        if not include_superseded:
+            out = [r for r in out if not r.superseded_by]
+        return out
 
     def get_outgoing_relationships(self, entity_id: str) -> List[Relationship]:
-        """Get outgoing relationships from an entity."""
+        """Live outgoing relationships from an entity."""
         edge_ids = self._outgoing_edges.get(entity_id, set())
-        return [self.edges[eid] for eid in edge_ids if eid in self.edges]
+        return [
+            self.edges[eid]
+            for eid in edge_ids
+            if eid in self.edges and not self.edges[eid].superseded_by
+        ]
 
     def get_incoming_relationships(self, entity_id: str) -> List[Relationship]:
-        """Get incoming relationships to an entity."""
+        """Live incoming relationships to an entity."""
         edge_ids = self._incoming_edges.get(entity_id, set())
-        return [self.edges[eid] for eid in edge_ids if eid in self.edges]
+        return [
+            self.edges[eid]
+            for eid in edge_ids
+            if eid in self.edges and not self.edges[eid].superseded_by
+        ]
 
     def get_neighbors(self, entity_id: str, depth: int = 1) -> Dict[str, int]:
         """
@@ -253,10 +373,7 @@ class KnowledgeGraph:
         return visited
 
     def get_subgraph(
-        self,
-        entity_ids: List[str],
-        depth: int = 1,
-        include_connecting: bool = True
+        self, entity_ids: List[str], depth: int = 1, include_connecting: bool = True
     ) -> SubGraph:
         """
         Extract a subgraph centered on given entities.
@@ -287,14 +404,18 @@ class KnowledgeGraph:
                     if edge_id in seen_edges:
                         continue
                     edge = self.edges.get(edge_id)
-                    if edge and edge.source_id in all_entity_ids and edge.target_id in all_entity_ids:
+                    if (
+                        edge
+                        and edge.source_id in all_entity_ids
+                        and edge.target_id in all_entity_ids
+                    ):
                         relationships.append(edge)
                         seen_edges.add(edge_id)
 
         return SubGraph(
             entities=entities,
             relationships=relationships,
-            center_entity_id=entity_ids[0] if entity_ids else None
+            center_entity_id=entity_ids[0] if entity_ids else None,
         )
 
     def merge_extraction(self, result: ExtractionResult) -> None:
@@ -329,7 +450,10 @@ class KnowledgeGraph:
                 strength=rel.strength,
                 source_units=rel.source_units,
                 bidirectional=rel.bidirectional,
-                attributes=rel.attributes
+                attributes=rel.attributes,
+                # Omitting this silently reset every EXTRACTED edge to the
+                # INFERRED default, undoing the whole point of the label.
+                confidence=rel.confidence,
             )
             self.add_relationship(updated_rel, merge_if_exists=True)
 
@@ -356,20 +480,43 @@ class KnowledgeGraph:
 
     def get_top_entities(self, n: int = 10) -> List[Entity]:
         """Get the top N most important entities."""
-        sorted_entities = sorted(
-            self.nodes.values(),
-            key=lambda e: e.importance,
-            reverse=True
-        )
+        sorted_entities = sorted(self.nodes.values(), key=lambda e: e.importance, reverse=True)
         return sorted_entities[:n]
 
     def get_all_entities(self) -> List[Entity]:
         """Get all entities in the graph."""
         return list(self.nodes.values())
 
-    def get_all_relationships(self) -> List[Relationship]:
-        """Get all relationships in the graph."""
-        return list(self.edges.values())
+    def get_all_relationships(self, include_superseded: bool = False) -> List[Relationship]:
+        """Every relationship, or only the live ones (the default)."""
+        if include_superseded:
+            return list(self.edges.values())
+        return self.live_relationships()
+
+    def live_relationships(self) -> List[Relationship]:
+        """Every relationship that has not been superseded."""
+        return [r for r in self.edges.values() if not r.superseded_by]
+
+    def supersede_relationship(self, old_id: str, new_id: str, when: Optional[str] = None) -> bool:
+        """Mark ``old_id`` as replaced by ``new_id`` from ``when`` (now by default).
+
+        The old edge stays in the graph for the record and drops out of
+        traversal, search and community detection; ``get_all_relationships(
+        include_superseded=True)`` still returns it. Returns False when
+        either id is unknown.
+        """
+        from ...._time import utcnow_iso
+
+        old = self.edges.get(old_id)
+        new = self.edges.get(new_id)
+        if old is None or new is None or old_id == new_id:
+            return False
+        stamp = when or utcnow_iso()
+        old.superseded_by = new_id
+        old.valid_to = old.valid_to or stamp
+        if new.valid_from is None:
+            new.valid_from = stamp
+        return True
 
     def remove_entity(self, entity_id: str) -> bool:
         """Remove an entity and its relationships."""
@@ -437,13 +584,16 @@ class KnowledgeGraph:
                     "source_units": r.source_units,
                     "bidirectional": r.bidirectional,
                     "attributes": r.attributes,
+                    "valid_from": r.valid_from,
+                    "valid_to": r.valid_to,
+                    "superseded_by": r.superseded_by,
                 }
                 for r in self.edges.values()
             ],
             "metadata": {
                 "entity_count": self.entity_count,
                 "relationship_count": self.relationship_count,
-            }
+            },
         }
 
     @classmethod
@@ -477,6 +627,9 @@ class KnowledgeGraph:
                 source_units=r_data.get("source_units", []),
                 bidirectional=r_data.get("bidirectional", False),
                 attributes=r_data.get("attributes", {}),
+                valid_from=r_data.get("valid_from"),
+                valid_to=r_data.get("valid_to"),
+                superseded_by=r_data.get("superseded_by"),
             )
             graph.add_relationship(relationship, merge_if_exists=False)
 
@@ -506,7 +659,9 @@ class KnowledgeGraph:
         lines.append("╔" + "═" * 60 + "╗")
         lines.append("║" + "VECTRIXDB KNOWLEDGE GRAPH".center(60) + "║")
         lines.append("╠" + "═" * 60 + "╣")
-        lines.append(f"║  Entities: {self.entity_count:<10}  Relationships: {self.relationship_count:<10}     ║")
+        lines.append(
+            f"║  Entities: {self.entity_count:<10}  Relationships: {self.relationship_count:<10}     ║"
+        )
         lines.append("╠" + "═" * 60 + "╣")
 
         # Get top entities by importance
@@ -556,7 +711,9 @@ class KnowledgeGraph:
                 rel_count += 1
 
         if self.relationship_count > 15:
-            lines.append(f"║    ... and {self.relationship_count - 15} more relationships".ljust(61) + "║")
+            lines.append(
+                f"║    ... and {self.relationship_count - 15} more relationships".ljust(61) + "║"
+            )
 
         lines.append("╚" + "═" * 60 + "╝")
 
@@ -566,7 +723,7 @@ class KnowledgeGraph:
         lines.append("  " + "─" * 40)
 
         # Simple node-edge ASCII representation
-        displayed = set()
+        displayed: Set[str] = set()
         edge_lines = []
         for rel in list(self.edges.values())[:10]:
             source = self.nodes.get(rel.source_id)

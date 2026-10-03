@@ -11,6 +11,21 @@ from typing import Any, Dict, List, Set, Union
 from .base import BasePayloadIndex
 
 
+__all__ = [
+    "TagIndex",
+]
+
+
+# ============================================================================
+# THE TAG INDEX
+# ============================================================================
+#
+# INPUT   array fields
+# OUTPUT  in, all and any queries over an inverted index
+#
+# One posting list a tag.
+
+
 class TagIndex(BasePayloadIndex):
     """
     Inverted index for array/tag fields.
@@ -200,13 +215,16 @@ class TagIndex(BasePayloadIndex):
     def get_stats(self) -> Dict[str, Any]:
         """Get index statistics."""
         stats = super().get_stats()
-        stats.update({
-            "unique_tags": len(self._tag_to_docs),
-            "avg_tags_per_doc": (
-                sum(len(tags) for tags in self._doc_to_tags.values()) / self._count
-                if self._count > 0 else 0
-            ),
-        })
+        stats.update(
+            {
+                "unique_tags": len(self._tag_to_docs),
+                "avg_tags_per_doc": (
+                    sum(len(tags) for tags in self._doc_to_tags.values()) / self._count
+                    if self._count > 0
+                    else 0
+                ),
+            }
+        )
         return stats
 
     def save(self, path: Path) -> None:

@@ -9,6 +9,21 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
 
+__all__ = [
+    "BasePayloadIndex",
+]
+
+
+# ============================================================================
+# THE BASE
+# ============================================================================
+#
+# INPUT   a field's values
+# OUTPUT  what every payload index implements: add, remove, query, save, load
+#
+# Abstract, so the manager treats every index alike.
+
+
 class BasePayloadIndex(ABC):
     """
     Abstract base class for payload indexes.

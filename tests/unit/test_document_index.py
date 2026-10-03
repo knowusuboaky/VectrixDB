@@ -16,42 +16,42 @@ class TestDocumentIndex:
     def test_document_index_exists(self):
         """Test that documents property exists on VectrixDB."""
         db = VectrixDB()
-        assert hasattr(db, 'documents')
+        assert hasattr(db, "documents")
         assert db.documents is not None
         db.close()
 
     def test_index_text_method_exists(self):
         """Test that index_text method exists."""
         db = VectrixDB()
-        assert hasattr(db.documents, 'index_text')
+        assert hasattr(db.documents, "index_text")
         assert callable(db.documents.index_text)
         db.close()
 
     def test_list_documents_method_exists(self):
         """Test that list_documents method exists."""
         db = VectrixDB()
-        assert hasattr(db.documents, 'list_documents')
+        assert hasattr(db.documents, "list_documents")
         assert callable(db.documents.list_documents)
         db.close()
 
     def test_get_document_method_exists(self):
         """Test that get_document method exists."""
         db = VectrixDB()
-        assert hasattr(db.documents, 'get_document')
+        assert hasattr(db.documents, "get_document")
         assert callable(db.documents.get_document)
         db.close()
 
     def test_delete_document_method_exists(self):
         """Test that delete_document method exists."""
         db = VectrixDB()
-        assert hasattr(db.documents, 'delete_document')
+        assert hasattr(db.documents, "delete_document")
         assert callable(db.documents.delete_document)
         db.close()
 
     def test_get_document_nodes_method_exists(self):
         """Test that get_document_nodes method exists."""
         db = VectrixDB()
-        assert hasattr(db.documents, 'get_document_nodes')
+        assert hasattr(db.documents, "get_document_nodes")
         assert callable(db.documents.get_document_nodes)
         db.close()
 
@@ -62,9 +62,7 @@ class TestDocumentIndex:
         doc_id = str(uuid.uuid4())
         try:
             doc_info = db.documents.index_text(
-                doc_id=doc_id,
-                content=sample_document_text,
-                title="Test Research Paper"
+                doc_id=doc_id, content=sample_document_text, title="Test Research Paper"
             )
 
             assert doc_info is not None
@@ -83,11 +81,13 @@ class TestChunkingFunctions:
     def test_chunk_text_exists(self):
         """Test chunk_text function exists."""
         from vectrixdb import chunk_text
+
         assert callable(chunk_text)
 
     def test_chunk_with_context_exists(self):
         """Test chunk_with_context function exists."""
         from vectrixdb import chunk_with_context
+
         assert callable(chunk_with_context)
 
     def test_chunk_text_basic(self):
@@ -115,6 +115,7 @@ class TestDocumentTypes:
     def test_document_type_exists(self):
         """Test DocumentType enum exists."""
         from vectrixdb import DocumentType
+
         assert DocumentType is not None
 
     def test_document_type_values(self):
@@ -122,4 +123,4 @@ class TestDocumentTypes:
         from vectrixdb import DocumentType
 
         # Check common types exist
-        assert hasattr(DocumentType, 'TEXT') or hasattr(DocumentType, 'MARKDOWN')
+        assert hasattr(DocumentType, "TEXT") or hasattr(DocumentType, "MARKDOWN")

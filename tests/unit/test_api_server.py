@@ -12,6 +12,7 @@ class TestAPIImports:
         """Test that server module can be imported."""
         try:
             from vectrixdb.api import server
+
             assert server is not None
         except ImportError as e:
             pytest.skip(f"API module not available: {e}")
@@ -20,6 +21,7 @@ class TestAPIImports:
         """Test that FastAPI app can be imported."""
         try:
             from vectrixdb.api.server import app
+
             assert app is not None
         except ImportError as e:
             pytest.skip(f"FastAPI not installed: {e}")
@@ -46,7 +48,7 @@ class TestDashboardFile:
         pkg_dir = Path(vectrixdb.__file__).parent
         dashboard_path = pkg_dir / "dashboard" / "index.html"
 
-        content = dashboard_path.read_text(encoding='utf-8')
+        content = dashboard_path.read_text(encoding="utf-8")
         assert "VectrixDB" in content
 
     def test_dashboard_has_storage_badge(self):
@@ -57,8 +59,9 @@ class TestDashboardFile:
         pkg_dir = Path(vectrixdb.__file__).parent
         dashboard_path = pkg_dir / "dashboard" / "index.html"
 
-        content = dashboard_path.read_text(encoding='utf-8')
-        assert "storage-badge" in content
+        content = dashboard_path.read_text(encoding="utf-8")
+        # The sidebar pill that names the storage backend.
+        assert 'id="pill-backend"' in content
 
     def test_dashboard_has_delta_lake_style(self):
         """Test dashboard has Delta Lake CSS style."""
@@ -68,7 +71,7 @@ class TestDashboardFile:
         pkg_dir = Path(vectrixdb.__file__).parent
         dashboard_path = pkg_dir / "dashboard" / "index.html"
 
-        content = dashboard_path.read_text(encoding='utf-8')
+        content = dashboard_path.read_text(encoding="utf-8")
         assert "delta_lake" in content
 
     def test_dashboard_has_code_tips(self):
@@ -79,8 +82,9 @@ class TestDashboardFile:
         pkg_dir = Path(vectrixdb.__file__).parent
         dashboard_path = pkg_dir / "dashboard" / "index.html"
 
-        content = dashboard_path.read_text(encoding='utf-8')
-        assert "Code Tips" in content or "code-tips" in content
+        content = dashboard_path.read_text(encoding="utf-8")
+        # The copy-paste guide, carried over into the Learn page.
+        assert 'id="guide-root"' in content and "code-quickstart" in content
 
     def test_dashboard_has_sync_section(self):
         """Test dashboard has Sync section in Code Tips."""
@@ -90,7 +94,7 @@ class TestDashboardFile:
         pkg_dir = Path(vectrixdb.__file__).parent
         dashboard_path = pkg_dir / "dashboard" / "index.html"
 
-        content = dashboard_path.read_text(encoding='utf-8')
+        content = dashboard_path.read_text(encoding="utf-8")
         assert "Sync" in content or "sync" in content
 
 
@@ -103,6 +107,7 @@ class TestAPIEndpointsWithClient:
         try:
             from fastapi.testclient import TestClient
             from vectrixdb.api.server import app
+
             return TestClient(app)
         except ImportError:
             pytest.skip("FastAPI TestClient not available")

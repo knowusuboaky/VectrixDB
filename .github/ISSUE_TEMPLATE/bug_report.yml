@@ -1,0 +1,55 @@
+name: Bug report
+description: Something did the wrong thing, raised the wrong error, or returned the wrong results
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The fastest fix comes from a script that reproduces it; the second fastest from the exact error text.
+  - type: input
+    id: version
+    attributes:
+      label: VectrixDB version
+      description: "`python -c \"import vectrixdb; print(vectrixdb.__version__)\"`"
+      placeholder: "2.2.0"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Python and platform
+      placeholder: "Python 3.12, Windows 11 / Ubuntu 24.04 / macOS 15, arm64"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Search mode and storage
+      options:
+        - dense, local SQLite
+        - hybrid, local SQLite
+        - ultimate, local SQLite
+        - graph, local SQLite
+        - a cloud backend (say which below)
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Script that reproduces it
+      description: The smallest Python that shows the problem. Use the bundled model so we can run it without your data.
+      render: python
+      placeholder: |
+        from vectrixdb import Vectrix
+        db = Vectrix("bug")
+        db.add(["..."])
+        print(db.search("..."))
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+      description: Paste the full traceback or the wrong output.
+    validations:
+      required: true

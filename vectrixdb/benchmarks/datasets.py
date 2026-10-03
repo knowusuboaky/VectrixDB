@@ -8,6 +8,22 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 
 
+__all__ = [
+    "BenchmarkDatasets",
+    "DatasetScaler",
+]
+
+
+# ============================================================================
+# THE DATASETS, AND SCALING THEM
+# ============================================================================
+#
+# INPUT   a size
+# OUTPUT  standard test datasets and generators; a dataset scaled up or down
+#
+# Synthetic where a standard set is too big to ship.
+
+
 class BenchmarkDatasets:
     """
     Standard datasets for benchmarking.
@@ -150,15 +166,13 @@ class BenchmarkDatasets:
         """
         rng = np.random.default_rng(seed)
 
-        string_values = [
-            "category_a", "category_b", "category_c", "category_d", "category_e"
-        ]
+        string_values = ["category_a", "category_b", "category_c", "category_d", "category_e"]
         tag_values = ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8"]
 
         metadata = []
 
         for i in range(n):
-            record = {}
+            record: Dict[str, Any] = {}
 
             for field, dtype in schema.items():
                 if dtype == "int":
@@ -197,7 +211,7 @@ class BenchmarkDatasets:
         rng = np.random.default_rng(42)
 
         # GloVe-like distribution: mostly small values with some outliers
-        vectors = rng.standard_normal((n, dimension)).astype(np.float32)
+        vectors: np.ndarray = rng.standard_normal((n, dimension)).astype(np.float32)
 
         # Scale by frequency-like distribution
         frequencies = rng.power(0.7, n)  # Zipf-like
@@ -230,7 +244,7 @@ class BenchmarkDatasets:
         rng = np.random.default_rng(seed)
 
         # Sentence embeddings are typically normalized
-        vectors = rng.standard_normal((n, dimension)).astype(np.float32)
+        vectors: np.ndarray = rng.standard_normal((n, dimension)).astype(np.float32)
 
         # Add some structure (simulating semantic clusters)
         n_topics = 50
@@ -238,8 +252,9 @@ class BenchmarkDatasets:
         topic_assignments = rng.integers(0, n_topics, size=n)
         topic_weights = rng.uniform(0.3, 0.7, size=n)
 
-        vectors = (1 - topic_weights[:, np.newaxis]) * vectors + \
-                  topic_weights[:, np.newaxis] * topics[topic_assignments]
+        vectors = (1 - topic_weights[:, np.newaxis]) * vectors + topic_weights[
+            :, np.newaxis
+        ] * topics[topic_assignments]
 
         # Normalize
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)

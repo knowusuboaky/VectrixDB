@@ -10,9 +10,29 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 
+__all__ = [
+    "SearchResult",
+    "DenseSearchConfig",
+    "DenseSearch",
+    "MultiQuerySearch",
+    "PrefetchRescore",
+]
+
+
+# ============================================================================
+# A RESULT, AND THE CONFIG
+# ============================================================================
+#
+# INPUT   a dense search
+# OUTPUT  one result; the configuration
+#
+# The shapes the searches below share.
+
+
 @dataclass
 class SearchResult:
     """Single search result."""
+
     id: str
     score: float
     vector: Optional[np.ndarray] = None
@@ -22,10 +42,21 @@ class SearchResult:
 @dataclass
 class DenseSearchConfig:
     """Configuration for dense search."""
+
     metric: str = "cosine"  # cosine, euclidean, dot
     ef_search: int = 100
     use_quantization: bool = False
     rescore_multiplier: int = 4  # Prefetch this many candidates for rescoring
+
+
+# ============================================================================
+# DENSE SEARCH
+# ============================================================================
+#
+# INPUT   a vector, or several, some negative
+# OUTPUT  nearest neighbours, with negative queries pushed away
+#
+# Negative queries move the target, not the filter.
 
 
 class DenseSearch:
@@ -94,11 +125,9 @@ class DenseSearch:
             return self._filtered_search(query, k, filter_ids)
 
         # Use index for search
-        if hasattr(self.index, 'search'):
+        if hasattr(self.index, "search"):
             indices, distances = self.index.search(
-                query.reshape(1, -1),
-                k=k,
-                ef=ef or self.config.ef_search
+                query.reshape(1, -1), k=k, ef=ef or self.config.ef_search
             )
             indices = indices[0]
             distances = distances[0]
@@ -111,11 +140,13 @@ class DenseSearch:
             if idx < 0:  # Invalid index
                 continue
             score = self._distance_to_score(dist)
-            results.append(SearchResult(
-                id=self.ids[idx],
-                score=score,
-                vector=self.vectors[idx],
-            ))
+            results.append(
+                SearchResult(
+                    id=self.ids[idx],
+                    score=score,
+                    vector=self.vectors[idx],
+                )
+            )
 
         return results
 
@@ -179,7 +210,7 @@ class DenseSearch:
         results = []
 
         # If index supports batch search
-        if hasattr(self.index, 'search') and len(queries.shape) == 2:
+        if hasattr(self.index, "search") and len(queries.shape) == 2:
             all_indices, all_distances = self.index.search(queries, k=k)
 
             for indices, distances in zip(all_indices, all_distances):
@@ -188,10 +219,12 @@ class DenseSearch:
                     if idx < 0:
                         continue
                     score = self._distance_to_score(dist)
-                    query_results.append(SearchResult(
-                        id=self.ids[idx],
-                        score=score,
-                    ))
+                    query_results.append(
+                        SearchResult(
+                            id=self.ids[idx],
+                            score=score,
+                        )
+                    )
                 results.append(query_results)
         else:
             # Sequential fallback
@@ -208,11 +241,7 @@ class DenseSearch:
     ) -> List[SearchResult]:
         """Search within a filtered subset of vectors."""
         # Get indices for filtered IDs
-        filtered_indices = [
-            self._id_to_idx[id_]
-            for id_ in filter_ids
-            if id_ in self._id_to_idx
-        ]
+        filtered_indices = [self._id_to_idx[id_] for id_ in filter_ids if id_ in self._id_to_idx]
 
         if not filtered_indices:
             return []
@@ -228,11 +257,13 @@ class DenseSearch:
         for local_idx in top_k_local:
             global_idx = filtered_indices[local_idx]
             score = self._distance_to_score(distances[local_idx])
-            results.append(SearchResult(
-                id=self.ids[global_idx],
-                score=score,
-                vector=self.vectors[global_idx],
-            ))
+            results.append(
+                SearchResult(
+                    id=self.ids[global_idx],
+                    score=score,
+                    vector=self.vectors[global_idx],
+                )
+            )
 
         return results
 
@@ -242,6 +273,11 @@ class DenseSearch:
         k: int,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Brute force search over all vectors."""
+        if k <= 0:
+            # Without this a negative k slices from the end and returns
+            # almost everything.
+            empty = np.zeros(0, dtype=np.int64)
+            return empty, np.zeros(0, dtype=np.float32)
         distances = self._compute_distances(query, self.vectors)
         top_k = np.argsort(distances)[:k]
         return top_k, distances[top_k]
@@ -279,6 +315,17 @@ class DenseSearch:
         elif self.config.metric == "dot":
             return -distance  # Was negated
         return 1 / (1 + distance)
+
+
+# ============================================================================
+# MULTI-QUERY, AND PREFETCH THEN RESCORE
+# ============================================================================
+#
+# INPUT   several queries; a wide first pass
+# OUTPUT  results aggregated across queries; a wide candidate set rescored
+#         exactly
+#
+# Two patterns for accuracy: ask more ways, or ask wide and then look closely.
 
 
 class MultiQuerySearch:
@@ -323,6 +370,14 @@ class MultiQuerySearch:
         if not queries:
             return []
 
+        if weights is not None and len(weights) != len(queries):
+            # Indexing weights[i] per query used to raise IndexError partway
+            # through the fan-out, after some queries had already run.
+            raise ValueError(
+                f"weights has {len(weights)} entries for {len(queries)} queries; "
+                "give one weight per query or none at all"
+            )
+
         # Get more candidates per query
         candidates_per_query = k * 2
 
@@ -331,8 +386,7 @@ class MultiQuerySearch:
 
         for i, query in enumerate(queries):
             results = self.dense_search.search(
-                np.asarray(query, dtype=np.float32),
-                k=candidates_per_query
+                np.asarray(query, dtype=np.float32), k=candidates_per_query
             )
 
             weight = weights[i] if weights else 1.0
@@ -427,7 +481,7 @@ class PrefetchRescore:
         prefetch_k = prefetch_k or (k * 4)
 
         # Phase 1: Prefetch candidates with approximate search
-        if hasattr(self.index, 'search'):
+        if hasattr(self.index, "search"):
             indices, _ = self.index.search(query.reshape(1, -1), k=prefetch_k)
             candidate_indices = indices[0]
         else:
@@ -458,11 +512,13 @@ class PrefetchRescore:
         # Return top k
         results = []
         for idx, score in rescored[:k]:
-            results.append(SearchResult(
-                id=self.ids[idx],
-                score=score,
-                vector=self.vectors[idx],
-            ))
+            results.append(
+                SearchResult(
+                    id=self.ids[idx],
+                    score=score,
+                    vector=self.vectors[idx],
+                )
+            )
 
         return results
 
@@ -489,9 +545,9 @@ class PrefetchRescore:
     ) -> float:
         """Compute exact similarity score."""
         if self.metric == "cosine":
-            return float(np.dot(query, vector) / (
-                np.linalg.norm(query) * np.linalg.norm(vector) + 1e-8
-            ))
+            return float(
+                np.dot(query, vector) / (np.linalg.norm(query) * np.linalg.norm(vector) + 1e-8)
+            )
         elif self.metric == "euclidean":
             return 1.0 / (1.0 + float(np.linalg.norm(query - vector)))
         else:  # dot

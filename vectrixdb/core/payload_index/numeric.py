@@ -14,6 +14,21 @@ import pickle
 from .base import BasePayloadIndex
 
 
+__all__ = [
+    "NumericRangeIndex",
+]
+
+
+# ============================================================================
+# THE NUMERIC INDEX
+# ============================================================================
+#
+# INPUT   numeric fields
+# OUTPUT  range queries by bisect, in logarithmic time
+#
+# A sorted list, and two bisects a query.
+
+
 class NumericRangeIndex(BasePayloadIndex):
     """
     Sorted index for numeric fields supporting range queries.
@@ -153,10 +168,7 @@ class NumericRangeIndex(BasePayloadIndex):
     def _query_ne(self, value: float) -> Set[str]:
         """Find documents with different value."""
         value = float(value)
-        return set(
-            doc_id for doc_id, v in self._doc_to_value.items()
-            if v != value
-        )
+        return {doc_id for doc_id, v in self._doc_to_value.items() if v != value}
 
     def _query_gt(self, value: float) -> Set[str]:
         """Find documents with value > threshold."""
@@ -261,11 +273,13 @@ class NumericRangeIndex(BasePayloadIndex):
         stats = super().get_stats()
         if self._entries:
             values = [e[0] for e in self._entries]
-            stats.update({
-                "min": min(values),
-                "max": max(values),
-                "unique_values": len(set(values)),
-            })
+            stats.update(
+                {
+                    "min": min(values),
+                    "max": max(values),
+                    "unique_values": len(set(values)),
+                }
+            )
         return stats
 
     def save(self, path: Path) -> None:

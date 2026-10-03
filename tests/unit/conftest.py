@@ -76,3 +76,13 @@ The results of the study.
 ## Conclusion
 Final thoughts and conclusions.
 """
+
+
+@pytest.fixture(autouse=True)
+def _chat_routes_start_fresh():
+    """What a model turned down is remembered for the process; each test starts with nothing remembered."""
+    from vectrixdb._chat import ChatRoute
+
+    ChatRoute._REFUSED.clear()
+    yield
+    ChatRoute._REFUSED.clear()

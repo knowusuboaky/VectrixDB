@@ -1,0 +1,50 @@
+# Runs the same checks CI runs, before the commit rather than after the push.
+#   pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        # ONNX models legitimately live in Git LFS; block anything else large.
+        args: [--maxkb=2048]
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: trailing-whitespace
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        files: ^vectrixdb/
+        additional_dependencies: [numpy>=1.24.0]
+
+  - repo: local
+    hooks:
+      - id: no-bare-except
+        name: no bare except
+        # A bare `except:` also catches KeyboardInterrupt and SystemExit, and it
+        # hides real failures. Raise something from vectrixdb.exceptions instead.
+        entry: 'except\s*:'
+        language: pygrep
+        types: [python]
+        exclude: ^tests/
+
+      - id: no-naive-utcnow
+        name: no datetime.utcnow()
+        # Deprecated, scheduled for removal, and returns a naive datetime that
+        # compares wrongly against aware ones. Use vectrixdb._time.utcnow().
+        entry: 'datetime\.utcnow\(\)'
+        language: pygrep
+        types: [python]
+        exclude: ^(vectrixdb/_time\.py|tests/)

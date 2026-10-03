@@ -38,11 +38,107 @@ import shutil
 import zipfile
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
 from .embedded import get_models_dir, MODEL_CONFIG, GITHUB_REPO, GITHUB_RELEASE_BASE
+from .checksums import verify as _verify_checksums
+from .._net import assert_network
+from ..exceptions import ModelDownloadError
+
+
+__all__ = [
+    "ModelDownloader",
+    "download_models_cli",
+    "RELEASE_ASSETS",
+    "release_asset_url",
+    "publish_commands",
+]
+
+
+# ============================================================================
+# SETTINGS: the release asset each downloadable model is fetched as
+# ============================================================================
+#
+# ``download(model_type)`` asks GitHub for ``<asset>.zip`` under the tag in
+# MODEL_CONFIG and unpacks it into ``<folder>``. Two names are not the type's
+# own: the English ColBERT (``late_interaction_en``, alias ``colbert``) is
+# fetched as ``colbert.zip`` into ``colbert/``, and BGE-M3
+# (``late_interaction``) lands in ``bge-m3/``. scripts/publish_models.py and
+# scripts/check_model_releases.py read this so the zip a maintainer uploads
+# is the zip the downloader asks for.
+
+#: model type -> (release asset name without ".zip", directory under the models dir)
+RELEASE_ASSETS: Dict[str, Tuple[str, str]] = {
+    "dense": ("dense", "dense"),
+    "dense_en": ("dense_en", "dense_en"),
+    "reranker": ("reranker", "reranker"),
+    "reranker_en": ("reranker_en", "reranker_en"),
+    "late_interaction_en": ("colbert", "colbert"),
+    "colbert": ("colbert", "colbert"),
+    "bge_base_en": ("bge_base_en", "bge_base_en"),
+    "bge_reranker_base": ("bge_reranker_base", "bge_reranker_base"),
+    "colbert_v2": ("colbert_v2", "colbert_v2"),
+    "late_interaction": ("late_interaction", "bge-m3"),
+    "rebel": ("rebel", "rebel"),
+}
+
+
+def _config_key(model_type: str) -> str:
+    """The MODEL_CONFIG entry a download type reads; ``colbert`` is an alias."""
+    return "late_interaction_en" if model_type == "colbert" else model_type
+
+
+def release_asset_url(model_type: str) -> Optional[str]:
+    """The GitHub release URL ``download(model_type)`` fetches, or None for a type with no release."""
+    if model_type not in RELEASE_ASSETS:
+        return None
+    tag = MODEL_CONFIG.get(_config_key(model_type), {}).get("github_release")
+    if not tag:
+        return None
+    asset, _folder = RELEASE_ASSETS[model_type]
+    return f"{GITHUB_RELEASE_BASE}/{tag}/{asset}.zip"
+
+
+def publish_commands(model_type: str, tag: Optional[str] = None) -> List[str]:
+    """The commands that publish this model's release asset, for the maintainer.
+
+    Named in every download failure, because the GitHub fallback is only as
+    real as the release behind it: a tag nobody has created yet answers 404
+    to everyone, and the message is where that is found out. ``tag`` is the
+    registry's unless a ``github:<tag>`` model name chose another.
+    """
+    tag = tag or MODEL_CONFIG.get(_config_key(model_type), {}).get("github_release", "<tag>")
+    asset, _folder = RELEASE_ASSETS.get(model_type, (model_type, model_type))
+    return [
+        f"python scripts/publish_models.py {model_type}",
+        f'gh release create {tag} dist/models/{asset}.zip --title "{asset} model" --notes "ONNX INT8 {asset} for vectrixdb download-models"',
+    ]
+
+
+def _inside(base: Path, name: str) -> Path:
+    """``base / name``, refused when the name would land outside ``base``.
+
+    A zip entry named ``../../x`` or ``/etc/x`` is how a substituted release
+    asset writes anywhere the process can; nothing it holds belongs there.
+    """
+    target = base / name
+    try:
+        target.resolve().relative_to(base.resolve())
+    except ValueError:
+        raise ModelDownloadError(f"refusing zip entry {name!r}: it would extract outside {base}")
+    return target
+
+
+# ============================================================================
+# THE DOWNLOADER
+# ============================================================================
+#
+# INPUT   a model's name, and where it goes
+# OUTPUT  the model fetched from Hugging Face and converted to ONNX, once
+#
+# A one-time set-up; after it, no network calls.
 
 
 class ModelDownloader:
@@ -57,6 +153,64 @@ class ModelDownloader:
         """
         self.progress = progress
         self.models_dir = get_models_dir()
+        #: asset name -> (url, what went wrong, whether the release is missing)
+        self._github_attempts: Dict[str, Tuple[str, str, bool]] = {}
+
+    def _failed(
+        self, model_type: str, config: dict, huggingface: Optional[str] = None, hint: str = ""
+    ) -> ModelDownloadError:
+        """The error for a model no source could supply.
+
+        It names every source tried and what each answered, says when the
+        GitHub release does not exist yet and how a maintainer publishes it,
+        and ends with what the person can do now. A bare "check your
+        connection" was the old message, and it was wrong whenever the
+        release had never been made.
+        """
+        asset, _folder = RELEASE_ASSETS.get(model_type, (model_type, model_type))
+        url, reason, missing = self._github_attempts.get(
+            asset, (release_asset_url(model_type) or "(no release tag)", "not tried", False)
+        )
+        lines = [
+            f"Could not fetch the {config.get('name', model_type)} model ({model_type}). Sources tried, in order:",
+            f"  1. GitHub release {config.get('github_release', '(none)')}, asset {asset}.zip",
+            f"     {url}",
+            f"     {reason}",
+        ]
+        if huggingface is not None:
+            hf_id = config.get("huggingface_id", "(no HuggingFace id)")
+            lines += [
+                f"  2. HuggingFace {hf_id}, exported to ONNX on this machine",
+                f"     {huggingface}",
+            ]
+        else:
+            lines.append("  There is no HuggingFace fallback for this model.")
+        if missing:
+            lines.append(
+                "The GitHub release for this model has not been published yet, so the fallback "
+                "cannot work for anyone. A maintainer publishes it with:"
+            )
+            lines += [f"  {command}" for command in publish_commands(model_type)]
+            lines.append(
+                "(scripts/publish_models.py zips the model and prints that command; it runs nothing.)"
+            )
+        else:
+            lines.append(
+                "Check the network or the proxy, or copy the model from a machine that has it "
+                "and point VECTRIXDB_MODELS_DIR at the copy."
+            )
+        if huggingface is not None:
+            lines.append(
+                f'Until then: pip install "vectrixdb[setup-models]" && vectrixdb download-models --type {model_type}'
+            )
+        else:
+            lines.append(
+                "Until then: this model ships in the wheel, so pip install --force-reinstall vectrixdb "
+                "restores it, or copy it from a machine that has it and point VECTRIXDB_MODELS_DIR at the copy."
+            )
+        if hint:
+            lines.append(hint)
+        return ModelDownloadError("\n".join(lines))
 
     def _download_from_github(self, model_type: str, model_dir: Path, config: dict) -> bool:
         """
@@ -79,6 +233,7 @@ class ModelDownloader:
 
         print(f"  Trying GitHub fallback: {zip_url}")
 
+        tmp_path = None
         try:
             # Download with progress
             req = Request(zip_url, headers={"User-Agent": "VectrixDB-Downloader/1.0"})
@@ -100,7 +255,11 @@ class ModelDownloader:
 
                         if self.progress and total_size > 0:
                             pct = (downloaded / total_size) * 100
-                            print(f"\r  Downloading: {pct:.1f}% ({downloaded // 1024 // 1024}MB)", end="", flush=True)
+                            print(
+                                f"\r  Downloading: {pct:.1f}% ({downloaded // 1024 // 1024}MB)",
+                                end="",
+                                flush=True,
+                            )
 
                     if self.progress:
                         print()  # New line after progress
@@ -117,24 +276,23 @@ class ModelDownloader:
                 root_folder = first_item.split("/")[0] if "/" in first_item else None
 
                 # Check if all files are under the same root folder
-                has_nested_folder = (
-                    root_folder and
-                    all(n.startswith(root_folder + "/") or n == root_folder + "/" for n in namelist)
+                has_nested_folder = root_folder and all(
+                    n.startswith(root_folder + "/") or n == root_folder + "/" for n in namelist
                 )
 
                 if has_nested_folder:
+                    # has_nested_folder is only truthy when root_folder is a non-empty string.
+                    assert root_folder is not None
                     # Extract with flattening - remove the root folder prefix
                     print(f"  Flattening nested folder: {root_folder}/")
-                    for member in namelist:
-                        # Skip the root folder itself
-                        if member == root_folder + "/":
-                            continue
-                        # Remove the root folder prefix
-                        relative_path = member[len(root_folder) + 1:]
-                        if not relative_path:
-                            continue
-                        # Extract to the correct location
-                        target_path = model_dir / relative_path
+                    # Every target checked before any is written, so a bad
+                    # entry leaves no half-extracted model behind.
+                    targets = [
+                        (member, _inside(model_dir, member[len(root_folder) + 1 :]))
+                        for member in namelist
+                        if member[len(root_folder) + 1 :]
+                    ]
+                    for member, target_path in targets:
                         if member.endswith("/"):
                             target_path.mkdir(parents=True, exist_ok=True)
                         else:
@@ -143,26 +301,47 @@ class ModelDownloader:
                                 shutil.copyfileobj(src, dst)
                 else:
                     # Normal extraction
+                    for member in namelist:
+                        _inside(model_dir, member)
                     zip_ref.extractall(model_dir)
 
-            # Clean up temp file
-            os.unlink(tmp_path)
+            # A corrupt or substituted asset must not pass as a model.
+            _verify_checksums(model_type, model_dir)
 
-            print(f"  Successfully downloaded from GitHub!")
+            print("  Successfully downloaded from GitHub!")
             return True
 
         except HTTPError as e:
             if e.code == 404:
-                print(f"  GitHub release not found (404). Model may not be uploaded yet.")
+                print("  GitHub release not found (404). Model may not be uploaded yet.")
+                self._github_attempts[model_type] = (
+                    zip_url,
+                    "HTTP 404: this release, or its asset, does not exist",
+                    True,
+                )
             else:
                 print(f"  GitHub download failed: HTTP {e.code}")
+                self._github_attempts[model_type] = (zip_url, f"HTTP {e.code}", False)
             return False
         except URLError as e:
             print(f"  GitHub download failed: {e.reason}")
+            self._github_attempts[model_type] = (zip_url, f"unreachable: {e.reason}", False)
             return False
+        except ModelDownloadError:
+            raise  # a checksum failure is not a reason to try another source
         except Exception as e:
             print(f"  GitHub download failed: {e}")
+            self._github_attempts[model_type] = (zip_url, f"failed: {e}", False)
             return False
+        finally:
+            # The zip is a temporary file with delete=False, so a download that
+            # failed part way, or a zip that would not open, used to leave it
+            # in the system temp directory for good.
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     def download(self, model_type: str) -> Path:
         """
@@ -176,6 +355,7 @@ class ModelDownloader:
         Returns:
             Path to model directory
         """
+        assert_network(f"download the {model_type} model")
         if model_type == "dense":
             return self._download_dense()
         elif model_type == "sparse":
@@ -186,6 +366,8 @@ class ModelDownloader:
             return self._download_reranker_en()
         elif model_type == "bge_base_en":
             return self._download_bge_base_en()
+        elif model_type == "dense_en":
+            return self._download_dense_en()
         elif model_type == "bge_reranker_base":
             return self._download_bge_reranker_base()
         elif model_type == "colbert":
@@ -201,7 +383,9 @@ class ModelDownloader:
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
-    def download_all(self, include_graphrag: bool = True, include_multilingual: bool = True) -> None:
+    def download_all(
+        self, include_graphrag: bool = True, include_multilingual: bool = True
+    ) -> None:
         """Download all models."""
         print("Downloading VectrixDB models (one-time setup)...")
         size = "~250MB"
@@ -250,6 +434,7 @@ class ModelDownloader:
         # Fallback to HuggingFace if GitHub failed
         print("  GitHub download failed, falling back to HuggingFace...")
         hf_success = False
+        hf_error = ""
         try:
             from optimum.onnxruntime import ORTModelForFeatureExtraction
             from transformers import AutoTokenizer
@@ -282,15 +467,14 @@ class ModelDownloader:
                 hf_success = True
             except Exception as e:
                 print(f"  Manual export failed: {e}")
+                hf_error = f"manual export failed: {e}"
 
         except Exception as e:
             print(f"  HuggingFace download failed: {e}")
+            hf_error = str(e)
 
         if not hf_success:
-            raise RuntimeError(
-                f"Failed to download dense model from both GitHub and HuggingFace.\n"
-                f"Please check your internet connection or try again later."
-            )
+            raise self._failed("dense", config, huggingface=hf_error)
 
         return model_dir
 
@@ -397,10 +581,45 @@ class ModelDownloader:
         # These are approximate IDFs for common words
         default_idf = {word: 1.0 for word in default_vocab.keys()}
         # Lower IDF for very common words
-        common_words = ["the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-                       "have", "has", "had", "do", "does", "did", "will", "would", "could",
-                       "should", "may", "might", "must", "shall", "can", "to", "of", "in",
-                       "for", "on", "with", "at", "by", "from", "as", "into", "through"]
+        common_words = [
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "must",
+            "shall",
+            "can",
+            "to",
+            "of",
+            "in",
+            "for",
+            "on",
+            "with",
+            "at",
+            "by",
+            "from",
+            "as",
+            "into",
+            "through",
+        ]
         for word in common_words:
             if word in default_idf:
                 default_idf[word] = 0.1
@@ -431,77 +650,499 @@ class ModelDownloader:
         # Basic English vocabulary
         words = [
             # Articles, prepositions, conjunctions
-            "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
-            "of", "with", "by", "from", "as", "into", "through", "during", "before",
-            "after", "above", "below", "between", "under", "over",
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "with",
+            "by",
+            "from",
+            "as",
+            "into",
+            "through",
+            "during",
+            "before",
+            "after",
+            "above",
+            "below",
+            "between",
+            "under",
+            "over",
             # Pronouns
-            "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us",
-            "them", "my", "your", "his", "its", "our", "their", "this", "that",
-            "these", "those", "who", "whom", "which", "what", "whose",
+            "i",
+            "you",
+            "he",
+            "she",
+            "it",
+            "we",
+            "they",
+            "me",
+            "him",
+            "her",
+            "us",
+            "them",
+            "my",
+            "your",
+            "his",
+            "its",
+            "our",
+            "their",
+            "this",
+            "that",
+            "these",
+            "those",
+            "who",
+            "whom",
+            "which",
+            "what",
+            "whose",
             # Verbs
-            "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
-            "do", "does", "did", "will", "would", "could", "should", "may", "might",
-            "must", "shall", "can", "need", "get", "got", "make", "made", "take",
-            "took", "come", "came", "go", "went", "see", "saw", "know", "knew",
-            "think", "thought", "want", "use", "find", "found", "give", "gave",
-            "tell", "told", "work", "call", "try", "ask", "seem", "feel", "leave",
-            "put", "mean", "keep", "let", "begin", "show", "hear", "play", "run",
-            "move", "live", "believe", "hold", "bring", "happen", "write", "provide",
-            "sit", "stand", "lose", "pay", "meet", "include", "continue", "set",
-            "learn", "change", "lead", "understand", "watch", "follow", "stop",
-            "create", "speak", "read", "allow", "add", "spend", "grow", "open",
-            "walk", "win", "offer", "remember", "love", "consider", "appear", "buy",
-            "wait", "serve", "die", "send", "expect", "build", "stay", "fall",
-            "cut", "reach", "kill", "remain",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "must",
+            "shall",
+            "can",
+            "need",
+            "get",
+            "got",
+            "make",
+            "made",
+            "take",
+            "took",
+            "come",
+            "came",
+            "go",
+            "went",
+            "see",
+            "saw",
+            "know",
+            "knew",
+            "think",
+            "thought",
+            "want",
+            "use",
+            "find",
+            "found",
+            "give",
+            "gave",
+            "tell",
+            "told",
+            "work",
+            "call",
+            "try",
+            "ask",
+            "seem",
+            "feel",
+            "leave",
+            "put",
+            "mean",
+            "keep",
+            "let",
+            "begin",
+            "show",
+            "hear",
+            "play",
+            "run",
+            "move",
+            "live",
+            "believe",
+            "hold",
+            "bring",
+            "happen",
+            "write",
+            "provide",
+            "sit",
+            "stand",
+            "lose",
+            "pay",
+            "meet",
+            "include",
+            "continue",
+            "set",
+            "learn",
+            "change",
+            "lead",
+            "understand",
+            "watch",
+            "follow",
+            "stop",
+            "create",
+            "speak",
+            "read",
+            "allow",
+            "add",
+            "spend",
+            "grow",
+            "open",
+            "walk",
+            "win",
+            "offer",
+            "remember",
+            "love",
+            "consider",
+            "appear",
+            "buy",
+            "wait",
+            "serve",
+            "die",
+            "send",
+            "expect",
+            "build",
+            "stay",
+            "fall",
+            "cut",
+            "reach",
+            "kill",
+            "remain",
             # Nouns
-            "time", "year", "people", "way", "day", "man", "thing", "woman", "life",
-            "child", "world", "school", "state", "family", "student", "group", "country",
-            "problem", "hand", "part", "place", "case", "week", "company", "system",
-            "program", "question", "work", "government", "number", "night", "point",
-            "home", "water", "room", "mother", "area", "money", "story", "fact",
-            "month", "lot", "right", "study", "book", "eye", "job", "word", "business",
-            "issue", "side", "kind", "head", "house", "service", "friend", "father",
-            "power", "hour", "game", "line", "end", "member", "law", "car", "city",
-            "community", "name", "president", "team", "minute", "idea", "kid", "body",
-            "information", "back", "parent", "face", "others", "level", "office",
-            "door", "health", "person", "art", "war", "history", "party", "result",
-            "change", "morning", "reason", "research", "girl", "guy", "moment",
-            "air", "teacher", "force", "education",
+            "time",
+            "year",
+            "people",
+            "way",
+            "day",
+            "man",
+            "thing",
+            "woman",
+            "life",
+            "child",
+            "world",
+            "school",
+            "state",
+            "family",
+            "student",
+            "group",
+            "country",
+            "problem",
+            "hand",
+            "part",
+            "place",
+            "case",
+            "week",
+            "company",
+            "system",
+            "program",
+            "question",
+            "work",
+            "government",
+            "number",
+            "night",
+            "point",
+            "home",
+            "water",
+            "room",
+            "mother",
+            "area",
+            "money",
+            "story",
+            "fact",
+            "month",
+            "lot",
+            "right",
+            "study",
+            "book",
+            "eye",
+            "job",
+            "word",
+            "business",
+            "issue",
+            "side",
+            "kind",
+            "head",
+            "house",
+            "service",
+            "friend",
+            "father",
+            "power",
+            "hour",
+            "game",
+            "line",
+            "end",
+            "member",
+            "law",
+            "car",
+            "city",
+            "community",
+            "name",
+            "president",
+            "team",
+            "minute",
+            "idea",
+            "kid",
+            "body",
+            "information",
+            "back",
+            "parent",
+            "face",
+            "others",
+            "level",
+            "office",
+            "door",
+            "health",
+            "person",
+            "art",
+            "war",
+            "history",
+            "party",
+            "result",
+            "change",
+            "morning",
+            "reason",
+            "research",
+            "girl",
+            "guy",
+            "moment",
+            "air",
+            "teacher",
+            "force",
+            "education",
             # Adjectives
-            "good", "new", "first", "last", "long", "great", "little", "own", "other",
-            "old", "right", "big", "high", "different", "small", "large", "next",
-            "early", "young", "important", "few", "public", "bad", "same", "able",
-            "human", "local", "sure", "free", "better", "true", "whole", "real",
-            "best", "hard", "possible", "special", "clear", "recent", "certain",
-            "personal", "open", "red", "difficult", "available", "likely", "short",
-            "single", "medical", "current", "wrong", "private", "past", "foreign",
-            "fine", "common", "poor", "natural", "significant", "similar", "hot",
-            "dead", "central", "happy", "serious", "ready", "simple", "left",
-            "physical", "general", "environmental", "financial", "blue", "democratic",
-            "dark", "various", "entire", "close", "legal", "religious", "cold",
-            "final", "main", "green", "nice", "huge", "popular", "traditional",
+            "good",
+            "new",
+            "first",
+            "last",
+            "long",
+            "great",
+            "little",
+            "own",
+            "other",
+            "old",
+            "right",
+            "big",
+            "high",
+            "different",
+            "small",
+            "large",
+            "next",
+            "early",
+            "young",
+            "important",
+            "few",
+            "public",
+            "bad",
+            "same",
+            "able",
+            "human",
+            "local",
+            "sure",
+            "free",
+            "better",
+            "true",
+            "whole",
+            "real",
+            "best",
+            "hard",
+            "possible",
+            "special",
+            "clear",
+            "recent",
+            "certain",
+            "personal",
+            "open",
+            "red",
+            "difficult",
+            "available",
+            "likely",
+            "short",
+            "single",
+            "medical",
+            "current",
+            "wrong",
+            "private",
+            "past",
+            "foreign",
+            "fine",
+            "common",
+            "poor",
+            "natural",
+            "significant",
+            "similar",
+            "hot",
+            "dead",
+            "central",
+            "happy",
+            "serious",
+            "ready",
+            "simple",
+            "left",
+            "physical",
+            "general",
+            "environmental",
+            "financial",
+            "blue",
+            "democratic",
+            "dark",
+            "various",
+            "entire",
+            "close",
+            "legal",
+            "religious",
+            "cold",
+            "final",
+            "main",
+            "green",
+            "nice",
+            "huge",
+            "popular",
+            "traditional",
             "cultural",
             # Adverbs
-            "not", "also", "very", "often", "however", "too", "usually", "really",
-            "early", "never", "always", "sometimes", "together", "likely", "simply",
-            "generally", "instead", "actually", "already", "enough", "both", "well",
-            "much", "even", "again", "still", "almost", "ever", "why", "here",
-            "there", "where", "when", "how", "now", "then", "today", "just", "only",
+            "not",
+            "also",
+            "very",
+            "often",
+            "however",
+            "too",
+            "usually",
+            "really",
+            "early",
+            "never",
+            "always",
+            "sometimes",
+            "together",
+            "likely",
+            "simply",
+            "generally",
+            "instead",
+            "actually",
+            "already",
+            "enough",
+            "both",
+            "well",
+            "much",
+            "even",
+            "again",
+            "still",
+            "almost",
+            "ever",
+            "why",
+            "here",
+            "there",
+            "where",
+            "when",
+            "how",
+            "now",
+            "then",
+            "today",
+            "just",
+            "only",
             # Tech terms
-            "data", "computer", "software", "system", "network", "internet", "web",
-            "database", "server", "code", "program", "application", "app", "user",
-            "file", "document", "search", "query", "vector", "embedding", "model",
-            "machine", "learning", "ai", "artificial", "intelligence", "algorithm",
-            "api", "cloud", "service", "platform", "development", "developer",
-            "python", "javascript", "java", "programming", "language", "function",
-            "class", "method", "variable", "string", "number", "array", "list",
-            "object", "json", "xml", "html", "css", "framework", "library",
-            "package", "module", "import", "export", "install", "run", "build",
-            "test", "debug", "error", "exception", "log", "config", "setting",
-            "option", "parameter", "argument", "value", "key", "index", "table",
-            "row", "column", "field", "record", "schema", "query", "select",
-            "insert", "update", "delete", "create", "drop", "join", "where",
-            "order", "group", "limit", "offset",
+            "data",
+            "computer",
+            "software",
+            "system",
+            "network",
+            "internet",
+            "web",
+            "database",
+            "server",
+            "code",
+            "program",
+            "application",
+            "app",
+            "user",
+            "file",
+            "document",
+            "search",
+            "query",
+            "vector",
+            "embedding",
+            "model",
+            "machine",
+            "learning",
+            "ai",
+            "artificial",
+            "intelligence",
+            "algorithm",
+            "api",
+            "cloud",
+            "service",
+            "platform",
+            "development",
+            "developer",
+            "python",
+            "javascript",
+            "java",
+            "programming",
+            "language",
+            "function",
+            "class",
+            "method",
+            "variable",
+            "string",
+            "number",
+            "array",
+            "list",
+            "object",
+            "json",
+            "xml",
+            "html",
+            "css",
+            "framework",
+            "library",
+            "package",
+            "module",
+            "import",
+            "export",
+            "install",
+            "run",
+            "build",
+            "test",
+            "debug",
+            "error",
+            "exception",
+            "log",
+            "config",
+            "setting",
+            "option",
+            "parameter",
+            "argument",
+            "value",
+            "key",
+            "index",
+            "table",
+            "row",
+            "column",
+            "field",
+            "record",
+            "schema",
+            "query",
+            "select",
+            "insert",
+            "update",
+            "delete",
+            "create",
+            "drop",
+            "join",
+            "where",
+            "order",
+            "group",
+            "limit",
+            "offset",
         ]
 
         return {word: i for i, word in enumerate(words)}
@@ -518,10 +1159,7 @@ class ModelDownloader:
         if self._download_from_github("reranker_en", model_dir, config):
             return model_dir
 
-        raise RuntimeError(
-            f"Failed to download English reranker model from GitHub.\n"
-            f"Please check your internet connection or try again later."
-        )
+        raise self._failed("reranker_en", config)
 
     def _download_late_interaction_en(self) -> Path:
         """Download English ColBERT model from GitHub."""
@@ -535,10 +1173,35 @@ class ModelDownloader:
         if self._download_from_github("colbert", model_dir, config):
             return model_dir
 
-        raise RuntimeError(
-            f"Failed to download English ColBERT model from GitHub.\n"
-            f"Please check your internet connection or try again later."
-        )
+        raise self._failed("late_interaction_en", config)
+
+    def _download_dense_en(self) -> Path:
+        """Fetch e5-small-v2, the English default before 2.2.
+
+        Not in the wheel since 2.2. A collection written before then was
+        built with it, and either fetches it once through here or moves to
+        the current default with reembed().
+        """
+        config = MODEL_CONFIG["dense_en"]
+        model_dir = self.models_dir / "dense_en"
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Downloading e5-small-v2 (the pre-2.2 English default): {config['name']}...")
+        if self._download_from_github("dense_en", model_dir, config):
+            return model_dir
+
+        print("  GitHub download failed, falling back to HuggingFace...")
+        try:
+            self._manual_dense_export(model_dir, config)
+            return model_dir
+        except Exception as e:
+            raise self._failed(
+                "dense_en",
+                config,
+                huggingface=str(e),
+                hint="Or move the collection to the current default: "
+                'Vectrix(name, path=..., dense_model="bge-small").reembed()',
+            )
 
     def _download_bge_base_en(self) -> Path:
         """Download BGE-base-en-v1.5 model (higher quality dense embeddings)."""
@@ -559,11 +1222,7 @@ class ModelDownloader:
             self._manual_dense_export(model_dir, config)
             return model_dir
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to download BGE-base model.\n"
-                f"Error: {e}\n\n"
-                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type bge_base_en"
-            )
+            raise self._failed("bge_base_en", config, huggingface=str(e))
 
     def _download_bge_reranker_base(self) -> Path:
         """Download BGE-reranker-base model (higher quality reranker)."""
@@ -584,11 +1243,7 @@ class ModelDownloader:
             self._manual_reranker_export(model_dir, config)
             return model_dir
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to download BGE reranker model.\n"
-                f"Error: {e}\n\n"
-                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type bge_reranker_base"
-            )
+            raise self._failed("bge_reranker_base", config, huggingface=str(e))
 
     def _download_colbert_v2(self) -> Path:
         """Download ColBERT v2 model (higher quality late interaction)."""
@@ -609,11 +1264,7 @@ class ModelDownloader:
             self._manual_colbert_export(model_dir, config)
             return model_dir
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to download ColBERT v2 model.\n"
-                f"Error: {e}\n\n"
-                f"Try: pip install vectrixdb[setup-models] && vectrixdb download-models --type colbert_v2"
-            )
+            raise self._failed("colbert_v2", config, huggingface=str(e))
 
     def _download_reranker(self) -> Path:
         """Download and convert reranker model to ONNX."""
@@ -630,6 +1281,7 @@ class ModelDownloader:
         # Fallback to HuggingFace if GitHub failed
         print("  GitHub download failed, falling back to HuggingFace...")
         hf_success = False
+        hf_error = ""
         try:
             from optimum.onnxruntime import ORTModelForSequenceClassification
             from transformers import AutoTokenizer
@@ -662,15 +1314,14 @@ class ModelDownloader:
                 hf_success = True
             except Exception as e:
                 print(f"  Manual export failed: {e}")
+                hf_error = f"manual export failed: {e}"
 
         except Exception as e:
             print(f"  HuggingFace download failed: {e}")
+            hf_error = str(e)
 
         if not hf_success:
-            raise RuntimeError(
-                f"Failed to download reranker model from both GitHub and HuggingFace.\n"
-                f"Please check your internet connection or try again later."
-            )
+            raise self._failed("reranker", config, huggingface=hf_error)
 
         return model_dir
 
@@ -757,8 +1408,14 @@ class ModelDownloader:
         print(f"  Reranker model exported to: {model_dir}")
 
     def _download_colbert(self) -> Path:
-        """Download and convert ColBERT model to ONNX."""
-        config = MODEL_CONFIG["colbert"]
+        """Download and convert ColBERT model to ONNX.
+
+        ``colbert`` is the older name for the English late-interaction model
+        and installs into the same directory. This read MODEL_CONFIG["colbert"],
+        a key that has never existed, so the advertised ``--type colbert``
+        raised KeyError before it reached the network.
+        """
+        config = MODEL_CONFIG["late_interaction_en"]
         model_dir = self.models_dir / "colbert"
         model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -771,6 +1428,7 @@ class ModelDownloader:
         # Fallback to HuggingFace if GitHub failed
         print("  GitHub download failed, falling back to HuggingFace...")
         hf_success = False
+        hf_error = ""
         try:
             from optimum.onnxruntime import ORTModelForFeatureExtraction
             from transformers import AutoTokenizer
@@ -803,15 +1461,14 @@ class ModelDownloader:
                 hf_success = True
             except Exception as e:
                 print(f"  Manual export failed: {e}")
+                hf_error = f"manual export failed: {e}"
 
         except Exception as e:
             print(f"  HuggingFace download failed: {e}")
+            hf_error = str(e)
 
         if not hf_success:
-            raise RuntimeError(
-                f"Failed to download ColBERT model from both GitHub and HuggingFace.\n"
-                f"Please check your internet connection or try again later."
-            )
+            raise self._failed("colbert", config, huggingface=hf_error)
 
         return model_dir
 
@@ -913,6 +1570,7 @@ class ModelDownloader:
         # Fallback to HuggingFace if GitHub failed
         print("  GitHub download failed, falling back to HuggingFace...")
         hf_success = False
+        hf_error = ""
         try:
             from optimum.onnxruntime import ORTModelForFeatureExtraction
             from transformers import AutoTokenizer
@@ -945,15 +1603,14 @@ class ModelDownloader:
                 hf_success = True
             except Exception as e:
                 print(f"  Manual export failed: {e}")
+                hf_error = f"manual export failed: {e}"
 
         except Exception as e:
             print(f"  HuggingFace download failed: {e}")
+            hf_error = str(e)
 
         if not hf_success:
-            raise RuntimeError(
-                f"Failed to download BGE-M3 model from both GitHub and HuggingFace.\n"
-                f"Please check your internet connection or try again later."
-            )
+            raise self._failed("late_interaction", config, huggingface=hf_error)
 
         return model_dir
 
@@ -1055,6 +1712,7 @@ class ModelDownloader:
         # Fallback to HuggingFace if GitHub failed
         print("  GitHub download failed, falling back to HuggingFace...")
         hf_success = False
+        hf_error = ""
         try:
             from optimum.onnxruntime import ORTModelForSeq2SeqLM
             from transformers import AutoTokenizer
@@ -1097,15 +1755,14 @@ class ModelDownloader:
                 hf_success = True
             except Exception as e:
                 print(f"  Manual export failed: {e}")
+                hf_error = f"manual export failed: {e}"
 
         except Exception as e:
             print(f"  HuggingFace download failed: {e}")
+            hf_error = str(e)
 
         if not hf_success:
-            raise RuntimeError(
-                f"Failed to download mREBEL model from both GitHub and HuggingFace.\n"
-                f"Please check your internet connection or try again later."
-            )
+            raise self._failed("rebel", config, huggingface=hf_error)
 
         return model_dir
 
@@ -1173,7 +1830,9 @@ class ModelDownloader:
                 super().__init__()
                 self.model = model
 
-            def forward(self, input_ids, attention_mask, encoder_hidden_states, encoder_attention_mask):
+            def forward(
+                self, input_ids, attention_mask, encoder_hidden_states, encoder_attention_mask
+            ):
                 outputs = self.model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -1195,7 +1854,12 @@ class ModelDownloader:
                 dummy_input["attention_mask"],
             ),
             decoder_path,
-            input_names=["input_ids", "attention_mask", "encoder_hidden_states", "encoder_attention_mask"],
+            input_names=[
+                "input_ids",
+                "attention_mask",
+                "encoder_hidden_states",
+                "encoder_attention_mask",
+            ],
             output_names=["logits"],
             dynamic_axes={
                 "input_ids": {0: "batch_size", 1: "sequence"},
@@ -1224,6 +1888,16 @@ class ModelDownloader:
         print(f"  mREBEL model exported to: {model_dir}")
 
 
+# ============================================================================
+# MAIN SCRIPT
+# ============================================================================
+#
+# INPUT   the command line
+# OUTPUT  the models downloaded
+#
+# The entry point vectrixdb download-models runs through.
+
+
 def download_models_cli():
     """CLI entry point for downloading models."""
     import argparse
@@ -1231,7 +1905,17 @@ def download_models_cli():
     parser = argparse.ArgumentParser(description="Download VectrixDB models")
     parser.add_argument(
         "--type",
-        choices=["all", "dense", "sparse", "reranker", "colbert", "late_interaction", "rebel", "graphrag"],
+        choices=[
+            "all",
+            "dense",
+            "dense_en",
+            "sparse",
+            "reranker",
+            "colbert",
+            "late_interaction",
+            "rebel",
+            "graphrag",
+        ],
         default="all",
         help="Model type to download (late_interaction = BGE-M3, graphrag = rebel for triplet extraction)",
     )

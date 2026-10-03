@@ -1,0 +1,22 @@
+{
+  "entities": [
+    "Curie Institute",
+    "France",
+    "Marie Curie",
+    "Nobel Prize",
+    "Paris",
+    "Pierre Curie",
+    "Radioactivity",
+    "Radium",
+    "The Nobel Prize"
+  ],
+  "edges": [
+    "Curie Institute -> France",
+    "Marie Curie -> Paris",
+    "Paris -> Nobel Prize",
+    "Pierre Curie -> Marie Curie",
+    "Radioactivity -> Nobel Prize",
+    "Radioactivity -> Paris"
+  ],
+  "communities": 1
+}

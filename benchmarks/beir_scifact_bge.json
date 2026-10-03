@@ -1,0 +1,32 @@
+{
+  "dataset": "scifact",
+  "fast": false,
+  "model": "vectrixdb/bge-small-en-v1.5",
+  "vectrixdb": "2.2.0",
+  "date": "2026-09-19",
+  "machine": "AMD64 Windows Python 3.13.14",
+  "results": {
+    "dense": {
+      "ndcg@10": 0.7074,
+      "recall@100": 0.9383,
+      "p50_ms": 9.7,
+      "queries": 300,
+      "build_s": 655.7
+    },
+    "hybrid": {
+      "ndcg@10": 0.7355,
+      "recall@100": 0.9683,
+      "p50_ms": 162.9,
+      "queries": 300,
+      "build_s": 669.7
+    },
+    "hybrid+rerank": {
+      "ndcg@10": 0.6933,
+      "recall@100": 0.9683,
+      "p50_ms": 2003.5,
+      "queries": 300,
+      "build_s": 0.0
+    }
+  },
+  "note": "Quality and query times from one run on the date below, on indexes built by a run earlier the same day; build_s is that earlier run's, for the same indexes. The reranked row reuses the hybrid index."
+}

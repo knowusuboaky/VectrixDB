@@ -12,15 +12,15 @@ class TestQuantizationType:
 
     def test_none_exists(self):
         """Test NONE quantization type exists."""
-        assert hasattr(QuantizationType, 'NONE')
+        assert hasattr(QuantizationType, "NONE")
 
     def test_scalar_exists(self):
         """Test SCALAR quantization type exists."""
-        assert hasattr(QuantizationType, 'SCALAR')
+        assert hasattr(QuantizationType, "SCALAR")
 
     def test_binary_exists(self):
         """Test BINARY quantization type exists."""
-        assert hasattr(QuantizationType, 'BINARY')
+        assert hasattr(QuantizationType, "BINARY")
 
 
 class TestQuantizationConfig:
