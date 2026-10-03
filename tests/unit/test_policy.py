@@ -546,6 +546,34 @@ class TestSubsetStatistics:
             index.add(f"withheld{n}", "covenant covenant covenant review")
         return index
 
+    def test_a_tie_falls_by_id_whatever_else_the_index_holds(self):
+        """Two visible documents that score alike come back in the same order with or without the withheld ones.
+
+        Their order once followed the order a set handed the query's words
+        over, which changes from run to run, so a pile of withheld documents
+        could swap two visible ones on one machine and not another.
+        """
+        from vectrixdb.core.collection import TextIndex
+
+        def index(*withheld):
+            built = TextIndex(use_stemming=False)
+            for n, text in enumerate(withheld):
+                built.add(f"withheld{n}", text)
+            built.add("b-escrow", "escrow terms for this borrower")
+            built.add("a-covenant", "covenant terms for this borrower")
+            return built
+
+        visible = {"a-covenant", "b-escrow"}
+        holds = index(*["covenant review for the other client"] * 12).search(
+            "covenant escrow terms", doc_ids=visible, statistics_over_subset=True
+        )
+        never = index().search(
+            "covenant escrow terms", doc_ids=visible, statistics_over_subset=True
+        )
+        assert holds == never
+        assert holds[0][1] == holds[1][1], "the two must tie for this to test anything"
+        assert [doc for doc, _ in holds] == ["a-covenant", "b-escrow"]
+
     def test_the_whole_index_is_still_the_default(self, index):
         """Changing what an ordinary filtered search scores would be a
         ranking change for everybody, and this is a security fix."""

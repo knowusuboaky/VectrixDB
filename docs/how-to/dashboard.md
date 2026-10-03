@@ -57,6 +57,8 @@ browser's own searches, which includes the network.
 
 ## Collections
 
+![Collections, one opened to its Points, Policy, Builds and Quality tabs](../images/dashboard/tour-collections.gif)
+
 ![Every collection: its state, who may search it, its chunks and when it changed](../images/dashboard/collections.png)
 
 Every collection with its state, who may search it, its size and when it last
@@ -92,6 +94,8 @@ asks for a check from the last ten minutes.
 
 ![Search results, each led by its relevance and what found it](../images/dashboard/search.png)
 
+![A question typed in, and the results coming back with their relevance](../images/dashboard/tour-search.gif)
+
 Dense, hybrid, keyword and reranked search, with the modes a collection cannot
 do greyed out and saying why. Each result leads with its relevance, a
 percentage and a word, and says whether meaning, keywords or both found it; the
@@ -102,6 +106,8 @@ library is fetched the first time the tab is opened, so a server without
 graphs never loads it. Press `/` anywhere to come here.
 
 ## Evaluate
+
+![The Evaluate page: three picks, found in the top 10 against search time, and the chunking runs](../images/dashboard/tour-evaluate.gif)
 
 ![A sample evaluation run: the three picks, found in the top 10 against time, and every setup ranked](../images/dashboard/evaluate.png)
 
@@ -141,6 +147,8 @@ the library, the command line or a function, never here.
 
 ![Files sent to the server to read, cut, embed and write](../images/dashboard/ingest.png)
 
+![A PDF added, its pages and chunks counted as they are written](../images/dashboard/tour-ingest.gif)
+
 Send files to the server, which reads them the way `add_document()` does, or
 paste paragraphs. It says which file types this server reads and who reads
 each, and every document comes back with its chunk count, quality and
@@ -164,6 +172,8 @@ there. Then the records, newest first: query text is never stored, only its
 keyed fingerprint.
 
 ## Access
+
+![The Access page: who may read, write and administer](../images/dashboard/tour-access.gif)
 
 ![Access: sign-ins against refusals, who reads most, keys by last use, and the people](../images/dashboard/access.png)
 

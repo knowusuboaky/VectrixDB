@@ -1,0 +1,134 @@
+/* The documentation wears the dashboard's clothes: the same amber, the same
+   warm ink and paper, the same IBM Plex. Light and dark follow the reader. */
+
+:root {
+  --vx-amber: #e8a81a;
+  --vx-amber-ink: #8a6203;
+  --vx-ink: #1a170f;
+  --vx-paper: #fdfcf9;
+  --vx-paper-2: #f3f0ea;
+  --vx-line: #ece9e2;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #1a170f;
+  --md-primary-fg-color--light: #2a2619;
+  --md-primary-fg-color--dark: #14110a;
+  --md-primary-bg-color: #fdfcf9;
+  --md-primary-bg-color--light: #d6d1c6;
+  --md-accent-fg-color: #8a6203;
+  --md-accent-fg-color--transparent: rgba(232, 168, 26, 0.12);
+  --md-default-bg-color: #fdfcf9;
+  --md-default-fg-color: #1a170f;
+  --md-default-fg-color--light: #4a463c;
+  --md-default-fg-color--lighter: #8e8a7f;
+  --md-default-fg-color--lightest: #ece9e2;
+  --md-typeset-a-color: #8a6203;
+  --md-code-bg-color: #f3f0ea;
+  --md-code-fg-color: #1a170f;
+  --md-footer-bg-color: #1a170f;
+  --md-footer-bg-color--dark: #14110a;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #14110a;
+  --md-primary-fg-color--light: #2a2619;
+  --md-primary-fg-color--dark: #0f0d08;
+  --md-primary-bg-color: #f7f5f1;
+  --md-accent-fg-color: #e8a81a;
+  --md-accent-fg-color--transparent: rgba(232, 168, 26, 0.14);
+  --md-default-bg-color: #1a170f;
+  --md-default-fg-color: #f7f5f1;
+  --md-default-fg-color--light: #cfcabd;
+  --md-default-fg-color--lighter: #8e8a7f;
+  --md-default-fg-color--lightest: #2a2619;
+  --md-typeset-a-color: #f0c65a;
+  --md-code-bg-color: #211d13;
+  --md-code-fg-color: #f7f5f1;
+  --md-footer-bg-color: #0f0d08;
+  --md-footer-bg-color--dark: #0a0906;
+}
+
+/* The amber mark in the header, the way the dashboard's sidebar wears it. */
+.md-header__button.md-logo img,
+.md-nav__button.md-logo img {
+  height: 1.6rem;
+  width: 1.6rem;
+  border-radius: 6px;
+}
+.md-header__topic .md-ellipsis { font-weight: 600; letter-spacing: 0.01em; }
+.md-header, .md-tabs { border-bottom: 1px solid rgba(232, 168, 26, 0.25); }
+.md-tabs__link--active, .md-tabs__link:hover { color: var(--vx-amber); }
+.md-nav__link--active, .md-nav__link:focus, .md-nav__link:hover { color: var(--md-accent-fg-color); }
+
+/* Pictures of the dashboard: framed like a window, never wider than the text. */
+.md-typeset img[src$=".gif"],
+.md-typeset img[src*="images/dashboard/"] {
+  display: block;
+  width: 100%;
+  max-width: 960px;
+  margin: 1.2rem auto;
+  border-radius: 10px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  box-shadow: 0 10px 30px rgba(26, 23, 15, 0.12);
+}
+
+/* The home page. */
+.vx-hero {
+  margin: 0 0 2rem;
+  padding: 2.2rem 0 0.4rem;
+  text-align: center;
+}
+.vx-hero h1 {
+  font-size: 2.6rem;
+  line-height: 1.1;
+  margin: 0 0 0.6rem;
+  color: var(--md-default-fg-color);
+  letter-spacing: -0.01em;
+}
+.vx-hero h1 em { font-style: normal; color: var(--md-accent-fg-color); }
+.vx-hero p.lead {
+  font-size: 1.1rem;
+  color: var(--md-default-fg-color--light);
+  max-width: 44rem;
+  margin: 0 auto 1.4rem;
+}
+.vx-actions { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.6rem; }
+.vx-actions .md-button {
+  border-radius: 999px;
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-accent-fg-color);
+}
+.vx-actions .md-button--primary {
+  background: var(--vx-amber);
+  border-color: var(--vx-amber);
+  color: var(--vx-ink);
+}
+.vx-hero img { margin-top: 0; }
+.vx-hero .vx-caption, .vx-caption {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--md-default-fg-color--lighter);
+  margin: 0.4rem 0 0;
+  text-align: center;
+}
+
+.vx-tours { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1.2rem; margin: 1rem 0 2rem; }
+.vx-tour { border: 1px solid var(--md-default-fg-color--lightest); border-radius: 12px; padding: 0.8rem; background: var(--md-code-bg-color); }
+.vx-tour img { margin: 0 0 0.5rem; width: 100%; box-shadow: none; }
+.vx-tour h3 { margin: 0.2rem 0 0.2rem; font-size: 0.9rem; font-weight: 600; }
+.vx-tour p { margin: 0; font-size: 0.74rem; color: var(--md-default-fg-color--light); }
+
+.md-typeset .grid.cards > ul > li {
+  border-radius: 12px;
+  border-color: var(--md-default-fg-color--lightest);
+}
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--vx-amber);
+  box-shadow: 0 6px 20px rgba(232, 168, 26, 0.18);
+}
+
+@media (max-width: 44.9em) {
+  .vx-hero h1 { font-size: 1.9rem; }
+  .vx-hero { padding-top: 1rem; }
+}

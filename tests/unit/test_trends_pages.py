@@ -461,8 +461,8 @@ class TestThreeThingsThePagesGotWrong:
         assert top - above - size >= 0, "the label above a bar at the top of the scale was clipped"
 
     def test_a_collection_tagged_dense_is_dense_whatever_index_it_carries(self):
-        for app in (
-            DASH / "app.js",
+        # The example dashboard's copy too, where the folder is on this machine: it is not in the repository.
+        example = (
             DASH.parents[1]
             / "examples"
             / "azure"
@@ -470,8 +470,9 @@ class TestThreeThingsThePagesGotWrong:
             / "Frontend"
             / "public"
             / "pages"
-            / "app.js",
-        ):
+            / "app.js"
+        )
+        for app in (DASH / "app.js", *([example] if example.exists() else [])):
             script = app.read_text(encoding="utf-8")
             body = script[script.index("function modeOf(") : script.index("function hasPolicy(")]
             assert body.index("tags.includes('dense')") < body.index("c.has_text_index"), app

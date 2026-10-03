@@ -8,6 +8,7 @@ say why in the change.
 
 import importlib.util
 import json
+import platform
 import sys
 from pathlib import Path
 
@@ -16,7 +17,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 BASELINE = ROOT / "tests" / "fixtures" / "recall_baseline.json"
 SCRIPT = ROOT / "scripts" / "recall_baseline.py"
-TOLERANCE = 0.02
+# The baseline is measured on x86. ARM's ONNX kernels round differently and land
+# about a hundredth lower on the same questions, so it is held a hundredth wider.
+TOLERANCE = 0.03 if platform.machine().lower() in {"arm64", "aarch64"} else 0.02
 
 
 def _script():

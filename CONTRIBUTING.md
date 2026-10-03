@@ -37,7 +37,7 @@ missing model files, run `git lfs pull`.
 
 A change is ready when all four of these are true. CI enforces the first three.
 
-1. **`ruff check .` passes**, scripts and examples included, and `ruff format` has been run.
+1. **`ruff check .` passes**, scripts included, and `ruff format` has been run.
 2. **`mypy vectrixdb` passes.** New modules should be fully annotated. The config
    ratchets toward strict: modules listed under `[[tool.mypy.overrides]]` in
    `pyproject.toml` are held to `disallow_untyped_defs`, and that list should

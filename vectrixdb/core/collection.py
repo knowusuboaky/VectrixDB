@@ -617,7 +617,9 @@ class TextIndex:
 
         # Also try original tokens (before stemming) for exact matches
         original_tokens = self._tokenize_raw(query)
-        all_query_tokens = list(set(query_tokens) | set(original_tokens))
+        # In a fixed order: a set's order changes from run to run, and so would the
+        # order each document's score is summed in.
+        all_query_tokens = sorted(set(query_tokens) | set(original_tokens))
 
         for token in all_query_tokens:
             if token not in self._inverted_index:
@@ -655,8 +657,10 @@ class TextIndex:
 
                 scores[doc_id] = scores.get(doc_id, 0) + score
 
-        # Sort by score
-        sorted_results = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        # By score, and a tie by id, so it falls the same way whatever else the index
+        # holds: under a policy, two documents that score alike must not swap places
+        # because of documents the caller may not see.
+        sorted_results = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
         return sorted_results[:limit]
 
     def get_highlights(self, doc_id: str, query: str, max_length: int = 150) -> List[str]:

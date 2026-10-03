@@ -28,15 +28,15 @@ jobs:
       - name: Install tooling
         run: python -m pip install --upgrade pip ruff mypy
 
-      # The whole repository: the scripts and examples are run by people and by
-      # the test suite, so they are held to the same rules as the package.
+      # The whole repository: the scripts are run by people and by the test
+      # suite, so they are held to the same rules as the package.
       - name: Ruff (lint)
         run: ruff check .
 
       # The codebase was formatted once before 2.2 shipped, so this is a gate:
-      # `ruff format vectrixdb tests scripts examples` before committing.
+      # `ruff format vectrixdb tests scripts` before committing.
       - name: Ruff (format check)
-        run: ruff format --check vectrixdb tests scripts examples
+        run: ruff format --check vectrixdb tests scripts
 
       # The package type-checks clean as of 2.2, so this is a cliff again: any
       # new error fails the build. The ratchet below stays as the second gate

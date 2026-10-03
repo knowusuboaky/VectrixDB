@@ -965,6 +965,30 @@ CLIPS: Dict[str, Tuple[int, int, str, str]] = {
         "light",
         "A walk through Overview, Collections, Evaluate and Audit",
     ),
+    "tour-collections": (
+        1280,
+        800,
+        "light",
+        "One collection opened: its Overview, Points, Policy, Builds and Quality tabs",
+    ),
+    "tour-evaluate": (
+        1280,
+        800,
+        "light",
+        "The evaluation run: three picks, found in the top 10 against time, every setup, then Chunking",
+    ),
+    "tour-access": (
+        1280,
+        800,
+        "light",
+        "Access: people and what each role may do, the access log, and the sidebar's badges",
+    ),
+    "tour-console": (
+        1280,
+        800,
+        "light",
+        "The Console: a preset, a request typed, sent, its answer and the curl for it",
+    ),
     "tour-ingest": (
         1280,
         800,
@@ -1280,11 +1304,90 @@ def clip_pages(reel: Reel, base: str, theme: str, folder: Path) -> None:
         reel.film(2.4, until=ready(wait))
 
 
+def clip_collections(reel: Reel, base: str, theme: str, folder: Path) -> None:
+    browser = reel.browser
+    open_page(browser, base, "#/collections", theme, "#page-collections.active #col-grid > *")
+    reel.film(1.6)
+    browser.js(
+        # The name in its row: a press on it reaches the row's own handler.
+        "[...document.querySelectorAll('#col-grid *')].find((e) => !e.children.length && e.textContent.trim() === 'handbook').id = 'vx-handbook-row'"
+    )
+    reel.press("#vx-handbook-row")
+    reel.film(1.8, until=ready("#page-collection.active #cpanel-overview.on > *"))
+    for tab, wait in (
+        ("points", "#page-collection.active #cpanel-points.on button"),
+        ("policy", "#page-collection.active #cpanel-policy.on > *"),
+        ("builds", "#page-collection.active #cpanel-builds.on > *"),
+        ("quality", "#page-collection.active #cpanel-quality.on > *"),
+    ):
+        reel.press(f"#ctab-{tab}")
+        reel.film(1.9, until=ready(wait))
+
+
+def clip_evaluate(reel: Reel, base: str, theme: str, folder: Path) -> None:
+    open_page(reel.browser, base, "#/evaluate/retrieval", theme, "#page-evaluate.active svg")
+    # The three picks, then down to found in the top 10 against search time, and the ranking.
+    reel.film(2.6)
+    reel.scroll(330)
+    reel.hold(2600)
+    reel.scroll(760)
+    reel.hold(2200)
+    reel.scroll(0, smooth=False)
+    reel.press("#etab-chunking")
+    reel.film(2.4, until=ready("#page-evaluate.active svg"))
+
+
+def clip_access(reel: Reel, base: str, theme: str, folder: Path) -> None:
+    open_page(reel.browser, base, "#/access", theme, "#page-access.active #access-body > *")
+    reel.film(2.4)
+    # Who may do what, then the access log below it.
+    reel.scroll(520)
+    reel.hold(2600)
+    reel.scroll(1040)
+    reel.hold(2200)
+    reel.scroll(0)
+    # The badges in the sidebar say what this server is and who is looking.
+    reel.point("#pill-auth")
+    reel.hold(2200)
+
+
+def clip_console(reel: Reel, base: str, theme: str, folder: Path) -> None:
+    browser = reel.browser
+    open_page(browser, base, "#/console", theme, "#page-console.active #con-path")
+    reel.hold(1200)
+    browser.js(
+        "[...document.querySelectorAll('#page-console .chip')].find((x) => x.textContent.trim() === 'hybrid search').id = 'vx-preset'"
+    )
+    reel.press("#vx-preset")
+    reel.film(1.0)
+    browser.js(
+        "(() => { const s = document.querySelector('#s-collection'); if (s) { s.value = 'handbook'; } })()"
+    )
+    browser.js(
+        "(() => { const p = document.querySelector('#con-path'); p.value = p.value.replace(/collections\\/[^/]+\\//, 'collections/handbook/'); })()"
+    )
+    browser.js(
+        "(() => { const b = document.querySelector('#con-body'); b.value = b.value.replace('how does sleep affect memory', ''); })()"
+    )
+    reel.type("#con-body", '{\n  "query_text": "how many days of leave do I get",\n  "limit": 3\n}')
+    browser.js(
+        "[...document.querySelectorAll('#page-console button')].find((x) => x.textContent.trim() === 'Send').id = 'vx-send'"
+    )
+    reel.press("#vx-send")
+    reel.film(2.0, until="/\\d{3} ·/.test(document.querySelector('#con-status').textContent)")
+    reel.point("#con-curl")
+    reel.hold(2600)
+
+
 #: What each clip does, by name.
 CLIP_STEPS: Dict[str, Callable[[Reel, str, str, Path], None]] = {
     "tour-search": clip_search,
-    "tour-ingest": clip_ingest,
     "tour-pages": clip_pages,
+    "tour-collections": clip_collections,
+    "tour-evaluate": clip_evaluate,
+    "tour-access": clip_access,
+    "tour-console": clip_console,
+    "tour-ingest": clip_ingest,
 }
 
 

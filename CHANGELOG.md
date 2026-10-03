@@ -16,6 +16,29 @@ may change at any time.
 
 ### Added
 
+- **The test-question writer spreads its questions and judges harder.**
+  `write_golden` now gives every collection, then every document, a floor of
+  questions, so a three-file media collection beside a 240-page report is
+  still asked about. A passage the reading's own quality check scored under
+  0.5 is passed over as `poor` rather than judged. The critic holds two
+  floors a good mean cannot carry: `answered` at 0.7, the passages answer it
+  and the answer is right and complete with its units, a comparison comparing
+  like with like, and `standalone` at 0.6, a search standing alone when it
+  names what it looks for. A draft answered by the same words as one already
+  written is sent back as a `repeat`; one naming what the passages never do is
+  `named`. The summary counts each.
+- **`stale_evidence()` says which questions' quotes have left the index.** A
+  question whose expected document is held but none of whose quotes any
+  chunk still holds is named, with the document, and `check_golden` notes it;
+  over several collections a document is missing only when none holds it.
+- **Moving pictures of the dashboard.** `scripts/dashboard_shots.py` films
+  the pages it already photographs: `tour-search`, `tour-ingest`,
+  `tour-pages`, `tour-collections`, `tour-evaluate`, `tour-access` and
+  `tour-console`, each a GIF of eleven to sixteen seconds, each with a test
+  that it is on disk and in the docs. The README opens with one, the
+  documentation's home page shows them all, and the site wears the
+  dashboard's own mark, amber and type.
+
 - **`VectrixSync.cdc()` carries deletes to the target.** `full()` and
   `incremental()` only ever copied, so a chunk deleted or revoked in the
   governed Delta Lake source stayed searchable in the Lakebase copy for good.
@@ -402,6 +425,31 @@ may change at any time.
   treats it as the passing thing it is.
 
 ### Fixed
+
+- **Two results that score alike come back in the same order every time.**
+  Keyword scoring walked the query's words in a set's order, which changes
+  from run to run, and broke ties by that order, so under a policy a pile of
+  withheld documents could swap two visible ones on one machine and not
+  another. The words are taken in a fixed order and a tie falls by id.
+- **Years and figures are not phone numbers.** The masking engine took a
+  row of years, `2025 2024 ... 2016`, and a column of figures for phone
+  numbers and wrote bullets over them; runs of years, steady steps, decimals
+  and short groups are now left alone whichever engine found them, and a busy
+  Language service is retried rather than failed.
+- **A table's stacked column headings head their own columns.** A heading
+  written one word a line, `Land`, `Buildings`, `Computer equipment`, used to
+  merge into its neighbour, and two figures a figure's width apart used to
+  merge into one cell, so a bank's property note read as `Furniture,
+  fixtures, and other Leasehold depreciable equipment assets`. Each word
+  heads the column under it, and a cell ends where a whole figure ends.
+- **A footnote mark glued to its word is cut loose on every page,** after a
+  figure's description is merged in, not only on the first; a page reader
+  the model throttles waits and reads again instead of dropping the page.
+- **Keyword and hybrid search run in the store that holds the text.** A
+  search over a store that keeps the text in one place and the vectors in
+  another ran the keyword half against an empty local copy and found
+  nothing; it runs where the text is, and a store that fails says so as a
+  502 in words.
 
 - **The audit before release.** Found by reading the tree and running it, each
   with a test:

@@ -1,9 +1,26 @@
-# VectrixDB
+---
+hide:
+  - navigation
+  - toc
+---
 
-**The vector database that works with no network and no accounts.**
+<div class="vx-hero" markdown>
 
-Embedded ONNX models, GraphRAG, and eight storage backends. Nothing to sign up
-for, no API key, no service to run. `pip install` and search.
+# The vector database that works <em>with no network and no accounts</em>
+
+<p class="lead">Embedded ONNX models, GraphRAG, and eight storage backends.
+Nothing to sign up for, no API key, no service to run. <code>pip install</code> and search.</p>
+
+<div class="vx-actions" markdown>
+[Get started](tutorial/getting-started.md){ .md-button .md-button--primary }
+[Use the dashboard](how-to/dashboard.md){ .md-button }
+[GitHub](https://github.com/knowusuboaky/VectrixDB){ .md-button }
+</div>
+
+![A question typed into the dashboard, and every result saying how well it matched and what found it](images/dashboard/tour-search.gif)
+<span class="vx-caption">A question goes in, and every result says how well it matched and what found it: meaning, keywords, or both.</span>
+
+</div>
 
 ```bash
 pip install vectrixdb
@@ -19,12 +36,54 @@ results = db.search("programming")
 print(results.top.text)
 ```
 
-That is the whole setup. The embedding model ships in the package.
+That is the whole setup. The embedding model ships in the package, so the first
+search works offline on a machine that has never seen an API key.
 
-`vectrixdb serve` adds a server with a dashboard, people who sign in as
-themselves, and a record of who read what:
+## See it work
 
-![The VectrixDB dashboard: search results, each led by its relevance](images/dashboard/search.png)
+`pip install "vectrixdb[api]"` and `vectrixdb serve` give the same collections
+a REST API and a dashboard. These are the real pages, filmed by the same script
+that keeps the still pictures current.
+
+<div class="vx-tours" markdown>
+
+<div class="vx-tour" markdown>
+![A file added on the Ingest page, its chunks counted as they are written](images/dashboard/tour-ingest.gif)
+### Ingest
+A PDF goes in. The server says what it read: pages, chunks, and a citation for each.
+</div>
+
+<div class="vx-tour" markdown>
+![Collections, one opened to its Points, Policy, Builds and Quality tabs](images/dashboard/tour-collections.gif)
+### Collections
+Every collection with its state, mode and model, and what it holds, tab by tab.
+</div>
+
+<div class="vx-tour" markdown>
+![The Evaluate page: three picks, found in the top 10 against search time, and the chunking runs](images/dashboard/tour-evaluate.gif)
+### Evaluate
+Every setup ranked on your own questions, and three picks: most found, best balance, fastest.
+</div>
+
+<div class="vx-tour" markdown>
+![The Access page: who may read, write and administer, and the state badge in the sidebar](images/dashboard/tour-access.gif)
+### Access
+People who sign in as themselves, roles, and a record of who read what.
+</div>
+
+<div class="vx-tour" markdown>
+![The Console: a request built, sent, and the curl it shows](images/dashboard/tour-console.gif)
+### Console
+Build a request, send it, and copy the curl that does the same.
+</div>
+
+<div class="vx-tour" markdown>
+![A walk through Overview, Collections, Evaluate and Audit](images/dashboard/tour-pages.gif)
+### The whole walk
+Overview, Collections, the evaluation run with its picks, and Audit.
+</div>
+
+</div>
 
 ## Where to go next
 
@@ -62,9 +121,9 @@ themselves, and a record of who read what:
 
     One settings file, checked before a start, read by every command.
 
-- **[Tips and tricks](how-to/tips.md)**
+- **[Measure retrieval](how-to/measure-retrieval.md)**
 
-    The things that are easy to miss, in the library and the dashboard.
+    Golden questions written from your own documents, and checked against them.
 
 - **[What it does not do](explanation/limits.md)**
 
@@ -79,8 +138,9 @@ themselves, and a record of who read what:
 | **Search modes** | Dense, Hybrid, Ultimate, Graph (GraphRAG) |
 | **Storage** | Memory, SQLite, Lakebase, Delta Lake, Cosmos DB, Azure AI Search, OpenSearch, Aurora PostgreSQL |
 | **Models** | Bundled ONNX, or bring your own from HuggingFace |
+| **Readers** | PDF, Word, Excel, Markdown, scans by sight, speech, video |
 | **Memory** | Conversation turns, pinned facts, recency and feedback weighting |
-| **Extras** | Document index with chunking, visual dashboard, REST API, CLI, MCP server |
+| **Extras** | Document index with chunking, dashboard, REST API, CLI, MCP server |
 
 ## Install what you need
 
