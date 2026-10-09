@@ -270,9 +270,3 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | `MetadataContractWarning` | `UserWarning` | A document was written without a field the policy decides by. |
 | `ExtractionQualityError` | `VectrixError, ValueError` | A document arrived whose text reads as a failed extraction. |
 | `ExtractionQualityWarning` | `UserWarning` | A document whose text reads as a failed extraction was written anyway. |
-| `ServerRefused` | `VectrixError` | A VectrixDB server said no. ``status`` is its HTTP status; ``said`` its own words. |
-| `ServerSignInRequired` | `ServerRefused` | 401: no key or token, or one the server does not take. |
-| `ServerPermissionDenied` | `ServerRefused` | 403: the caller is known and may not do this: its role, its key's collections, or a policy. |
-| `ServerNotFound` | `ServerRefused` | 404: no such collection or document, or none this caller may see, which is the same answer. |
-| `ServerRejected` | `ServerRefused` | 400, 422 or another 4xx: the request itself is wrong, and the words say what to change. |
-| `ServerBusy` | `ServerRefused` | 429 or 503, still, after the client waited and asked again: come back later. |

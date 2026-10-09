@@ -103,11 +103,11 @@ signin = [
     "pyjwt[crypto]>=2.8.0",
     "qrcode>=7.4",
 ]
-# The client for a VectrixDB server: vectrixdb.connect(url, key=...).
+# Talking to a server from Python: connect(), VectrixClient and AsyncVectrixClient
 client = [
     "httpx>=0.24.0",
     # verify="system": the operating system's certificates, so a company's own
-    # authority and a TLS-inspecting proxy are trusted the way a browser does.
+    # authority and a TLS-inspecting proxy are trusted the way a browser is.
     "truststore>=0.9; python_version >= '3.10'",
 ]
 # MCP server, so an assistant can use a collection as a tool
@@ -273,7 +273,7 @@ asr-aws = [
 # Everything a user might want at runtime. Deliberately excludes `dev`, `docs`
 # and `test`, which are contributor tooling rather than features, and the local
 # readers in `extract`, whose speech models are large enough to ask for by name.
-all = ["vectrixdb[api,signin,mcp,documents,viz,hf,fastembed,aws,azure,databricks,postgres,tracing,feeds]"]
+all = ["vectrixdb[api,signin,mcp,client,documents,viz,hf,fastembed,aws,azure,databricks,postgres,tracing,feeds]"]
 
 [project.scripts]
 vectrixdb = "vectrixdb.cli:app"
@@ -326,6 +326,13 @@ exclude = [
     "vectrixdb/models/data/reranker",
     "vectrixdb/models/data/bge-m3",
     "vectrixdb/models/data/rebel",
+    # The clients' build output, which hatch does not see in their own
+    # .gitignore files: a checkout that built them would otherwise put
+    # hundreds of megabytes in the sdist.
+    "sdk/rust/target",
+    "sdk/typescript/node_modules",
+    "sdk/typescript/dist",
+    ".hypothesis",
 ]
 
 [tool.black]

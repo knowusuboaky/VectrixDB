@@ -65,12 +65,6 @@ __all__ = [
     "MetadataContractWarning",
     "ExtractionQualityError",
     "ExtractionQualityWarning",
-    "ServerRefused",
-    "ServerSignInRequired",
-    "ServerPermissionDenied",
-    "ServerNotFound",
-    "ServerRejected",
-    "ServerBusy",
 ]
 
 
@@ -594,42 +588,3 @@ class ExtractionQualityError(VectrixError, ValueError):
 
 class ExtractionQualityWarning(UserWarning):
     """A document whose text reads as a failed extraction was written anyway."""
-
-
-# ============================================================================
-# A SERVER'S REFUSALS
-# ============================================================================
-#
-# INPUT   an answer from a VectrixDB server that was not a yes
-# OUTPUT  the kind of no it was, with its status and the server's own words
-#
-# What vectrixdb.connect raises, so a program catches a kind, not a number.
-
-
-class ServerRefused(VectrixError):
-    """A VectrixDB server said no. ``status`` is its HTTP status; ``said`` its own words."""
-
-    def __init__(self, status: int, said: str) -> None:
-        self.status = int(status)
-        self.said = said
-        super().__init__(f"The server answered {self.status}: {said}")
-
-
-class ServerSignInRequired(ServerRefused):
-    """401: no key or token, or one the server does not take."""
-
-
-class ServerPermissionDenied(ServerRefused):
-    """403: the caller is known and may not do this: its role, its key's collections, or a policy."""
-
-
-class ServerNotFound(ServerRefused):
-    """404: no such collection or document, or none this caller may see, which is the same answer."""
-
-
-class ServerRejected(ServerRefused):
-    """400, 422 or another 4xx: the request itself is wrong, and the words say what to change."""
-
-
-class ServerBusy(ServerRefused):
-    """429 or 503, still, after the client waited and asked again: come back later."""

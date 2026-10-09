@@ -1,289 +1,421 @@
-"""vectrixdb.connect: a server's collections with a local Vectrix's calls, against a real server in this process."""
+"""The Python client walks sdk/CONTRACT.md's conformance walk against a real server.
+
+The server runs in this process on a free port, so the sync client goes over
+a socket like a user's would; the async client runs the same walk through
+httpx's in-process transport.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import json
+import socket
+import threading
+import time
+import uuid
 from pathlib import Path
 
 import pytest
 
-pytest.importorskip("fastapi", reason="the API extra is not installed")
-httpx = pytest.importorskip("httpx")
+pytest.importorskip("fastapi")
+pytest.importorskip("httpx")
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-import vectrixdb  # noqa: E402
-from vectrixdb import Vectrix  # noqa: E402
-from vectrixdb.client import OPERATIONS, Client  # noqa: E402
-from vectrixdb.easy import Result, Results  # noqa: E402
-from vectrixdb.exceptions import (  # noqa: E402
-    ServerBusy,
-    ServerNotFound,
-    ServerPermissionDenied,
-    ServerRefused,
-    ServerSignInRequired,
-    VectrixError,
+from vectrixdb import connect  # noqa: E402
+from vectrixdb.client import (  # noqa: E402
+    AsyncVectrixClient,
+    AuthError,
+    BusyError,
+    ConnectionFailed,
+    InvalidError,
+    NotFoundError,
+    RequestError,
+    VectrixClient,
 )
 
-KEY = "the-key"
-READ_ONLY = "the-read-only-key"
-BASE = "http://vectors.test"
-ROOT = Path(__file__).resolve().parents[2]
-
-TEXTS = [
-    "Refunds are paid by the billing team within ten working days.",
-    "Travel is booked through the office manager, economy class.",
-    "Laptops are replaced every three years by the IT desk.",
-]
+KEY = "the-admin-api-key"
+HANDBOOK = Path(__file__).resolve().parents[2] / "sdk" / "conformance" / "handbook.md"
 
 
-@pytest.fixture
-def served(tmp_path, monkeypatch):
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+@pytest.fixture(scope="module")
+def served(tmp_path_factory):
+    """A server on a free port that keeps each document's Markdown."""
+    import uvicorn
+
     from vectrixdb.api.server import create_app
 
-    monkeypatch.setenv("VECTRIXDB_API_KEY", KEY)
-    monkeypatch.setenv("VECTRIXDB_READ_ONLY_API_KEY", READ_ONLY)
-    monkeypatch.setenv("VECTRIXDB_KEEP_SOURCE", "1")
-    app = create_app(db_path=str(tmp_path / "server"), enable_dashboard=False)
-    with TestClient(app, base_url=BASE) as http:
-        yield app, http
+    # Set for this module alone: the server reads them at each request, and
+    # other tests in the same worker must not find a key they never set.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("VECTRIXDB_API_KEY", KEY)
+        patch.setenv("VECTRIXDB_KEEP_SOURCE", "1")
+        port = _free_port()
+        app = create_app(db_path=str(tmp_path_factory.mktemp("db")), enable_dashboard=False)
+        server = uvicorn.Server(
+            uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+        )
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        for _ in range(200):
+            if server.started:
+                break
+            time.sleep(0.05)
+        assert server.started
+        yield f"http://127.0.0.1:{port}"
+        server.should_exit = True
+        thread.join(timeout=5)
 
 
-@pytest.fixture
-def client(served):
-    _, http = served
-    return vectrixdb.connect(BASE, key=KEY, http=http)
-
-
-@pytest.fixture
-def handbook(client):
-    db = client.create_collection("handbook", description="The staff handbook")
-    db.add(
-        TEXTS,
-        ids=["refunds", "travel", "laptops"],
-        metadata=[{"team": "billing"}, {"team": "office"}, {"team": "it"}],
+def walk(db: VectrixClient, url: str) -> None:
+    """The conformance walk, step for step as the contract numbers them."""
+    name = f"walk-{uuid.uuid4().hex[:8]}"
+    assert db.health() is True  # 1
+    assert db.ready() is True
+    made = db.create_collection(name)  # 2
+    assert made.has_text_index and made.count == 0
+    assert name in [c.name for c in db.collections()]  # 3
+    assert db.describe(name).name == name
+    added = db.add_document(name, HANDBOOK.read_bytes(), "handbook.md", doc_id="handbook.md")  # 4
+    assert added.chunks >= 2 and added.kept and "handbook.md#Refunds" in added.citations
+    count = db.add_texts(  # 5
+        name,
+        [
+            {
+                "id": "t1",
+                "text": "Parking permits are issued by reception.",
+                "metadata": {"team": "facilities"},
+            },
+            {
+                "id": "t2",
+                "text": "Salaries are paid on the last working day of the month.",
+                "metadata": {"team": "payroll"},
+            },
+        ],
     )
-    return db
+    assert count == 2
+    hits = db.search(name, "refunds", limit=3)  # 6
+    assert hits[0].citation == "handbook.md#Refunds" and "ten working days" in hits[0].text
+    assert hits.query == "refunds" and hits.mode == "meaning"
+    hybrid = db.search(name, "salaries", mode="hybrid", rerank=True, limit=2)  # 7
+    assert hybrid[0].id == "t2"
+    only = db.search(name, "pay", limit=5, filter={"team": "payroll"})
+    assert [hit.id for hit in only] == ["t2"]
+    assert [d.doc_id for d in db.documents(name)] == ["handbook.md"]  # 8
+    assert db.open_document(name, "handbook.md").startswith("# Refunds")
+    assert db.sources(name) == []  # 9
+    assert db.refresh_sources(name).added == 0
+    assert db.delete_document(name, "handbook.md") >= 2  # 10
+    assert db.documents(name) == []
+    with pytest.raises(NotFoundError) as refused:  # 11
+        db.describe("no-such-collection")
+    assert refused.value.status == 404 and "not found" in refused.value.message
+    with pytest.raises(InvalidError) as invalid:  # 12
+        db.create_collection("walk-bad", dimension=0)
+    assert invalid.value.status == 422
+    assert any("dimension" in str(item.get("loc")) for item in invalid.value.detail)
+    with pytest.raises(AuthError) as denied:  # 13
+        with VectrixClient(url, key="wrong") as stranger:
+            stranger.describe(name)
+    assert denied.value.status == 401
+    db.delete_collection(name)  # 14
+    assert name not in [c.name for c in db.collections()]
 
 
-class TestTheSameCallsAsVectrix:
-    def test_search_answers_with_the_libraries_own_results(self, handbook):
-        found = handbook.search("when are refunds paid", limit=2)
-        assert isinstance(found, Results) and isinstance(found.top, Result)
-        assert found.top.id == "refunds" and "ten working days" in found.top.text
-        assert 0 < found.top.relevance <= 1
-        assert len(found) == 2
+def test_the_sync_client_walks_the_contract(served):
+    with connect(served, key=KEY) as db:
+        walk(db, served)
 
-    def test_the_same_code_runs_on_this_machine_and_on_the_server(self, handbook, tmp_path):
-        local = Vectrix("handbook", path=str(tmp_path / "local"))
-        local.add(TEXTS, ids=["refunds", "travel", "laptops"])
-        for db in (local, handbook):
-            assert db.search("who books travel", limit=1).top.id == "travel"
-        local.close()
 
-    @pytest.mark.parametrize("mode", ["hybrid", "dense", "keyword", "rerank"])
-    def test_every_mode(self, handbook, mode):
-        assert handbook.search("refunds", mode=mode, limit=3).top.id == "refunds"
-
-    def test_a_filter(self, handbook):
-        found = handbook.search("who does what", filter={"team": "it"}, limit=3)
-        assert [r.id for r in found] == ["laptops"]
-
-    def test_similar_is_more_like_one_and_never_itself(self, handbook):
-        found = handbook.similar("refunds", limit=2)
-        assert "refunds" not in [r.id for r in found] and len(found) == 2
-
-    def test_a_document_from_markdown_a_path_and_bytes(self, handbook, tmp_path):
-        said = handbook.add_document(
-            "# Leave\n\nAnnual leave is twenty five days.", doc_id="leave.md"
+@pytest.mark.asyncio
+async def test_the_async_client_walks_the_contract(served):
+    name = f"walk-{uuid.uuid4().hex[:8]}"
+    async with AsyncVectrixClient(served, key=KEY) as db:
+        assert await db.ready()
+        made = await db.create_collection(name)
+        assert made.has_text_index
+        added = await db.add_document(
+            name, HANDBOOK.read_bytes(), "handbook.md", doc_id="handbook.md"
         )
-        assert said["chunks"] >= 1 and said["doc_id"] == "leave.md"
-        page = tmp_path / "parking.md"
-        page.write_text("# Parking\n\nThe car park opens at seven.", encoding="utf-8")
-        assert handbook.add_document(page)["doc_id"] == "parking.md"
+        assert "handbook.md#Refunds" in added.citations
         assert (
-            handbook.add_document(
-                b"# Badges\n\nBadges are collected at reception.", filename="badges.md"
-            )["chunks"]
-            >= 1
+            await db.add_texts(
+                name, [("t2", "Salaries are paid on the last working day.", {"team": "payroll"})]
+            )
+            == 1
         )
-        held = {d["doc_id"] for d in handbook.documents()}
-        assert {"leave.md", "parking.md", "badges.md"} <= held
-        assert "twenty five days" in handbook.document("leave.md")
-        assert handbook.search("how many days of leave", limit=1).top.citation.startswith(
-            "leave.md"
+        hits = await db.search(name, "refunds", limit=2)
+        assert hits[0].citation == "handbook.md#Refunds"
+        assert (await db.open_document(name, "handbook.md")).startswith("# Refunds")
+        assert await db.delete_document(name, "handbook.md") >= 2
+        with pytest.raises(NotFoundError):
+            await db.describe("no-such-collection")
+        await db.delete_collection(name)
+        assert name not in [c.name for c in await db.collections()]
+
+
+def test_a_document_id_with_a_slash_round_trips(served):
+    name = f"walk-{uuid.uuid4().hex[:8]}"
+    with connect(served, key=KEY) as db:
+        db.create_collection(name)
+        added = db.add_document(
+            name,
+            b"# Policy\n\nThe policy text, long enough to keep.\n",
+            "policy.md",
+            doc_id="hr/policy.md",
         )
-
-    def test_delete_a_document(self, handbook):
-        handbook.add_document("# Gone\n\nThis goes.", doc_id="gone.md")
-        assert handbook.delete_document("gone.md") >= 1
-        with pytest.raises(ServerNotFound):
-            handbook.delete_document("gone.md")
-
-    def test_describe_names_the_fields_to_filter_on(self, handbook):
-        about = handbook.describe()
-        assert about["count"] == 3 and about["description"] == "The staff handbook"
-        assert "team" in about["fields"]
-
-    def test_collections_and_whoami(self, client, handbook):
-        assert "handbook" in [c["name"] for c in client.collections()]
-        me = client.whoami()
-        assert me["method"] in ("key", "none") or me["role"]
-        client.delete_collection("handbook")
-        assert "handbook" not in [c["name"] for c in client.collections()]
-
-    def test_health_and_ready(self, client):
-        assert client.health()["status"] == "healthy"
-        assert client.ready() is True
-
-    def test_connect_with_a_collection_is_that_collection(self, served, handbook):
-        _, http = served
-        db = vectrixdb.connect(BASE, key=KEY, collection="handbook", http=http)
-        assert db.search("refunds", limit=1).top.id == "refunds"
+        assert added.doc_id == "hr/policy.md"
+        assert db.open_document(name, "hr/policy.md").startswith("# Policy")
+        assert db.delete_document(name, "hr/policy.md") >= 1
+        db.delete_collection(name)
 
 
-class TestRefusals:
-    def test_no_key_is_sign_in_required(self, served):
-        _, http = served
-        with pytest.raises(ServerSignInRequired) as caught:
-            vectrixdb.connect(BASE, key="wrong", http=http).collections()
-        assert caught.value.status == 401
-
-    def test_a_read_only_key_may_search_and_may_not_write(self, served, handbook):
-        _, http = served
-        reader = vectrixdb.connect(BASE, key=READ_ONLY, collection="handbook", http=http)
-        assert reader.search("refunds", limit=1).top.id == "refunds"
-        with pytest.raises(ServerPermissionDenied) as caught:
-            reader.add(["A new rule."])
-        assert "Read-only" in caught.value.said
-
-    def test_a_collection_that_is_not_there(self, client):
-        with pytest.raises(ServerNotFound):
-            client.collection("nothing").search("anything")
-
-    def test_every_refusal_is_a_vectrix_error(self, client):
-        with pytest.raises(VectrixError):
-            client.collection("nothing").describe()
-
-    def test_a_key_and_a_token_together(self):
-        with pytest.raises(ValueError, match="not both"):
-            Client(BASE, key="k", token="t", http=object())
-
-    def test_a_bad_mode_is_caught_before_a_request(self, client):
-        with pytest.raises(ValueError, match="mode is one of"):
-            client.collection("handbook").search("x", mode="fastest")
+def test_a_server_that_is_not_there_says_so():
+    with pytest.raises(ConnectionFailed) as failed:
+        connect("http://127.0.0.1:9", key="x", timeout=2).health()
+    assert "127.0.0.1:9" in str(failed.value)
 
 
-class Scripted:
-    """An httpx.Client stand-in that answers from a script and records what it was asked."""
+def test_a_busy_server_is_retried_with_retry_after(monkeypatch):
+    """Two 503s with Retry-After, then an answer: the client waits as told and succeeds."""
+    import httpx
 
-    def __init__(self, *answers):
-        self.answers = list(answers)
-        self.asked = []
-
-    def request(self, method, path, **kw):
-        self.asked.append((method, path, kw))
-        status, headers, body = self.answers.pop(0)
-        return httpx.Response(
-            status,
-            headers=headers,
-            content=json.dumps(body).encode(),
-            request=httpx.Request(method, BASE + path),
-        )
-
-
-class TestTryingAgain:
-    @pytest.fixture(autouse=True)
-    def no_waiting(self, monkeypatch):
-        waited = []
-        monkeypatch.setattr("vectrixdb.client.time.sleep", waited.append)
-        return waited
-
-    def test_a_busy_server_is_asked_again_after_what_it_asked(self, no_waiting):
-        http = Scripted(
-            (503, {"retry-after": "4"}, {"detail": "busy"}),
-            (200, {}, {"ok": True, "data": {"status": "healthy"}}),
-        )
-        assert Client(BASE, key=KEY, http=http).health() == {"status": "healthy"}
-        assert no_waiting == [4.0] and len(http.asked) == 2
-
-    def test_still_busy_after_every_try_is_server_busy(self, no_waiting):
-        http = Scripted(*[(429, {}, {"detail": "slow down"})] * 4)
-        with pytest.raises(ServerBusy, match="slow down"):
-            Client(BASE, key=KEY, http=http, retries=3).collections()
-        assert len(http.asked) == 4 and no_waiting == [0.5, 1.0, 2.0]
-
-    def test_a_refusal_is_not_asked_again(self):
-        http = Scripted((403, {}, {"detail": "Your role does not allow this"}))
-        with pytest.raises(ServerPermissionDenied):
-            Client(BASE, key=KEY, http=http).collections()
-        assert len(http.asked) == 1
-
-    def test_a_token_function_is_asked_before_every_request(self):
-        issued = iter(["first", "second"])
-        http = Scripted((200, {}, {"ok": True, "data": {}}), (200, {}, {"ok": True, "data": {}}))
-        client = Client(BASE, token=lambda: next(issued), http=http)
-        client.whoami()
-        client.whoami()
-        assert [kw["headers"]["Authorization"] for _, _, kw in http.asked] == [
-            "Bearer first",
-            "Bearer second",
+    waits = []
+    monkeypatch.setattr("vectrixdb.client.time.sleep", lambda seconds: waits.append(seconds))
+    answers = iter(
+        [
+            httpx.Response(
+                503, headers={"retry-after": "2"}, json={"ok": False, "message": "busy"}
+            ),
+            httpx.Response(503, json={"ok": False, "message": "busy"}),
+            httpx.Response(200, json={"status": "healthy"}),
         ]
-
-    def test_a_key_goes_in_the_header_the_server_reads(self):
-        http = Scripted((200, {}, {"ok": True, "data": {}}))
-        Client(BASE, key="k", key_header="x-vectrix-key", http=http).whoami()
-        assert http.asked[0][2]["headers"]["x-vectrix-key"] == "k"
-
-
-class TestAsync:
-    def test_the_same_calls_awaited(self, served):
-        app, _ = served
-
-        async def run():
-            http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE)
-            client = vectrixdb.connect_async(BASE, key=KEY, http=http)
-            db = await client.create_collection("notes")
-            await db.add(TEXTS, ids=["refunds", "travel", "laptops"])
-            found = await db.search("refunds", limit=1)
-            near = await db.similar("refunds", limit=1)
-            said = await db.add_document("# Leave\n\nTwenty five days.", doc_id="leave.md")
-            names = [c["name"] for c in await client.collections()]
-            await http.aclose()
-            return found, near, said, names
-
-        found, near, said, names = asyncio.run(run())
-        assert found.top.id == "refunds" and near.top.id != "refunds"
-        assert said["doc_id"] == "leave.md" and "notes" in names
-
-    def test_an_async_token_function(self):
-        from vectrixdb.client import AsyncClient
-
-        async def token():
-            return "fresh"
-
-        async def run():
-            client = AsyncClient(BASE, token=token, http=object())
-            return await client._headers()
-
-        assert asyncio.run(run()) == {"Authorization": "Bearer fresh"}
+    )
+    transport = httpx.MockTransport(lambda request: next(answers))
+    with VectrixClient("https://server.test", key="k", transport=transport) as db:
+        assert db.health() is True
+    assert waits == [2.0, 2.0]
 
 
-class TestTheContract:
-    def test_every_request_the_client_makes_is_in_the_openapi_document(self):
-        document = json.loads(
-            (ROOT / "docs" / "reference" / "openapi.json").read_text(encoding="utf-8")
+def test_a_server_that_stays_busy_raises_after_the_retries():
+    import httpx
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            429, headers={"retry-after": "0"}, json={"ok": False, "message": "slow down"}
         )
-        paths = {
-            (method.upper(), path.replace("{doc_id:path}", "{doc_id}"))
-            for path, methods in document["paths"].items()
-            for method in methods
-        }
-        missing = [op for op in OPERATIONS if op[0] != "GET" or op[1] not in ("/health", "/ready")]
-        missing = [op for op in missing if op not in paths]
-        assert missing == [], f"the client asks for routes the server does not publish: {missing}"
+    )
+    with VectrixClient("https://server.test", key="k", transport=transport) as db:
+        with pytest.raises(BusyError) as busy:
+            db.collections()
+    assert busy.value.status == 429 and busy.value.message == "slow down"
 
-    def test_a_refusal_carries_the_servers_words(self):
-        error = ServerRefused(500, "The disk is full")
-        assert error.status == 500 and str(error) == "The server answered 500: The disk is full"
+
+def test_a_proxy_page_becomes_a_status_and_the_address():
+    import httpx
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(502, text="<html>bad gateway</html>")
+    )
+    with VectrixClient("https://server.test", key="k", transport=transport) as db:
+        with pytest.raises(RequestError) as refused:
+            db.collections()
+    assert refused.value.status == 502 and refused.value.message.startswith(
+        "502 from https://server.test"
+    )
+
+
+def test_the_key_and_the_token_go_in_their_headers():
+    import httpx
+
+    seen = []
+
+    def answer(request):
+        seen.append(
+            (
+                request.headers.get("api-key"),
+                request.headers.get("authorization"),
+                request.headers.get("user-agent"),
+            )
+        )
+        return httpx.Response(200, json={"status": "healthy"})
+
+    with VectrixClient("https://s.test", key="k1", transport=httpx.MockTransport(answer)) as db:
+        db.health()
+    with VectrixClient("https://s.test", token="t1", transport=httpx.MockTransport(answer)) as db:
+        db.health()
+    assert seen[0][0] == "k1" and seen[0][1] is None
+    assert seen[1][0] is None and seen[1][1] == "Bearer t1"
+    assert seen[0][2].startswith("vectrixdb-python/")
+
+
+# --- safety and the company network: sdk/CONTRACT.md, the same cases in every language ---
+
+GATEWAY = "api/v1=/files/search, auth=/files/auth"
+
+
+@pytest.mark.parametrize(
+    "paths, prefix, route, sent",
+    [
+        (GATEWAY, "/acme", "/api/v1/collections", "/files/search/acme/api/v1/collections"),
+        (GATEWAY, "/acme", "/auth/me", "/files/auth/acme/auth/me"),
+        (GATEWAY, "/acme", "/health", "/acme/health"),
+        (GATEWAY, "/acme", "/api/v1x", "/acme/api/v1x"),
+        ("api=/a, api/v1=/b", "", "/api/v1/c", "/b/api/v1/c"),
+        ("api=/a, api/v1=/b", "", "/api/other", "/a/api/other"),
+        ("/api//v1/ = files//search/", " acme/ ", "/api/v1/x", "/files/search/acme/api/v1/x"),
+    ],
+)
+def test_each_route_goes_to_its_gateway_path(paths, prefix, route, sent):
+    from vectrixdb.client import _names, _route_path, read_gateway_paths
+
+    assert _route_path(route, _names(prefix, "the prefix"), read_gateway_paths(paths)) == sent
+
+
+@pytest.mark.parametrize(
+    "written", ["api/v1", "=/x", "api/v1=", "../x=/y", "api/v1=/a, api/v1/=/b"]
+)
+def test_a_gateway_list_that_cannot_be_read_is_refused(written):
+    from vectrixdb.client import read_gateway_paths
+    from vectrixdb.exceptions import ConfigurationError
+
+    with pytest.raises(ConfigurationError):
+        read_gateway_paths(written)
+
+
+def test_the_client_reads_the_gateway_list_as_the_server_does():
+    pytest.importorskip("fastapi")
+    from vectrixdb.api.gateway import Gateway
+    from vectrixdb.api.gateway import read_gateway_paths as server_reads
+    from vectrixdb.client import _names, _route_path, read_gateway_paths
+
+    written = "api/v1=/files/search, auth=/files/auth, api/v1/collections/x=/one"
+    assert read_gateway_paths(written) == server_reads(written)
+    server = Gateway(prefix="/acme", paths=server_reads(written))
+    for route in (
+        "/api/v1/collections",
+        "/api/v1/collections/x/text-search",
+        "/auth/me",
+        "/health",
+    ):
+        assert _route_path(
+            route, _names("acme", "p"), read_gateway_paths(written)
+        ) == server.visible(route)
+
+
+@pytest.mark.parametrize(
+    "url, allowed",
+    [
+        ("http://vectors.example.com", False),
+        ("http://localhost.evil.com", False),
+        ("http://localhost:8000", True),
+        ("http://127.0.0.5", True),
+        ("http://[::1]:9", True),
+        ("https://vectors.example.com", True),
+    ],
+)
+def test_a_key_crosses_the_network_only_over_https(url, allowed):
+    from vectrixdb.exceptions import ConfigurationError
+
+    if allowed:
+        VectrixClient(url, key="k").close()
+        return
+    with pytest.raises(ConfigurationError) as refused:
+        VectrixClient(url, key="k")
+    assert "allow_http" in str(refused.value) and "k" not in str(refused.value).split()
+    VectrixClient(url, key="k", allow_http=True).close()
+    VectrixClient(url).close()
+
+
+def test_a_redirect_is_never_followed_so_the_key_stays_put():
+    import httpx
+
+    asked = []
+
+    def answer(request):
+        asked.append(str(request.url))
+        return httpx.Response(302, headers={"location": "https://elsewhere.example/x"})
+
+    with VectrixClient("https://s.test", key="k1", transport=httpx.MockTransport(answer)) as db:
+        with pytest.raises(RequestError) as refused:
+            db.collections()
+    assert asked == ["https://s.test/api/v1/collections"]
+    assert refused.value.status == 302 and "https://elsewhere.example/x" in refused.value.message
+    assert "k1" not in str(refused.value) and "k1" not in repr(db)
+
+
+def test_a_gateway_gets_its_headers_and_its_paths():
+    import httpx
+
+    seen = []
+
+    def answer(request):
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True, "data": {"collections": []}})
+
+    with VectrixClient(
+        "https://gateway.example.com",
+        key="k1",
+        key_header="Ocp-Apim-Subscription-Key",
+        headers={"x-team": "search", "api-key": "not-this", "user-agent": "nor-this"},
+        prefix="acme",
+        gateway_paths=GATEWAY,
+        transport=httpx.MockTransport(answer),
+    ) as db:
+        db.collections()
+    sent = seen[0]
+    assert sent.url.path == "/files/search/acme/api/v1/collections"
+    assert sent.headers["ocp-apim-subscription-key"] == "k1"
+    assert sent.headers["x-team"] == "search" and sent.headers["user-agent"].startswith(
+        "vectrixdb-python/"
+    )
+    with VectrixClient(
+        "https://s.test", token="t1", token_header="x-token", transport=httpx.MockTransport(answer)
+    ) as db:
+        db.health()
+    assert seen[1].headers["x-token"] == "Bearer t1" and "authorization" not in seen[1].headers
+
+
+def test_certificates_cannot_be_switched_off_and_a_header_name_is_checked():
+    from vectrixdb.exceptions import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="always checked"):
+        VectrixClient("https://s.test", verify=False)
+    with pytest.raises(ConfigurationError, match="HTTP header"):
+        VectrixClient("https://s.test", key="k", key_header="bad header")
+
+
+@pytest.mark.parametrize("name", ["", ".", ".."])
+def test_a_name_or_id_that_would_name_another_route_is_refused(name):
+    """``..`` would reach /api/v1/collections itself, so deleting it could take a whole collection."""
+    import httpx
+
+    sent = []
+    transport = httpx.MockTransport(lambda request: sent.append(request) or httpx.Response(200))
+    with VectrixClient("https://s.test", key="k1", transport=transport) as db:
+        with pytest.raises(ValueError, match="another route"):
+            db.delete_document("handbook", name)
+        with pytest.raises(ValueError, match="another route"):
+            db.delete_collection(name)
+    assert sent == []
+
+
+def test_a_key_in_the_address_or_with_a_control_character_is_refused_unshown():
+    from vectrixdb.exceptions import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="not in the address") as refused:
+        VectrixClient("https://ada:secret-key@s.test")
+    assert "secret-key" not in str(refused.value)
+    for bad in ("secret\nkey", "secret\rX-Evil: 1"):
+        with pytest.raises(ConfigurationError) as refused:
+            VectrixClient("https://s.test", key=bad)
+        assert "secret" not in str(refused.value)
+    with pytest.raises(ConfigurationError):
+        VectrixClient("https://s.test", headers={"x-team": "a\nb"})
+
+
+def test_the_key_is_never_in_the_clients_printed_form():
+    with VectrixClient("https://s.test", key="secret-key", headers={"x-team": "t"}) as db:
+        assert "secret-key" not in repr(db) and "secret-key" not in repr(db._wire)

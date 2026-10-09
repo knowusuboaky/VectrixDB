@@ -73,8 +73,9 @@ Thumbs.db
 *.tmp
 
 # The walkthroughs and sample apps are kept on the machine that runs them and
-# out of the repository.
-examples/
+# out of the repository. Only the top-level folder: each client's examples
+# under sdk/ are part of it.
+/examples/
 
 # A crash dump the shell leaves behind
 *.stackdump
@@ -88,3 +89,6 @@ docker/*.key
 # The SDKs' own build output and dependencies
 node_modules/
 sdk/rust/target/
+
+# Hypothesis keeps its example database here.
+.hypothesis/

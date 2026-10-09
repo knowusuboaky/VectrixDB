@@ -581,6 +581,9 @@ class SignInConfig:
                     if e.strip()
                 ),
                 api_audience=env.get("VECTRIXDB_OIDC_API_AUDIENCE", "").strip() or None,
+                api_clients=tuple(
+                    env.get("VECTRIXDB_OIDC_API_CLIENTS", "").replace(",", " ").split()
+                ),
                 token_role=env.get("VECTRIXDB_OIDC_TOKEN_ROLE", "").strip().lower() or None,
                 client_key=env_secret(env, "VECTRIXDB_OIDC_CLIENT_KEY"),
                 client_cert=env_secret(env, "VECTRIXDB_OIDC_CLIENT_CERT"),

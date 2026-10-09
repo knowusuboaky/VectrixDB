@@ -2,7 +2,7 @@
 
 # Settings
 
-Every setting VectrixDB reads, 175 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
+Every setting VectrixDB reads, 178 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
 
 ## The server
 
@@ -25,7 +25,8 @@ Every setting VectrixDB reads, 175 of them, each an environment variable. `vectr
 | `VECTRIXDB_OFFLINE` | 1 refuses every download: the bundled models only. |  |
 | `VECTRIXDB_MODELS_DIR` | Where models are kept, when not beside the package. |  |
 | `VECTRIXDB_AUTO_DOWNLOAD` | 1 fetches a missing model on first use. |  |
-| `VECTRIXDB_MODELS_URL` | Where model downloads come from instead of GitHub's releases: a company's mirror of them, such as an Artifactory generic remote repository. The same paths below it: <tag>/<model>.zip. | `https://acme.jfrog.io/artifactory/vectrixdb-models/knowusuboaky/VectrixDB/releases/download` |
+| `VECTRIXDB_MODELS_URL` | A company's mirror of the model releases, in place of GitHub: an Artifactory or Nexus remote serving the same <tag>/<asset>.zip paths. Checked against the same checksums. | `https://acme.jfrog.io/artifactory/vectrixdb-models` |
+| `VECTRIXDB_MODELS_TOKEN` | The token the mirror asks for, sent as a Bearer token to MODELS_URL alone, never on to a redirect. (a secret) |  |
 | `VECTRIXDB_WARM` | 1 loads the embedding model at start, and /ready says so once it has. On under vectrixdb serve and in the image; 0 loads it on the first search. | `1` |
 | `VECTRIXDB_THREADS` | Threads one model session uses. Left out, the CPUs this process may use, the container's quota when there is one, at most 4. | `2` |
 | `VECTRIXDB_INFERENCE_CONCURRENCY` | Model calls the server runs at once; the rest wait their turn, a batch at a time. | `2` |
@@ -89,6 +90,7 @@ Every setting VectrixDB reads, 175 of them, each an environment variable. `vectr
 | `VECTRIXDB_OIDC_LABEL` | The words on the sign-in button. | `Continue with SSO` |
 | `VECTRIXDB_OIDC_ALLOWED_EMAILS` | Addresses that may sign in beside the People list, which single sign-on also needs: an address or @domain, comma separated. * alone: the groups decide on their own. |  |
 | `VECTRIXDB_OIDC_API_AUDIENCE` | The audience of an access token taken as a Bearer token, so an app acts as the person using it: api://vectrixdb. Empty: no token is taken. |  |
+| `VECTRIXDB_OIDC_API_CLIENTS` | The apps an access token may come from, by client id, separated by spaces: a company's own wrapper and the MCP clients it allows. Empty: any app the provider gave a token for OIDC_API_AUDIENCE. | `<wrapper client id> <MCP client id>` |
 | `VECTRIXDB_OIDC_TOKEN_ROLE` | The role an app's access token is given, whoever it is for: reader, searcher, viewer or operator. Unset: their groups'. A token never needs the People list. | `searcher` |
 | `VECTRIXDB_SSO_RECHECK_DAYS` | With oidc,email: a passkey or a code works only for somebody who signed in with single sign-on within this many days. | `30` |
 
@@ -249,17 +251,18 @@ Every setting VectrixDB reads, 175 of them, each an environment variable. `vectr
 | `VECTRIXDB_MAX_MEMORY_PERCENT` | The share of memory the server tries to stay under. | `85` |
 | `VECTRIXDB_BUILD_THREADS` | Threads that insert into the vector index. 1 makes every build of the same vectors the same graph, and is slower; empty is every core. |  |
 
-## The command line, against a server
+## The command line, on a server
 
 | Setting | What it does | Example or default |
 | --- | --- | --- |
-| `VECTRIXDB_URL` | The server list, create, delete, ingest, query, stats, sources and whoami go to when --server is left out. Left out too, they use the data on this machine. | `https://vectors.company.com` |
-| `VECTRIXDB_KEY` | The key those commands call the server with, for scripts and CI. Wins over what vectrixdb login kept; --key-file wins over it. (a secret) |  |
-| `VECTRIXDB_TOKEN` | A person's or an app's access token from the identity provider, sent as a bearer token, when there is no key. (a secret) |  |
-| `VECTRIXDB_CA_FILE` | The company's certificate authority, as a PEM file or a folder of them, or system for the operating system's own store: for a server or a TLS-inspecting proxy the default bundle does not trust. | `system` |
-| `VECTRIXDB_ALLOW_HTTP` | 1 lets a key or token go to another machine over plain http://. Off: only https://, or http:// to this machine. |  |
-| `VECTRIXDB_CLIENT_ID` | The company's client id for the command line at its identity provider: a public client with the device code flow allowed. vectrixdb login uses it. |  |
-| `VECTRIXDB_CREDENTIALS` | Where vectrixdb login keeps a sign-in: keyring for the system keychain, file for a file only this user may read. Left out, the keychain when the keyring package is installed. |  |
-| `VECTRIXDB_DEFAULTS_FILE` | A company's defaults file for the client and the command line (TOML, or JSON by its suffix). Left out, /etc/vectrixdb/defaults.toml, %ProgramData%\vectrixdb\defaults.toml or /Library/Application Support/vectrixdb/defaults.toml when there is one. |  |
-| `VECTRIXDB_DEFAULTS` | With more than one wrapper package installed, the one whose defaults apply, by its entry point name. |  |
-| `VECTRIXDB_CONFIG_DIR` | The folder that file is in. Left out, the platform's own: %APPDATA%\vectrixdb, ~/Library/Application Support/vectrixdb, or ~/.config/vectrixdb. |  |
+| `VECTRIXDB_URL` | The server the vectrixdb command and the clients' examples talk to, instead of a folder here. Read on the caller's machine, not by the server. | `https://vectors.company.com` |
+| `VECTRIXDB_KEY` | The API key they send. Never put it on the command line. (a secret) |  |
+| `VECTRIXDB_KEY_FILE` | A file holding that key, readable by its owner alone, as a mounted secret. |  |
+| `VECTRIXDB_TOKEN` | A company sign-in token your own tooling fetched, sent instead of a key. (a secret) |  |
+| `VECTRIXDB_LOGIN_CLIENT_ID` | The client id vectrixdb login uses: a public client registered at the identity provider for the command line. |  |
+| `VECTRIXDB_LOGIN_SCOPES` | The scopes vectrixdb login may ask for, space-separated. Set, a server asking for any other is refused and nobody is asked to confirm. | `api://vectrixdb/search` |
+| `VECTRIXDB_CONFIG_DIR` | Where vectrixdb login keeps sign-ins. Unset, the platform's config folder. |  |
+| `VECTRIXDB_ALLOW_HTTP` | 1 lets the command send a key or token over plain HTTP to another machine, on a network you trust. | `0` |
+| `VECTRIXDB_CA_BUNDLE` | A CA bundle to trust, for a company's own CA. |  |
+| `VECTRIXDB_CLIENT_CERT` | A client certificate for a gateway that asks for one, PEM. |  |
+| `VECTRIXDB_CLIENT_CERT_KEY` | Its private key, readable by its owner alone. |  |

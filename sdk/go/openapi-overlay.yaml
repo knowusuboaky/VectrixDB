@@ -1,0 +1,17 @@
+# Applied to ../openapi.json before the types are generated. The two anyOf
+# unions in the spec would make the generated file import the oapi-codegen
+# runtime; this SDK depends on the standard library alone, so a source's
+# `every` is typed as its string form ("6h") and a validation error's `loc`
+# entries as plain values.
+overlay: 1.0.0
+info:
+  title: Flatten the two unions so the generated types need no runtime package
+  version: 1.0.0
+actions:
+  - target: $.components.schemas.AddSourceRequest.properties.every.anyOf
+    remove: true
+  - target: $.components.schemas.AddSourceRequest.properties.every
+    update:
+      type: string
+  - target: $.components.schemas.ValidationError.properties.loc.items.anyOf
+    remove: true

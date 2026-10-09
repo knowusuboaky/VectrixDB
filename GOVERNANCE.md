@@ -14,7 +14,7 @@ A single-node, embeddable Python vector database with its models in the package.
 - **Minor releases** (`2.x.0`) ship roughly every eight weeks, or when a roadmap block is complete, whichever comes first. Every minor release gets a changelog entry under each of Added, Changed, Fixed and Security that applies.
 - **Major releases** are for removing deprecated public API. Anything reachable from `import vectrixdb` is public. Removal needs a `DeprecationWarning` naming the replacement for at least one full minor release first.
 
-The mechanics are in `scripts/release.py`: it checks the changelog, stamps the version and date, and prints the git commands. The publish workflow runs the full suite and uploads to PyPI on the GitHub release. Nothing publishes from a laptop.
+The mechanics are in `scripts/release.py`: it checks the changelog, stamps the version and date, and prints the git commands. The publish workflow runs the full suite and the clients' own tests, uploads to PyPI on the GitHub release, and then publishes the clients at the same version: npm, crates.io, and the tag `sdk/go/vX.Y.Z` for Go. Nothing publishes from a laptop.
 
 ## What is checked before a merge
 

@@ -170,6 +170,50 @@ def test_release_url_is_built_from_tag_and_type(fake_urlopen, models_dir):
     assert timeout == 60
 
 
+MIRROR = "https://acme.jfrog.io/artifactory/vectrixdb-models"
+
+
+def test_a_company_mirror_serves_the_same_paths_with_its_token(
+    monkeypatch, fake_urlopen, models_dir
+):
+    """VECTRIXDB_MODELS_URL replaces GitHub, and the token goes to the mirror and no further."""
+    monkeypatch.setenv("VECTRIXDB_MODELS_URL", MIRROR + "/")
+    monkeypatch.setenv("VECTRIXDB_MODELS_TOKEN", "jfrog-token")
+    fake_urlopen.serve(make_zip({"model.onnx": ONNX_BYTES}))
+    ok = ModelDownloader(progress=False)._download_from_github(
+        "widget", models_dir / "widget", {"github_release": "v9"}
+    )
+    assert ok is True
+    ((req, _timeout),) = fake_urlopen.requests
+    assert req.full_url == f"{MIRROR}/v9/widget.zip"
+    assert req.unredirected_hdrs.get("Authorization") == "Bearer jfrog-token"
+    assert "Authorization" not in req.headers  # so a redirect does not carry it
+    assert downloader_mod.release_asset_url("dense").startswith(MIRROR + "/")
+
+
+def test_the_token_never_goes_to_github(monkeypatch, fake_urlopen, models_dir):
+    monkeypatch.delenv("VECTRIXDB_MODELS_URL", raising=False)
+    monkeypatch.setenv("VECTRIXDB_MODELS_TOKEN", "jfrog-token")
+    fake_urlopen.serve(make_zip({"model.onnx": ONNX_BYTES}))
+    ModelDownloader(progress=False)._download_from_github(
+        "widget", models_dir / "widget", {"github_release": "v9"}
+    )
+    ((req, _timeout),) = fake_urlopen.requests
+    assert not req.has_header("Authorization")
+
+
+@pytest.mark.parametrize(
+    "given", ["http://mirror.acme.com/models", "https://ada:pw@mirror.acme.com/models", "ftp://x"]
+)
+def test_a_mirror_address_that_is_not_https_or_holds_a_password_is_refused(monkeypatch, given):
+    from vectrixdb.exceptions import ConfigurationError
+    from vectrixdb.models.embedded import release_base
+
+    monkeypatch.setenv("VECTRIXDB_MODELS_URL", given)
+    with pytest.raises(ConfigurationError, match="VECTRIXDB_MODELS"):
+        release_base()
+
+
 # --- download, progress and extraction --------------------------------------------------
 
 
@@ -1130,9 +1174,7 @@ def test_the_easy_api_github_download_is_contained_too(tmp_path, monkeypatch):
 
     body = make_zip({"model.onnx": ONNX_BYTES, "../../escaped.txt": b"pwned"})
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(
-        urllib.request, "urlretrieve", lambda url, dest: Path(dest).write_bytes(body)
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout=None: FakeResponse(body))
     with pytest.raises(ModelDownloadError, match="outside"):
         Vectrix._download_github_model(object.__new__(Vectrix), "github:v1", "reranker")
     assert not list(tmp_path.rglob("escaped.txt"))

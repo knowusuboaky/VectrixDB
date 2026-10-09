@@ -96,6 +96,16 @@ class SignInRefused(VectrixError):
         super().__init__(reason)
 
 
+def token_app(claims: Mapping[str, Any]) -> str:
+    """The client id of the app an access token was issued to: ``azp`` (OpenID, Entra v2,
+    Keycloak, Auth0), ``appid`` (Entra v1), ``cid`` (Okta) or ``client_id`` (RFC 9068)."""
+    for name in ("azp", "appid", "cid", "client_id"):
+        value = claims.get(name)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
 @dataclass
 class OidcConfig:
     issuer: str
@@ -133,6 +143,10 @@ class OidcConfig:
     #: The audience of an access token this server takes as a Bearer token, ``api://vectrixdb``.
     #: Unset, no token is taken: an app reaches the server with a key, as nobody in particular.
     api_audience: Optional[str] = None
+    #: The apps an access token may come from, by client id: a company's own wrapper of the
+    #: command line or a client, and the MCP clients it allows. Empty, any app the identity
+    #: provider gave a token for this server's audience is taken.
+    api_clients: Sequence[str] = ()
     _signer: Any = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -147,6 +161,12 @@ class OidcConfig:
         if self.client_cert and not self.client_key:
             raise ConfigurationError(
                 "VECTRIXDB_OIDC_CLIENT_CERT is set without VECTRIXDB_OIDC_CLIENT_KEY, the private key it belongs to"
+            )
+        self.api_clients = tuple(str(c).strip() for c in self.api_clients if str(c).strip())
+        if self.api_clients and not self.api_audience:
+            raise ConfigurationError(
+                "VECTRIXDB_OIDC_API_CLIENTS names the apps a token may come from, and no token is taken "
+                "without VECTRIXDB_OIDC_API_AUDIENCE. Set the audience too"
             )
         if self.client_key:
             self._signer = _ClientSigner(self.client_key, self.client_cert, self.client_key_id)
@@ -566,6 +586,15 @@ class OidcClient:
             )
         except jwt.PyJWTError as exc:
             raise SignInRefused("The token did not verify.", code=type(exc).__name__) from exc
+        if self.config.api_clients and token_app(claims) not in self.config.api_clients:
+            # A token for this server's audience can be asked for by any app the
+            # provider lets ask for it. A company that wants its people on its own
+            # wrapper names the wrapper, and a token from anything else is turned away.
+            raise SignInRefused(
+                "The token was issued to an app this server does not take tokens from. "
+                "Use the company's own tool to sign in.",
+                code="app_not_allowed",
+            )
         return dict(claims)
 
     def token_identity(self, token: str) -> Identity:

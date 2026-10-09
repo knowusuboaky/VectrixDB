@@ -1,0 +1,172 @@
+# The TypeScript, Go and Rust clients: their own checks, and the conformance
+# walk each takes against a real VectrixDB server (sdk/CONTRACT.md).
+#
+# Each job installs this checkout's package with the api extra, so the walk
+# runs against the server in the same commit: a change to a route that breaks
+# a client fails here, in the pull request that made it. The Python client is
+# tested with the rest of the package in ci.yml.
+#
+# The release workflow calls this too, so nothing is published while a client
+# is red.
+
+name: SDKs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdk/**"
+      - "vectrixdb/**"
+      - "pyproject.toml"
+      - "docs/reference/openapi.json"
+      - ".github/workflows/sdk.yml"
+  pull_request:
+    paths:
+      - "sdk/**"
+      - "vectrixdb/**"
+      - "pyproject.toml"
+      - "docs/reference/openapi.json"
+      - ".github/workflows/sdk.yml"
+  workflow_call:
+
+concurrency:
+  group: sdk-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The Python the conformance walks start sdk/conformance/serve.py with.
+  PYTHON: python
+
+jobs:
+  typescript:
+    name: TypeScript on Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["18", "20", "22"]
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true # the server's embedded models
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the server
+        working-directory: .
+        run: python -m pip install -e ".[api]"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+
+      - run: npm ci
+
+      # The types are generated from the server's OpenAPI document; a route
+      # that changed without regenerating them shows up as a diff here.
+      - name: Types match the OpenAPI document
+        run: |
+          npm run generate
+          git diff --exit-code -- src/generated/schema.ts
+
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Unit tests and the conformance walk
+        run: npm test
+
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/go
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the server
+        working-directory: .
+        run: python -m pip install -e ".[api]"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: sdk/go/go.mod
+          cache: false # no dependencies to cache: the client is standard library only
+
+      - name: Formatted
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - run: go vet ./...
+
+      - name: Unit tests and the conformance walk
+        run: go test -count=1 ./...
+
+  rust:
+    name: Rust ${{ matrix.toolchain }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # stable, and the oldest Rust the crate says it builds with.
+        toolchain: ["stable", "1.88"]
+    defaults:
+      run:
+        working-directory: sdk/rust
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the server
+        working-directory: .
+        run: python -m pip install -e ".[api]"
+
+      - name: Install Rust ${{ matrix.toolchain }}
+        run: |
+          rustup toolchain install "${{ matrix.toolchain }}" --profile minimal --component rustfmt,clippy
+          rustup override set "${{ matrix.toolchain }}"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sdk/rust/target
+          key: rust-${{ matrix.toolchain }}-${{ hashFiles('sdk/rust/Cargo.lock') }}
+
+      - name: Formatted
+        if: matrix.toolchain == 'stable'
+        run: cargo fmt --check
+
+      - name: Clippy
+        if: matrix.toolchain == 'stable'
+        run: cargo clippy --all-features --all-targets --locked -- -D warnings
+
+      - name: Unit tests, the safety tests and the conformance walk
+        run: cargo test --all-features --locked
+
+      - name: The package crates.io would get builds
+        if: matrix.toolchain == 'stable'
+        run: cargo package --locked

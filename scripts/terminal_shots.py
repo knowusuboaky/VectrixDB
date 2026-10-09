@@ -1,459 +1,319 @@
-"""Film the terminal clips the docs show, from real runs: every line on screen is what the command printed.
+"""Film the terminal clips: the four clients against one server, and doctor.
 
-    python scripts/terminal_shots.py                 # every clip, into docs/images/terminal/
-    python scripts/terminal_shots.py doctor sdk      # some of them
+    python scripts/terminal_shots.py              # every clip
+    python scripts/terminal_shots.py clients      # one of them
 
-Each clip types its commands and shows what they printed, in the dashboard's
-own ink and amber. Nothing on screen is written by hand: a clip runs its
-commands first, against a server it starts in a temporary folder when it
-needs one, and only then draws them. A command that fails stops the clip, so
-a broken page is never filmed as a working one.
+cli.gif points the vectrixdb command at a server serve.py started: a folder
+ingested, a search with its citations, whoami, and the plain-HTTP address it
+refuses to send a key to.
+clients.gif starts a server with sdk/conformance/serve.py, adds a document
+with the Python client, and runs the same search with each client's own
+example: Python, TypeScript, Go and Rust, each answering with the same
+citation. doctor.gif runs ``vectrixdb doctor --offline`` in an empty folder.
+Every command on screen is the one that ran, in the folder it names, and what
+is shown under it is what it printed. Both are saved in docs/images/terminal,
+960 wide.
 
-Clips:
-
-    terminal-doctor   vectrixdb doctor, on a fresh install, offline
-    terminal-mcp      the MCP tools on a real server: whoami, describe, search with facets
-    terminal-sdk      the Python and TypeScript clients searching the same server
-
-Author: Kwadwo Daddy Nyame Owusu - Boakye
+Needs Pillow, websocket-client, Edge or Chrome (VECTRIXDB_BROWSER names one
+somewhere else), jq for cli.gif, and for clients.gif node with sdk/typescript's packages
+installed, go and cargo. The Go and Rust examples are built before filming,
+so the clip shows what they print and not the compiler.
 """
 
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
-import secrets
-import shutil
-import socket
+import re
 import subprocess
 import sys
 import tempfile
-import time
-import urllib.request
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional
 
-from PIL import Image, ImageDraw, ImageFont
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-ROOT = Path(__file__).resolve().parents[1]
+import container_shots as terminal  # noqa: E402
+import dashboard_shots as shots  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+SDK = ROOT / "sdk"
 OUT = ROOT / "docs" / "images" / "terminal"
+#: The clips, each saved as <name>.gif in OUT, and what each shows.
+CLIPS = {
+    "clients": "One server, one document, the same search from Python, TypeScript, Go and Rust",
+    "doctor": "vectrixdb doctor trying every part of a fresh install",
+    "cli": "The vectrixdb command on a server: ingest, search, whoami, and a key it will not send",
+}
+QUERY = "how long do refunds take?"
+#: The clips are taller than the containers page's, so a whole run fits without scrolling.
+HEIGHT = 900
+
+
+def run(command: List[str], cwd: Path, env: Optional[Dict[str, str]] = None) -> str:
+    """What ``command`` printed, stdout and stderr together; a failure stops the filming."""
+    done = subprocess.run(
+        command,
+        cwd=cwd,
+        # The filming's own settings (the browser to use) are not the reader's.
+        env={**{k: v for k, v in os.environ.items() if k != "VECTRIXDB_BROWSER"}, **(env or {})},
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if done.returncode != 0:
+        raise SystemExit(f"{' '.join(command[:4])} failed: {(done.stdout + done.stderr)[-800:]}")
+    return done.stdout + done.stderr
+
+
+def hits(printed: str) -> str:
+    """A search example's lines, the score and the citation coloured as a terminal would."""
+    out = []
+    for line in printed.rstrip("\n").split("\n"):
+        found = re.match(r"^(\d\.\d{3})  (.*)$", line)
+        if found:
+            score, citation = found.groups()
+            out.append(
+                f'<span class="n">{score}</span>  <span class="ok">{html.escape(citation)}</span>'
+            )
+        else:
+            out.append(html.escape(line))
+    return "\n".join(out)
+
 
 # ============================================================================
-# SETTINGS: the look, the pace, the font
-# ============================================================================
-#
-# The dashboard's ink, paper and amber; a monospace face this machine has.
-
-WIDTH, HEIGHT = 1040, 600
-PAD = 22
-BAR = 34
-INK = (26, 23, 15)
-INK_2 = (33, 29, 19)
-PAPER = (247, 245, 241)
-DIM = (142, 138, 127)
-AMBER = (232, 168, 26)
-GREEN = (127, 207, 157)
-RED = (232, 110, 92)
-FONT_SIZE = 15
-LINE = 22
-TYPE_MS = 28  # a character of a typed command
-LINE_MS = 55  # a line of output appearing
-HOLD_MS = 2600  # the last frame
-PAUSE_MS = 700  # after a command's output, before the next
-
-
-def _font() -> ImageFont.FreeTypeFont:
-    for name in ("CascadiaMono.ttf", "consola.ttf", "DejaVuSansMono.ttf", "Menlo.ttc"):
-        for folder in (
-            Path("C:/Windows/Fonts"),
-            Path("/usr/share/fonts/truetype/dejavu"),
-            Path("/System/Library/Fonts"),
-        ):
-            if (folder / name).exists():
-                return ImageFont.truetype(str(folder / name), FONT_SIZE)
-    return ImageFont.load_default()
-
-
-FONT = _font()
-COLUMNS = (WIDTH - 2 * PAD) // max(1, int(FONT.getlength("M")))
-ROWS = (HEIGHT - BAR - 2 * PAD) // LINE
-
-
-# ============================================================================
-# A SESSION: commands and what they printed
+# THE CLIENTS
 # ============================================================================
 
 
-@dataclass
-class Step:
-    """One command as typed, and what it printed."""
+def film_clients(reel: shots.Reel, scratch: Path) -> None:
+    for tool in ("node", "go", "cargo"):
+        if not shutil_which(tool):
+            raise SystemExit(f"{tool} is needed for clients.gif and was not found")
+    target = scratch / "rust-target"
+    rust_env = {"CARGO_TARGET_DIR": str(target)}
+    print("  building the Go and Rust examples first", file=sys.stderr)
+    run(["go", "build", "-o", str(scratch / "go-search"), "./examples/search"], SDK / "go")
+    run(["cargo", "build", "-q", "--example", "search"], SDK / "rust", rust_env)
 
-    shown: str
-    output: str
+    server = subprocess.Popen(
+        [sys.executable, str(SDK / "conformance" / "serve.py")],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        assert server.stdout is not None
+        where = json.loads(server.stdout.readline())
+        env = {"VECTRIXDB_URL": where["url"], "VECTRIXDB_KEY": where["key"]}
+        handbook = scratch / "handbook.md"
+        handbook.write_bytes((SDK / "conformance" / "handbook.md").read_bytes())
+
+        term = terminal.Terminal(reel, scratch, "vectrixdb/sdk", HEIGHT)
+        reel.hold(600)
+        term.type(f"export VECTRIXDB_URL={where['url']} VECTRIXDB_KEY=…", 300)
+
+        python = SDK / "python" / "examples"
+        added = run(
+            [sys.executable, str(python / "ingest.py"), "handbook", str(handbook)], scratch, env
+        )
+        term.type("python python/examples/ingest.py handbook handbook.md", 300)
+        term.show(html.escape(added.rstrip("\n")), 1200)
+
+        steps = [
+            (
+                f'python python/examples/search.py handbook "{QUERY}"',
+                [sys.executable, str(python / "search.py"), "handbook", QUERY],
+                ROOT,
+            ),
+            (
+                f'(cd typescript && npx tsx examples/search.ts handbook "{QUERY}")',
+                ["npx", "tsx", "examples/search.ts", "handbook", QUERY],
+                SDK / "typescript",
+            ),
+            (
+                f'(cd go && go run ./examples/search handbook "{QUERY}")',
+                [str(scratch / "go-search"), "handbook", QUERY],
+                SDK / "go",
+            ),
+            (
+                f'(cd rust && cargo run -q --example search -- handbook "{QUERY}")',
+                ["cargo", "run", "-q", "--example", "search", "--", "handbook", QUERY],
+                SDK / "rust",
+            ),
+        ]
+        for shown, command, cwd in steps:
+            printed = run(command, cwd, {**env, **rust_env})
+            term.type(shown, 300)
+            term.show(hits(printed), 1500)
+        reel.hold(2600)
+    finally:
+        server.terminate()
+        server.wait(timeout=30)
 
 
-@dataclass
-class Session:
-    title: str
-    steps: List[Step] = field(default_factory=list)
+def shutil_which(tool: str) -> Optional[str]:
+    import shutil
 
-    def run(
-        self,
-        shown: str,
-        argv: Sequence[str],
-        *,
-        env: Optional[Dict[str, str]] = None,
-        cwd: Optional[Path] = None,
-        keep: Optional[Callable[[str], str]] = None,
-    ) -> str:
-        """Run a command, keep what it printed, and stop the clip if it failed."""
-        done = subprocess.run(
-            list(argv),
+    return shutil.which(tool)
+
+
+# ============================================================================
+# DOCTOR
+# ============================================================================
+
+LEVELS = {"ok": "ok", "warn": "s", "error": "s", "--": "out"}
+
+
+def doctored(printed: str) -> str:
+    """doctor's report, each line's verdict coloured: ok green, warn amber, -- grey."""
+    out = []
+    for line in printed.rstrip("\n").split("\n"):
+        found = re.match(r"^(  )(ok|warn|error|--)(\s+)(.*)$", line)
+        if found:
+            lead, level, gap, rest = found.groups()
+            out.append(
+                f'{lead}<span class="{LEVELS[level]}">{level}</span>{gap}{html.escape(rest)}'
+            )
+        elif line.startswith(("Healthy", "Unhealthy")):
+            out.append(f'<span class="cmd">{html.escape(line)}</span>')
+        else:
+            out.append(html.escape(line))
+    return "\n".join(out)
+
+
+def film_doctor(reel: shots.Reel, scratch: Path) -> None:
+    folder = scratch / "fresh"
+    folder.mkdir()
+    beside = Path(sys.executable).with_name("vectrixdb")
+    command = str(beside) if beside.exists() else "vectrixdb"
+    printed = run(
+        [command, "doctor", "--offline"],
+        folder,
+        {"COLUMNS": "100", "TERM": "dumb", "NO_COLOR": "1"},
+    )
+    term = terminal.Terminal(reel, folder, "vectrixdb doctor", HEIGHT)
+    reel.hold(600)
+    term.type("vectrixdb doctor --offline", 400)
+    lines = doctored(printed).split("\n")
+    for at, line in enumerate(lines):
+        term.show(line, 260 if at < len(lines) - 1 else 4000)
+
+
+def _command() -> str:
+    beside = Path(sys.executable).with_name("vectrixdb")
+    return str(beside) if beside.exists() else "vectrixdb"
+
+
+def film_cli(reel: shots.Reel, scratch: Path) -> None:
+    server = subprocess.Popen(
+        [sys.executable, str(SDK / "conformance" / "serve.py")],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        assert server.stdout is not None
+        where = json.loads(server.stdout.readline())
+        folder = scratch / "policies"
+        folder.mkdir()
+        (folder / "handbook.md").write_bytes((SDK / "conformance" / "handbook.md").read_bytes())
+        quiet = {"COLUMNS": "100", "TERM": "dumb", "NO_COLOR": "1"}
+        env = {"VECTRIXDB_URL": where["url"], "VECTRIXDB_KEY": where["key"], **quiet}
+
+        def vx(*args: str, extra: Optional[Dict[str, str]] = None, fails: bool = False) -> str:
+            done = subprocess.run(
+                [_command(), *args],
+                cwd=scratch,
+                env={
+                    **{k: v for k, v in os.environ.items() if not k.startswith("VECTRIXDB_")},
+                    **(extra if extra is not None else env),
+                },
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+            if (done.returncode != 0) != fails:
+                raise SystemExit(
+                    f"vectrixdb {' '.join(args)}: {(done.stdout + done.stderr)[-800:]}"
+                )
+            return (done.stdout + done.stderr).rstrip("\n")
+
+        term = terminal.Terminal(reel, scratch, "vectrixdb, on a server", HEIGHT)
+        reel.hold(600)
+        term.type(f"export VECTRIXDB_URL={where['url']}", 200)
+        term.type('export VECTRIXDB_KEY="$(cat handbook.key)"', 300)
+        printed = vx("ingest", "policies", "--name", "handbook")
+        term.type("vectrixdb ingest policies --name handbook", 300)
+        term.show(html.escape(printed), 1300)
+        printed = vx("query", QUERY, "--name", "handbook", "--limit", "2", "--json")
+        term.type(
+            f'vectrixdb query "{QUERY}" --name handbook --limit 2 --json | jq ".items[] | {{score, citation}}"',
+            300,
+        )
+        # jq itself, given what the command printed: the clip shows what the pipe prints.
+        picked = subprocess.run(
+            ["jq", ".items[] | {score, citation}"],
+            input=printed,
             capture_output=True,
             text=True,
-            encoding="utf-8",
-            errors="replace",
-            env={**os.environ, "NO_COLOR": "1", "COLUMNS": str(COLUMNS), **(env or {})},
-            cwd=str(cwd or ROOT),
-            timeout=600,
+            timeout=30,
+            check=True,
+        ).stdout.rstrip("\n")
+        term.show(terminal.coloured(picked), 1700)
+        printed = vx("whoami")
+        term.type("vectrixdb whoami", 300)
+        term.show(html.escape(printed), 1400)
+        printed = vx(
+            "list",
+            "--url",
+            "http://vectors.example.com",
+            extra={"VECTRIXDB_KEY": where["key"], **quiet},
+            fails=True,
         )
-        printed = (done.stdout + done.stderr).rstrip()
-        if done.returncode != 0:
-            raise SystemExit(f"{shown!r} failed ({done.returncode}):\n{printed[-3000:]}")
-        self.steps.append(Step(shown, keep(printed) if keep else printed))
-        return printed
-
-    def said(self, shown: str, output: str) -> None:
-        """A step whose output was produced in this process, by the code the command names."""
-        self.steps.append(Step(shown, output.rstrip()))
-
-
-# ============================================================================
-# DRAWING
-# ============================================================================
-
-
-def _colour(line: str) -> Tuple[int, int, int]:
-    stripped = line.strip().lower()
-    if stripped.startswith("$ "):
-        return PAPER
-    if stripped.startswith(("ok ", "[i]")) or " ok " in stripped[:12]:
-        return GREEN if stripped.startswith("ok ") else PAPER
-    if stripped.startswith(("error", "[!]", "failed")):
-        return RED
-    if stripped.startswith(("--", "#", "warn")):
-        return DIM
-    return PAPER
-
-
-def _wrap(text: str) -> List[str]:
-    out: List[str] = []
-    for raw in text.splitlines() or [""]:
-        line = raw.rstrip().replace("\t", "    ")
-        while len(line) > COLUMNS:
-            out.append(line[:COLUMNS])
-            line = "  " + line[COLUMNS:]
-        out.append(line)
-    return out
-
-
-def _frame(lines: List[Tuple[str, Tuple[int, int, int]]], title: str, cursor: bool) -> Image.Image:
-    image = Image.new("RGB", (WIDTH, HEIGHT), INK)
-    draw = ImageDraw.Draw(image)
-    draw.rectangle([0, 0, WIDTH, BAR], fill=INK_2)
-    for i, colour in enumerate(((232, 110, 92), AMBER, GREEN)):
-        draw.ellipse([PAD + i * 20, BAR // 2 - 6, PAD + i * 20 + 12, BAR // 2 + 6], fill=colour)
-    draw.text((WIDTH // 2, BAR // 2), title, fill=DIM, font=FONT, anchor="mm")
-    shown = lines[-ROWS:]
-    y = BAR + PAD
-    for text, colour in shown:
-        x = PAD
-        if text.startswith("$ "):
-            draw.text((x, y), "$", fill=AMBER, font=FONT)
-            x += FONT.getlength("$ ")
-            text = text[2:]
-        draw.text((x, y), text, fill=colour, font=FONT)
-        y += LINE
-    if cursor and shown:
-        last, _ = shown[-1]
-        cx = PAD + FONT.getlength(last)
-        draw.rectangle([cx + 2, y - LINE + 3, cx + 10, y - 4], fill=AMBER)
-    return image
-
-
-def render(session: Session, path: Path) -> None:
-    frames: List[Image.Image] = []
-    durations: List[int] = []
-    screen: List[Tuple[str, Tuple[int, int, int]]] = []
-
-    def add(cursor: bool, ms: int) -> None:
-        frames.append(_frame(screen, session.title, cursor))
-        durations.append(ms)
-
-    for step in session.steps:
-        typed = "$ "
-        screen.append((typed, PAPER))
-        for i, ch in enumerate(step.shown):
-            typed += ch
-            screen[-1] = (typed, PAPER)
-            if (
-                i % 2 == 1 or i == len(step.shown) - 1
-            ):  # two characters a frame keeps the file small
-                add(True, TYPE_MS * 2)
-        add(False, 250)
-        for line in _wrap(step.output):
-            screen.append((line, _colour(line)))
-            add(False, LINE_MS)
-        screen.append(("", PAPER))
-        add(False, PAUSE_MS)
-    screen.append(("$ ", PAPER))
-    add(True, HOLD_MS)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    palette = frames[-1].convert("P", palette=Image.ADAPTIVE, colors=32)
-    quantised = [f.quantize(palette=palette, dither=Image.Dither.NONE) for f in frames]
-    quantised[0].save(
-        path,
-        save_all=True,
-        append_images=quantised[1:],
-        duration=durations,
-        loop=0,
-        optimize=True,
-        disposal=1,
-    )
-    print(
-        f"wrote {path.relative_to(ROOT)} ({len(frames)} frames, {path.stat().st_size // 1024} KB)"
-    )
-
-
-# ============================================================================
-# A SERVER FOR A CLIP
-# ============================================================================
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return int(s.getsockname()[1])
-
-
-class Server:
-    """A real VectrixDB server in a temporary folder, with a handbook collection, for one clip."""
-
-    def __init__(self) -> None:
-        self.folder = tempfile.mkdtemp(prefix="vectrixdb-shots-")
-        self.port = _free_port()
-        self.url = f"http://127.0.0.1:{self.port}"
-        self.key = secrets.token_urlsafe(18)
-        env = {
-            **os.environ,
-            "VECTRIXDB_API_KEY": self.key,
-            "VECTRIXDB_MCP": "1",
-            "VECTRIXDB_KEEP_SOURCE": "1",
-            "VECTRIXDB_OFFLINE": "1",
-            "PYTHONPATH": str(ROOT),
-        }
-        self.process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "vectrixdb.cli",
-                "serve",
-                "--port",
-                str(self.port),
-                "--path",
-                self.folder,
-            ],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        deadline = time.monotonic() + 90
-        while time.monotonic() < deadline:
-            try:
-                with urllib.request.urlopen(self.url + "/ready", timeout=2) as reply:  # noqa: S310 - our own server
-                    if reply.status == 200:
-                        break
-            except OSError:
-                time.sleep(0.5)
-        else:
-            self.close()
-            raise SystemExit("the server for the clip did not become ready")
-        self._seed()
-
-    def _call(self, method: str, path: str, body: object) -> object:
-        request = urllib.request.Request(
-            self.url + path,
-            method=method,
-            data=json.dumps(body).encode(),
-            headers={
-                "api-key": self.key,
-                "content-type": "application/json",
-                "accept": "application/json, text/event-stream",
-            },
-        )
-        with urllib.request.urlopen(request, timeout=60) as reply:  # noqa: S310 - our own server
-            return json.loads(reply.read() or b"null")
-
-    def _seed(self) -> None:
-        self._call(
-            "POST",
-            "/api/v2/collections",
-            {
-                "name": "handbook",
-                "dimension": 384,
-                "metric": "cosine",
-                "enable_text_index": True,
-                "tags": ["hybrid"],
-                "description": "The staff handbook",
-            },
-        )
-        rows = [
-            (
-                "refunds",
-                "Refunds are paid by the billing team within ten working days of the request.",
-                "finance",
-            ),
-            ("refund-card", "A refund goes back to the card the customer paid with.", "finance"),
-            (
-                "travel",
-                "Travel is booked through the office manager, economy class under six hours.",
-                "operations",
-            ),
-            ("laptops", "Laptops are replaced every three years by the IT desk.", "it"),
-            ("leave", "Annual leave is twenty five days, plus public holidays.", "people"),
-        ]
-        self._call(
-            "POST",
-            "/api/v1/collections/handbook/text-upsert",
-            {"points": [{"id": i, "text": t, "payload": {"team": team}} for i, t, team in rows]},
-        )
-
-    def mcp(self, tool: str, arguments: dict) -> str:
-        reply = self._call(
-            "POST",
-            "/mcp",
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": {"name": tool, "arguments": arguments},
-            },
-        )
-        return str(reply["result"]["content"][0]["text"])  # type: ignore[index]
-
-    def close(self) -> None:
-        self.process.terminate()
-        try:
-            self.process.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            self.process.kill()
-        shutil.rmtree(self.folder, ignore_errors=True)
-
-
-# ============================================================================
-# THE CLIPS
-# ============================================================================
-
-
-def clip_doctor() -> Session:
-    session = Session("vectrixdb doctor")
-    folder = tempfile.mkdtemp(prefix="vectrixdb-doctor-")
-    try:
-        session.run(
-            "vectrixdb doctor --quick --offline",
-            [
-                sys.executable,
-                "-m",
-                "vectrixdb.cli",
-                "doctor",
-                "--quick",
-                "--offline",
-                "--path",
-                folder,
-            ],
-            env={"VECTRIXDB_OFFLINE": "1", "PYTHONPATH": str(ROOT)},
-        )
+        term.type("vectrixdb list --url http://vectors.example.com", 300)
+        term.show(f'<span class="s">{html.escape(printed)}</span>', 3200)
     finally:
-        shutil.rmtree(folder, ignore_errors=True)
-    return session
+        server.terminate()
+        server.wait(timeout=30)
 
 
-def clip_mcp() -> Session:
-    session = Session("an assistant's tools, on a VectrixDB server")
-    server = Server()
-    try:
-        session.said("mcp call whoami", server.mcp("whoami", {}))
-        session.said(
-            "mcp call describe_collection collection=handbook",
-            server.mcp("describe_collection", {"collection": "handbook"}),
-        )
-        found = server.mcp(
-            "search",
-            {
-                "collection": "handbook",
-                "query": "how are refunds paid",
-                "limit": 3,
-                "facets": ["team"],
-            },
-        )
-        session.said(
-            'mcp call search collection=handbook query="how are refunds paid" limit=3 facets=team',
-            found,
-        )
-    finally:
-        server.close()
-    return session
-
-
-def clip_sdk() -> Session:
-    session = Session("the same search, from Python and from TypeScript")
-    server = Server()
-    try:
-        env = {"VECTRIXDB_URL": server.url, "VECTRIXDB_KEY": server.key, "PYTHONPATH": str(ROOT)}
-        python = (
-            "import os, vectrixdb\n"
-            "db = vectrixdb.connect(os.environ['VECTRIXDB_URL'], key=os.environ['VECTRIXDB_KEY'], collection='handbook')\n"
-            "for r in db.search('how long do refunds take', limit=2):\n"
-            "    print(f'[{round(r.relevance * 100)}%] {r.readable_citation}: {r.text}')\n"
-        )
-        session.run("python search.py", [sys.executable, "-c", python], env=env)
-        node = shutil.which("node")
-        if node:
-            session.run(
-                'node quickstart/search.ts "how long do refunds take"',
-                [node, "quickstart/search.ts", "how long do refunds take"],
-                env=env,
-                cwd=ROOT / "sdk" / "typescript",
-            )
-    finally:
-        server.close()
-    return session
-
-
-CLIPS: Dict[str, Callable[[], Session]] = {
-    "terminal-doctor": clip_doctor,
-    "terminal-mcp": clip_mcp,
-    "terminal-sdk": clip_sdk,
-}
+FILMS = {"clients": film_clients, "doctor": film_doctor, "cli": film_cli}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("clips", nargs="*", help="doctor, mcp, sdk; every clip when left out")
-    args = parser.parse_args(argv)
-    wanted = [f"terminal-{c}" if not c.startswith("terminal-") else c for c in args.clips] or list(
-        CLIPS
+    parser.add_argument(
+        "names", nargs="*", help=f"the clips to film: {', '.join(CLIPS)} (all by default)"
     )
-    for name in wanted:
-        if name not in CLIPS:
-            parser.error(f"no clip {name}; there are {', '.join(CLIPS)}")
-        render(CLIPS[name](), OUT / f"{name}.gif")
+    args = parser.parse_args(argv)
+    names = args.names or list(CLIPS)
+    unknown = [name for name in names if name not in CLIPS]
+    if unknown:
+        parser.error(f"no clip named {', '.join(unknown)}; the clips are {', '.join(CLIPS)}")
+    OUT.mkdir(parents=True, exist_ok=True)
+    browser = shots.Browser()
+    try:
+        for name in names:
+            with tempfile.TemporaryDirectory(prefix=f"vx-{name}-") as scratch:
+                reel = shots.Reel(browser)
+                FILMS[name](reel, Path(scratch))
+                frames, size = reel.save(OUT / f"{name}.gif")
+                seconds = sum(ms for _, ms in reel.frames) / 1000
+                print(
+                    f"  {name}.gif  {frames} frames, {seconds:.1f} s, {size / 1e6:.2f} MB",
+                    file=sys.stderr,
+                )
+    finally:
+        browser.close()
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

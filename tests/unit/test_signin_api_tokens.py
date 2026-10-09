@@ -281,3 +281,60 @@ def test_the_setting_is_read_from_the_environment(tmp_path):
     assert SignInConfig.from_env(tmp_path, env).oidc.api_audience == "api://vectrixdb"
     del env["VECTRIXDB_OIDC_API_AUDIENCE"]
     assert SignInConfig.from_env(tmp_path, env).oidc.api_audience is None
+
+
+class TestOnlyTheAppsTheCompanyNames:
+    """A company that wants its people on its own wrapper names the wrapper's client id, and
+    the MCP clients it allows. A token any other app got for this audience is turned away."""
+
+    WRAPPER = "0f3c9a2e-acme-cli"
+
+    def call(self, data, idp, token, **oidc_over):
+        with serve(data, idp, api_clients=(self.WRAPPER, "claude-desktop"), **oidc_over) as c:
+            return c.get("/api/v1/collections", headers=bearer(token))
+
+    @pytest.mark.parametrize("claim", ["azp", "appid", "cid", "client_id"])
+    def test_a_token_from_a_named_app_is_taken_whichever_provider_names_it(self, data, idp, claim):
+        idp.person = {"sub": "u-7", "email": "olu@example.com", "groups": ["g-ops"]}
+        reply = self.call(data, idp, idp.access_token(**{claim: self.WRAPPER}))
+        assert reply.status_code == 200, reply.text
+
+    def test_a_token_from_another_app_is_refused_and_written_down(self, data, idp):
+        idp.person = {"sub": "u-7", "email": "olu@example.com", "groups": ["g-ops"]}
+        reply = self.call(data, idp, idp.access_token(azp="some-other-tool"))
+        assert reply.status_code == 401 and "company's own tool" in reply.json()["message"]
+        log = (data / "auth" / "access.jsonl").read_text(encoding="utf-8")
+        assert '"app_not_allowed"' in log
+
+    def test_a_token_that_names_no_app_is_refused(self, data, idp):
+        idp.person = {"sub": "u-7", "email": "olu@example.com", "groups": ["g-ops"]}
+        assert self.call(data, idp, idp.access_token()).status_code == 401
+
+    def test_unset_any_app_is_taken_as_before(self, data, idp):
+        idp.person = {"sub": "u-7", "email": "olu@example.com", "groups": ["g-ops"]}
+        with serve(data, idp) as client:
+            reply = client.get(
+                "/api/v1/collections", headers=bearer(idp.access_token(azp="anything"))
+            )
+        assert reply.status_code == 200
+
+
+def test_the_apps_are_read_from_the_environment_and_need_an_audience(tmp_path):
+    from vectrixdb.exceptions import ConfigurationError
+
+    env = {
+        "VECTRIXDB_SIGNIN": "oidc",
+        "VECTRIXDB_SIGNIN_SECRET": SECRET,
+        "VECTRIXDB_PUBLIC_URL": PUBLIC,
+        "VECTRIXDB_OIDC_ISSUER": ISSUER,
+        "VECTRIXDB_OIDC_CLIENT_ID": "vectrixdb",
+        "VECTRIXDB_OIDC_CLIENT_SECRET": "s3cret",
+        "VECTRIXDB_OIDC_DEFAULT_ROLE": "viewer",
+        "VECTRIXDB_OIDC_API_AUDIENCE": "api://vectrixdb",
+        "VECTRIXDB_OIDC_API_CLIENTS": " acme-cli, claude-desktop  other ",
+    }
+    found = SignInConfig.from_env(tmp_path, env).oidc.api_clients
+    assert found == ("acme-cli", "claude-desktop", "other")
+    del env["VECTRIXDB_OIDC_API_AUDIENCE"]
+    with pytest.raises(ConfigurationError, match="VECTRIXDB_OIDC_API_AUDIENCE"):
+        SignInConfig.from_env(tmp_path, env)

@@ -103,6 +103,10 @@ The full list of what a token is checked for, and what is refused, is in
     Register the audience as an API, register the client with PKCE, and name
     the scopes it asks for in `VECTRIXDB_MCP_SCOPES`.
 
+A server with `VECTRIXDB_OIDC_API_CLIENTS` set takes tokens from the apps it
+names alone, so the MCP client's own client id goes on that list too
+([Run it inside your company's registry](inside-your-registry.md#require-the-companys-own-tool)).
+
 ## Connect
 
 The client's config holds the address and nothing else:

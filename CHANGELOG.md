@@ -52,67 +52,81 @@ may change at any time.
   filtering, citing every claim, refusals as answers, and asking before a
   delete. A test holds every name in it, and in `skills/vectrixdb/SKILL.md`,
   to the code.
-- **Clients for Python, TypeScript, Go and Rust.** `vectrixdb.connect(url,
-  key=..., collection=...)` and `connect_async` (`pip install
-  "vectrixdb[client]"`) give a server's collection the calls a local
-  `Vectrix` has and answer with the same `Results`; the server's refusals
-  are `ServerSignInRequired`, `ServerPermissionDenied`, `ServerNotFound`,
-  `ServerRejected` and `ServerBusy`, all `VectrixError`s, and busy answers
-  are asked again after `Retry-After`. `sdk/typescript`, `sdk/go` and
-  `sdk/rust` are the same calls in those languages, each with no dependency
-  beyond its platform's HTTP. Each asks only for routes in
-  `docs/reference/openapi.json`, and a test in each holds it there;
-  `sdk/conformance/serve.py` starts a real server so each is asked the same
-  questions of it. See [Clients and SDKs](docs/how-to/clients.md).
-- **The command line, against a server.** `list`, `create`, `delete`,
-  `ingest`, `query`, `stats` and `sources add`, `list` and `refresh` take
-  `--server`, or `VECTRIXDB_URL`, and call that server as you, naming it on
-  stderr first. `vectrixdb login` signs a person in with the company's
-  identity provider by the device code flow, a code typed in a browser on any
-  machine, found from the server's protected-resource document, and renews
-  the sign-in with its refresh token; or keeps a key read from a file or
-  stdin, never from the command line. What it keeps goes to the system
-  keychain when `keyring` is installed, else to a file only that user may
-  read. `vectrixdb whoami` and `vectrixdb logout`. A refusal is one line and
-  exit code 1; a command that cannot start is 2. See
-  [Use the command line against a server](docs/how-to/command-line.md).
-- **Wrap it for your company.** A company's wrapper package registers its
-  defaults under the `vectrixdb.defaults` entry point, or an administrator
-  puts them in `/etc/vectrixdb/defaults.toml` (`%ProgramData%` on Windows,
-  `/Library/Application Support` on macOS): the server, the command line's
-  client id and scope, the certificate authority, the key header, headers
-  for a gateway (a value may read `${NAME}` from the environment, so no
-  secret is written), the wrapper's `User-Agent` and its command name.
-  `vectrixdb.connect()` with no address then goes to the company's server,
-  and every command and hint uses the wrapper's name. The headers and the
-  certificate authority go to the company's server only, never to another
-  address. Every client takes extra headers and a wrapper's name for
-  `User-Agent`: `headers=` and `user_agent=` in Python, `headers` and
-  `userAgent` in TypeScript, `WithHeader` and `WithUserAgent` in Go,
-  `.header()` and `.user_agent()` in Rust; none of them may carry the
-  caller. See [Wrap it for your company](docs/how-to/wrap-for-your-company.md).
-- **Distribute it through JFrog Artifactory.** A guide to bringing every
-  package, image and model through the company's registry, publishing the
-  wrapper and making it the way in. `VECTRIXDB_MODELS_URL` points model
-  downloads at a mirror of the releases. See
-  [Distribute it through JFrog Artifactory](docs/how-to/artifactory.md).
-- **A key never crosses a network in clear text.** Every client, in Python,
-  TypeScript, Go and Rust, sends a key or a token over `https://`, or over
-  `http://` to this machine only, and refuses a key in the address;
-  `allow_http` lifts that for a network you trust. A redirect is reported and
-  never followed, so a key never goes to a second host: the Go and Rust HTTP
-  libraries forward a custom header such as `api-key` when they follow one.
-  In Python, `verify=` takes a company's certificate authority as a file or
-  folder, or `"system"` for the operating system's own store (`truststore`,
-  now in the `client` extra), and every client names itself in its
-  `User-Agent`.
 - **The docs, grown.** MCP is a section of six pages; new pages for keys and
   roles, collection policies, masking, the audit trail, chunking, extraction
   quality, recordings, embedding models, sizing, check and doctor, scale,
-  clients, async, search options and installing; twelve more reference
-  pages from the code; a home page with what is new; every picture opens
-  full size over the page, with thumbnails, arrows, swipe and Esc; and
-  terminal clips filmed from real runs by `scripts/terminal_shots.py`.
+  async, search options and installing; twelve more reference
+  pages from the code; a home card for MCP keys; every picture opens
+  full size over the page, with thumbnails, arrows, swipe and Esc; and a
+  terminal clip of the MCP tools filmed from a real run.
+- **One release, every registry.** The Release workflow runs each client's
+  own checks and its walk against a real server (the new SDKs workflow, also
+  run on every pull request that touches a client or the server), then, once
+  PyPI has the package, publishes the TypeScript client to npm and the Rust
+  client to crates.io at the same version, and tags `sdk/go/v<version>` for
+  Go, next to the release's own `v<version>`. A version a registry already
+  has is skipped. `python scripts/release.py X.Y.Z` stamps the version in
+  every client too, and a release is refused while any client says another
+  one; a pre-release such as 2.3.0rc1 goes to npm, crates.io and Go as
+  2.3.0-rc.1, and to npm under `next`.
+- **The documentation's home page shows every way in:** the command line, the
+  four clients and MCP, each with its install line, its clip and its guide.
+- **A client in four languages, one surface.** `vectrixdb.connect(url,
+  key=...)` returns a `VectrixClient` with the same calls as `Vectrix`:
+  `search` returns the same `Results` with the same citations, `add_document`
+  sends a file for the server to read and embed, `add_texts`, `documents`,
+  `open_document`, `delete_document`, `collections`, `describe`,
+  `create_collection`, `sources`, `add_source`, `refresh_sources`, `whoami`,
+  `health` and `ready`. `AsyncVectrixClient` is the same with `await`. A key
+  goes in the `api-key` header, a company sign-in token as a bearer token; a
+  429 or 503 is retried three times honouring `Retry-After`; every refusal is
+  a `RequestError` with `status`, `message` and `detail`, and one named kind
+  per status (`AuthError`, `ForbiddenError`, `NotFoundError`,
+  `InvalidError`, `BusyError`, ...). The `client` extra brings httpx. The
+  TypeScript, Go and Rust clients under `sdk/` offer the same calls, are
+  built from `docs/reference/openapi.json`, and each runs the same
+  conformance walk (`sdk/CONTRACT.md`) against a real server, which
+  `sdk/conformance/serve.py` starts.
+- **Clients safe to point anywhere.** All four clients refuse to send a key
+  or token over plain HTTP to another machine (`allow_http` says otherwise),
+  never follow a redirect, so a key goes only to the address it was given
+  for, always check certificates, and never print a key. A name or id of
+  `.` or `..`, which would reach another route, a key with a control
+  character and an address with a password in it are refused before
+  anything is sent. They take a
+  gateway's key header and token header, extra headers, its `prefix` and
+  `gateway_paths` (read exactly as the server's `VECTRIXDB_GATEWAY_PATHS`),
+  a private CA and a client certificate, and honour `HTTPS_PROXY`. The Go
+  module is `github.com/knowusuboaky/VectrixDB/sdk/go/v2`, as a 2.x release
+  needs.
+- **The `vectrixdb` command on a server.** Every command that works on a
+  folder takes `--url` (or `VECTRIXDB_URL`) and works on a server instead:
+  `list`, `info`, `stats`, `create`, `delete`, `ingest`, `query`, `sources`
+  and `keys`. Who you are comes from `--key-file` (refused when others can
+  read it), `VECTRIXDB_KEY`, `VECTRIXDB_KEY_FILE`, `VECTRIXDB_TOKEN`, or
+  `vectrixdb login`, which signs a person in with the identity provider the
+  server names (a browser with PKCE, or `--device` from SSH and containers)
+  and keeps the sign-in for that address alone, readable by its owner, and
+  refreshed before it expires. `login` says where you sign in and what for
+  and asks first (`VECTRIXDB_LOGIN_SCOPES` pins the scopes instead), takes
+  only a server that names itself, and never goes over plain HTTP. There is
+  no `--key`, which shell history
+  would keep. `vectrixdb whoami`, `vectrixdb logout`, `--json` for scripts,
+  exit codes 0, 1 and 2, and `VECTRIXDB_CA_BUNDLE`,
+  `VECTRIXDB_CLIENT_CERT` and the gateway settings for a company network.
+  What a server sends back is printed with terminal control characters
+  taken out.
+- **Run it inside a company's registry.** `VECTRIXDB_MODELS_URL` fetches
+  models from a company's mirror of the releases (an Artifactory or Nexus
+  remote) in place of GitHub, checked against the same checksums, with
+  `VECTRIXDB_MODELS_TOKEN` sent to the mirror alone and never on to a
+  redirect. The images build with the company's package index and model
+  mirror as build secrets (`--secret id=pip`, `--secret id=mirrors`), never
+  written into a layer. `VECTRIXDB_OIDC_API_CLIENTS` takes access tokens from
+  the apps it names alone, a company's own wrapper and its MCP clients, and
+  writes any other to the access log as `app_not_allowed`. Two new how-tos:
+  shipping a company's own client or command on it, and running it inside
+  JFrog Artifactory from the repositories to the person at the keyboard.
 - **`vectrixdb doctor` tries every part of an install.** `vectrixdb check`
   reads the settings; `doctor` runs it and then tries each part for real: it
   writes and removes a file in the data folder, loads the embedding model and

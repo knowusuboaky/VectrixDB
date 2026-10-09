@@ -54,6 +54,7 @@ __all__ = [
     "GITHUB_REPO",
     "GITHUB_RELEASE_BASE",
     "release_base",
+    "release_request",
     "get_models_dir",
     "is_models_installed",
     "download_models",
@@ -281,9 +282,46 @@ GITHUB_RELEASE_BASE = f"https://github.com/{GITHUB_REPO}/releases/download"
 
 
 def release_base() -> str:
-    """Where the models' release files are fetched: VECTRIXDB_MODELS_URL, a company's mirror of the releases, else GitHub."""
-    mirror = os.environ.get("VECTRIXDB_MODELS_URL", "").strip().rstrip("/")
-    return mirror or GITHUB_RELEASE_BASE
+    """Where model releases are fetched from: ``VECTRIXDB_MODELS_URL``, else GitHub.
+
+    A company's mirror (an Artifactory or Nexus remote pointed at
+    GITHUB_RELEASE_BASE) serves the same ``<tag>/<asset>.zip`` paths, and what
+    comes from it is checked against the same checksums, so a mirror can make
+    a download possible but cannot change what is installed.
+    """
+    from urllib.parse import urlsplit
+
+    from ..exceptions import ConfigurationError
+
+    given = os.environ.get("VECTRIXDB_MODELS_URL", "").strip().rstrip("/")
+    if not given:
+        return GITHUB_RELEASE_BASE
+    parts = urlsplit(given)
+    if parts.username or parts.password:
+        raise ConfigurationError(
+            "VECTRIXDB_MODELS_URL has a user name or password in it. Put the token in VECTRIXDB_MODELS_TOKEN"
+        )
+    local = (parts.hostname or "") in ("localhost", "127.0.0.1", "::1")
+    if parts.scheme != "https" and not (parts.scheme == "http" and local):
+        raise ConfigurationError(
+            f"VECTRIXDB_MODELS_URL is {given!r}. It is an https:// address: the mirror the models come from"
+        )
+    return given
+
+
+def release_request(url: str) -> Any:
+    """A request for a release asset, with the mirror's token when one is set.
+
+    The token is never sent on to a redirect, so a mirror that hands the
+    download to storage elsewhere does not hand the token there too.
+    """
+    from urllib.request import Request
+
+    request = Request(url, headers={"User-Agent": "VectrixDB-Downloader/1.0"})
+    token = os.environ.get("VECTRIXDB_MODELS_TOKEN", "").strip()
+    if token and not url.startswith(GITHUB_RELEASE_BASE + "/"):
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    return request
 
 
 # ============================================================================

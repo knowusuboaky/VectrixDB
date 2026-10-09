@@ -1459,9 +1459,6 @@ class Vectrix:
         # Parse release tag
         release_tag = model_name.replace("github:", "")
 
-        # GitHub release URL
-        github_repo = "knowusuboaky/VectrixDB"
-
         # Map model types to expected zip file names
         zip_names = {
             "sparse": "sparse.zip",
@@ -1471,7 +1468,9 @@ class Vectrix:
         }
 
         zip_name = zip_names.get(model_type, f"{model_type}.zip")
-        url = f"https://github.com/{github_repo}/releases/download/{release_tag}/{zip_name}"
+        from .models.embedded import release_base, release_request
+
+        url = f"{release_base()}/{release_tag}/{zip_name}"
 
         # Download to cache directory
         cache_dir = Path.home() / ".cache" / "vectrixdb" / "github" / release_tag
@@ -1489,7 +1488,8 @@ class Vectrix:
         zip_path = cache_dir / zip_name
 
         try:
-            urllib.request.urlretrieve(url, zip_path)
+            with urllib.request.urlopen(release_request(url), timeout=60) as response:
+                zip_path.write_bytes(response.read())
         except Exception as e:
             from .exceptions import ModelDownloadError
             from .models.downloader import publish_commands

@@ -18,6 +18,7 @@ working directory.
 """
 
 import re
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,8 @@ PAGES = [
     "docs/how-to/offline.md",
     "docs/how-to/rest-api.md",
     "docs/how-to/build-an-app.md",
+    "docs/how-to/clients.md",
+    "docs/how-to/wrap-it.md",
     "docs/how-to/storage-backends.md",
     "docs/how-to/tips.md",
     "docs/how-to/tracing.md",
@@ -96,6 +99,9 @@ NOT_EXECUTABLE = (
     # The page is about calling one over HTTP, and there is none here; what
     # those calls return is held to in test_signin_key_scope.py instead.
     "vectors.company.com",
+    # The same, through a company's gateway; the gateway options are held to
+    # in test_client.py against a stand-in transport.
+    "gateway.company.com",
     # An extraction service, which refuses to be built without the key the
     # reader puts in their .env, and whose Azure services are the reader's
     # own. Every route it serves is held to in test_extraction_app.py.
@@ -103,7 +109,7 @@ NOT_EXECUTABLE = (
     # A VectrixDB server at an address the reader replaces. Every call is held
     # to its word against a real server in test_client.py.
     "vectrixdb.connect(",
-    "connect_async(",
+    "AsyncVectrixClient(",
     # A chat model the reader serves, cutting or describing chunks.
     "llm_cutter(",
     "context_writer(",
@@ -165,7 +171,8 @@ SKIP_IF_CONTAINS = NOT_EXECUTABLE + OPTIONAL_DEPENDENCY + CLOUD_BACKEND
 def _fences(page: Path):
     text = page.read_text(encoding="utf-8")
     for match in re.finditer(r"```python\n(.*?)```", text, re.S):
-        yield match.group(1)
+        # A fence inside a tab is indented with it.
+        yield textwrap.dedent(match.group(1))
 
 
 def _runnable(code: str) -> bool:

@@ -87,6 +87,37 @@ check a signature before anything runs.
   <img src="docs/images/containers/compose.gif" alt="Compose starting the server, the extraction service and Jaeger, then a scan read by the extraction service and a search that finds its words" width="860">
 </p>
 
+## From the command line, four languages, or an assistant
+
+The same server answers the `vectrixdb` command, clients in Python,
+TypeScript, Go and Rust, and an assistant over MCP. Every client keeps the same
+safety rules: no key over plain HTTP, no redirects, certificates always checked.
+
+| | Install | Guide |
+|---|---|---|
+| Command line | `pip install "vectrixdb[client]"` | [Use the command line on a server](docs/how-to/command-line-server.md) |
+| Python | `pip install "vectrixdb[client]"` | [Use it from Python, TypeScript, Go or Rust](docs/how-to/clients.md) |
+| TypeScript | `npm install vectrixdb` | [npm](https://www.npmjs.com/package/vectrixdb) |
+| Go | `go get github.com/knowusuboaky/VectrixDB/sdk/go/v2` | [pkg.go.dev](https://pkg.go.dev/github.com/knowusuboaky/VectrixDB/sdk/go/v2) |
+| Rust | `cargo add vectrixdb` | [crates.io](https://crates.io/crates/vectrixdb) |
+| MCP | `pip install "vectrixdb[mcp]"` | [Use your collections from an assistant over MCP](docs/how-to/mcp-server.md) |
+
+<p align="center">
+  <img src="docs/images/terminal/clients.gif" alt="One server and one document: the same search run from the Python, TypeScript, Go and Rust clients answers with the same citations" width="860">
+</p>
+
+<p align="center">
+  <img src="docs/images/terminal/cli.gif" alt="The vectrixdb command pointed at a server: a folder ingested, a search with each result's citation, whoami naming the key, and a plain-HTTP address it refuses to send the key to" width="860">
+</p>
+
+<p align="center">
+  <img src="docs/images/dashboard/tour-mcp.gif" alt="An assistant connects over MCP, lists the collections and searches: real calls to a sample server and the answers that came back" width="860">
+</p>
+
+A company can ship its own command or client on these
+([Ship your own client or command](docs/how-to/wrap-it.md)) and serve all of
+it from its own registry ([Run it inside your company's registry](docs/how-to/inside-your-registry.md)).
+
 ## Documentation
 
 Grouped by what you came for: learning it, doing one thing, looking something
@@ -175,14 +206,15 @@ optional package or a cloud account, so the code on them cannot quietly rot.
 
 **Build on it**
 
-- [Call a server from your code](docs/how-to/clients.md), Python, TypeScript,
-  Go and Rust
-- [Use the command line against a server](docs/how-to/command-line.md),
-  sign-in, keys, company networks
-- [Wrap it for your company](docs/how-to/wrap-for-your-company.md), the
-  company's server, sign-in and gateway as defaults, under its own command
-- [Distribute it through JFrog Artifactory](docs/how-to/artifactory.md),
-  every package, image and model through the company's registry
+- [Use it from Python, TypeScript, Go or Rust](docs/how-to/clients.md), the
+  four clients and their one set of calls
+- [Use the command line on a server](docs/how-to/command-line-server.md),
+  with a key file or your company sign-in
+- [Ship your own client or command on it](docs/how-to/wrap-it.md), a
+  company's wrapper with its settings filled in, published in its own registry
+- [Run it inside your company's registry](docs/how-to/inside-your-registry.md),
+  packages, images and models through JFrog Artifactory, and the company's
+  own tool as the way in
 - [Use it from async code](docs/how-to/async.md)
 - [Build an app on it](docs/how-to/build-an-app.md), in any language, on
   somebody else's server
@@ -191,9 +223,7 @@ optional package or a cloud account, so the code on them cannot quietly rot.
 **Reference**
 
 - [Easy API](docs/reference/easy.md), the `Vectrix` surface
-- [Client](docs/reference/client.md), `connect` and `connect_async`
-- [Company defaults](docs/reference/company.md), what a wrapper or a machine
-  file may set
+- [Python client](docs/reference/client.md), `connect()` and the server's calls
 - [Async](docs/reference/aio.md)
 - [Sources](docs/reference/sources.md), [Ingest](docs/reference/ingest.md),
   [Extract](docs/reference/extract.md),

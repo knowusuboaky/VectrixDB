@@ -134,8 +134,14 @@ SETTINGS: Tuple[Setting, ...] = tuple(
             ("AUTO_DOWNLOAD", "1 fetches a missing model on first use.", ""),
             (
                 "MODELS_URL",
-                "Where model downloads come from instead of GitHub's releases: a company's mirror of them, such as an Artifactory generic remote repository. The same paths below it: <tag>/<model>.zip.",
-                "https://acme.jfrog.io/artifactory/vectrixdb-models/knowusuboaky/VectrixDB/releases/download",
+                "A company's mirror of the model releases, in place of GitHub: an Artifactory or Nexus remote serving the same <tag>/<asset>.zip paths. Checked against the same checksums.",
+                "https://acme.jfrog.io/artifactory/vectrixdb-models",
+            ),
+            (
+                "MODELS_TOKEN",
+                "The token the mirror asks for, sent as a Bearer token to MODELS_URL alone, never on to a redirect.",
+                "",
+                "secret",
             ),
             (
                 "WARM",
@@ -325,6 +331,11 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 "OIDC_API_AUDIENCE",
                 "The audience of an access token taken as a Bearer token, so an app acts as the person using it: api://vectrixdb. Empty: no token is taken.",
                 "",
+            ),
+            (
+                "OIDC_API_CLIENTS",
+                "The apps an access token may come from, by client id, separated by spaces: a company's own wrapper and the MCP clients it allows. Empty: any app the provider gave a token for OIDC_API_AUDIENCE.",
+                "<wrapper client id> <MCP client id>",
             ),
             (
                 "OIDC_TOKEN_ROLE",
@@ -768,60 +779,52 @@ SETTINGS: Tuple[Setting, ...] = tuple(
         ],
     )
     + _s(
-        "The command line, against a server",
+        "The command line, on a server",
         [
             (
                 "URL",
-                "The server list, create, delete, ingest, query, stats, sources and whoami go to when --server is left out. Left out too, they use the data on this machine.",
+                "The server the vectrixdb command and the clients' examples talk to, instead of a folder here. Read on the caller's machine, not by the server.",
                 "https://vectors.company.com",
             ),
+            ("KEY", "The API key they send. Never put it on the command line.", "", "secret"),
             (
-                "KEY",
-                "The key those commands call the server with, for scripts and CI. Wins over what vectrixdb login kept; --key-file wins over it.",
+                "KEY_FILE",
+                "A file holding that key, readable by its owner alone, as a mounted secret.",
                 "",
-                "secret",
             ),
             (
                 "TOKEN",
-                "A person's or an app's access token from the identity provider, sent as a bearer token, when there is no key.",
+                "A company sign-in token your own tooling fetched, sent instead of a key.",
                 "",
                 "secret",
             ),
             (
-                "CA_FILE",
-                "The company's certificate authority, as a PEM file or a folder of them, or system for the operating system's own store: for a server or a TLS-inspecting proxy the default bundle does not trust.",
-                "system",
-            ),
-            (
-                "ALLOW_HTTP",
-                "1 lets a key or token go to another machine over plain http://. Off: only https://, or http:// to this machine.",
+                "LOGIN_CLIENT_ID",
+                "The client id vectrixdb login uses: a public client registered at the identity provider for the command line.",
                 "",
             ),
             (
-                "CLIENT_ID",
-                "The company's client id for the command line at its identity provider: a public client with the device code flow allowed. vectrixdb login uses it.",
-                "",
-            ),
-            (
-                "CREDENTIALS",
-                "Where vectrixdb login keeps a sign-in: keyring for the system keychain, file for a file only this user may read. Left out, the keychain when the keyring package is installed.",
-                "",
-            ),
-            (
-                "DEFAULTS_FILE",
-                "A company's defaults file for the client and the command line (TOML, or JSON by its suffix). Left out, /etc/vectrixdb/defaults.toml, %ProgramData%\\vectrixdb\\defaults.toml or /Library/Application Support/vectrixdb/defaults.toml when there is one.",
-                "",
-            ),
-            (
-                "DEFAULTS",
-                "With more than one wrapper package installed, the one whose defaults apply, by its entry point name.",
-                "",
+                "LOGIN_SCOPES",
+                "The scopes vectrixdb login may ask for, space-separated. Set, a server asking for any other is refused and nobody is asked to confirm.",
+                "api://vectrixdb/search",
             ),
             (
                 "CONFIG_DIR",
-                "The folder that file is in. Left out, the platform's own: %APPDATA%\\vectrixdb, ~/Library/Application Support/vectrixdb, or ~/.config/vectrixdb.",
+                "Where vectrixdb login keeps sign-ins. Unset, the platform's config folder.",
                 "",
             ),
+            (
+                "ALLOW_HTTP",
+                "1 lets the command send a key or token over plain HTTP to another machine, on a network you trust.",
+                "0",
+            ),
+            ("CA_BUNDLE", "A CA bundle to trust, for a company's own CA.", ""),
+            (
+                "CLIENT_CERT",
+                "A client certificate for a gateway that asks for one, PEM.",
+                "",
+            ),
+            ("CLIENT_CERT_KEY", "Its private key, readable by its owner alone.", ""),
         ],
     )
 )

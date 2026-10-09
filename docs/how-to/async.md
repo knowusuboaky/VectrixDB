@@ -7,7 +7,7 @@ faces, one for each place a collection can be:
 | The collection is | Use | What it does |
 | --- | --- | --- |
 | In your process, on this machine or on a store your process opens | `vectrixdb.aio.AsyncVectrix` | Runs each call of `Vectrix` in a worker thread and awaits it |
-| On a VectrixDB server | `vectrixdb.connect_async` | Sends each call to the server over `httpx`'s async client |
+| On a VectrixDB server | `vectrixdb.AsyncVectrixClient` | Sends each call to the server over `httpx`'s async client |
 
 Plain `Vectrix` and `vectrixdb.connect` are the right choice everywhere else:
 a script, a notebook, a batch job, a worker that handles one event at a time.
@@ -106,13 +106,14 @@ twice is safe.
 import asyncio
 import os
 
-import vectrixdb
+from vectrixdb import AsyncVectrixClient
 
 
 async def main():
-    async with vectrixdb.connect_async("https://vectors.company.com", key=os.environ["VECTRIXDB_KEY"]) as client:
-        db = client.collection("handbook")
-        found = await db.search("how long do refunds take", limit=5)
+    async with AsyncVectrixClient(
+        "https://vectors.company.com", key=os.environ["VECTRIXDB_KEY"]
+    ) as client:
+        found = await client.search("handbook", "how long do refunds take", limit=5)
         for result in found:
             print(result.relevance, result.readable_citation, result.text)
 
@@ -120,37 +121,18 @@ async def main():
 asyncio.run(main())
 ```
 
-`connect_async` takes what `connect` takes and gives the same calls as
-coroutines: every call in [Call a server from your code](clients.md#every-call)
-is awaited. It needs the `client` extra. `async with`, or `await client.aclose()`,
-closes its connections. With `collection=` it gives that collection at once,
-and `db.client` is the client to close.
+`AsyncVectrixClient` takes what `VectrixClient` takes and gives the same calls
+as coroutines: every call in [The calls](clients.md#the-calls) is awaited. It
+needs the `client` extra. `async with`, or `await client.close()`, closes its
+connections.
 
-A token for it may be a string, a function that returns one, or an `async`
-function that returns one, called before each request, so a token from an
-async identity library needs no wrapper:
+A company sign-in token goes in `token=`, a string your identity library
+fetched. For a token that expires while the program runs, open a client per
+unit of work with a fresh one: a client is cheap to make.
 
-```python
-import asyncio
-
-import vectrixdb
-
-
-async def fresh_token():
-    return "the access token your identity library returns"
-
-
-async def main():
-    async with vectrixdb.connect_async("https://vectors.company.com", token=fresh_token) as client:
-        print(await client.whoami())
-
-
-asyncio.run(main())
-```
-
-A busy server's `429` and `503`, and a dropped connection, are tried again with
-`asyncio.sleep` between tries, so a wait never holds the event loop. Refusals
-are the same exceptions as the blocking client raises: see
+A busy server's `429` and `503` are tried again with `asyncio.sleep` between
+tries, so a wait never holds the event loop. Refusals are the same exceptions
+as the blocking client raises: see
 [When the server says no](clients.md#when-the-server-says-no).
 
 ## Which to use
@@ -159,6 +141,6 @@ are the same exceptions as the blocking client raises: see
 | --- | --- |
 | A script, a notebook, a nightly job | `Vectrix` |
 | An async web app with the collection on its own disk or store | `AsyncVectrix` |
-| An async web app with a VectrixDB server to call | `connect_async` |
+| An async web app with a VectrixDB server to call | `AsyncVectrixClient` |
 | A program that calls a server one request at a time | `connect` |
 | An `async` route in your own FastAPI app that already opened a `Vectrix` | `AsyncVectrix.wrap(db)` |

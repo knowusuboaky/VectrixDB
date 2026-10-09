@@ -210,7 +210,7 @@ def test_create_rejects_unknown_metric(runner, db_path):
 def test_create_requires_dimension(runner, db_path):
     result = _invoke(runner, ["create", "vecs", "--path", db_path])
     assert result.exit_code != 0
-    assert "Missing argument" in result.output
+    assert "Give the vector dimension" in result.output
 
 
 def test_list_reports_error_and_exits_1(runner, monkeypatch):

@@ -43,7 +43,7 @@ pip install "vectrixdb[api,signin,documents]"
 | `signin` | `pyjwt[crypto]`, `qrcode` | Signing people in, with `VECTRIXDB_SIGNIN`: single sign-on, email, authenticator apps and passkeys |
 | `mcp` | `mcp` 2 or later, `httpx` | The server's `/mcp` endpoint with `VECTRIXDB_MCP=1`, and `vectrixdb mcp` |
 | `tracing` | `opentelemetry-api`, `opentelemetry-sdk`, the OTLP HTTP exporter | A span for every search, ingestion and evaluation run; see [Trace searches and ingestion](tracing.md) |
-| `client` | `httpx` | `vectrixdb.connect` and `connect_async`, for calling a server; see [Call a server from your code](clients.md) |
+| `client` | `httpx` | `vectrixdb.connect`, `VectrixClient` and `AsyncVectrixClient`, and the `vectrixdb` command on a server; see [Use it from Python, TypeScript, Go or Rust](clients.md) |
 | `jobs-azure` | `azure-storage-blob`, `azure-storage-queue`, `azure-identity` | The extraction service's long jobs on Azure, with `VECTRIXDB_EXTRACT_JOBS=azure` |
 
 A server for a team is usually `api`, `signin`, `mcp` and `tracing`, plus the
@@ -113,7 +113,7 @@ See [Choose a storage backend](storage-backends.md) for each.
 | `vectrixdb mcp`, `vectrixdb-mcp` | `mcp` |
 | `vectrixdb sources refresh` on an XML feed | `feeds` |
 | `vectrixdb download-models --type masking` | `masking` |
-| `vectrixdb.connect`, `connect_async` | `client` |
+| `vectrixdb.connect`, `VectrixClient`, `AsyncVectrixClient` | `client` |
 | `vectrixdb.load_youtube` | `youtube` |
 | `vectrixdb check`, `vectrixdb doctor` | the core; each says which extra a setting needs |
 

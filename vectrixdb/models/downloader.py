@@ -42,7 +42,7 @@ from typing import Dict, List, Optional, Tuple
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
-from .embedded import get_models_dir, MODEL_CONFIG, GITHUB_REPO, release_base
+from .embedded import get_models_dir, MODEL_CONFIG, GITHUB_REPO, release_base, release_request
 from .checksums import verify as _verify_checksums
 from .._net import assert_network
 from ..exceptions import ModelDownloadError
@@ -229,6 +229,7 @@ class ModelDownloader:
             return False
 
         # GitHub release URL: https://github.com/REPO/releases/download/TAG/MODEL.zip
+        # VECTRIXDB_MODELS_URL, a company's mirror, when it is set.
         zip_url = f"{release_base()}/{github_release}/{model_type}.zip"
 
         print(f"  Trying GitHub fallback: {zip_url}")
@@ -236,7 +237,7 @@ class ModelDownloader:
         tmp_path = None
         try:
             # Download with progress
-            req = Request(zip_url, headers={"User-Agent": "VectrixDB-Downloader/1.0"})
+            req = release_request(zip_url)
 
             with urlopen(req, timeout=60) as response:
                 total_size = int(response.headers.get("Content-Length", 0))

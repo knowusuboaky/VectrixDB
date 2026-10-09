@@ -17,6 +17,7 @@ and an address the library does not know is refused without being repeated.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -26,7 +27,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_chunk_store import MemoryChunks, RefusingChunks  # noqa: E402
 
-from vectrixdb.api import chunk_source  # noqa: E402
 from vectrixdb.chunk_store import CosmosChunks, open_chunk_store  # noqa: E402
 from vectrixdb.core.collection import Collection  # noqa: E402
 from vectrixdb.core.database import VectrixDB  # noqa: E402
@@ -116,6 +116,11 @@ class TestEveryWriteReachesTheStore:
 
 class TestTheDatabaseGivesEachCollectionItsView:
     def test_two_databases_on_two_paths_share_one_store(self, tmp_path):
+        # What the pages count is read through the server package, which needs
+        # the api extra; everything else in this file runs without it.
+        pytest.importorskip("fastapi", reason="the API extra is not installed")
+        from vectrixdb.api import chunk_source
+
         store = MemoryChunks()
         writer = VectrixDB(tmp_path / "writer", chunk_store=store)
         writer.create_collection("docs", DIM).add(
@@ -238,6 +243,9 @@ class TestOpening:
         assert "not a path" in str(refused.value)
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("fastapi") is None, reason="the API extra is not installed"
+)
 class TestTheServerReadsItFromTheEnvironment:
     def test_unset_is_none_and_a_store_given_wins(self):
         from vectrixdb.api.server import chunk_store_from_env

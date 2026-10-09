@@ -1,603 +1,849 @@
-/**
- * A VectrixDB server from TypeScript and JavaScript: Node 18 and later, browsers, Deno and Bun.
- *
- *     import { connect } from "vectrixdb";
- *
- *     const db = connect("https://vectors.company.com", { key: process.env.VECTRIXDB_KEY })
- *       .collection("handbook");
- *     const found = await db.search("how long do refunds take", { limit: 5 });
- *     for (const r of found.results) console.log(r.readableCitation, r.text);
- *
- * Every call is made to the server's REST API as one caller, a key or a
- * person's access token, and the server decides it as it decides any request.
- * A refusal comes back as a {@link ServerRefused}, and a busy server's 429 and
- * 503 are asked again after what Retry-After says.
- *
- * In a browser, sign in with a token, never a key: anything a page holds, its
- * reader holds too.
- *
- * A key or a token is only sent over https://, or to this machine over
- * http://; `allowHttp` lifts that for a network you trust. A redirect is
- * reported, never followed, so a key never goes to a second host.
- *
- * Author: Kwadwo Daddy Nyame Owusu - Boakye
- */
+import type { components } from "./generated/schema.js";
+import { routes } from "./routes.js";
 
-// ---------------------------------------------------------------- the types
+export const VERSION = "2.2.0";
+const USER_AGENT = `vectrixdb-typescript/${VERSION}`;
 
-/** A search mode: meaning and exact words, meaning, exact words, or meaning re-ordered. */
-export type Mode = "hybrid" | "dense" | "keyword" | "rerank";
+export type { components, paths } from "./generated/schema.js";
+export { routes } from "./routes.js";
 
-/** A token, or a function that returns a fresh one, called before each request. */
-export type Token = string | (() => string | Promise<string>);
+// ---------------------------------------------------------------------------
+// Errors
 
-export interface ConnectOptions {
-  /** An API key, for scripts and services. */
-  key?: string;
-  /** A person's or an app's access token from the company's identity provider. */
-  token?: Token;
-  /** The header a key goes in. The server's VECTRIXDB_KEY_HEADER; "api-key" unless it says otherwise. */
-  keyHeader?: string;
-  /** How many times a busy answer or a dropped connection is asked again. 3. */
-  retries?: number;
-  /** Milliseconds a request may take. 60000. */
-  timeoutMs?: number;
-  /** A fetch of your own, for a proxy or a test. The global fetch otherwise; yours is then yours to secure. */
-  fetch?: typeof fetch;
-  /** Send the key or token over plain http:// to another machine. Off: for a network you trust. */
-  allowHttp?: boolean;
-  /** Headers every request carries, such as a gateway's subscription key. Never the caller's own. */
-  headers?: Record<string, string>;
-  /** A wrapper's name and version, put before this client's in User-Agent, where the runtime lets it be set. */
-  userAgent?: string;
+/** Any refusal from the server, or a failure to reach it (status 0). */
+export class VectrixError extends Error {
+  readonly status: number;
+  readonly detail: unknown;
+
+  constructor(status: number, message: string, detail: unknown = null) {
+    super(message);
+    this.name = "VectrixError";
+    this.status = status;
+    this.detail = detail;
+  }
 }
 
-/** One search result, as the server judged it for this caller. */
+/** 401: no key, or a wrong one. */
+export class AuthError extends VectrixError {
+  override readonly name = "AuthError";
+}
+/** 403: the key's role or scope says no. */
+export class ForbiddenError extends VectrixError {
+  override readonly name = "ForbiddenError";
+}
+/** 404 */
+export class NotFoundError extends VectrixError {
+  override readonly name = "NotFoundError";
+}
+/** 409 */
+export class ConflictError extends VectrixError {
+  override readonly name = "ConflictError";
+}
+/** 413 */
+export class TooLargeError extends VectrixError {
+  override readonly name = "TooLargeError";
+}
+/** 422: `detail` is the list of field errors. */
+export class InvalidError extends VectrixError {
+  override readonly name = "InvalidError";
+}
+/** 429 or 503, after the retries. */
+export class BusyError extends VectrixError {
+  override readonly name = "BusyError";
+}
+
+function errorFor(status: number, message: string, detail: unknown): VectrixError {
+  switch (status) {
+    case 401:
+      return new AuthError(status, message, detail);
+    case 403:
+      return new ForbiddenError(status, message, detail);
+    case 404:
+      return new NotFoundError(status, message, detail);
+    case 409:
+      return new ConflictError(status, message, detail);
+    case 413:
+      return new TooLargeError(status, message, detail);
+    case 422:
+      return new InvalidError(status, message, detail);
+    case 429:
+    case 503:
+      return new BusyError(status, message, detail);
+    default:
+      return new VectrixError(status, message, detail);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Results
+
+export type Metadata = Record<string, unknown>;
+/** The simple filter form: `{ team: "payroll", price: { $lt: 100 } }`. */
+export type Filter = Record<string, unknown>;
+
+export interface Collection {
+  name: string;
+  dimension: number;
+  metric: string;
+  count: number;
+  sizeBytes: number;
+  description: string | null;
+  hasTextIndex: boolean;
+  tags: string[];
+  createdAt: string | null;
+  updatedAt: string | null;
+  indexedFields: string[];
+  /** The whole object as the server sent it. */
+  raw: Record<string, unknown>;
+}
+
 export interface Result {
   id: string;
-  text: string;
   score: number;
-  /** How well it matched, from 0 to 1, whatever found it. */
-  relevance: number | null;
-  relevanceKind: string | null;
-  metadata: Record<string, unknown>;
-  /** Where it came from, as a citation: `report.pdf#page=3`. */
+  text: string;
+  metadata: Metadata;
+  /** `metadata._vx_citation`, else `metadata.source`, else the id. */
   citation: string;
-  /** The same place as a person reads it: `report.pdf, p. 3`. */
-  readableCitation: string;
-  /** What found it: "meaning", "keywords", or both. */
-  matchedBy: string[];
+  raw: Record<string, unknown>;
 }
 
-export interface SearchResults {
-  results: Result[];
-  query: string;
-  mode: string;
-  /** The best result, or undefined when nothing matched. */
-  top: Result | undefined;
-  /** Set when a policy judged the search: the record in the audit trail. */
-  decisionId: string | null;
+export interface Document {
+  docId: string;
+  filename: string;
+  kind: string;
+  source: string | null;
+  version: number;
+  extractedAt: string | null;
+  chunking: Record<string, unknown>;
+  raw: Record<string, unknown>;
 }
 
-export interface SearchOptions {
-  limit?: number;
-  mode?: Mode;
-  /** Narrows by metadata: `{ department: "legal" }`. */
-  filter?: Record<string, unknown>;
+export interface Added {
+  docId: string;
+  chunks: number;
+  replaced: number;
+  quality: number | null;
+  lowQuality: boolean;
+  citations: string[];
+  kept: boolean;
+  raw: Record<string, unknown>;
+}
+
+export interface Source {
+  id: string;
+  address: string;
+  kind: string;
+  every: string | number;
+  raw: Record<string, unknown>;
+}
+
+export interface Refreshed {
+  added: number;
+  updated: number;
+  unchanged: number;
+  removed: number;
+  failed: unknown[];
+  raw: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Options
+
+export interface VectrixClientOptions {
+  /** The server, such as `http://localhost:8000`. */
+  url: string;
+  /** An API key, sent in the `keyHeader` header (`api-key`). Not for browsers. */
+  key?: string;
+  /** A company sign-in token, sent in the `tokenHeader` header (`authorization`) as `Bearer <token>`. */
+  token?: string;
+  /** Per request, in milliseconds. Default 30 000. */
+  timeoutMs?: number;
+  /**
+   * A fetch to use instead of the global one: for a proxy, a private CA or a
+   * client certificate (Node also honours `NODE_EXTRA_CA_CERTS`, and the
+   * `HTTPS_PROXY` family with `NODE_USE_ENV_PROXY=1`).
+   */
+  fetch?: typeof fetch;
+  /**
+   * Allow a key or token over plain `http://` to a host other than this
+   * machine. Default false: such a client refuses to be made.
+   */
+  allowHttp?: boolean;
+  /** The header the key goes in. Default `api-key`; a gateway may want `Ocp-Apim-Subscription-Key`. */
+  keyHeader?: string;
+  /** The header the token goes in, always as `Bearer <token>`. Default `authorization`. */
+  tokenHeader?: string;
+  /** Extra headers on every request. They never replace `user-agent` or the key or token header. */
+  headers?: Record<string, string>;
+  /** The path every route lives under, such as `/acme`. */
+  prefix?: string;
+  /**
+   * Each route's own gateway path, as the gateway team hands them over:
+   * `"api/v1=/files/search, auth=/files/auth"`, or the same as a map. A
+   * request goes to `<gateway path><prefix><route>`, the gateway path being
+   * that of the longest name the route falls under.
+   */
+  gatewayPaths?: string | Record<string, string>;
+}
+
+export interface CreateCollectionOptions {
+  dimension?: number;
+  textIndex?: boolean;
+  metric?: string;
+  description?: string | null;
 }
 
 export interface AddDocumentOptions {
   docId?: string;
-  filename?: string;
-  metadata?: Record<string, unknown>;
-  chunk?: "recursive" | "sentence" | "markdown" | "fixed";
+  metadata?: Metadata;
+  chunk?: string;
   chunkSize?: number;
   overlap?: number;
 }
 
-export interface CreateCollectionOptions {
-  /** Search by exact words as well as meaning. true. */
-  hybrid?: boolean;
-  description?: string;
-  dimension?: number;
-  metric?: "cosine" | "euclidean" | "dot";
+export interface TextPoint {
+  id: string;
+  text: string;
+  metadata?: Metadata;
 }
 
-// ---------------------------------------------------------------- the refusals
-
-/** Every error this client raises on purpose. */
-export class VectrixError extends Error {}
-
-/** The server said no. `status` is its HTTP status; `said` its own words. */
-export class ServerRefused extends VectrixError {
-  readonly status: number;
-  readonly said: string;
-  constructor(status: number, said: string) {
-    super(`The server answered ${status}: ${said}`);
-    this.name = new.target.name;
-    this.status = status;
-    this.said = said;
-  }
+export interface SearchOptions {
+  limit?: number;
+  filter?: Filter | null;
+  rerank?: boolean;
+  mode?: "meaning" | "hybrid";
 }
-/** 401: no key or token, or one the server does not take. */
-export class ServerSignInRequired extends ServerRefused {}
-/** 403: the caller may not do this: its role, its key's collections, or a policy. */
-export class ServerPermissionDenied extends ServerRefused {}
-/** 404: no such collection or document, or none this caller may see. */
-export class ServerNotFound extends ServerRefused {}
-/** 400, 422 or another 4xx: the request is wrong, and the words say what to change. */
-export class ServerRejected extends ServerRefused {}
-/** 429 or 503, still, after waiting and asking again. */
-export class ServerBusy extends ServerRefused {}
 
-// ---------------------------------------------------------------- the routes
+export interface AddSourceOptions {
+  kind?: "feed" | "page" | null;
+  every?: string | number | null;
+}
 
-const MODES: Record<Mode, [string, Record<string, unknown>]> = {
-  hybrid: ["text-hybrid-search", {}],
-  dense: ["text-search", {}],
-  keyword: ["keyword-search", {}],
-  rerank: ["text-search", { rerank: true }],
-};
+export type DocumentBytes = Uint8Array | ArrayBuffer | Blob | string;
 
-/** Every request this client makes, as [method, path] in the server's OpenAPI document. */
-export const OPERATIONS: ReadonlyArray<readonly [string, string]> = [
-  ["GET", "/health"],
-  ["GET", "/ready"],
-  ["GET", "/api/v1/whoami"],
-  ["GET", "/api/v1/collections"],
-  ["POST", "/api/v2/collections"],
-  ["GET", "/api/v1/collections/{name}"],
-  ["DELETE", "/api/v1/collections/{name}"],
-  ["POST", "/api/v1/collections/{name}/text-search"],
-  ["POST", "/api/v1/collections/{name}/text-hybrid-search"],
-  ["POST", "/api/v1/collections/{name}/keyword-search"],
-  ["POST", "/api/v1/collections/{name}/similar"],
-  ["POST", "/api/v1/collections/{name}/text-upsert"],
-  ["POST", "/api/v1/collections/{name}/documents"],
-  ["GET", "/api/v1/collections/{name}/documents"],
-  ["GET", "/api/v1/collections/{name}/documents/{doc_id}"],
-  ["DELETE", "/api/v1/collections/{name}/documents/{doc_id}"],
-  ["GET", "/api/v1/collections/{name}/sources"],
-  ["POST", "/api/v1/collections/{name}/sources"],
-  ["POST", "/api/v1/collections/{name}/sources/refresh"],
-];
+type Query = Record<string, string | number | boolean | null | undefined>;
 
-const AGAIN = new Set([429, 502, 503, 504]);
-
-interface Request {
-  method: string;
-  path: string;
+interface RequestOptions {
+  query?: Query;
   json?: unknown;
-  body?: Uint8Array | Blob;
+  body?: BodyInit;
   headers?: Record<string, string>;
-  query?: Record<string, string | number | undefined>;
 }
 
-function collectionPath(name: string, rest = ""): string {
-  return `/api/v1/collections/${encodeURIComponent(name)}${rest}`;
-}
+// Request bodies typed from the generated schema, so a renamed field fails to compile.
+type CreateCollectionBody = components["schemas"]["CreateCollectionRequestV2"];
+type TextUpsertBody = components["schemas"]["TextUpsertRequest"];
+type TextSearchBody = components["schemas"]["TextSearchRequest"];
+type AddSourceBody = components["schemas"]["AddSourceRequest"];
+type RefreshBody = components["schemas"]["RefreshRequest"];
 
-function documentPath(name: string, docId: string): string {
-  return collectionPath(name, `/documents/${docId.split("/").map(encodeURIComponent).join("/")}`);
-}
+// ---------------------------------------------------------------------------
+// Client
 
-function onThisMachine(host: string): boolean {
-  const name = host.toLowerCase().replace(/\.$/, "");
-  return (
-    name === "localhost" ||
-    name === "[::1]" ||
-    name.endsWith(".localhost") ||
-    /^127\.\d+\.\d+\.\d+$/.test(name)
-  );
-}
+const RETRY_WAITS_MS = [1000, 2000, 4000];
 
-/** The server's address, refused if it is not http(s), or if a key would cross a network in clear text. */
-function checkUrl(url: string, sendsACaller: boolean, allowHttp: boolean): string {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new TypeError(`the server's address must start https:// (or http://): ${url}`);
-  }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new TypeError(`the server's address must start https:// (or http://): ${url}`);
-  }
-  if (parsed.username || parsed.password) {
-    throw new TypeError("put the key in key, not in the address, where logs and history keep it");
-  }
-  if (parsed.protocol === "http:" && sendsACaller && !allowHttp && !onThisMachine(parsed.hostname)) {
-    throw new TypeError(
-      `${parsed.hostname} is reached over http://, which would send the key in clear text: ` +
-        "use https://, or allowHttp: true on a network you trust",
-    );
-  }
-  return url.replace(/\/+$/, "");
-}
-
-/** The version of VectrixDB this client was written for. */
-export const VERSION = "2.2.0";
-
-/** The headers every request carries besides the caller: never one that names the caller. */
-function extraHeaders(
-  headers: Record<string, string> | undefined,
-  userAgent: string | undefined,
-  keyHeader: string,
-): Record<string, string> {
-  const extra: Record<string, string> = { ...(headers ?? {}) };
-  const taken = Object.keys(extra)
-    .map((k) => k.toLowerCase())
-    .filter((k) => k === "authorization" || k === keyHeader.toLowerCase());
-  if (taken.length) {
-    throw new TypeError(`${taken.join(", ")} names the caller: give it as key or token, not in headers`);
-  }
-  extra["user-agent"] = userAgent ? `${userAgent} vectrixdb-js/${VERSION}` : `vectrixdb-js/${VERSION}`;
-  return extra;
-}
-
-function refusal(status: number, said: string): ServerRefused {
-  const kind =
-    status === 401
-      ? ServerSignInRequired
-      : status === 403
-        ? ServerPermissionDenied
-        : status === 404
-          ? ServerNotFound
-          : status === 429 || status === 503
-            ? ServerBusy
-            : status >= 400 && status < 500
-              ? ServerRejected
-              : ServerRefused;
-  return new kind(status, said);
-}
-
-async function saidBy(response: Response): Promise<string> {
-  const text = await response.text();
-  try {
-    const body = JSON.parse(text);
-    for (const key of ["detail", "message", "error"]) {
-      const value = body?.[key];
-      if (typeof value === "string" && value) return value;
-      if (Array.isArray(value) && value.length)
-        return value.map((v) => (typeof v === "object" && v && "msg" in v ? v.msg : String(v))).join("; ");
-    }
-    return text.slice(0, 300);
-  } catch {
-    return text.trim().slice(0, 300) || `HTTP ${response.status}`;
-  }
-}
-
-/** An answer's payload: the `data` of the server's envelope, or the body as it came. */
-function payload(body: unknown): any {
-  if (body && typeof body === "object" && "data" in body) {
-    const keys = Object.keys(body);
-    if (keys.every((k) => ["ok", "data", "message", "error"].includes(k))) return (body as any).data;
-  }
-  return body;
-}
-
-function waitMs(response: Response | null, attempt: number): number {
-  const asked = Number(response?.headers.get("retry-after") ?? "");
-  return Math.min(30000, Math.max(Number.isFinite(asked) ? asked * 1000 : 0, 500 * 2 ** attempt));
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function toResult(hit: any): Result {
-  const metadata: Record<string, unknown> = { ...(hit.metadata ?? {}) };
-  const citation = String(metadata._vx_citation ?? hit.id);
-  return {
-    id: String(hit.id),
-    text: String(hit.text ?? metadata.text ?? ""),
-    score: Number(hit.score ?? 0),
-    relevance: typeof hit.relevance === "number" ? hit.relevance : null,
-    relevanceKind: hit.relevance_kind ?? null,
-    metadata,
-    citation,
-    readableCitation: String(metadata._vx_readable_citation ?? citation),
-    matchedBy: Array.isArray(hit.matched_by) ? hit.matched_by : [],
-  };
-}
-
-function toResults(data: any, query: string, mode: string): SearchResults {
-  const results = (Array.isArray(data?.results) ? data.results : []).map(toResult);
-  return { results, query, mode, top: results[0], decisionId: data?.decision_id ?? null };
-}
-
-// ---------------------------------------------------------------- the client
-
-/** A VectrixDB server, as one caller. Made by {@link connect}. */
-export class Client {
+export class VectrixClient {
   readonly url: string;
-  readonly retries: number;
-  readonly #key?: string;
-  readonly #token?: Token;
-  readonly #keyHeader: string;
+  readonly prefix: string;
+  readonly gatewayPaths: Readonly<Record<string, string>>;
+  readonly keyHeader: string;
+  readonly tokenHeader: string;
+  // ES private fields: not enumerable, so never in JSON, inspect or a spread.
+  readonly #key: string | undefined;
+  readonly #token: string | undefined;
+  readonly #headers: Record<string, string>;
   readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
-  readonly #extra: Record<string, string>;
 
-  constructor(url: string, options: ConnectOptions = {}) {
-    if (options.key && options.token) {
-      throw new TypeError("give key or token, not both: the server takes one caller per request");
+  constructor(options: VectrixClientOptions) {
+    if (!options.url) throw new TypeError("VectrixClient needs a url");
+    this.url = options.url.replace(/\/+$/, "");
+    const parsed = parseUrl(this.url);
+    if (parsed && (parsed.username || parsed.password)) {
+      // Not quoted: the password is in it.
+      throw new TypeError("url: an address with a user name or password in it is refused; pass a key or token instead");
     }
-    // A fetch of the caller's own is theirs to secure: a proxy, a test.
-    this.url = checkUrl(
-      url,
-      Boolean(options.key || options.token) && !options.fetch,
-      options.allowHttp ?? false,
-    );
-    this.retries = Math.max(0, options.retries ?? 3);
-    this.#key = options.key;
-    this.#token = options.token;
-    this.#keyHeader = options.keyHeader ?? "api-key";
-    this.#timeoutMs = options.timeoutMs ?? 60000;
-    const found = options.fetch ?? globalThis.fetch;
-    if (!found) throw new TypeError("no fetch here: pass options.fetch, or use Node 18 or later");
-    this.#fetch = found.bind(globalThis);
-    this.#extra = extraHeaders(options.headers, options.userAgent, this.#keyHeader);
-  }
-
-  async #auth(): Promise<Record<string, string>> {
-    if (this.#key) return { [this.#keyHeader]: this.#key };
-    if (this.#token) {
-      const value = typeof this.#token === "function" ? await this.#token() : this.#token;
-      return { Authorization: `Bearer ${value}` };
+    this.#key = options.key || undefined;
+    this.#token = options.token || undefined;
+    for (const [what, value] of [["key", this.#key], ["token", this.#token]] as const) {
+      // Checked here so a bad character never reaches fetch, whose error would quote the value.
+      if (value !== undefined && !HEADER_VALUE.test(value)) {
+        throw new TypeError(`the ${what} holds characters a header cannot`);
+      }
     }
-    return {};
-  }
-
-  /** @internal One request, asked again while the server is busy; a refusal thrown. */
-  async send(request: Request): Promise<Response> {
-    let attempt = 0;
-    for (;;) {
-      const url = new URL(this.url + request.path);
-      for (const [k, v] of Object.entries(request.query ?? {})) {
-        if (v !== undefined) url.searchParams.set(k, String(v));
-      }
-      const headers: Record<string, string> = {
-        ...this.#extra,
-        ...(await this.#auth()),
-        ...(request.headers ?? {}),
-      };
-      let body: BodyInit | undefined;
-      if (request.json !== undefined) {
-        headers["content-type"] = "application/json";
-        body = JSON.stringify(request.json);
-      } else if (request.body !== undefined) {
-        body = request.body as BodyInit;
-      }
-      let response: Response;
-      try {
-        response = await this.#fetch(url, {
-          method: request.method,
-          headers,
-          body,
-          redirect: "manual",
-          signal: AbortSignal.timeout(this.#timeoutMs),
-        });
-      } catch (error) {
-        if (attempt >= this.retries) throw error;
-        await sleep(waitMs(null, attempt++));
-        continue;
-      }
-      if (AGAIN.has(response.status) && attempt < this.retries) {
-        await sleep(waitMs(response, attempt++));
-        continue;
-      }
-      if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
-        // Never followed, so a key never goes to a second host: the caller is told where instead.
-        const where = response.headers.get("location") ?? "another address";
-        throw new ServerRefused(
-          response.status,
-          `the server sent this request to ${where}; connect to that address instead`,
+    if ((this.#key || this.#token) && !options.allowHttp) {
+      const host = httpHost(this.url);
+      if (host !== undefined && !isLoopback(host)) {
+        throw new TypeError(
+          `refusing to send a ${this.#token ? "token" : "key"} over plain http to ${host}: ` +
+            "use https, or set allowHttp: true",
         );
       }
-      if (response.status >= 400) throw refusal(response.status, await saidBy(response));
-      return response;
     }
-  }
-
-  async #data(request: Request): Promise<any> {
-    const response = await this.send(request);
-    const text = await response.text();
-    if (!text) return null;
-    try {
-      return payload(JSON.parse(text));
-    } catch {
-      return text;
+    this.keyHeader = headerName(options.keyHeader, DEFAULT_KEY_HEADER, "keyHeader");
+    this.tokenHeader = headerName(options.tokenHeader, DEFAULT_TOKEN_HEADER, "tokenHeader");
+    // The header the credential goes in wins over an extra one of the same name.
+    const reserved = new Set(["user-agent"]);
+    if (this.#token) reserved.add(this.tokenHeader);
+    else if (this.#key) reserved.add(this.keyHeader);
+    this.#headers = {};
+    for (const [name, value] of Object.entries(options.headers ?? {})) {
+      const lower = headerName(name, "", "headers");
+      if (typeof value !== "string" || !HEADER_VALUE.test(value)) {
+        throw new TypeError(`headers: the value of ${lower} holds characters a header cannot`);
+      }
+      if (!reserved.has(lower)) this.#headers[lower] = value;
     }
+    this.prefix = names(options.prefix, "prefix", "a route prefix");
+    this.gatewayPaths = Object.freeze(readGatewayPaths(options.gatewayPaths));
+    this.#timeoutMs = options.timeoutMs ?? 30_000;
+    const f = options.fetch ?? globalThis.fetch;
+    if (typeof f !== "function") throw new TypeError("no fetch available; pass one in options.fetch");
+    this.#fetch = f;
   }
 
-  /** Whether the server is up: /health, which needs no caller. */
-  health(): Promise<{ status: string }> {
-    return this.#data({ method: "GET", path: "/health" });
+  /** The address a route is requested at: `<url><gateway path><prefix><route>`. */
+  address(route: string): string {
+    const bare = route.split("?", 1)[0]?.replace(/^\/+/, "") ?? "";
+    let best = "";
+    for (const name of Object.keys(this.gatewayPaths)) {
+      if ((bare === name || bare.startsWith(`${name}/`)) && name.length > best.length) best = name;
+    }
+    return this.url + (best ? this.gatewayPaths[best] : "") + this.prefix + route;
   }
 
-  /** Whether its models are loaded and it takes searches: /ready. */
+  toString(): string {
+    return `VectrixClient(${this.url})`;
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      url: this.url,
+      prefix: this.prefix,
+      gatewayPaths: this.gatewayPaths,
+      keyHeader: this.keyHeader,
+      tokenHeader: this.tokenHeader,
+    };
+  }
+
+  [Symbol.for("nodejs.util.inspect.custom")](): string {
+    return this.toString();
+  }
+
+  // -- server ---------------------------------------------------------------
+
+  /** True when the process answers. */
+  async health(): Promise<boolean> {
+    const res = await this.request(routes.health.method, routes.health.path);
+    return res.ok;
+  }
+
+  /** True when the models are loaded. Falls back to `/health` on a server without `/ready`. */
   async ready(): Promise<boolean> {
     try {
-      await this.send({ method: "GET", path: "/ready" });
-      return true;
-    } catch (error) {
-      if (error instanceof ServerBusy) return false;
-      throw error;
+      const res = await this.request(routes.ready.method, routes.ready.path);
+      return res.ok;
+    } catch (err) {
+      if (err instanceof NotFoundError) return this.health();
+      // 503 after the retries: the models are still loading.
+      if (err instanceof BusyError) return false;
+      throw err;
     }
   }
 
-  /** Who this client is on the server: how it came in, its role, what it may do, what it reaches. */
-  whoami(): Promise<Record<string, unknown>> {
-    return this.#data({ method: "GET", path: "/api/v1/whoami" });
+  /** The `data` object of `GET /auth/me`, as the server sends it. */
+  async whoami(): Promise<Record<string, unknown>> {
+    const res = await this.request(routes.whoami.method, routes.whoami.path);
+    return asObject(unwrapData(await res.json()));
   }
 
-  /** The collections this caller reaches, each with its size. */
-  async collections(): Promise<Array<Record<string, any>>> {
-    const data = await this.#data({ method: "GET", path: "/api/v1/collections" });
-    return Array.isArray(data) ? data : (data?.collections ?? []);
+  // -- collections ----------------------------------------------------------
+
+  async collections(): Promise<Collection[]> {
+    const res = await this.request(routes.collections.method, routes.collections.path);
+    // One of the three list routes: the list sits at the top, not under `data`.
+    const body = asObject(await res.json());
+    return asArray(body.collections).map(toCollection);
   }
 
-  /** Make a collection, searchable by meaning and exact words unless hybrid is false. */
+  async describe(name: string): Promise<Collection> {
+    const res = await this.request(routes.describe.method, fill(routes.describe.path, { name }));
+    return toCollection(unwrapData(await res.json()));
+  }
+
   async createCollection(name: string, options: CreateCollectionOptions = {}): Promise<Collection> {
-    const hybrid = options.hybrid ?? true;
-    await this.#data({
-      method: "POST",
-      path: "/api/v2/collections",
-      json: {
-        name,
-        dimension: options.dimension ?? 384,
-        metric: options.metric ?? "cosine",
-        enable_text_index: hybrid,
-        tags: [hybrid ? "hybrid" : "dense"],
-        ...(options.description ? { description: options.description } : {}),
-      },
-    });
-    return this.collection(name);
+    const json: CreateCollectionBody = {
+      name,
+      dimension: options.dimension ?? 384,
+      enable_text_index: options.textIndex ?? true,
+      metric: options.metric ?? "cosine",
+      description: options.description ?? null,
+    };
+    const res = await this.request(routes.createCollection.method, routes.createCollection.path, { json });
+    return toCollection(unwrapData(await res.json()));
   }
 
-  /** Delete a collection and everything in it, for good. */
   async deleteCollection(name: string): Promise<void> {
-    await this.send({ method: "DELETE", path: collectionPath(name) });
+    await this.request(routes.deleteCollection.method, fill(routes.deleteCollection.path, { name }));
   }
 
-  /** One collection. */
-  collection(name: string): Collection {
-    return new Collection(this, name, (r) => this.#data(r));
-  }
-}
+  // -- documents ------------------------------------------------------------
 
-/** One collection on a server: search it, add to it, read what it holds. */
-export class Collection {
-  readonly client: Client;
-  readonly name: string;
-  readonly #data: (request: Request) => Promise<any>;
-
-  constructor(client: Client, name: string, data: (request: Request) => Promise<any>) {
-    this.client = client;
-    this.name = name;
-    this.#data = data;
-  }
-
-  /** Its size, how it is searched, and the metadata fields it can be filtered on. */
-  describe(): Promise<Record<string, any>> {
-    return this.#data({ method: "GET", path: collectionPath(this.name) });
-  }
-
-  /** Search as this caller. */
-  async search(query: string, options: SearchOptions = {}): Promise<SearchResults> {
-    const mode = options.mode ?? "hybrid";
-    const route = MODES[mode];
-    if (!route) throw new TypeError(`mode is one of ${Object.keys(MODES).join(", ")}, not ${mode}`);
-    const data = await this.#data({
-      method: "POST",
-      path: collectionPath(this.name, `/${route[0]}`),
-      json: {
-        query_text: query,
-        limit: options.limit ?? 10,
-        ...route[1],
-        ...(options.filter ? { filter: options.filter } : {}),
+  async addDocument(
+    collection: string,
+    bytes: DocumentBytes,
+    filename: string,
+    options: AddDocumentOptions = {},
+  ): Promise<Added> {
+    const res = await this.request(routes.addDocument.method, fill(routes.addDocument.path, { name: collection }), {
+      body: toBody(bytes),
+      headers: {
+        "content-type": "application/octet-stream",
+        // The server percent-decodes this header, so names outside ASCII survive.
+        "x-filename": encodeURIComponent(filename),
       },
-    });
-    return toResults(data, query, mode);
-  }
-
-  /** The chunks most like one, by the id a search result gives. */
-  async similar(id: string, options: Omit<SearchOptions, "mode"> = {}): Promise<SearchResults> {
-    const data = await this.#data({
-      method: "POST",
-      path: collectionPath(this.name, "/similar"),
-      json: { id, limit: options.limit ?? 10, ...(options.filter ? { filter: options.filter } : {}) },
-    });
-    return toResults(data, id, "similar");
-  }
-
-  /** Add records, the server embedding each. Returns how many were written. */
-  async add(
-    texts: string | string[],
-    options: { ids?: string[]; metadata?: Array<Record<string, unknown>> } = {},
-  ): Promise<number> {
-    const all = typeof texts === "string" ? [texts] : texts;
-    if (options.ids && options.ids.length !== all.length) throw new TypeError("ids has to have one id a text");
-    if (options.metadata && options.metadata.length !== all.length)
-      throw new TypeError("metadata has to have one entry a text");
-    const points = all.map((text, i) => ({
-      id: options.ids?.[i] ?? crypto.randomUUID().replaceAll("-", ""),
-      text,
-      ...(options.metadata?.[i] ? { payload: options.metadata[i] } : {}),
-    }));
-    const data = await this.#data({
-      method: "POST",
-      path: collectionPath(this.name, "/text-upsert"),
-      json: { points },
-    });
-    return typeof data?.added === "number" ? data.added : all.length;
-  }
-
-  /** Read, cut and index a document: its bytes, a Blob, or a string of Markdown. */
-  addDocument(source: string | Uint8Array | Blob, options: AddDocumentOptions = {}): Promise<Record<string, any>> {
-    const body = typeof source === "string" ? new TextEncoder().encode(source) : source;
-    const named =
-      options.filename ??
-      (typeof Blob !== "undefined" && source instanceof Blob && "name" in source ? String((source as any).name) : undefined) ??
-      (options.docId && /\.(md|txt)$/i.test(options.docId) ? options.docId : `${options.docId ?? "document"}.md`);
-    return this.#data({
-      method: "POST",
-      path: collectionPath(this.name, "/documents"),
-      body,
-      headers: { "content-type": "application/octet-stream", "x-filename": encodeURIComponent(named) },
       query: {
         doc_id: options.docId,
-        metadata: options.metadata ? JSON.stringify(options.metadata) : undefined,
+        metadata: options.metadata === undefined ? undefined : JSON.stringify(options.metadata),
         chunk: options.chunk,
         chunk_size: options.chunkSize,
         overlap: options.overlap,
       },
     });
+    // A flat object with `ok` and the fields, not the `data` envelope.
+    return toAdded(asObject(await res.json()));
   }
 
-  /** The documents it holds, on a server that keeps them. */
-  async documents(): Promise<Array<Record<string, any>>> {
-    const data = await this.#data({ method: "GET", path: collectionPath(this.name, "/documents") });
-    return Array.isArray(data) ? data : (data?.documents ?? []);
+  /** Upserts texts the server embeds. Returns how many were added. */
+  async addTexts(collection: string, points: TextPoint[]): Promise<number> {
+    const json: TextUpsertBody = {
+      // The wire calls a point's metadata `payload`.
+      points: points.map((p) => ({ id: p.id, text: p.text, payload: p.metadata ?? null })),
+    };
+    const res = await this.request(routes.addTexts.method, fill(routes.addTexts.path, { name: collection }), { json });
+    const data = asObject(unwrapData(await res.json()));
+    return num(data.added);
   }
 
-  /** A document's Markdown, as it was indexed. */
-  async document(docId: string): Promise<string> {
-    const response = await this.client.send({ method: "GET", path: documentPath(this.name, docId) });
-    return response.text();
+  async search(collection: string, query: string, options: SearchOptions = {}): Promise<Result[]> {
+    const route = options.mode === "hybrid" ? routes.hybridSearch : routes.search;
+    const json: TextSearchBody = {
+      query_text: query,
+      limit: options.limit ?? 10,
+      filter: options.filter ?? null,
+      rerank: options.rerank ?? false,
+    };
+    const res = await this.request(route.method, fill(route.path, { name: collection }), { json });
+    const data = asObject(unwrapData(await res.json()));
+    return asArray(data.results).map(toResult);
   }
 
-  /** Delete a document and every chunk of it, for good. Returns how many chunks went. */
-  async deleteDocument(docId: string): Promise<number> {
-    const data = await this.#data({ method: "DELETE", path: documentPath(this.name, docId) });
-    return Number(data?.chunks_removed ?? 0);
+  async documents(collection: string): Promise<Document[]> {
+    const res = await this.request(routes.documents.method, fill(routes.documents.path, { name: collection }));
+    const body = asObject(await res.json());
+    return asArray(body.documents).map(toDocument);
   }
 
-  /** The feeds and pages it keeps up with. */
-  async sources(): Promise<Array<Record<string, any>>> {
-    const data = await this.#data({ method: "GET", path: collectionPath(this.name, "/sources") });
-    return Array.isArray(data) ? data : (data?.sources ?? []);
+  /** The Markdown a document was indexed from. */
+  async openDocument(collection: string, docId: string): Promise<string> {
+    const res = await this.request(
+      routes.openDocument.method,
+      fill(routes.openDocument.path, { name: collection, doc_id: docId }),
+    );
+    return res.text();
   }
 
-  /** Keep up with a feed or a page, read every `every` (30m, 6h, 1d). Nothing is written until a refresh. */
-  async addSource(address: string, options: { every?: string; kind?: "feed" | "page" } = {}): Promise<Record<string, any>> {
-    const data = await this.#data({
-      method: "POST",
-      path: collectionPath(this.name, "/sources"),
-      json: { address, every: options.every ?? "6h", ...(options.kind ? { kind: options.kind } : {}) },
-    });
-    return data?.source ?? data ?? {};
+  /** Removes a document. Returns the number of chunks removed. */
+  async deleteDocument(collection: string, docId: string): Promise<number> {
+    const res = await this.request(
+      routes.deleteDocument.method,
+      fill(routes.deleteDocument.path, { name: collection, doc_id: docId }),
+    );
+    const body = asObject(await res.json());
+    return num(body.chunks_removed);
   }
 
-  /** Read its sources now: one, or every one that is due; force reads every one. */
-  refreshSources(options: { source?: string; force?: boolean } = {}): Promise<Record<string, any>> {
-    return this.#data({
-      method: "POST",
-      path: collectionPath(this.name, "/sources/refresh"),
-      json: { force: options.force ?? false, ...(options.source ? { source: options.source } : {}) },
-    });
+  // -- sources --------------------------------------------------------------
+
+  async sources(collection: string): Promise<Source[]> {
+    const res = await this.request(routes.sources.method, fill(routes.sources.path, { name: collection }));
+    const body = asObject(await res.json());
+    return asArray(body.sources).map(toSource);
+  }
+
+  async addSource(collection: string, address: string, options: AddSourceOptions = {}): Promise<Source> {
+    const json: AddSourceBody = { address };
+    if (options.kind != null) json.kind = options.kind;
+    if (options.every != null) json.every = options.every;
+    const res = await this.request(routes.addSource.method, fill(routes.addSource.path, { name: collection }), { json });
+    const body = asObject(await res.json());
+    // Flat: `{ok, source: {...}}`.
+    return toSource(body.source ?? body);
+  }
+
+  async refreshSources(collection: string): Promise<Refreshed> {
+    const json: RefreshBody = {};
+    const res = await this.request(
+      routes.refreshSources.method,
+      fill(routes.refreshSources.path, { name: collection }),
+      { json },
+    );
+    return toRefreshed(asObject(await res.json()));
+  }
+
+  async deleteSource(collection: string, sourceId: string, deleteDocuments = false): Promise<void> {
+    await this.request(
+      routes.deleteSource.method,
+      fill(routes.deleteSource.path, { name: collection, source_id: sourceId }),
+      { query: { delete_documents: deleteDocuments } },
+    );
+  }
+
+  // -- the wire -------------------------------------------------------------
+
+  private async request(method: string, path: string, options: RequestOptions = {}): Promise<Response> {
+    const url = this.address(path + queryString(options.query));
+    const headers: Record<string, string> = {
+      accept: "application/json, text/markdown, text/plain",
+      ...this.#headers,
+      ...options.headers,
+    };
+    let body: BodyInit | undefined = options.body;
+    if (options.json !== undefined) {
+      headers["content-type"] = "application/json";
+      body = JSON.stringify(options.json);
+    }
+    // Set last, so nothing above can replace them.
+    if (this.#token) headers[this.tokenHeader] = `Bearer ${this.#token}`;
+    else if (this.#key) headers[this.keyHeader] = this.#key;
+    // Browsers set their own user-agent and drop this one; only set it elsewhere.
+    if (typeof document === "undefined") headers["user-agent"] = USER_AGENT;
+
+    for (let attempt = 0; ; attempt++) {
+      // Never followed: the key would go with it to wherever it points.
+      const res = await this.send(url, { method: method.toUpperCase(), headers, body, redirect: "manual" });
+      if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
+        await res.body?.cancel().catch(() => undefined);
+        const status = res.status || "a redirect";
+        const location = res.headers.get("location") ?? "an address the browser does not show";
+        throw new VectrixError(
+          res.status,
+          this.#redact(`refusing to follow ${status} from ${url} to ${location}: a client never follows a redirect`),
+        );
+      }
+      if (res.redirected) {
+        // A fetch of the caller's own that followed it anyway: refuse what came back.
+        await res.body?.cancel().catch(() => undefined);
+        throw new VectrixError(
+          0,
+          this.#redact(`refusing a response from ${url} that followed a redirect to ${res.url || "another address"}`),
+        );
+      }
+      if (res.ok) return res;
+      const retryable = res.status === 429 || res.status === 503;
+      if (retryable && attempt < RETRY_WAITS_MS.length) {
+        await res.body?.cancel().catch(() => undefined);
+        await sleep(retryAfterMs(res.headers.get("retry-after")) ?? RETRY_WAITS_MS[attempt] ?? 1000);
+        continue;
+      }
+      throw await this.refusal(res, url);
+    }
+  }
+
+  private async send(url: string, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
+    try {
+      return await this.#fetch(url, { ...init, signal: controller.signal });
+    } catch (err) {
+      if (controller.signal.aborted) {
+        throw new VectrixError(0, this.#redact(`timed out after ${this.#timeoutMs} ms: ${url}`));
+      }
+      const cause = err instanceof Error ? causeMessage(err) : String(err);
+      throw new VectrixError(0, this.#redact(`could not reach ${url}: ${cause}`));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** The message with the key and token taken out, wherever they came from. */
+  #redact(message: string): string {
+    let out = message;
+    for (const secret of [this.#key, this.#token]) {
+      if (secret) out = out.split(secret).join("[redacted]");
+    }
+    return out;
+  }
+
+  private async refusal(res: Response, url: string): Promise<VectrixError> {
+    let message: string | undefined;
+    let detail: unknown = null;
+    const text = await res.text().catch(() => "");
+    try {
+      const body: unknown = JSON.parse(text);
+      if (isObject(body)) {
+        if (typeof body.message === "string" && body.message) message = body.message;
+        detail = body.detail ?? null;
+        // Not one of ours: a bare FastAPI `{"detail": "..."}`.
+        if (message === undefined && typeof body.detail === "string") message = body.detail;
+      }
+    } catch {
+      // Not JSON: an HTML page from a proxy, say.
+    }
+    if (typeof detail === "string") detail = this.#redact(detail);
+    return errorFor(res.status, this.#redact(message ?? `${res.status} from ${url}`), detail);
   }
 }
 
-/** A VectrixDB server at `url`, as a key or a token. */
-export function connect(url: string, options: ConnectOptions = {}): Client {
-  return new Client(url, options);
+// ---------------------------------------------------------------------------
+// Safety and the company network
+
+const DEFAULT_KEY_HEADER = "api-key";
+const DEFAULT_TOKEN_HEADER = "authorization";
+/** RFC 9110 token characters: what a header's name may be made of. */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+/** A header value we send: no control characters (tab, CR, LF, NUL, DEL...), nothing past one byte. */
+const HEADER_VALUE = /^[\x20-\x7e\x80-\xff]*$/;
+
+function headerName(given: string | undefined, fallback: string, option: string): string {
+  const name = (given ?? "").trim() || fallback;
+  if (!HEADER_NAME.test(name)) throw new TypeError(`${option}: ${JSON.stringify(name)} is not a header name`);
+  return name.toLowerCase();
+}
+
+/** The address parsed, or undefined when it cannot be (fetch will say what is wrong with it). */
+function parseUrl(url: string): URL | undefined {
+  try {
+    const base = (globalThis as { location?: { href?: string } }).location?.href;
+    return base ? new URL(url, base) : new URL(url);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The host of an `http://` address, or undefined for any other. */
+function httpHost(url: string): string | undefined {
+  const parsed = parseUrl(url);
+  return parsed?.protocol === "http:" ? parsed.hostname.toLowerCase() : undefined;
+}
+
+/** This machine: `localhost`, `127.0.0.0/8`, `::1`. */
+function isLoopback(host: string): boolean {
+  return host === "localhost" || host === "::1" || host === "[::1]" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/** `/one/two`, or `""`: a path of names, whatever it was written as. */
+function names(value: unknown, option: string, what: string): string {
+  const parts = String(value ?? "").trim().split("/").filter((p) => p !== "");
+  if (parts.some((p) => p === "." || p === "..")) {
+    throw new TypeError(`${option}: ${what} is a path of names, not ${JSON.stringify(String(value))}`);
+  }
+  return parts.length ? `/${parts.join("/")}` : "";
+}
+
+/** Each route's gateway path, `{ "api/v1": "/files/search" }`, read the way the server reads it. */
+function readGatewayPaths(value: string | Record<string, string> | undefined): Record<string, string> {
+  const option = "gatewayPaths";
+  if (!value) return {};
+  const pairs: [string, string][] = [];
+  if (typeof value === "string") {
+    for (const entry of value.split(",")) {
+      if (!entry.trim()) continue;
+      const at = entry.indexOf("=");
+      if (at < 0) throw new TypeError(`${option}: a gateway path is route=path, not ${JSON.stringify(entry.trim())}`);
+      pairs.push([entry.slice(0, at), entry.slice(at + 1)]);
+    }
+  } else {
+    for (const [route, path] of Object.entries(value)) pairs.push([route, String(path ?? "")]);
+  }
+  // No prototype, so a route named `__proto__` is just a name.
+  const paths = Object.create(null) as Record<string, string>;
+  for (const [route, path] of pairs) {
+    const name = names(route, option, "a route").slice(1);
+    const where = names(path, option, "a gateway path");
+    if (!name || !where) {
+      const given = `${route.trim()}=${path.trim()}`;
+      throw new TypeError(`${option}: a gateway path is route=path with both given, not ${JSON.stringify(given)}`);
+    }
+    if (Object.prototype.hasOwnProperty.call(paths, name)) {
+      throw new TypeError(`${option}: ${name} is given two gateway paths`);
+    }
+    paths[name] = where;
+  }
+  return paths;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+
+function fill(path: string, params: Record<string, string>): string {
+  // Ids are encoded whole, `/` included, so "a/b.md" is one path segment.
+  return path.replace(/\{(\w+)\}/g, (_, k: string) => segment(params[k], k));
+}
+
+/**
+ * One path segment for a name or id. Empty, `.` and `..` are refused before
+ * anything is sent: URL parsing collapses dot segments (even `%2e%2e`), so
+ * `deleteDocument("c", "..")` would otherwise become `DELETE /api/v1/collections/c`.
+ */
+function segment(value: string | undefined, what: string): string {
+  const s = String(value ?? "");
+  if (s === "" || s === "." || s === "..") {
+    throw new TypeError(`${what}: ${JSON.stringify(s)} is not a name or id that can be sent`);
+  }
+  return encodeURIComponent(s);
+}
+
+function queryString(query: Query | undefined): string {
+  if (!query) return "";
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) {
+    if (v !== undefined && v !== null) q.set(k, String(v));
+  }
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
+function toBody(bytes: DocumentBytes): BodyInit {
+  if (typeof bytes === "string") return new TextEncoder().encode(bytes);
+  return bytes;
+}
+
+function retryAfterMs(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const at = Date.parse(header);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function causeMessage(err: Error): string {
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause instanceof Error && cause.message) return cause.message;
+  return err.message;
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function asObject(v: unknown): Record<string, unknown> {
+  return isObject(v) ? v : {};
+}
+
+function asArray(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : [];
+}
+
+/** Most routes answer `{ok, message, data}`; the client returns `data`. */
+function unwrapData(body: unknown): unknown {
+  return isObject(body) && "data" in body ? body.data : body;
+}
+
+function str(v: unknown, fallback = ""): string {
+  return typeof v === "string" ? v : v == null ? fallback : String(v);
+}
+
+function strOrNull(v: unknown): string | null {
+  return typeof v === "string" ? v : null;
+}
+
+function num(v: unknown, fallback = 0): number {
+  return typeof v === "number" ? v : typeof v === "string" && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : fallback;
+}
+
+function bool(v: unknown): boolean {
+  return v === true;
+}
+
+function strings(v: unknown): string[] {
+  return asArray(v).map((x) => str(x));
+}
+
+function toCollection(v: unknown): Collection {
+  const raw = asObject(v);
+  return {
+    name: str(raw.name),
+    dimension: num(raw.dimension),
+    metric: str(raw.metric),
+    count: num(raw.count),
+    sizeBytes: num(raw.size_bytes),
+    description: strOrNull(raw.description),
+    hasTextIndex: bool(raw.has_text_index),
+    tags: strings(raw.tags),
+    createdAt: strOrNull(raw.created_at),
+    updatedAt: strOrNull(raw.updated_at),
+    indexedFields: strings(raw.indexed_fields),
+    raw,
+  };
+}
+
+function toResult(v: unknown): Result {
+  const raw = asObject(v);
+  const metadata = asObject(raw.metadata);
+  const id = str(raw.id);
+  const citation = typeof metadata._vx_citation === "string" ? metadata._vx_citation
+    : typeof metadata.source === "string" ? metadata.source
+    : id;
+  return {
+    id,
+    score: num(raw.score),
+    text: str(raw.text ?? metadata.text),
+    metadata,
+    citation,
+    raw,
+  };
+}
+
+function toDocument(v: unknown): Document {
+  const raw = asObject(v);
+  return {
+    docId: str(raw.doc_id),
+    filename: str(raw.filename),
+    kind: str(raw.kind),
+    source: strOrNull(raw.source),
+    version: num(raw.version),
+    extractedAt: strOrNull(raw.extracted_at),
+    chunking: asObject(raw.chunking),
+    raw,
+  };
+}
+
+function toAdded(raw: Record<string, unknown>): Added {
+  return {
+    docId: str(raw.doc_id),
+    chunks: num(raw.chunks),
+    replaced: num(raw.replaced),
+    quality: typeof raw.quality === "number" ? raw.quality : null,
+    lowQuality: bool(raw.low_quality),
+    citations: strings(raw.citations),
+    kept: bool(raw.kept),
+    raw,
+  };
+}
+
+function toSource(v: unknown): Source {
+  const raw = asObject(v);
+  return {
+    id: str(raw.id),
+    address: str(raw.address),
+    kind: str(raw.kind),
+    every: typeof raw.every === "number" ? raw.every : str(raw.every),
+    raw,
+  };
+}
+
+function toRefreshed(raw: Record<string, unknown>): Refreshed {
+  return {
+    added: num(raw.added),
+    updated: num(raw.updated),
+    unchanged: num(raw.unchanged),
+    removed: num(raw.removed),
+    failed: asArray(raw.failed),
+    raw,
+  };
 }

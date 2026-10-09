@@ -128,21 +128,23 @@ nav:
       - Run without a network: how-to/offline.md
       - Back up, move and restore: how-to/export-import.md
       - Use the dashboard: how-to/dashboard.md
-  - Build on it:
-      - Call a server from your code: how-to/clients.md
-      - Use the command line against a server: how-to/command-line.md
-      - Wrap it for your company: how-to/wrap-for-your-company.md
-      - Distribute it through JFrog Artifactory: how-to/artifactory.md
+  - SDKs and CLI:
+      - SDKs:
+          - Use it from Python, TypeScript, Go or Rust: how-to/clients.md
+          - Use it from async code: how-to/async.md
+      - Command line:
+          - Use the command line on a server: how-to/command-line-server.md
+      - Your company's own:
+          - Ship your own client or command on it: how-to/wrap-it.md
+          - Run it inside your company's registry: how-to/inside-your-registry.md
       - Run the REST API: how-to/rest-api.md
       - Build an app on it: how-to/build-an-app.md
-      - Use it from async code: how-to/async.md
       - Handle errors: how-to/handle-errors.md
       - LangChain, LlamaIndex, plugins, CLI: how-to/integrations.md
       - Tips and tricks: how-to/tips.md
   - Reference:
       - Easy API: reference/easy.md
-      - Client: reference/client.md
-      - Company defaults: reference/company.md
+      - Python client: reference/client.md
       - Async: reference/aio.md
       - Sources: reference/sources.md
       - Ingest: reference/ingest.md
