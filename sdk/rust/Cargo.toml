@@ -2,7 +2,7 @@
 name = "vectrixdb"
 version = "2.2.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/knowusuboaky/VectrixDB"
 description = "Client for VectrixDB: collections, documents, text search, sources."
