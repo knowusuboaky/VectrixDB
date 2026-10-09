@@ -24,7 +24,7 @@ use vectrixdb::{AddOptions, Client, CreateOptions, SearchOptions};
 
 #[tokio::main]
 async fn main() -> vectrixdb::Result<()> {
-    let db = Client::new("http://127.0.0.1:8080").key("your-key").build()?;
+    let db = Client::new("http://127.0.0.1:8000").key("your-key").build()?;
     db.create_collection("docs", CreateOptions::default()).await?;
     let bytes = std::fs::read("handbook.md").unwrap();
     db.add_document("docs", &bytes, "handbook.md", AddOptions::default()).await?;

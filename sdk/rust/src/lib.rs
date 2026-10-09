@@ -4,7 +4,7 @@
 //! use vectrixdb::{Client, SearchOptions};
 //!
 //! # async fn run() -> vectrixdb::Result<()> {
-//! let db = Client::new("http://127.0.0.1:8080").key("...").build()?;
+//! let db = Client::new("http://127.0.0.1:8000").key("...").build()?;
 //! for hit in db.search("docs", "refunds", SearchOptions::default()).await? {
 //!     println!("{} ({:.2}): {}", hit.citation, hit.score, hit.text);
 //! }

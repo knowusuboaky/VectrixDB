@@ -15,7 +15,7 @@ go get github.com/knowusuboaky/VectrixDB/sdk/go
 Connect, add a document, search, and cite the answer:
 
 ```go
-db := vectrixdb.New("http://127.0.0.1:8000", vectrixdb.WithKey(os.Getenv("VECTRIXDB_API_KEY")))
+db := vectrixdb.New("http://127.0.0.1:8000", vectrixdb.WithKey(os.Getenv("VECTRIXDB_KEY")))
 ctx := context.Background()
 col, _ := db.CreateCollection(ctx, "handbook", nil)
 f, _ := os.Open("handbook.md")
@@ -96,7 +96,7 @@ fetched for that run only and is not a dependency of the module.
 ## Examples
 
 `examples/search`, `examples/ingest` and `examples/signin-token` are small
-programs that read `VECTRIXDB_URL` and `VECTRIXDB_API_KEY` (or
+programs that read `VECTRIXDB_URL` and `VECTRIXDB_KEY` (or
 `VECTRIXDB_TOKEN`) from the environment:
 
 ```
