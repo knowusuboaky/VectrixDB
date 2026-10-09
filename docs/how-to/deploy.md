@@ -113,6 +113,49 @@ The masking engine is held to the same, under **Masking**: `presidio` with a
 language whose spaCy model is not installed fails the first document masked,
 and the check says so before.
 
+## Then try every part of it
+
+`check` reads the settings and opens nothing. `doctor` runs the same check,
+then tries each part for real: it loads the models and embeds a word, reads a
+small document of each built-in kind, and asks every service the settings name
+whether it is there.
+
+```bash
+vectrixdb doctor --env-file vectrixdb.env
+```
+
+```text
+VectrixDB doctor, for ./vectrixdb_data
+
+  ok     Install    VectrixDB 2.2.0 on Python 3.12.7
+  ok     Models     Embedding model loads and embeds, 384 dimensions, 378 ms
+  ok     Models     Reranker loads and scores, 283 ms
+  ok     Readers    Markdown, HTML, Plain text: read
+  ok     Readers    PDF: ready
+  ok     Sign-in    The identity provider at login.microsoftonline.com answers, 212 ms
+  ok     Sign-in    Its 6 signing keys read
+  --     Readers    Scanned pages (OCR): pip install 'vectrixdb[ocr]'
+  error  Documents  The extraction service at extract.company.com cannot be reached: the name does not resolve
+                    Check VECTRIXDB_EXTRACTOR_URL, and that this machine can reach extract.company.com (a firewall, a private endpoint, a proxy).
+
+1 error, 0 warnings. Each says what to do under it.
+```
+
+| It tries | How |
+| --- | --- |
+| The data folder | writes a file and removes it, and reads the free space |
+| The models | loads the embedding model and the reranker, and times one answer from each |
+| The readers | reads Markdown, HTML and text; which other readers are installed comes from `check` |
+| Sign-in | reads the identity provider's description and signing keys, and checks it calls itself the issuer you set |
+| The services | the extraction service's `/health`, the mail server, the stores, the chat models, the masking service, the trace collector |
+
+It changes nothing anywhere: a service is asked a GET, or for a connection
+with nothing sent. A key is never printed, and an address shows only its host,
+since a database address can hold a password. `--offline`, or
+`VECTRIXDB_OFFLINE=1`, leaves the network out; `--quick` leaves the models
+unloaded; `--json` prints the result for a pipeline. It exits `1` while there
+is an error.
+
 ## Every command reads the same file
 
 ```bash

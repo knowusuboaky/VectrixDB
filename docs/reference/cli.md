@@ -68,6 +68,22 @@ Delete a collection.
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 | `--force`, `-f` | Skip confirmation | off |
 
+## doctor
+
+```text
+vectrixdb doctor [OPTIONS]
+```
+
+Try every part of this install: the models, the readers, and each service the settings name.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--offline` | Ask no service over the network; VECTRIXDB_OFFLINE=1 does too | off |
+| `--quick` | Leave the models unloaded | off |
+| `--json` | print JSON instead of a list | off |
+
 ## download-models
 
 ```text
