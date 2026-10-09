@@ -46,7 +46,7 @@ from fastapi.responses import JSONResponse
 try:  # The mcp extra. Without it the module imports, and build_server says what to install.
     from mcp.server.mcpserver import Context
 except ImportError:  # pragma: no cover - the extra is not installed
-    Context = Any  # type: ignore[misc,assignment]
+    Context = Any  # type: ignore[misc,assignment,unused-ignore]
 
 logger = logging.getLogger(__name__)
 
