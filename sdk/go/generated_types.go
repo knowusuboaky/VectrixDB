@@ -289,6 +289,15 @@ type SearchRequest struct {
 	UseCache       *bool                   `json:"use_cache,omitempty"`
 }
 
+// SimilarRequest More like this: the chunks nearest to one the caller can already see.
+type SimilarRequest struct {
+	Filter *map[string]interface{} `json:"filter,omitempty"`
+
+	// Id The chunk's id, as a search result gives it.
+	Id    string `json:"id"`
+	Limit *int   `json:"limit,omitempty"`
+}
+
 // SparseSearchRequest Sparse vector search request.
 type SparseSearchRequest struct {
 	Filter *map[string]interface{} `json:"filter,omitempty"`
@@ -542,6 +551,9 @@ type SearchWithFacetsApiV1CollectionsNameSearchFacetsPostJSONRequestBody = Facet
 
 // SearchWithRerankApiV1CollectionsNameSearchRerankPostJSONRequestBody defines body for SearchWithRerankApiV1CollectionsNameSearchRerankPost for application/json ContentType.
 type SearchWithRerankApiV1CollectionsNameSearchRerankPostJSONRequestBody = RerankSearchRequest
+
+// SimilarApiV1CollectionsNameSimilarPostJSONRequestBody defines body for SimilarApiV1CollectionsNameSimilarPost for application/json ContentType.
+type SimilarApiV1CollectionsNameSimilarPostJSONRequestBody = SimilarRequest
 
 // AddSourceApiV1CollectionsNameSourcesPostJSONRequestBody defines body for AddSourceApiV1CollectionsNameSourcesPost for application/json ContentType.
 type AddSourceApiV1CollectionsNameSourcesPostJSONRequestBody = AddSourceRequest
