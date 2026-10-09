@@ -2,7 +2,7 @@
 
 # Settings
 
-Every setting VectrixDB reads, 160 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
+Every setting VectrixDB reads, 170 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
 
 ## The server
 
@@ -243,3 +243,18 @@ Every setting VectrixDB reads, 160 of them, each an environment variable. `vectr
 | `VECTRIXDB_SCALING_STRATEGY` | none, or how indexes are moved out of memory under pressure. | `none` |
 | `VECTRIXDB_MAX_MEMORY_PERCENT` | The share of memory the server tries to stay under. | `85` |
 | `VECTRIXDB_BUILD_THREADS` | Threads that insert into the vector index. 1 makes every build of the same vectors the same graph, and is slower; empty is every core. |  |
+
+## The command line, on a server
+
+| Setting | What it does | Example or default |
+| --- | --- | --- |
+| `VECTRIXDB_URL` | The server the vectrixdb command and the clients' examples talk to, instead of a folder here. Read on the caller's machine, not by the server. | `https://vectors.company.com` |
+| `VECTRIXDB_KEY` | The API key they send. Never put it on the command line. (a secret) |  |
+| `VECTRIXDB_KEY_FILE` | A file holding that key, readable by its owner alone, as a mounted secret. |  |
+| `VECTRIXDB_TOKEN` | A company sign-in token your own tooling fetched, sent instead of a key. (a secret) |  |
+| `VECTRIXDB_LOGIN_CLIENT_ID` | The client id vectrixdb login uses: a public client registered at the identity provider for the command line. |  |
+| `VECTRIXDB_CONFIG_DIR` | Where vectrixdb login keeps sign-ins. Unset, the platform's config folder. |  |
+| `VECTRIXDB_ALLOW_HTTP` | 1 lets the command send a key or token over plain HTTP to another machine, on a network you trust. | `0` |
+| `VECTRIXDB_CA_BUNDLE` | A CA bundle to trust, for a company's own CA. |  |
+| `VECTRIXDB_CLIENT_CERT` | A client certificate for a gateway that asks for one, PEM. |  |
+| `VECTRIXDB_CLIENT_CERT_KEY` | Its private key, readable by its owner alone. |  |

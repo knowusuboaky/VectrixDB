@@ -92,6 +92,125 @@ def _settings(path: Optional[str], env_file: Optional[str]) -> str:
 
 
 # ============================================================================
+# A SERVER INSTEAD OF A FOLDER
+# ============================================================================
+#
+# INPUT   --url and --key-file, the environment, a saved sign-in
+# OUTPUT  the server a command talks to through the Python client, or None for
+#         the folder here; a refusal printed as one line and an exit code
+#
+# vectrixdb/remote.py says who the caller is and how a request may travel.
+# Exit codes: 0 done, 1 the server refused or could not be reached, 2 the
+# command or its settings are wrong.
+
+_URL_HELP = (
+    "Use the server at this address instead of a folder here: https://vectors.company.com. "
+    "Default: VECTRIXDB_URL"
+)
+_KEY_FILE_HELP = (
+    "With a server: a file holding its API key, readable by you alone. "
+    "Or set VECTRIXDB_KEY, or sign in: vectrixdb login"
+)
+
+
+def _fail(text: str, code: int = 2) -> "typer.Exit":
+    from .remote import clean
+
+    console.print(clean(text), style="red", markup=False, highlight=False, soft_wrap=True)
+    return typer.Exit(code=code)
+
+
+def _server(
+    url: Optional[str],
+    key_file: Optional[str],
+    env_file: Optional[str],
+    path: Optional[str] = None,
+) -> Any:
+    """The server this command talks to, or None when it is for a folder here."""
+    from .exceptions import ConfigurationError, DependencyError
+    from .remote import server_from
+
+    _env_file(env_file)
+    try:
+        server = server_from(url, key_file=key_file)
+    except (ConfigurationError, DependencyError) as exc:
+        raise _fail(str(exc))
+    if server is not None and path:
+        raise _fail(
+            "--path names a folder here and --url a server (VECTRIXDB_URL counts): give one of them"
+        )
+    return server
+
+
+class _Talk:
+    """``with _Talk(server) as db:``: the client, and every refusal said as one line and an exit code."""
+
+    def __init__(self, server: Any) -> None:
+        self.server = server
+        self.db: Any = None
+
+    def __enter__(self) -> Any:
+        from .exceptions import ConfigurationError, DependencyError
+
+        try:
+            self.db = self.server.client()
+        except (ConfigurationError, DependencyError) as exc:
+            raise _fail(str(exc))
+        return self.db
+
+    def __exit__(self, kind: Any, exc: Any, _tb: Any) -> None:
+        from .client import AuthError, ConnectionFailed, ForbiddenError, RequestError
+
+        if self.db is not None:
+            self.db.close()
+        if exc is None or isinstance(exc, (typer.Exit, typer.Abort)):
+            return
+        url = self.server.url
+        if isinstance(exc, AuthError):
+            hint = (
+                f"The server does not know {self.server.who}"
+                if self.server.who != "no key"
+                else "It needs a key or a sign-in: VECTRIXDB_KEY, --key-file, or vectrixdb login"
+            )
+            raise _fail(f"{url} refused: {exc.message}. {hint}.", 1)
+        if isinstance(exc, ForbiddenError):
+            raise _fail(f"{url} refused: {exc.message}. {self.server.who} may not do this.", 1)
+        if isinstance(exc, RequestError):
+            raise _fail(f"{url} refused ({exc.status}): {exc.message}", 1)
+        if isinstance(exc, ConnectionFailed):
+            raise _fail(str(exc), 1)
+
+
+def _who(remote: Any, server: Any) -> dict:
+    """Who the server takes the caller for. A key is not a person, so a server with sign-in answers its /auth/me only for people: then the key is tried on the collections instead."""
+    from .client import AuthError
+
+    try:
+        return dict(remote.whoami() or {})
+    except AuthError:
+        if not server.key:
+            raise
+    remote.collections()  # a wrong key is refused here, as it would be anywhere
+    return {"key": True}
+
+
+def _json(value: Any) -> None:
+    """``value`` as JSON on stdout, for a script: plain, every non-ASCII character escaped."""
+    import json as _json_module
+
+    typer.echo(_json_module.dumps(value, indent=2, ensure_ascii=True, default=str))
+
+
+def _text(value: Any) -> Any:
+    """A table cell from a server: control characters out, square brackets left as they are."""
+    from rich.text import Text
+
+    from .remote import clean
+
+    return Text(clean("" if value is None else value))
+
+
+# ============================================================================
 # SERVE, INFO, COLLECTIONS, INGEST, QUERY, AND STATS
 # ============================================================================
 #
@@ -268,16 +387,47 @@ def extract_serve(
 def info(
     path: Optional[str] = typer.Argument(None, help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
+    json_out: bool = typer.Option(False, "--json", help="print JSON instead of a table"),
 ):
-    """Show database information."""
-    path = _settings(path, env_file)
+    """Show database information, or a server's: whether it answers, who it takes you for."""
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        with _Talk(server) as db:
+            ready = db.ready()
+            me = _who(db, server)
+            collections = db.collections()
+        said = {
+            "url": server.url,
+            "ready": ready,
+            "as": me.get("email") or me.get("name") or me.get("who") or server.who,
+            "role": me.get("role"),
+            "collections": len(collections),
+            "vectors": sum(c.count for c in collections),
+        }
+        if json_out:
+            _json(said)
+            return
+        table = Table(title="Server", show_header=False)
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Address", _text(server.url))
+        table.add_row("Ready", "yes" if ready else "not yet: its models are loading")
+        table.add_row(
+            "You are", _text(f"{said['as']}" + (f", {said['role']}" if said["role"] else ""))
+        )
+        table.add_row("Credential", _text(server.who))
+        table.add_row("Collections you can see", str(len(collections)))
+        table.add_row("Vectors in them", f"{said['vectors']:,}")
+        console.print(table)
+        return
+    path = _data_path(path)
     from .core.database import VectrixDB
 
     try:
         db = VectrixDB(path)
         info = db.info()
-
-        console.print(Panel(BANNER, style="cyan", border_style="cyan"))
 
         table = Table(title="Database Info", show_header=False)
         table.add_column("Property", style="cyan")
@@ -290,6 +440,20 @@ def info(
         table.add_row("Total Size", _format_size(info.total_size_bytes))
         table.add_row("Created", info.created_at.strftime("%Y-%m-%d %H:%M:%S"))
 
+        if json_out:
+            db.close()
+            _json(
+                {
+                    "path": info.path,
+                    "version": info.version,
+                    "collections": info.collections_count,
+                    "vectors": info.total_vectors,
+                    "size_bytes": info.total_size_bytes,
+                    "created": info.created_at.isoformat(),
+                }
+            )
+            return
+        console.print(Panel(BANNER, style="cyan", border_style="cyan"))
         console.print(table)
         db.close()
 
@@ -302,15 +466,59 @@ def info(
 def list_collections(
     path: Optional[str] = typer.Argument(None, help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
+    json_out: bool = typer.Option(False, "--json", help="print JSON instead of a table"),
 ):
-    """List all collections."""
-    path = _settings(path, env_file)
+    """List all collections: here, or the ones a server lets you see."""
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        with _Talk(server) as remote:
+            found = remote.collections()
+        if json_out:
+            _json([c.raw or {"name": c.name} for c in found])
+            return
+        if not found:
+            console.print("No collections you may see on this server.", style="yellow")
+            return
+        table = Table(title=_text(f"Collections at {server.url}"))
+        table.add_column("Name", style="cyan")
+        table.add_column("Dimension", justify="right")
+        table.add_column("Metric", style="magenta")
+        table.add_column("Vectors", justify="right", style="green")
+        table.add_column("Hybrid", justify="center")
+        for c in found:
+            table.add_row(
+                _text(c.name),
+                str(c.dimension),
+                _text(c.metric),
+                f"{c.count:,}",
+                "yes" if c.has_text_index else "no",
+            )
+        console.print(table)
+        return
+    path = _data_path(path)
     from .core.database import VectrixDB
 
     try:
         db = VectrixDB(path)
         collections = db.list_collections()
 
+        if json_out:
+            db.close()
+            _json(
+                [
+                    {
+                        "name": c.name,
+                        "dimension": c.dimension,
+                        "metric": c.metric.value,
+                        "count": c.count,
+                        "size_bytes": c.size_bytes,
+                    }
+                    for c in collections
+                ]
+            )
+            return
         if not collections:
             console.print("[yellow]No collections found.[/yellow]")
             return
@@ -342,13 +550,42 @@ def list_collections(
 @app.command()
 def create(
     name: str = typer.Argument(..., help="Collection name"),
-    dimension: int = typer.Argument(..., help="Vector dimension"),
+    dimension: Optional[int] = typer.Argument(
+        None, help="Vector dimension. On a server, left out, the server's model's: 384"
+    ),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
     metric: str = typer.Option("cosine", "--metric", "-m", help="Distance metric"),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
+    no_text_index: bool = typer.Option(
+        False, "--no-text-index", help="On a server: no word index, so no hybrid search"
+    ),
+    description: Optional[str] = typer.Option(
+        None, "--description", help="On a server: what it holds"
+    ),
 ):
     """Create a new collection."""
-    path = _settings(path, env_file)
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        with _Talk(server) as remote:
+            made = remote.create_collection(
+                name,
+                dimension=dimension or 384,
+                text_index=not no_text_index,
+                metric=metric,
+                description=description,
+            )
+        console.print(
+            _text(
+                f"Created {made.name} at {server.url}: {made.dimension} dimensions, {made.metric}"
+            ),
+            style="green",
+        )
+        return
+    if dimension is None:
+        raise _fail("Give the vector dimension: vectrixdb create <name> <dimension>")
+    path = _data_path(path)
     from .core.database import VectrixDB
     from .core.types import DistanceMetric
 
@@ -375,15 +612,21 @@ def delete(
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
 ):
-    """Delete a collection."""
-    path = _settings(path, env_file)
+    """Delete a collection, and every document in it."""
+    server = _server(url, key_file, env_file, path)
+    where = f" at {server.url}" if server is not None else ""
+    if not force and not typer.confirm(f"Delete collection {name!r}{where}? It cannot be undone"):
+        raise typer.Abort()
+    if server is not None:
+        with _Talk(server) as remote:
+            remote.delete_collection(name)
+        console.print(_text(f"Deleted {name}{where}"), style="green")
+        return
+    path = _data_path(path)
     from .core.database import VectrixDB
-
-    if not force:
-        confirm = typer.confirm(f"Delete collection '{name}'?")
-        if not confirm:
-            raise typer.Abort()
 
     try:
         db = VectrixDB(path)
@@ -404,33 +647,39 @@ def ingest(
     name: str = typer.Option("docs", "--name", "-n", help="Collection name"),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
-    mode: str = typer.Option("dense", "--mode", help="dense, hybrid, ultimate or graph"),
-    chunk: str = typer.Option(
-        "recursive", "--chunk", help="recursive, sentence, semantic, markdown or fixed"
+    mode: Optional[str] = typer.Option(
+        None, "--mode", help="dense, hybrid, ultimate or graph. Here only: dense by default"
     ),
-    chunk_size: int = typer.Option(1000, "--chunk-size"),
-    overlap: int = typer.Option(200, "--overlap"),
+    chunk: Optional[str] = typer.Option(
+        None, "--chunk", help="recursive, sentence, semantic, markdown or fixed. Default: recursive"
+    ),
+    chunk_size: Optional[int] = typer.Option(None, "--chunk-size", help="Default: 1000"),
+    overlap: Optional[int] = typer.Option(None, "--overlap", help="Default: 200"),
     parent_size: Optional[int] = typer.Option(
-        None, "--parent-size", help="store sections for search --parents"
+        None, "--parent-size", help="store sections for search --parents. Here only"
     ),
     dedupe: Optional[float] = typer.Option(
-        None, "--dedupe", help="skip near-duplicates at or above this similarity"
+        None, "--dedupe", help="skip near-duplicates at or above this similarity. Here only"
     ),
     glob: str = typer.Option("*", "--glob", help="pattern for files inside directories"),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
 ):
-    """Load, chunk and index files: PDF, DOCX, HTML, Markdown, text."""
-    path = _settings(path, env_file)
+    """Load, chunk and index files: PDF, DOCX, HTML, Markdown, text. On a server, it reads them."""
+    server = _server(url, key_file, env_file, path)
     from pathlib import Path as _Path
 
-    from .easy import Vectrix
-
     files: list = []
+    roots: dict = {}
     for source in sources:
         p = _Path(source)
         if p.is_dir():
-            files.extend(sorted(f for f in p.rglob(glob) if f.is_file()))
+            for f in sorted(f for f in p.rglob(glob) if f.is_file()):
+                files.append(f)
+                roots[f] = p
         elif p.is_file():
             files.append(p)
+            roots[p] = p.parent
         else:
             console.print(f"[red]Not found:[/red] {source}")
             raise typer.Exit(1)
@@ -438,7 +687,72 @@ def ingest(
         console.print("[yellow]Nothing to ingest.[/yellow]")
         raise typer.Exit(1)
 
-    db = Vectrix(name, path=path, mode=cast(Any, mode))
+    if server is not None:
+        here_only = [
+            flag
+            for flag, given in (
+                ("--mode", mode),
+                ("--parent-size", parent_size),
+                ("--dedupe", dedupe),
+            )
+            if given is not None
+        ]
+        if here_only:
+            raise _fail(
+                f"{', '.join(here_only)} shape a collection on this machine. On a server the collection's own settings decide"
+            )
+        from .client import NotFoundError
+
+        total = 0
+        failed = 0
+        with _Talk(server) as remote:
+            try:
+                remote.describe(name)
+            except NotFoundError:
+                made = remote.create_collection(name)
+                console.print(_text(f"Created {made.name} at {server.url}"), style="dim")
+            for f in files:
+                # The id is the file's path under the folder it came from, so adding it again replaces it.
+                doc_id = f.relative_to(roots[f]).as_posix()
+                try:
+                    added = remote.add_document(
+                        name,
+                        f,
+                        f.name,
+                        doc_id=doc_id,
+                        chunk=chunk,
+                        chunk_size=chunk_size,
+                        overlap=overlap,
+                    )
+                except Exception as exc:  # noqa: BLE001 - one file refused; say so and go on
+                    from .client import AuthError, ConnectionFailed, ForbiddenError
+
+                    if isinstance(exc, (AuthError, ForbiddenError, ConnectionFailed)):
+                        raise
+                    failed += 1
+                    console.print(_text(f"{f}: {getattr(exc, 'message', exc)}"), style="red")
+                    continue
+                total += added.chunks
+                console.print(
+                    _text(f"{f}: {added.chunks} chunks" + (", replaced" if added.replaced else "")),
+                    style="green",
+                )
+        console.print(
+            _text(
+                f"Indexed {total:,} chunks from {len(files) - failed} files into {name!r} at {server.url}."
+            )
+        )
+        if failed:
+            raise typer.Exit(1)
+        return
+
+    path = _data_path(path)
+    from .easy import Vectrix
+
+    chunk = chunk or "recursive"
+    chunk_size = chunk_size or 1000
+    overlap = 200 if overlap is None else overlap
+    db = Vectrix(name, path=path, mode=cast(Any, mode or "dense"))
     total = 0
     skipped = 0
     try:
@@ -479,27 +793,65 @@ def query(
     mode: Optional[str] = typer.Option(
         None, "--mode", help="dense, sparse, hybrid, ultimate, graph"
     ),
-    parents: bool = typer.Option(False, "--parents", help="return the enclosing sections"),
-    explain: bool = typer.Option(False, "--explain", help="show score components"),
+    parents: bool = typer.Option(
+        False, "--parents", help="return the enclosing sections. Here only"
+    ),
+    explain: bool = typer.Option(False, "--explain", help="show score components. Here only"),
     json_out: bool = typer.Option(False, "--json", help="print JSON instead of a table"),
+    filter_json: Optional[str] = typer.Option(
+        None, "--filter", help='Only results whose fields match, as JSON: {"team": "payroll"}'
+    ),
+    rerank: bool = typer.Option(False, "--rerank", help="Reorder the results with the reranker"),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
 ):
-    """Search a collection from the shell."""
-    path = _settings(path, env_file)
-    import json as _json
+    """Search a collection from the shell: here, or on a server."""
+    import json as _json_module
 
-    from .easy import Vectrix
+    server = _server(url, key_file, env_file, path)
+    where: Optional[dict] = None
+    if filter_json:
+        try:
+            where = _json_module.loads(filter_json)
+        except ValueError as exc:
+            raise _fail(f"--filter is not JSON: {exc}")
+        if not isinstance(where, dict):
+            raise _fail('--filter is a JSON object: {"team": "payroll"}')
+    if server is not None:
+        if parents or explain:
+            raise _fail("--parents and --explain are for a collection here")
+        modes = {None: "meaning", "dense": "meaning", "meaning": "meaning", "hybrid": "hybrid"}
+        if mode not in modes:
+            raise _fail(f"On a server, --mode is dense or hybrid, not {mode}")
+        with _Talk(server) as remote:
+            results = remote.search(
+                name, text, limit=limit, filter=where, rerank=rerank, mode=modes[mode]
+            )
+    else:
+        path = _data_path(path)
+        from .easy import Vectrix
 
-    db = Vectrix(name, path=path)
-    try:
-        results = db.search(
-            text, limit=limit, mode=cast(Any, mode), parents=parents, explain=explain
-        )
-    finally:
-        db.close()
+        db = Vectrix(name, path=path)
+        try:
+            results = db.search(
+                text,
+                limit=limit,
+                mode=cast(Any, mode),
+                parents=parents,
+                explain=explain,
+                filter=where,
+                rerank=cast(Any, "cross-encoder" if rerank else None),
+            )
+        finally:
+            db.close()
     if json_out:
-        console.print_json(_json.dumps(results.to_dict()))
+        said = results.to_dict()
+        # What an answer cites, which a script wants most and to_dict leaves to the reader to work out.
+        for item, result in zip(said["items"], results):
+            item.setdefault("citation", getattr(result, "citation", None))
+        _json(said)
         return
-    table = Table(title=f"{results.mode} search: {text!r}", show_lines=True)
+    table = Table(title=_text(f"{results.mode} search: {text!r}"), show_lines=True)
     table.add_column("score", justify="right", style="cyan", width=7)
     table.add_column("id", style="dim", width=18, overflow="fold")
     table.add_column("text", overflow="fold")
@@ -515,7 +867,7 @@ def query(
                 )
                 + "[/dim]"
             )
-        table.add_row(f"{r.score:.3f}", r.id, cell)
+        table.add_row(f"{r.score:.3f}", _text(r.id), _text(cell) if server is not None else cell)
     console.print(table)
     if results.truncated:
         console.print(f"[yellow]{results.cut_count} results cut to fit the budget.[/yellow]")
@@ -526,9 +878,34 @@ def stats(
     name: str = typer.Option("docs", "--name", "-n", help="Collection name"),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
+    json_out: bool = typer.Option(False, "--json", help="print JSON instead of a table"),
 ):
     """Size, model and mode of a collection."""
-    path = _settings(path, env_file)
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        with _Talk(server) as remote:
+            found = remote.describe(name)
+        if json_out:
+            _json(found.raw or {"name": found.name})
+            return
+        table = Table(title=_text(f"Collection {found.name!r} at {server.url}"), show_header=False)
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Vectors", f"{found.count:,}")
+        table.add_row("Dimension", str(found.dimension))
+        table.add_row("Metric", _text(found.metric))
+        table.add_row("Hybrid search", "yes" if found.has_text_index else "no: no word index")
+        if found.size_bytes:
+            table.add_row("Size", _format_size(found.size_bytes))
+        if found.indexed_fields:
+            table.add_row("Fields to filter on", _text(", ".join(found.indexed_fields)))
+        if found.description:
+            table.add_row("Holds", _text(found.description))
+        console.print(table)
+        return
+    path = _data_path(path)
     from pathlib import Path as _Path
 
     from .easy import Vectrix
@@ -552,6 +929,19 @@ def stats(
     table.add_row("Embedding model", str(model))
     table.add_row("Dimension", str(dimension))
     table.add_row("Size on disk", _format_size(size))
+    if json_out:
+        _json(
+            {
+                "name": name,
+                "path": str(base),
+                "count": count,
+                "mode": mode,
+                "embedding_model": str(model),
+                "dimension": dimension,
+                "size_bytes": size,
+            }
+        )
+        return
     console.print(table)
 
 
@@ -1111,6 +1501,28 @@ def _key_scope(key: Any) -> str:
     return ", ".join(said)
 
 
+def _remote_keys(server: Any, method: str, path: str, body: Optional[dict] = None) -> Any:
+    """A call to the server's key routes, which an admin may make: ``/api/v1/keys``."""
+    from .client import _Call, _data
+
+    with _Talk(server) as remote:
+        return remote._send(_Call(method, path, lambda _r, b: _data(b), json=body))
+
+
+def _remote_scope(row: dict) -> str:
+    said = [", ".join(row.get("collections") or []) or "every collection"]
+    if row.get("expires_at"):
+        import datetime
+
+        said.append(
+            "until "
+            + datetime.datetime.fromtimestamp(float(row["expires_at"])).strftime("%d %b %Y")
+        )
+    if row.get("per_minute") or row.get("requests_per_minute"):
+        said.append(f"{row.get('per_minute') or row.get('requests_per_minute')} a minute")
+    return ", ".join(said)
+
+
 @keys_app.command("add")
 def keys_add(
     name: str = typer.Argument(..., help="What uses the key, so it is clear later: handbook-bot"),
@@ -1129,13 +1541,38 @@ def keys_add(
     ),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
 ):
     """Make a key. It is shown once, here, and kept only as a hash."""
     import time
 
     from .exceptions import ConfigurationError
 
-    path = _settings(path, env_file)
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        if days is not None and days < 1:
+            raise _fail("--days is a whole number of days, 1 or more")
+        made = _remote_keys(
+            server,
+            "POST",
+            "/api/v1/keys",
+            {
+                "name": name,
+                "role": role,
+                "collections": collection or None,
+                "expires_in_days": days,
+                "requests_per_minute": per_minute,
+            },
+        )
+        _say(
+            f"Made the key {made.get('name')} at {server.url}: {made.get('role')}, {_remote_scope(made)}. "
+            "Copy it now, it is not shown again:"
+        )
+        # The key itself goes to stdout alone, so a script can take it: KEY=$(vectrixdb keys add ... | tail -1)
+        typer.echo(f"  {made.get('key', '')}")
+        return
+    path = _data_path(path)
     config, store = _keys_store(path)
     try:
         if days is not None and days < 1:
@@ -1166,11 +1603,44 @@ def keys_add(
 def keys_list(
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
+    json_out: bool = typer.Option(False, "--json", help="print JSON instead of a table"),
 ):
     """Every key that has not been revoked: what it may do, what it reaches, and when it was last used."""
     import datetime
 
-    path = _settings(path, env_file)
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        found = (_remote_keys(server, "GET", "/api/v1/keys") or {}).get("keys") or []
+        if json_out:
+            _json(found)
+            return
+        if not found:
+            _say(
+                f"No keys at {server.url} yet. Make one: vectrixdb keys add handbook-bot --url {server.url}"
+            )
+            return
+        table = Table(title=_text(f"Keys at {server.url}"))
+        for heading in ("Id", "Name", "Role", "Reaches", "Last used"):
+            table.add_column(heading)
+        for row in found:
+            last = row.get("last_used")
+            when = (
+                datetime.datetime.fromtimestamp(float(last)).strftime("%d %b %Y %H:%M")
+                if isinstance(last, (int, float))
+                else (last or "never")
+            )
+            table.add_row(
+                _text(row.get("key_id") or row.get("id")),
+                _text(row.get("name")),
+                _text(row.get("role")),
+                _text(_remote_scope(row)),
+                _text(when),
+            )
+        console.print(table)
+        return
+    path = _data_path(path)
     _, store = _keys_store(path)
     try:
         keys = store.keys()
@@ -1201,9 +1671,18 @@ def keys_revoke(
     key_id: str = typer.Argument(..., help="The key's id, from: vectrixdb keys list"),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
 ):
     """Revoke a key. Anything using it stops working at once."""
-    path = _settings(path, env_file)
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        from urllib.parse import quote as _quote
+
+        _remote_keys(server, "DELETE", f"/api/v1/keys/{_quote(key_id, safe='')}")
+        _say(f"Revoked {key_id} at {server.url}. Anything using it has stopped working.")
+        return
+    path = _data_path(path)
     config, store = _keys_store(path)
     try:
         name = store.revoke_key(key_id)
@@ -1868,7 +2347,9 @@ app.add_typer(sources_app, name="sources")
 
 
 def _say(text: str) -> None:
-    console.print(text, markup=False, highlight=False, soft_wrap=True)
+    from .remote import clean
+
+    console.print(clean(text), markup=False, highlight=False, soft_wrap=True)
 
 
 def _collections_with_sources(path: str) -> List[str]:
@@ -1907,13 +2388,29 @@ def sources_add(
     ),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
 ):
     """Keep a collection up with a feed or a page. Nothing is written until a refresh."""
     from .easy import Vectrix
     from .exceptions import ConfigurationError, DependencyError, ExtractionError
     from .sources import every_text
 
-    path = _settings(path, env_file)
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        if articles or no_transcribe or delete_when_gone:
+            raise _fail(
+                "--articles, --no-transcribe and --delete-when-gone are for a collection here; "
+                "on a server, set them on its Sources page"
+            )
+        with _Talk(server) as remote:
+            info = remote.add_source(name, address, kind=kind, every=every)
+        _say(
+            f"{name} at {server.url}: added {info.kind or 'the source'} {info.address}, read every {info.every or every}, "
+            f"id {info.id}. Nothing is written until: vectrixdb sources refresh --name {name}"
+        )
+        return
+    path = _data_path(path)
     options: dict = {}
     if articles:
         options["articles"] = True
@@ -1940,12 +2437,39 @@ def sources_list(
     name: str = typer.Option("docs", "--name", "-n", help="Collection name"),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
+    json_out: bool = typer.Option(False, "--json", help="print JSON instead of a table"),
 ):
     """The feeds and pages a collection keeps up with, and how each last went."""
     from .easy import Vectrix
     from .sources import every_text
 
-    path = _settings(path, env_file)
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        with _Talk(server) as remote:
+            listed = remote.sources(name)
+        if json_out:
+            _json([x.raw or {"id": x.id, "address": x.address} for x in listed])
+            return
+        if not listed:
+            _say(f"{name} at {server.url} keeps up with no sources.")
+            return
+        table = Table(title=_text(f"Sources of {name} at {server.url}"))
+        for column in ("id", "kind", "address", "every", "last read", "status"):
+            table.add_column(column)
+        for x in listed:
+            table.add_row(
+                _text(x.id),
+                _text(x.kind or ""),
+                _text(x.address),
+                _text(x.every or ""),
+                _text(x.raw.get("last_refresh") or ""),
+                _text(x.raw.get("last_status") or "not read yet"),
+            )
+        console.print(table)
+        return
+    path = _data_path(path)
     db = Vectrix(name, path=path)
     try:
         found = db.sources.list()
@@ -1984,11 +2508,28 @@ def sources_remove(
     ),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
 ):
     """Stop keeping up with a source. Its documents stay unless --delete-documents."""
     from .easy import Vectrix
 
-    path = _settings(path, env_file)
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        with _Talk(server) as remote:
+            match = [x for x in remote.sources(name) if source in (x.id, x.address)]
+            if not match:
+                _say(
+                    f"{name} at {server.url} has no source {source}. See: vectrixdb sources list --name {name}"
+                )
+                raise typer.Exit(code=1)
+            remote.delete_source(name, match[0].id, delete_documents=delete_documents)
+        _say(
+            f"{name} at {server.url}: removed {source}"
+            + (", and the documents it wrote." if delete_documents else "; its documents stay.")
+        )
+        return
+    path = _data_path(path)
     db = Vectrix(name, path=path)
     try:
         removed = db.sources.remove(source, delete_documents=delete_documents)
@@ -2015,11 +2556,28 @@ def sources_refresh(
     max_items: int = typer.Option(50, "--max-items", help="Entries written per source this time"),
     path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
 ):
     """Read the sources that are due and write only what changed. Run it from cron or a scheduled job."""
     from .easy import Vectrix
 
-    path = _settings(path, env_file)
+    server = _server(url, key_file, env_file, path)
+    if server is not None:
+        if not name:
+            raise _fail("On a server, name the collection: --name handbook")
+        with _Talk(server) as remote:
+            done = remote.refresh_sources(name)
+        _say(
+            f"{name} at {server.url}: {done.added} added, {done.updated} updated, {done.unchanged} unchanged, "
+            f"{done.removed} removed, {len(done.failed)} failed"
+        )
+        for failure in done.failed:
+            _say(f"  {failure}")
+        if done.failed:
+            raise typer.Exit(code=1)
+        return
+    path = _data_path(path)
     names = [name] if name else _collections_with_sources(path)
     if not names:
         _say("No collection here keeps up with a source.")
@@ -2125,3 +2683,138 @@ def doctor(
 
 if __name__ == "__main__":
     app()
+
+
+# ============================================================================
+# WHO YOU ARE ON A SERVER: WHOAMI, LOGIN, LOGOUT
+# ============================================================================
+#
+# INPUT   a server's address; a client id the company registered for the
+#         command line
+# OUTPUT  who the server takes you for; a sign-in saved for that address alone,
+#         in a file only you can read; that sign-in removed
+#
+# vectrixdb/remote.py does the signing in, with the identity provider the
+# server itself names, so nothing about the provider is set here.
+
+
+@app.command()
+def whoami(
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    key_file: Optional[str] = typer.Option(None, "--key-file", help=_KEY_FILE_HELP),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    json_out: bool = typer.Option(False, "--json", help="print JSON instead of words"),
+):
+    """Who a server takes you for, and with what: a key, a token, or your saved sign-in."""
+    server = _server(url, key_file, env_file)
+    if server is None:
+        raise _fail("whoami asks a server: give --url or set VECTRIXDB_URL")
+    with _Talk(server) as remote:
+        me = _who(remote, server)
+    if json_out:
+        _json({"url": server.url, "credential": server.who, **me})
+        return
+    if me.get("signin") is False or me.get("key") or not me:
+        _say(
+            f"{server.url} takes you as the holder of {server.who}: a key, not a person."
+        )
+        return
+    name = me.get("email") or me.get("name") or me.get("who") or me.get("subject") or "somebody"
+    role = f", {me['role']}" if me.get("role") else ""
+    _say(f"{server.url} takes you for {name}{role}, by {server.who}.")
+
+
+@app.command()
+def login(
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    client_id: Optional[str] = typer.Option(
+        None,
+        "--client-id",
+        help="The command line's client id at your identity provider. Default: VECTRIXDB_LOGIN_CLIENT_ID",
+    ),
+    device: bool = typer.Option(
+        False, "--device", help="Sign in with a code on any device: for SSH, containers, no browser"
+    ),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+):
+    """Sign in to a server with your company account, and keep the sign-in for that address."""
+    import os as _os
+
+    from .exceptions import ConfigurationError
+    from .remote import Logins, Server, discover, login_with_browser, login_with_device
+
+    _env_file(env_file)
+    address = (url or _os.environ.get("VECTRIXDB_URL", "")).strip().rstrip("/")
+    if not address:
+        raise _fail("Name the server: vectrixdb login --url https://vectors.company.com")
+    client = (client_id or _os.environ.get("VECTRIXDB_LOGIN_CLIENT_ID", "")).strip()
+    if not client:
+        raise _fail(
+            "Give the client id your company registered for the command line: --client-id, or VECTRIXDB_LOGIN_CLIENT_ID. "
+            "It is a public client at the identity provider, with http://localhost as a redirect and device sign-in allowed."
+        )
+    try:
+        # The same checks any command makes on the address: https, no key in it.
+        from .remote import server_from
+
+        checked = server_from(
+            address,
+            env={
+                k: v
+                for k, v in _os.environ.items()
+                if k not in ("VECTRIXDB_KEY", "VECTRIXDB_KEY_FILE", "VECTRIXDB_TOKEN")
+            },
+            use_saved=False,
+        )
+        assert checked is not None
+        provider = discover(checked.url)
+        signed = (login_with_device if device else login_with_browser)(
+            checked.url, client, provider=provider, say=_say
+        )
+    except ConfigurationError as exc:
+        raise _fail(str(exc), 1)
+    probe = Server(
+        checked.url, token=signed.access_token, who="the new sign-in", options=checked.options
+    )
+    with _Talk(probe) as remote:
+        me = remote.whoami()
+    signed.who = str(me.get("email") or me.get("name") or me.get("subject") or "")
+    store = Logins()
+    store.save(signed)
+    _say(
+        f"Signed in to {checked.url}"
+        + (f" as {signed.who}" if signed.who else "")
+        + f". Kept in {store.path}, readable by you alone."
+    )
+
+
+@app.command()
+def logout(
+    url: Optional[str] = typer.Option(None, "--url", help=_URL_HELP),
+    every: bool = typer.Option(False, "--all", help="Every saved sign-in on this machine"),
+):
+    """Forget a saved sign-in on this machine. The identity provider still ends it on its own schedule."""
+    import os as _os
+
+    from .exceptions import ConfigurationError
+    from .remote import Logins
+
+    store = Logins()
+    try:
+        if every:
+            gone = store.urls()
+            for address in gone:
+                store.remove(address)
+            _say(f"Forgot {len(gone)} saved sign-in{'s' if len(gone) != 1 else ''}.")
+            return
+        address = (url or _os.environ.get("VECTRIXDB_URL", "")).strip().rstrip("/")
+        if not address:
+            raise _fail(
+                "Name the server: vectrixdb logout --url https://vectors.company.com, or --all"
+            )
+        if store.remove(address):
+            _say(f"Forgot the sign-in for {address}.")
+        else:
+            _say(f"No sign-in was saved for {address}.")
+    except ConfigurationError as exc:
+        raise _fail(str(exc))

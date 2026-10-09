@@ -740,6 +740,50 @@ SETTINGS: Tuple[Setting, ...] = tuple(
             ),
         ],
     )
+    + _s(
+        "The command line, on a server",
+        [
+            (
+                "URL",
+                "The server the vectrixdb command and the clients' examples talk to, instead of a folder here. Read on the caller's machine, not by the server.",
+                "https://vectors.company.com",
+            ),
+            ("KEY", "The API key they send. Never put it on the command line.", "", "secret"),
+            (
+                "KEY_FILE",
+                "A file holding that key, readable by its owner alone, as a mounted secret.",
+                "",
+            ),
+            (
+                "TOKEN",
+                "A company sign-in token your own tooling fetched, sent instead of a key.",
+                "",
+                "secret",
+            ),
+            (
+                "LOGIN_CLIENT_ID",
+                "The client id vectrixdb login uses: a public client registered at the identity provider for the command line.",
+                "",
+            ),
+            (
+                "CONFIG_DIR",
+                "Where vectrixdb login keeps sign-ins. Unset, the platform's config folder.",
+                "",
+            ),
+            (
+                "ALLOW_HTTP",
+                "1 lets the command send a key or token over plain HTTP to another machine, on a network you trust.",
+                "0",
+            ),
+            ("CA_BUNDLE", "A CA bundle to trust, for a company's own CA.", ""),
+            (
+                "CLIENT_CERT",
+                "A client certificate for a gateway that asks for one, PEM.",
+                "",
+            ),
+            ("CLIENT_CERT_KEY", "Its private key, readable by its owner alone.", ""),
+        ],
+    )
 )
 
 

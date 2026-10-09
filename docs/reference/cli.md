@@ -40,7 +40,7 @@ Test the settings before a start: what a start would refuse, and what looks wron
 ## create
 
 ```text
-vectrixdb create NAME DIMENSION [OPTIONS]
+vectrixdb create NAME [DIMENSION] [OPTIONS]
 ```
 
 Create a new collection.
@@ -48,10 +48,14 @@ Create a new collection.
 | Argument or option | What it does | Default |
 | --- | --- | --- |
 | `NAME` | Collection name | required |
-| `DIMENSION` | Vector dimension | required |
+| `DIMENSION` | Vector dimension. On a server, left out, the server's model's: 384 |  |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 | `--metric`, `-m` | Distance metric | `cosine` |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
+| `--no-text-index` | On a server: no word index, so no hybrid search | off |
+| `--description` | On a server: what it holds |  |
 
 ## delete
 
@@ -59,7 +63,7 @@ Create a new collection.
 vectrixdb delete NAME [OPTIONS]
 ```
 
-Delete a collection.
+Delete a collection, and every document in it.
 
 | Argument or option | What it does | Default |
 | --- | --- | --- |
@@ -67,6 +71,8 @@ Delete a collection.
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 | `--force`, `-f` | Skip confirmation | off |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
 
 ## doctor
 
@@ -215,12 +221,15 @@ Draft golden questions with a chat model from the collection's own chunks, every
 vectrixdb info [PATH] [OPTIONS]
 ```
 
-Show database information.
+Show database information, or a server's: whether it answers, who it takes you for.
 
 | Argument or option | What it does | Default |
 | --- | --- | --- |
 | `PATH` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
+| `--json` | print JSON instead of a table | off |
 
 ## ingest
 
@@ -228,7 +237,7 @@ Show database information.
 vectrixdb ingest SOURCES... [OPTIONS]
 ```
 
-Load, chunk and index files: PDF, DOCX, HTML, Markdown, text.
+Load, chunk and index files: PDF, DOCX, HTML, Markdown, text. On a server, it reads them.
 
 | Argument or option | What it does | Default |
 | --- | --- | --- |
@@ -236,13 +245,15 @@ Load, chunk and index files: PDF, DOCX, HTML, Markdown, text.
 | `--name`, `-n` | Collection name | `docs` |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
-| `--mode` | dense, hybrid, ultimate or graph | `dense` |
-| `--chunk` | recursive, sentence, semantic, markdown or fixed | `recursive` |
-| `--chunk-size` |  | `1000` |
-| `--overlap` |  | `200` |
-| `--parent-size` | store sections for search --parents |  |
-| `--dedupe` | skip near-duplicates at or above this similarity |  |
+| `--mode` | dense, hybrid, ultimate or graph. Here only: dense by default |  |
+| `--chunk` | recursive, sentence, semantic, markdown or fixed. Default: recursive |  |
+| `--chunk-size` | Default: 1000 |  |
+| `--overlap` | Default: 200 |  |
+| `--parent-size` | store sections for search --parents. Here only |  |
+| `--dedupe` | skip near-duplicates at or above this similarity. Here only |  |
 | `--glob` | pattern for files inside directories | `*` |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
 
 ## keys
 
@@ -265,6 +276,8 @@ Make a key. It is shown once, here, and kept only as a hash.
 | `--per-minute` | Requests a minute it may make. Left out, the server's setting. |  |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
 
 ### keys list
 
@@ -278,6 +291,9 @@ Every key that has not been revoked: what it may do, what it reaches, and when i
 | --- | --- | --- |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
+| `--json` | print JSON instead of a table | off |
 
 ### keys revoke
 
@@ -292,6 +308,8 @@ Revoke a key. Anything using it stops working at once.
 | `KEY_ID` | The key's id, from: vectrixdb keys list | required |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
 
 ## list
 
@@ -299,12 +317,43 @@ Revoke a key. Anything using it stops working at once.
 vectrixdb list [PATH] [OPTIONS]
 ```
 
-List all collections.
+List all collections: here, or the ones a server lets you see.
 
 | Argument or option | What it does | Default |
 | --- | --- | --- |
 | `PATH` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
+| `--json` | print JSON instead of a table | off |
+
+## login
+
+```text
+vectrixdb login [OPTIONS]
+```
+
+Sign in to a server with your company account, and keep the sign-in for that address.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--client-id` | The command line's client id at your identity provider. Default: VECTRIXDB_LOGIN_CLIENT_ID |  |
+| `--device` | Sign in with a code on any device: for SSH, containers, no browser | off |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+
+## logout
+
+```text
+vectrixdb logout [OPTIONS]
+```
+
+Forget a saved sign-in on this machine. The identity provider still ends it on its own schedule.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--all` | Every saved sign-in on this machine | off |
 
 ## mcp
 
@@ -396,7 +445,7 @@ Forget somebody's passkeys, authenticator and recovery codes, sign them out, and
 vectrixdb query TEXT [OPTIONS]
 ```
 
-Search a collection from the shell.
+Search a collection from the shell: here, or on a server.
 
 | Argument or option | What it does | Default |
 | --- | --- | --- |
@@ -406,9 +455,13 @@ Search a collection from the shell.
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 | `--limit`, `-k` |  | `5` |
 | `--mode` | dense, sparse, hybrid, ultimate, graph |  |
-| `--parents` | return the enclosing sections | off |
-| `--explain` | show score components | off |
+| `--parents` | return the enclosing sections. Here only | off |
+| `--explain` | show score components. Here only | off |
 | `--json` | print JSON instead of a table | off |
+| `--filter` | Only results whose fields match, as JSON: {"team": "payroll"} |  |
+| `--rerank` | Reorder the results with the reranker | off |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
 
 ## serve
 
@@ -452,6 +505,8 @@ Keep a collection up with a feed or a page. Nothing is written until a refresh.
 | `--delete-when-gone` | A page: remove its chunks when it answers 404 or 410 | off |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
 
 ### sources list
 
@@ -466,6 +521,9 @@ The feeds and pages a collection keeps up with, and how each last went.
 | `--name`, `-n` | Collection name | `docs` |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
+| `--json` | print JSON instead of a table | off |
 
 ### sources refresh
 
@@ -482,6 +540,8 @@ Read the sources that are due and write only what changed. Run it from cron or a
 | `--max-items` | Entries written per source this time | `50` |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
 
 ### sources remove
 
@@ -498,6 +558,8 @@ Stop keeping up with a source. Its documents stay unless --delete-documents.
 | `--delete-documents` | Take the documents it wrote too | off |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
 
 ## stats
 
@@ -512,6 +574,9 @@ Size, model and mode of a collection.
 | `--name`, `-n` | Collection name | `docs` |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
+| `--json` | print JSON instead of a table | off |
 
 ## sweep
 
@@ -539,3 +604,18 @@ vectrixdb version
 ```
 
 Show version information.
+
+## whoami
+
+```text
+vectrixdb whoami [OPTIONS]
+```
+
+Who a server takes you for, and with what: a key, a token, or your saved sign-in.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
+| `--key-file` | With a server: a file holding its API key, readable by you alone. Or set VECTRIXDB_KEY, or sign in: vectrixdb login |  |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--json` | print JSON instead of words | off |
