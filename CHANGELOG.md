@@ -99,6 +99,23 @@ may change at any time.
   a private CA and a client certificate, and honour `HTTPS_PROXY`. The Go
   module is `github.com/knowusuboaky/VectrixDB/sdk/go/v2`, as a 2.x release
   needs.
+- **A company's presets, its command's name, and its keychain.** Every
+  `vectrixdb` command first reads `VECTRIXDB_` lines from a machine-wide file
+  (`/etc/vectrixdb/defaults.env`, `%ProgramData%\vectrixdb\defaults.env`,
+  `/Library/Application Support/vectrixdb/defaults.env`, or
+  `VECTRIXDB_DEFAULTS_FILE`), the environment winning; a line that sets
+  anything else stops the command, so the file cannot change `PATH` or a
+  proxy. `VECTRIXDB_COMMAND` names a wrapper's command in every hint
+  (`acme vectors login`), and `VECTRIXDB_USER_AGENT` its name in every
+  request. The four clients take the same: `user_agent=` in Python,
+  `userAgent` in TypeScript, `WithUserAgent` in Go, `.user_agent()` in
+  Rust, put before the client's own `User-Agent` and refused with a line
+  break in it. `VECTRIXDB_CREDENTIALS=keyring` keeps `vectrixdb login`'s
+  tokens in the system keychain, the file holding only which servers.
+  `verify="system"` in Python, and `VECTRIXDB_CA_BUNDLE=system` for the
+  command, trust the operating system's own certificate store, where a
+  managed machine keeps the company's authority (`truststore`, now in the
+  `client` extra on Python 3.10 and later).
 - **The `vectrixdb` command on a server.** Every command that works on a
   folder takes `--url` (or `VECTRIXDB_URL`) and works on a server instead:
   `list`, `info`, `stats`, `create`, `delete`, `ingest`, `query`, `sources`

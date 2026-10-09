@@ -175,6 +175,12 @@ export interface VectrixClientOptions {
   tokenHeader?: string;
   /** Extra headers on every request. They never replace `user-agent` or the key or token header. */
   headers?: Record<string, string>;
+  /**
+   * A wrapper's name and version, `acme-vectors/1.4`, put before this
+   * client's own in `user-agent`, so a gateway's log says which tool called.
+   * Outside a browser, which sets its own.
+   */
+  userAgent?: string;
   /** The path every route lives under, such as `/acme`. */
   prefix?: string;
   /**
@@ -252,6 +258,7 @@ export class VectrixClient {
   readonly #key: string | undefined;
   readonly #token: string | undefined;
   readonly #headers: Record<string, string>;
+  readonly #userAgent: string;
   readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
 
@@ -294,6 +301,10 @@ export class VectrixClient {
       }
       if (!reserved.has(lower)) this.#headers[lower] = value;
     }
+    if (options.userAgent !== undefined && !HEADER_VALUE.test(options.userAgent)) {
+      throw new TypeError("userAgent holds characters a header cannot");
+    }
+    this.#userAgent = options.userAgent ? `${options.userAgent.trim()} ${USER_AGENT}` : USER_AGENT;
     this.prefix = names(options.prefix, "prefix", "a route prefix");
     this.gatewayPaths = Object.freeze(readGatewayPaths(options.gatewayPaths));
     this.#timeoutMs = options.timeoutMs ?? 30_000;
@@ -517,7 +528,7 @@ export class VectrixClient {
     if (this.#token) headers[this.tokenHeader] = `Bearer ${this.#token}`;
     else if (this.#key) headers[this.keyHeader] = this.#key;
     // Browsers set their own user-agent and drop this one; only set it elsewhere.
-    if (typeof document === "undefined") headers["user-agent"] = USER_AGENT;
+    if (typeof document === "undefined") headers["user-agent"] = this.#userAgent;
 
     for (let attempt = 0; ; attempt++) {
       // Never followed: the key would go with it to wherever it points.

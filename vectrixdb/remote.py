@@ -37,7 +37,19 @@ Safe by default, so it can be pointed anywhere:
 - A saved sign-in lives in a file only you can read, under
   ``VECTRIXDB_CONFIG_DIR`` or the platform's config folder. The command refuses
   to read it when others can, and it is used only for the address it was made
-  for. ``vectrixdb logout`` removes it.
+  for. ``vectrixdb logout`` removes it. ``VECTRIXDB_CREDENTIALS=keyring`` keeps
+  its tokens in the system keychain instead (Windows Credential Manager,
+  macOS Keychain, the Secret Service), the file holding only what is not a
+  secret.
+- ``VECTRIXDB_CA_BUNDLE=system`` trusts what the operating system trusts.
+
+A company's wrapper, or an administrator, presets any of these for every
+command: ``VECTRIXDB_*`` lines in a machine-wide file
+(``/etc/vectrixdb/defaults.env``, ``%ProgramData%\vectrixdb\defaults.env``,
+``/Library/Application Support/vectrixdb/defaults.env``, or the file
+``VECTRIXDB_DEFAULTS_FILE`` names), read before every command, a person's own
+environment winning. ``VECTRIXDB_COMMAND`` names the wrapper's command in
+every hint, and ``VECTRIXDB_USER_AGENT`` its name in every request.
 - What a server sends back is printed with terminal control characters taken
   out, so a document cannot rewrite the screen.
 
@@ -93,6 +105,52 @@ WELL_KNOWN = "/.well-known/oauth-protected-resource"
 BROWSER_WAIT = 300
 #: Characters a terminal acts on rather than prints: all controls but tab and newline.
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def command() -> str:
+    """The command a hint names: a wrapper's, from ``VECTRIXDB_COMMAND``, else ``vectrixdb``."""
+    return clean(os.environ.get("VECTRIXDB_COMMAND", "").strip()) or "vectrixdb"
+
+
+def machine_defaults(env: Optional[Mapping[str, str]] = None) -> Path:
+    """The machine-wide presets file: ``VECTRIXDB_DEFAULTS_FILE``, else the platform's own place."""
+    values = os.environ if env is None else env
+    given = _env("VECTRIXDB_DEFAULTS_FILE", values)
+    if given:
+        return Path(given).expanduser()
+    if os.name == "nt":
+        return Path(_env("PROGRAMDATA", values) or r"C:\ProgramData") / "vectrixdb" / "defaults.env"
+    if sys.platform == "darwin":
+        return Path("/Library/Application Support/vectrixdb/defaults.env")
+    return Path("/etc/vectrixdb/defaults.env")
+
+
+def apply_machine_defaults(environ: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Read the machine-wide presets into the environment, what it already sets winning. Returns what was taken.
+
+    Only ``VECTRIXDB_`` settings are taken, so a presets file cannot change
+    ``PATH``, a proxy or anything else outside this command. A file named by
+    ``VECTRIXDB_DEFAULTS_FILE`` that is not there is an error; the platform's
+    own place may be empty.
+    """
+    from .settings import read_env_file
+
+    target: Any = os.environ if environ is None else environ
+    path = machine_defaults(target)
+    if not path.is_file():
+        if _env("VECTRIXDB_DEFAULTS_FILE", target):
+            raise ConfigurationError(f"VECTRIXDB_DEFAULTS_FILE names {path}, which is not a file")
+        return {}
+    taken: Dict[str, str] = {}
+    for name, value in read_env_file(path).items():
+        if not name.startswith("VECTRIXDB_"):
+            raise ConfigurationError(
+                f"{path} sets {name}. The presets file holds VECTRIXDB_ settings alone"
+            )
+        if name not in target:
+            target[name] = value
+            taken[name] = value
+    return taken
 
 
 def clean(text: Any) -> str:
@@ -201,8 +259,12 @@ def server_from(
         if gateway_paths is not None
         else _env("VECTRIXDB_GATEWAY_PATHS", values),
     }
+    if _env("VECTRIXDB_USER_AGENT", values):
+        options["user_agent"] = _env("VECTRIXDB_USER_AGENT", values)
     bundle = ca_bundle or _env("VECTRIXDB_CA_BUNDLE", values)
-    if bundle:
+    if bundle == "system":
+        options["verify"] = "system"
+    elif bundle:
         if not Path(bundle).is_file():
             raise ConfigurationError(f"The CA bundle {bundle} is not a file")
         options["verify"] = bundle
@@ -290,12 +352,45 @@ def config_dir(env: Optional[Mapping[str, str]] = None) -> Path:
     return Path(_env("XDG_CONFIG_HOME", values) or Path.home() / ".config") / "vectrixdb"
 
 
-class Logins:
-    """The sign-ins saved on this machine, one per server address."""
+#: The parts of a sign-in that are secrets: in the keychain when it is used.
+_SECRETS = ("access_token", "refresh_token")
+_KEYCHAIN = "vectrixdb"
 
-    def __init__(self, folder: Optional[Path] = None) -> None:
+
+def _keychain(env: Mapping[str, str]) -> Any:
+    """The keyring module when ``VECTRIXDB_CREDENTIALS=keyring``; None for the file."""
+    chosen = _env("VECTRIXDB_CREDENTIALS", env).lower()
+    if chosen in ("", "file"):
+        return None
+    if chosen != "keyring":
+        raise ConfigurationError(f"VECTRIXDB_CREDENTIALS is keyring or file, not {chosen!r}")
+    try:
+        import keyring
+        from keyring.backends import fail
+    except ImportError:
+        raise ConfigurationError(
+            "VECTRIXDB_CREDENTIALS=keyring needs the keyring package: pip install keyring"
+        ) from None
+    if isinstance(keyring.get_keyring(), fail.Keyring):
+        raise ConfigurationError(
+            "VECTRIXDB_CREDENTIALS=keyring, and this machine has no keychain keyring can reach. "
+            "Leave it unset to keep sign-ins in a file only you can read"
+        )
+    return keyring
+
+
+class Logins:
+    """The sign-ins saved on this machine, one per server address.
+
+    The file holds every sign-in; with ``VECTRIXDB_CREDENTIALS=keyring`` it
+    holds all but the tokens, which go to the system keychain under the
+    service ``vectrixdb`` and the server's address.
+    """
+
+    def __init__(self, folder: Optional[Path] = None, keychain: Any = None) -> None:
         self.folder = folder or config_dir()
         self.path = self.folder / "logins.json"
+        self.keychain = keychain if keychain is not None else _keychain(os.environ)
 
     def _read(self) -> Dict[str, Dict[str, Any]]:
         if not self.path.exists():
@@ -305,7 +400,7 @@ class Logins:
             found = json.loads(text or "{}")
         except json.JSONDecodeError:
             raise ConfigurationError(
-                f"{self.path} is not readable JSON. Remove it and sign in again: vectrixdb login"
+                f"{self.path} is not readable JSON. Remove it and sign in again: {command()} login"
             ) from None
         return found if isinstance(found, dict) else {}
 
@@ -327,6 +422,15 @@ class Logins:
         row = self._read().get(url.rstrip("/"))
         if not row:
             return None
+        if row.get("in") == "keychain":
+            if self.keychain is None:
+                raise ConfigurationError(
+                    f"The sign-in for {url} is in the system keychain: set VECTRIXDB_CREDENTIALS=keyring"
+                )
+            secrets_kept = self.keychain.get_password(_KEYCHAIN, url.rstrip("/"))
+            if not secrets_kept:
+                return None
+            row = {**row, **json.loads(secrets_kept)}
         try:
             return Login(**{k: row[k] for k in Login.__dataclass_fields__ if k in row})
         except TypeError:
@@ -334,13 +438,25 @@ class Logins:
 
     def save(self, login: Login) -> None:
         every = self._read()
-        every[login.url.rstrip("/")] = asdict(login)
+        row = asdict(login)
+        address = login.url.rstrip("/")
+        if self.keychain is not None:
+            kept = {name: row.pop(name) for name in _SECRETS}
+            self.keychain.set_password(_KEYCHAIN, address, json.dumps(kept))
+            row["in"] = "keychain"
+        every[address] = row
         self._write(every)
 
     def remove(self, url: str) -> bool:
         every = self._read()
-        if every.pop(url.rstrip("/"), None) is None:
+        row = every.pop(url.rstrip("/"), None)
+        if row is None:
             return False
+        if isinstance(row, dict) and row.get("in") == "keychain" and self.keychain is not None:
+            try:
+                self.keychain.delete_password(_KEYCHAIN, url.rstrip("/"))
+            except Exception:  # noqa: BLE001 - already gone from the keychain
+                pass
         self._write(every)
         return True
 
@@ -356,7 +472,7 @@ class Logins:
             return login
         if not login.refresh_token:
             raise ConfigurationError(
-                f"The sign-in saved for {url} has expired. Sign in again: vectrixdb login --url {url}"
+                f"The sign-in saved for {url} has expired. Sign in again: {command()} login --url {url}"
             )
         try:
             answer = (post or _post_form)(
@@ -370,7 +486,7 @@ class Logins:
             )
         except ConfigurationError as exc:
             raise ConfigurationError(
-                f"The sign-in saved for {url} could not be refreshed ({exc}). Sign in again: vectrixdb login --url {url}"
+                f"The sign-in saved for {url} could not be refreshed ({exc}). Sign in again: {command()} login --url {url}"
             ) from None
         _take_tokens(login, answer)
         self.save(login)
@@ -505,7 +621,7 @@ def discover(
         said = named[: -len("/mcp")] if named.endswith("/mcp") else named
         raise ConfigurationError(
             f"{base} says it is {clean(said) or 'nothing'}, so a sign-in got for it would not be its own. "
-            f"Sign in with the address it gives: vectrixdb login --url {clean(said)}. "
+            f"Sign in with the address it gives: {command()} login --url {clean(said)}. "
             "If that is wrong, its admin sets VECTRIXDB_PUBLIC_URL to the address people use"
             if said
             else f"{base} names no resource in its protected-resource document, so it cannot be signed in to"
@@ -636,7 +752,7 @@ def login_with_browser(
     provider = provider or discover(url)
     if not provider.authorization_endpoint:
         raise ConfigurationError(
-            "The identity provider names no authorization endpoint. Try: vectrixdb login --device"
+            f"The identity provider names no authorization endpoint. Try: {command()} login --device"
         )
     _https(provider.authorization_endpoint, "Its authorization endpoint")
     verifier, challenge = _verifier()
@@ -685,7 +801,7 @@ def login_with_browser(
     got = handler.got
     if not got:
         raise ConfigurationError(
-            "No sign-in came back in time. On a machine without a browser, try: vectrixdb login --device"
+            f"No sign-in came back in time. On a machine without a browser, try: {command()} login --device"
         )
     if got.get("error"):
         raise ConfigurationError(
@@ -725,7 +841,7 @@ def login_with_device(
     provider = provider or discover(url)
     if not provider.device_authorization_endpoint:
         raise ConfigurationError(
-            "The identity provider does not offer sign-in with a code. Sign in in a browser: vectrixdb login"
+            f"The identity provider does not offer sign-in with a code. Sign in in a browser: {command()} login"
         )
     _https(provider.device_authorization_endpoint, "Its device endpoint")
     started = post(
@@ -758,5 +874,5 @@ def login_with_device(
             continue
         return _new_login(url, provider, client_id, answer)
     raise ConfigurationError(
-        "The code expired before the sign-in finished. Run vectrixdb login again"
+        f"The code expired before the sign-in finished. Run {command()} login again"
     )

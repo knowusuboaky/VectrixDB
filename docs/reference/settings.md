@@ -2,7 +2,7 @@
 
 # Settings
 
-Every setting VectrixDB reads, 178 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
+Every setting VectrixDB reads, 182 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
 
 ## The server
 
@@ -263,6 +263,10 @@ Every setting VectrixDB reads, 178 of them, each an environment variable. `vectr
 | `VECTRIXDB_LOGIN_SCOPES` | The scopes vectrixdb login may ask for, space-separated. Set, a server asking for any other is refused and nobody is asked to confirm. | `api://vectrixdb/search` |
 | `VECTRIXDB_CONFIG_DIR` | Where vectrixdb login keeps sign-ins. Unset, the platform's config folder. |  |
 | `VECTRIXDB_ALLOW_HTTP` | 1 lets the command send a key or token over plain HTTP to another machine, on a network you trust. | `0` |
-| `VECTRIXDB_CA_BUNDLE` | A CA bundle to trust, for a company's own CA. |  |
+| `VECTRIXDB_CA_BUNDLE` | A CA bundle to trust, for a company's own CA; system trusts what the operating system trusts, where a managed machine keeps the company's authority. |  |
+| `VECTRIXDB_CREDENTIALS` | keyring keeps vectrixdb login's tokens in the system keychain (Windows Credential Manager, macOS Keychain, the Secret Service); unset or file, a file readable by its owner alone. |  |
+| `VECTRIXDB_COMMAND` | The command a hint names, for a company's wrapper: acme vectors login. Unset, vectrixdb. |  |
+| `VECTRIXDB_USER_AGENT` | A wrapper's name and version, put before the client's own in User-Agent, so a gateway's log says which tool called. | `acme-vectors/1.4` |
+| `VECTRIXDB_DEFAULTS_FILE` | A presets file of VECTRIXDB_ lines read before every command, the environment winning. Unset, /etc/vectrixdb/defaults.env, %ProgramData%\vectrixdb\defaults.env or /Library/Application Support/vectrixdb/defaults.env, when there is one. |  |
 | `VECTRIXDB_CLIENT_CERT` | A client certificate for a gateway that asks for one, PEM. |  |
 | `VECTRIXDB_CLIENT_CERT_KEY` | Its private key, readable by its owner alone. |  |

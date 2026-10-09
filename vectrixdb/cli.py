@@ -36,6 +36,19 @@ app = typer.Typer(
 console = Console()
 
 
+@app.callback()
+def _presets() -> None:
+    """Read the machine-wide presets before any command, the environment winning."""
+    from .exceptions import ConfigurationError
+    from .remote import apply_machine_defaults
+
+    try:
+        apply_machine_defaults()
+    except ConfigurationError as exc:
+        console.print(str(exc), style="red", markup=False, highlight=False)
+        raise typer.Exit(code=2)
+
+
 BANNER = """
  _    _        _       _      ___  ___
 | |  | |      | |     (_)     |  \\/  |
@@ -113,6 +126,13 @@ _KEY_FILE_HELP = (
 )
 
 
+def _command() -> str:
+    """The command a hint names: a wrapper's, from VECTRIXDB_COMMAND, else vectrixdb."""
+    from .remote import command
+
+    return command()
+
+
 def _fail(text: str, code: int = 2) -> "typer.Exit":
     from .remote import clean
 
@@ -170,7 +190,7 @@ class _Talk:
             hint = (
                 f"The server does not know {self.server.who}"
                 if self.server.who != "no key"
-                else "It needs a key or a sign-in: VECTRIXDB_KEY, --key-file, or vectrixdb login"
+                else f"It needs a key or a sign-in: VECTRIXDB_KEY, --key-file, or {_command()} login"
             )
             raise _fail(f"{url} refused: {exc.message}. {hint}.", 1)
         if isinstance(exc, ForbiddenError):
@@ -2769,7 +2789,7 @@ def login(
     _env_file(env_file)
     address = (url or _os.environ.get("VECTRIXDB_URL", "")).strip().rstrip("/")
     if not address:
-        raise _fail("Name the server: vectrixdb login --url https://vectors.company.com")
+        raise _fail(f"Name the server: {_command()} login --url https://vectors.company.com")
     client = (client_id or _os.environ.get("VECTRIXDB_LOGIN_CLIENT_ID", "")).strip()
     if not client:
         raise _fail(
@@ -2853,7 +2873,7 @@ def logout(
         address = (url or _os.environ.get("VECTRIXDB_URL", "")).strip().rstrip("/")
         if not address:
             raise _fail(
-                "Name the server: vectrixdb logout --url https://vectors.company.com, or --all"
+                f"Name the server: {_command()} logout --url https://vectors.company.com, or --all"
             )
         if store.remove(address):
             _say(f"Forgot the sign-in for {address}.")

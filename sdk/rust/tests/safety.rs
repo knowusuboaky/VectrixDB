@@ -235,6 +235,26 @@ async fn the_key_header_and_extra_headers() {
 }
 
 #[tokio::test]
+async fn a_wrappers_name_goes_before_the_clients_own() {
+    let (port, seen) = listen(|_| ok(r#"{"ok":true}"#));
+    let db = Client::new(local(port))
+        .key(KEY)
+        .user_agent("acme-vectors/1.4")
+        .build()
+        .unwrap();
+    db.health().await.unwrap();
+    let seen = seen.join().unwrap();
+    assert!(seen
+        .header("user-agent")
+        .unwrap()
+        .starts_with("acme-vectors/1.4 vectrixdb-rust/"));
+    assert!(Client::new("https://v.example")
+        .user_agent("acme\r\nx-evil: 1")
+        .build()
+        .is_err());
+}
+
+#[tokio::test]
 async fn the_token_goes_as_bearer_in_its_header() {
     let (port, seen) = listen(|_| ok(r#"{"ok":true}"#));
     let db = Client::new(local(port)).token("tok-1").build().unwrap();
