@@ -191,7 +191,7 @@ def test_a_busy_server_is_retried_with_retry_after(monkeypatch):
         ]
     )
     transport = httpx.MockTransport(lambda request: next(answers))
-    with VectrixClient("http://server.test", key="k", transport=transport) as db:
+    with VectrixClient("https://server.test", key="k", transport=transport) as db:
         assert db.health() is True
     assert waits == [2.0, 2.0]
 
@@ -204,7 +204,7 @@ def test_a_server_that_stays_busy_raises_after_the_retries():
             429, headers={"retry-after": "0"}, json={"ok": False, "message": "slow down"}
         )
     )
-    with VectrixClient("http://server.test", key="k", transport=transport) as db:
+    with VectrixClient("https://server.test", key="k", transport=transport) as db:
         with pytest.raises(BusyError) as busy:
             db.collections()
     assert busy.value.status == 429 and busy.value.message == "slow down"
@@ -216,11 +216,11 @@ def test_a_proxy_page_becomes_a_status_and_the_address():
     transport = httpx.MockTransport(
         lambda request: httpx.Response(502, text="<html>bad gateway</html>")
     )
-    with VectrixClient("http://server.test", key="k", transport=transport) as db:
+    with VectrixClient("https://server.test", key="k", transport=transport) as db:
         with pytest.raises(RequestError) as refused:
             db.collections()
     assert refused.value.status == 502 and refused.value.message.startswith(
-        "502 from http://server.test"
+        "502 from https://server.test"
     )
 
 
@@ -239,10 +239,146 @@ def test_the_key_and_the_token_go_in_their_headers():
         )
         return httpx.Response(200, json={"status": "healthy"})
 
-    with VectrixClient("http://s.test", key="k1", transport=httpx.MockTransport(answer)) as db:
+    with VectrixClient("https://s.test", key="k1", transport=httpx.MockTransport(answer)) as db:
         db.health()
-    with VectrixClient("http://s.test", token="t1", transport=httpx.MockTransport(answer)) as db:
+    with VectrixClient("https://s.test", token="t1", transport=httpx.MockTransport(answer)) as db:
         db.health()
     assert seen[0][0] == "k1" and seen[0][1] is None
     assert seen[1][0] is None and seen[1][1] == "Bearer t1"
     assert seen[0][2].startswith("vectrixdb-python/")
+
+
+# --- safety and the company network: sdk/CONTRACT.md, the same cases in every language ---
+
+GATEWAY = "api/v1=/files/search, auth=/files/auth"
+
+
+@pytest.mark.parametrize(
+    "paths, prefix, route, sent",
+    [
+        (GATEWAY, "/acme", "/api/v1/collections", "/files/search/acme/api/v1/collections"),
+        (GATEWAY, "/acme", "/auth/me", "/files/auth/acme/auth/me"),
+        (GATEWAY, "/acme", "/health", "/acme/health"),
+        (GATEWAY, "/acme", "/api/v1x", "/acme/api/v1x"),
+        ("api=/a, api/v1=/b", "", "/api/v1/c", "/b/api/v1/c"),
+        ("api=/a, api/v1=/b", "", "/api/other", "/a/api/other"),
+        ("/api//v1/ = files//search/", " acme/ ", "/api/v1/x", "/files/search/acme/api/v1/x"),
+    ],
+)
+def test_each_route_goes_to_its_gateway_path(paths, prefix, route, sent):
+    from vectrixdb.client import _names, _route_path, read_gateway_paths
+
+    assert _route_path(route, _names(prefix, "the prefix"), read_gateway_paths(paths)) == sent
+
+
+@pytest.mark.parametrize(
+    "written", ["api/v1", "=/x", "api/v1=", "../x=/y", "api/v1=/a, api/v1/=/b"]
+)
+def test_a_gateway_list_that_cannot_be_read_is_refused(written):
+    from vectrixdb.client import read_gateway_paths
+    from vectrixdb.exceptions import ConfigurationError
+
+    with pytest.raises(ConfigurationError):
+        read_gateway_paths(written)
+
+
+def test_the_client_reads_the_gateway_list_as_the_server_does():
+    pytest.importorskip("fastapi")
+    from vectrixdb.api.gateway import Gateway
+    from vectrixdb.api.gateway import read_gateway_paths as server_reads
+    from vectrixdb.client import _names, _route_path, read_gateway_paths
+
+    written = "api/v1=/files/search, auth=/files/auth, api/v1/collections/x=/one"
+    assert read_gateway_paths(written) == server_reads(written)
+    server = Gateway(prefix="/acme", paths=server_reads(written))
+    for route in (
+        "/api/v1/collections",
+        "/api/v1/collections/x/text-search",
+        "/auth/me",
+        "/health",
+    ):
+        assert _route_path(
+            route, _names("acme", "p"), read_gateway_paths(written)
+        ) == server.visible(route)
+
+
+@pytest.mark.parametrize(
+    "url, allowed",
+    [
+        ("http://vectors.example.com", False),
+        ("http://localhost.evil.com", False),
+        ("http://localhost:8000", True),
+        ("http://127.0.0.5", True),
+        ("http://[::1]:9", True),
+        ("https://vectors.example.com", True),
+    ],
+)
+def test_a_key_crosses_the_network_only_over_https(url, allowed):
+    from vectrixdb.exceptions import ConfigurationError
+
+    if allowed:
+        VectrixClient(url, key="k").close()
+        return
+    with pytest.raises(ConfigurationError) as refused:
+        VectrixClient(url, key="k")
+    assert "allow_http" in str(refused.value) and "k" not in str(refused.value).split()
+    VectrixClient(url, key="k", allow_http=True).close()
+    VectrixClient(url).close()
+
+
+def test_a_redirect_is_never_followed_so_the_key_stays_put():
+    import httpx
+
+    asked = []
+
+    def answer(request):
+        asked.append(str(request.url))
+        return httpx.Response(302, headers={"location": "https://elsewhere.example/x"})
+
+    with VectrixClient("https://s.test", key="k1", transport=httpx.MockTransport(answer)) as db:
+        with pytest.raises(RequestError) as refused:
+            db.collections()
+    assert asked == ["https://s.test/api/v1/collections"]
+    assert refused.value.status == 302 and "https://elsewhere.example/x" in refused.value.message
+    assert "k1" not in str(refused.value) and "k1" not in repr(db)
+
+
+def test_a_gateway_gets_its_headers_and_its_paths():
+    import httpx
+
+    seen = []
+
+    def answer(request):
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True, "data": {"collections": []}})
+
+    with VectrixClient(
+        "https://gateway.example.com",
+        key="k1",
+        key_header="Ocp-Apim-Subscription-Key",
+        headers={"x-team": "search", "api-key": "not-this", "user-agent": "nor-this"},
+        prefix="acme",
+        gateway_paths=GATEWAY,
+        transport=httpx.MockTransport(answer),
+    ) as db:
+        db.collections()
+    sent = seen[0]
+    assert sent.url.path == "/files/search/acme/api/v1/collections"
+    assert sent.headers["ocp-apim-subscription-key"] == "k1"
+    assert sent.headers["x-team"] == "search" and sent.headers["user-agent"].startswith(
+        "vectrixdb-python/"
+    )
+    with VectrixClient(
+        "https://s.test", token="t1", token_header="x-token", transport=httpx.MockTransport(answer)
+    ) as db:
+        db.health()
+    assert seen[1].headers["x-token"] == "Bearer t1" and "authorization" not in seen[1].headers
+
+
+def test_certificates_cannot_be_switched_off_and_a_header_name_is_checked():
+    from vectrixdb.exceptions import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="always checked"):
+        VectrixClient("https://s.test", verify=False)
+    with pytest.raises(ConfigurationError, match="HTTP header"):
+        VectrixClient("https://s.test", key="k", key_header="bad header")

@@ -17,6 +17,51 @@ same names, spelled the language's way (`add_document`, `addDocument`,
   retried. Connection failures raise at once with the address in the message.
 - Timeout: 30 s per request by default, settable.
 
+## Safety and the company network
+
+The same options in every client, spelled the language's way
+(`key_header`, `keyHeader`, `WithKeyHeader`, `.key_header()`), so a client
+works behind a company's gateway, proxy and private CA, and a key cannot
+leak by accident.
+
+- **No key over plain HTTP.** A client given a key or a token for an
+  `http://` address refuses to be made unless the host is this machine
+  (`localhost`, `127.0.0.0/8`, `::1`) or `allow_http` is set. The error says
+  so and names the option. Without a key or token, `http://` is allowed.
+- **No redirects.** A client never follows a redirect: the key would go
+  with it to wherever it points. A 3xx is a refusal, the base error, whose
+  message names the status and the `location` it pointed to.
+- **`key_header`** (default `api-key`): the header the key goes in, for a
+  gateway that wants its own (`Ocp-Apim-Subscription-Key`). The server's
+  `VECTRIXDB_KEY_HEADER` is the same setting on the other side.
+- **`token_header`** (default `authorization`): the header a sign-in token
+  goes in, always as `Bearer <token>`. The server's `VECTRIXDB_TOKEN_HEADER`.
+- **`headers`**: extra headers sent on every request, for a gateway that
+  wants a subscription key as well as the person's token. They never
+  replace `user-agent` or the key or token header.
+- **`prefix` and `gateway_paths`**: for a gateway that publishes each part
+  of the server under a path of its own. The address is then the gateway's
+  (`https://gateway.example.com`), `prefix` the path every route lives under
+  (`/acme`), and `gateway_paths` the list the gateway team hands over,
+  written `api/v1=/files/search, auth=/files/auth` or as a map. A request
+  for a route goes to `<gateway path><prefix><route>`, where the gateway
+  path is that of the longest name the route falls under (the route without
+  its leading `/` equals the name or starts with `name/`), else nothing.
+  Names and paths are read as paths of names: slashes trimmed and doubled
+  ones dropped, `.` and `..` refused, both sides required, a name given twice
+  refused. This is the server's own reading (`vectrixdb/api/gateway.py`), so
+  one list serves both sides.
+- **TLS**: certificates are always checked; there is no option to turn that
+  off. A private CA is trusted with a CA bundle option (Python `verify=`
+  a path, Rust `.ca_certificate(pem)`, Go `WithHTTPClient`, Node
+  `NODE_EXTRA_CA_CERTS`), and a gateway that asks for a client certificate
+  gets one (Python `cert=`, Rust `.identity(pem)`, Go `WithHTTPClient`).
+- **Proxies**: `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured where
+  the language's HTTP stack does (Python, Go, Rust by default; Node with
+  `NODE_USE_ENV_PROXY=1`, or a `fetch` of your own).
+- A key or token never appears in an error message, a log line or the
+  client's printed form.
+
 ## The calls
 
 | Call | Route | Returns |

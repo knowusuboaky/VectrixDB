@@ -22,22 +22,41 @@ and raises one refusal type per status, all of them ``RequestError``:
     except NotFoundError as refused:
         print(refused.status, refused.message)
 
+Behind a company's gateway, proxy or private CA:
+
+    db = connect(
+        "https://gateway.example.com",
+        key=KEY,
+        key_header="Ocp-Apim-Subscription-Key",
+        prefix="/acme",
+        gateway_paths="api/v1=/files/search, auth=/files/auth",
+        verify="/etc/ssl/company-ca.pem",
+    )
+
+A key never travels over plain HTTP to another machine (``allow_http=True``
+says it may), and no redirect is followed, so a key goes only to the address
+it was given for. ``HTTPS_PROXY`` and ``NO_PROXY`` are honoured.
+
 Every language's client offers this surface; ``sdk/CONTRACT.md`` in the
 repository is the shared description.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import os
+import re
+import ssl
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Union
-from urllib.parse import quote
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple, Union
+from urllib.parse import quote, urlsplit
 
 from . import __version__
 from .easy import Result, Results
-from .exceptions import DependencyError, VectrixError
+from .exceptions import ConfigurationError, DependencyError, VectrixError
 
 __all__ = [
     "Added",
@@ -57,6 +76,7 @@ __all__ = [
     "TooLargeError",
     "VectrixClient",
     "connect",
+    "read_gateway_paths",
 ]
 
 USER_AGENT = f"vectrixdb-python/{__version__}"
@@ -575,13 +595,177 @@ class _Calls:
 # OUTPUT  its answer, after the retries the contract allows
 
 
-def _headers(key: Optional[str], token: Optional[str]) -> Dict[str, str]:
-    sent = {"user-agent": USER_AGENT, "accept": "application/json"}
-    if token:
-        sent["authorization"] = f"Bearer {token}"
-    elif key:
-        sent["api-key"] = key
-    return sent
+# ============================================================================
+# THE CONNECTION: where the key goes, and how a gateway publishes the routes
+# ============================================================================
+#
+# INPUT   the address, the key or token, and the options for a gateway, a
+#         proxy and a private CA
+# OUTPUT  the base address, the headers every request carries, the path each
+#         route is sent to, and the TLS settings; or a ConfigurationError
+#
+# The gateway paths are read the way the server reads its own
+# VECTRIXDB_GATEWAY_PATHS (vectrixdb/api/gateway.py), so one list serves both
+# sides. That module needs the server's packages, so the reading is here too,
+# and a test holds the two to the same answers.
+
+#: RFC 9110 token characters: what an HTTP header's name may be made of.
+_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+
+
+def _names(value: Any, what: str) -> str:
+    """``/one/two``, or ``""``: a path of names, whatever it was written as."""
+    parts = [part for part in str(value or "").strip().split("/") if part]
+    if any(part in (".", "..") for part in parts):
+        raise ConfigurationError(f"{what} is a path of names, not {value!r}")
+    return "/" + "/".join(parts) if parts else ""
+
+
+def read_gateway_paths(value: Union[None, str, Mapping[str, str]]) -> Dict[str, str]:
+    """Each route's own gateway path, ``{"api/v1": "/files/search"}``, from ``api/v1=/files/search, auth=/files/auth``."""
+    if not value:
+        return {}
+    if isinstance(value, Mapping):
+        pairs: List[Tuple[Any, Any]] = list(value.items())
+    else:
+        pairs = []
+        for entry in str(value).split(","):
+            if not entry.strip():
+                continue
+            route, equals, path = entry.partition("=")
+            if not equals:
+                raise ConfigurationError(f"a gateway path is route=path, not {entry.strip()!r}")
+            pairs.append((route, path))
+    paths: Dict[str, str] = {}
+    for route, path in pairs:
+        name, where = _names(route, "a route")[1:], _names(path, "a gateway path")
+        if not name or not where:
+            given = f"{str(route or '').strip()}={str(path or '').strip()}"
+            raise ConfigurationError(f"a gateway path is route=path with both given, not {given!r}")
+        if name in paths:
+            raise ConfigurationError(f"{name} is given two gateway paths")
+        paths[name] = where
+    return paths
+
+
+def _route_path(route: str, prefix: str, paths: Mapping[str, str]) -> str:
+    """The path a request for ``route`` goes to: its gateway path, the prefix, the route."""
+    bare = route.split("?", 1)[0].split("#", 1)[0].strip("/")
+    best: Optional[str] = None
+    for name in paths:
+        if (bare == name or bare.startswith(name + "/")) and (
+            best is None or len(name) > len(best)
+        ):
+            best = name
+    return f"{paths[best] if best else ''}{prefix}{route}"
+
+
+def _loopback(host: str) -> bool:
+    """Whether ``host`` is this machine: ``localhost``, ``127.0.0.0/8`` or ``::1``."""
+    name = host.strip("[]").lower()
+    if name == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def _header_name(value: str, what: str) -> str:
+    name = str(value or "").strip()
+    if not _HEADER_NAME.match(name):
+        raise ConfigurationError(f"{what} is {value!r}, which cannot be the name of an HTTP header")
+    return name.lower()
+
+
+def _tls(verify: Any, cert: Any) -> Any:
+    """What httpx is given as ``verify``: its own default, or a context with the CA bundle and the client certificate."""
+    if verify is False:
+        raise ConfigurationError(
+            "Certificates are always checked. For a private CA, give its bundle: verify='/path/to/ca.pem'"
+        )
+    if isinstance(verify, ssl.SSLContext):
+        if cert:
+            raise ConfigurationError(
+                "give the client certificate in the SSLContext passed as verify"
+            )
+        return verify
+    if verify in (None, True) and not cert:
+        return True
+    bundle = verify if isinstance(verify, (str, os.PathLike)) else os.environ.get("SSL_CERT_FILE")
+    if not bundle:
+        try:
+            import certifi
+
+            bundle = certifi.where()
+        except ImportError:  # pragma: no cover - httpx brings certifi
+            bundle = None
+    context = ssl.create_default_context(cafile=str(bundle) if bundle else None)
+    if cert:
+        certfile, keyfile = (cert, None) if isinstance(cert, (str, os.PathLike)) else tuple(cert)
+        context.load_cert_chain(str(certfile), str(keyfile) if keyfile else None)
+    return context
+
+
+@dataclass
+class _Wire:
+    """How every request is made: the base address, the headers, the route map, the TLS settings."""
+
+    url: str
+    headers: Dict[str, str]
+    prefix: str
+    paths: Dict[str, str]
+    verify: Any
+
+    @classmethod
+    def of(
+        cls,
+        url: str,
+        key: Optional[str],
+        token: Optional[str],
+        *,
+        allow_http: bool,
+        key_header: str,
+        token_header: str,
+        headers: Optional[Mapping[str, str]],
+        prefix: Optional[str],
+        gateway_paths: Union[None, str, Mapping[str, str]],
+        verify: Any,
+        cert: Any,
+    ) -> "_Wire":
+        base = str(url or "").strip().rstrip("/")
+        parts = urlsplit(base)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ConfigurationError(f"{url!r} is not an address: https://vectors.example.com")
+        if (
+            (key or token)
+            and parts.scheme == "http"
+            and not allow_http
+            and not _loopback(parts.hostname)
+        ):
+            raise ConfigurationError(
+                f"{base} is plain HTTP, and the key or token would cross the network readable. "
+                "Use its https:// address, or pass allow_http=True on a network you trust"
+            )
+        sent: Dict[str, str] = {}
+        for name, value in (headers or {}).items():
+            sent[_header_name(name, "a header")] = str(value)
+        sent["user-agent"] = USER_AGENT
+        sent.setdefault("accept", "application/json")
+        if token:
+            sent[_header_name(token_header, "token_header")] = f"Bearer {token}"
+        elif key:
+            sent[_header_name(key_header, "key_header")] = key
+        return cls(
+            url=base,
+            headers=sent,
+            prefix=_names(prefix, "the prefix"),
+            paths=read_gateway_paths(gateway_paths),
+            verify=_tls(verify, cert),
+        )
+
+    def path(self, route: str) -> str:
+        return _route_path(route, self.prefix, self.paths)
 
 
 def _wait_for(response: Any, attempt: int) -> float:
@@ -599,6 +783,16 @@ def _retry(response: Any, attempt: int) -> bool:
 
 
 def _finish(call: _Call, response: Any, url: str) -> Any:
+    if 300 <= response.status_code < 400:
+        # Never followed: the key would go with it, to wherever it points.
+        where = response.headers.get("location") or "nowhere"
+        raise RequestError(
+            response.status_code,
+            f"{response.status_code} from {url}, pointing to {where}. Redirects are not "
+            "followed, so a key goes only to the address it was given for: use the address it names",
+            None,
+            url,
+        )
     body = None if call.text and response.status_code < 400 else _json_of(response)
     if response.status_code >= 400:
         raise _refusal(response.status_code, body, url)
@@ -617,11 +811,27 @@ class VectrixClient(_Calls):
     """A VectrixDB server, used from Python.
 
     Args:
-        url: Where the server is, ``https://vectors.example.com``.
+        url: Where the server is, ``https://vectors.example.com``. Behind a
+            gateway that publishes each part under a path of its own, the
+            gateway's address, with ``prefix`` and ``gateway_paths``.
         key: An API key, sent in the ``api-key`` header.
         token: A company sign-in token, sent as a bearer token instead of a key.
         timeout: Seconds to wait for each request.
         transport: An httpx transport, for tests that talk to an app in-process.
+        allow_http: Send the key or token over plain HTTP to another machine.
+            Off, only ``https://`` or this machine.
+        key_header: The header the key goes in, for a gateway with its own:
+            ``Ocp-Apim-Subscription-Key``. The server's ``VECTRIXDB_KEY_HEADER``.
+        token_header: The header the token goes in, as ``Bearer <token>``.
+        headers: More headers for every request, such as a gateway's
+            subscription key alongside a person's token.
+        prefix: The path every route lives under, as the server's ``VECTRIXDB_PREFIX``.
+        gateway_paths: Each route's gateway path, as the server's
+            ``VECTRIXDB_GATEWAY_PATHS``: ``api/v1=/files/search, auth=/files/auth``.
+        verify: A CA bundle to trust, for a private CA, or an ``ssl.SSLContext``.
+            Certificates are always checked.
+        cert: A client certificate for a gateway that asks for one: a path,
+            or ``(certificate, key)``.
     """
 
     def __init__(
@@ -632,15 +842,41 @@ class VectrixClient(_Calls):
         *,
         timeout: float = 30.0,
         transport: Any = None,
+        allow_http: bool = False,
+        key_header: str = "api-key",
+        token_header: str = "authorization",
+        headers: Optional[Mapping[str, str]] = None,
+        prefix: Optional[str] = None,
+        gateway_paths: Union[None, str, Mapping[str, str]] = None,
+        verify: Any = True,
+        cert: Any = None,
     ) -> None:
         httpx = _httpx()
-        self.url = url.rstrip("/")
+        self._wire = _Wire.of(
+            url,
+            key,
+            token,
+            allow_http=allow_http,
+            key_header=key_header,
+            token_header=token_header,
+            headers=headers,
+            prefix=prefix,
+            gateway_paths=gateway_paths,
+            verify=verify,
+            cert=cert,
+        )
+        self.url = self._wire.url
         self._http = httpx.Client(
             base_url=self.url,
-            headers=_headers(key, token),
+            headers=self._wire.headers,
             timeout=timeout,
             transport=transport,
+            verify=self._wire.verify,
+            follow_redirects=False,
         )
+
+    def __repr__(self) -> str:
+        return f"VectrixClient({self.url!r})"
 
     def close(self) -> None:
         self._http.close()
@@ -658,7 +894,7 @@ class VectrixClient(_Calls):
             try:
                 response = self._http.request(
                     call.method,
-                    call.path,
+                    self._wire.path(call.path),
                     params=call.params,
                     json=call.json,
                     content=call.content,
@@ -802,15 +1038,41 @@ class AsyncVectrixClient(_Calls):
         *,
         timeout: float = 30.0,
         transport: Any = None,
+        allow_http: bool = False,
+        key_header: str = "api-key",
+        token_header: str = "authorization",
+        headers: Optional[Mapping[str, str]] = None,
+        prefix: Optional[str] = None,
+        gateway_paths: Union[None, str, Mapping[str, str]] = None,
+        verify: Any = True,
+        cert: Any = None,
     ) -> None:
         httpx = _httpx()
-        self.url = url.rstrip("/")
+        self._wire = _Wire.of(
+            url,
+            key,
+            token,
+            allow_http=allow_http,
+            key_header=key_header,
+            token_header=token_header,
+            headers=headers,
+            prefix=prefix,
+            gateway_paths=gateway_paths,
+            verify=verify,
+            cert=cert,
+        )
+        self.url = self._wire.url
         self._http = httpx.AsyncClient(
             base_url=self.url,
-            headers=_headers(key, token),
+            headers=self._wire.headers,
             timeout=timeout,
             transport=transport,
+            verify=self._wire.verify,
+            follow_redirects=False,
         )
+
+    def __repr__(self) -> str:
+        return f"AsyncVectrixClient({self.url!r})"
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -830,7 +1092,7 @@ class AsyncVectrixClient(_Calls):
             try:
                 response = await self._http.request(
                     call.method,
-                    call.path,
+                    self._wire.path(call.path),
                     params=call.params,
                     json=call.json,
                     content=call.content,
@@ -950,6 +1212,11 @@ def connect(
     token: Optional[str] = None,
     *,
     timeout: float = 30.0,
+    **options: Any,
 ) -> VectrixClient:
-    """A server, by address and key: ``connect("https://vectors.example.com", key="...")``."""
-    return VectrixClient(url, key=key, token=token, timeout=timeout)
+    """A server, by address and key: ``connect("https://vectors.example.com", key="...")``.
+
+    ``options`` are ``VectrixClient``'s: ``key_header``, ``prefix``,
+    ``gateway_paths``, ``verify``, ``cert``, ``headers``, ``allow_http``.
+    """
+    return VectrixClient(url, key=key, token=token, timeout=timeout, **options)
