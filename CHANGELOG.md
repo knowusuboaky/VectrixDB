@@ -110,7 +110,8 @@ may change at any time.
   request. The four clients take the same: `user_agent=` in Python,
   `userAgent` in TypeScript, `WithUserAgent` in Go, `.user_agent()` in
   Rust, put before the client's own `User-Agent` and refused with a line
-  break in it. `VECTRIXDB_CREDENTIALS=keyring` keeps `vectrixdb login`'s
+  break in it (the TypeScript and Rust clients went to npm and crates.io as 2.2.0
+  before this, so theirs ships in the next release of each). `VECTRIXDB_CREDENTIALS=keyring` keeps `vectrixdb login`'s
   tokens in the system keychain, the file holding only which servers.
   `verify="system"` in Python, and `VECTRIXDB_CA_BUNDLE=system` for the
   command, trust the operating system's own certificate store, where a
