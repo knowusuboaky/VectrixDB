@@ -61,6 +61,17 @@ may change at any time.
   `VECTRIXDB_CLIENT_CERT` and the gateway settings for a company network.
   What a server sends back is printed with terminal control characters
   taken out.
+- **Run it inside a company's registry.** `VECTRIXDB_MODELS_URL` fetches
+  models from a company's mirror of the releases (an Artifactory or Nexus
+  remote) in place of GitHub, checked against the same checksums, with
+  `VECTRIXDB_MODELS_TOKEN` sent to the mirror alone and never on to a
+  redirect. The images build with the company's package index and model
+  mirror as build secrets (`--secret id=pip`, `--secret id=mirrors`), never
+  written into a layer. `VECTRIXDB_OIDC_API_CLIENTS` takes access tokens from
+  the apps it names alone, a company's own wrapper and its MCP clients, and
+  writes any other to the access log as `app_not_allowed`. Two new how-tos:
+  shipping a company's own client or command on it, and running it inside
+  JFrog Artifactory from the repositories to the person at the keyboard.
 - **`vectrixdb doctor` tries every part of an install.** `vectrixdb check`
   reads the settings; `doctor` runs it and then tries each part for real: it
   writes and removes a file in the data folder, loads the embedding model and

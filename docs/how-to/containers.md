@@ -282,6 +282,17 @@ never written into it. `--build-context wheels=dist` builds from a wheel in
 `dist` instead of the checkout, which is how a release builds from the wheel
 PyPI has.
 
+| Build secret | What it is | For |
+| --- | --- | --- |
+| `ca` | A certificate authority, PEM | a proxy that inspects TLS |
+| `pip` | A `pip.conf` naming the company's package index, credentials and all | a build that reaches packages only through JFrog Artifactory, Nexus or the like |
+| `mirrors` | Lines of `NAME=value`: `VECTRIXDB_MODELS_URL`, `VECTRIXDB_MODELS_TOKEN`, `HF_ENDPOINT`, `HF_TOKEN` | `MODELS=all` and the speech model, fetched from the company's mirror |
+
+Each is mounted for the steps that need it and never written into a layer,
+so `docker history` and the image's SBOM show none of them.
+[Run it inside your company's registry](inside-your-registry.md) builds the
+images that way, end to end.
+
 Then check what you built the way a release is checked: every container started
 read-only with every capability dropped, a collection made, filled and
 searched, data kept across a restart, a platform's own user id, the Kubernetes

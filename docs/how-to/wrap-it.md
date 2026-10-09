@@ -209,6 +209,10 @@ registry = "sparse+https://acme.jfrog.io/artifactory/api/cargo/cargo-virtual/ind
 checksum database; `github.com/knowusuboaky/VectrixDB/sdk/go/v2` is public,
 so its checksums are still checked there.
 
+[Run it inside your company's registry](inside-your-registry.md) sets up
+every repository this needs, step by step, along with the images and the
+models, and makes the wrapper the only way in.
+
 ## What a person at the company does
 
 The registry hands out the software and nothing else: once installed, the

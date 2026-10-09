@@ -828,6 +828,20 @@ export VECTRIXDB_OIDC_TOKEN_ROLE=searcher
 It is `reader`, `searcher`, `viewer` or `operator`, never `admin`, because a
 token is an app. Unset, the token's groups decide, as they do at sign-in.
 
+Any app the provider lets ask for a token for this audience gets one. To take
+tokens from the company's own apps alone, its wrapper of the command line or a
+client and the MCP clients it allows, name their client ids:
+
+```bash
+export VECTRIXDB_OIDC_API_CLIENTS="0f3c9a2e-5d1b-4c7e-9a8f-1b2c3d4e5f60 7a1d4b2c-9e8f-4a3b-8c7d-6e5f4a3b2c1d"
+```
+
+The app is read from the token's `azp` (Entra ID v2, Keycloak, Auth0, Google),
+`appid` (Entra ID v1), `cid` (Okta) or `client_id` (RFC 9068). A token from
+any other app, or one that names none, is refused and written to the access
+log as `app_not_allowed`. [Run it inside your company's registry](inside-your-registry.md#require-the-companys-own-tool)
+says what this does and does not stop.
+
 What is refused, each with a 401 and a line in the access log that never holds
 the token: a token whose audience is anything else, which includes every
 identity token, since those are issued to an application and would otherwise

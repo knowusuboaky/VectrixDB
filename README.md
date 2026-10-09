@@ -116,6 +116,9 @@ optional package or a cloud account, so the code on them cannot quietly rot.
   with a key file or your company sign-in
 - [Ship your own client or command on it](docs/how-to/wrap-it.md), a
   company's wrapper with its settings filled in, published in its own registry
+- [Run it inside your company's registry](docs/how-to/inside-your-registry.md),
+  packages, images and models through JFrog Artifactory, and the company's
+  own tool as the way in
 - [Sign people in](docs/how-to/sign-in.md)
 - [Put your company's name on it](docs/how-to/branding.md)
 - [Deploy the server](docs/how-to/deploy.md)

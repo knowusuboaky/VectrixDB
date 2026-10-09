@@ -87,6 +87,7 @@ nav:
       - Use it from Python, TypeScript, Go or Rust: how-to/clients.md
       - Use the command line on a server: how-to/command-line-server.md
       - Ship your own client or command on it: how-to/wrap-it.md
+      - Run it inside your company's registry: how-to/inside-your-registry.md
       - Sign people in: how-to/sign-in.md
       - Put your company's name on it: how-to/branding.md
       - Deploy the server: how-to/deploy.md
