@@ -1548,6 +1548,7 @@ def keys_add(
     import time
 
     from .exceptions import ConfigurationError
+    from .remote import clean
 
     server = _server(url, key_file, env_file, path)
     if server is not None:
@@ -1570,7 +1571,7 @@ def keys_add(
             "Copy it now, it is not shown again:"
         )
         # The key itself goes to stdout alone, so a script can take it: KEY=$(vectrixdb keys add ... | tail -1)
-        typer.echo(f"  {made.get('key', '')}")
+        typer.echo(f"  {clean(made.get('key', ''))}")
         return
     path = _data_path(path)
     config, store = _keys_store(path)
@@ -2715,9 +2716,7 @@ def whoami(
         _json({"url": server.url, "credential": server.who, **me})
         return
     if me.get("signin") is False or me.get("key") or not me:
-        _say(
-            f"{server.url} takes you as the holder of {server.who}: a key, not a person."
-        )
+        _say(f"{server.url} takes you as the holder of {server.who}: a key, not a person.")
         return
     name = me.get("email") or me.get("name") or me.get("who") or me.get("subject") or "somebody"
     role = f", {me['role']}" if me.get("role") else ""
@@ -2735,13 +2734,30 @@ def login(
     device: bool = typer.Option(
         False, "--device", help="Sign in with a code on any device: for SSH, containers, no browser"
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Do not ask before signing in. VECTRIXDB_LOGIN_SCOPES pins what may be asked for instead",
+    ),
     env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
 ):
     """Sign in to a server with your company account, and keep the sign-in for that address."""
     import os as _os
 
     from .exceptions import ConfigurationError
-    from .remote import Logins, Server, discover, login_with_browser, login_with_device
+    from .remote import (
+        WELL_KNOWN,
+        Logins,
+        Server,
+        _checked,
+        clean,
+        discover,
+        login_with_browser,
+        login_with_device,
+        pinned,
+        poster,
+    )
 
     _env_file(env_file)
     address = (url or _os.environ.get("VECTRIXDB_URL", "")).strip().rstrip("/")
@@ -2751,7 +2767,7 @@ def login(
     if not client:
         raise _fail(
             "Give the client id your company registered for the command line: --client-id, or VECTRIXDB_LOGIN_CLIENT_ID. "
-            "It is a public client at the identity provider, with http://localhost as a redirect and device sign-in allowed."
+            "It is a public client at the identity provider, with http://127.0.0.1 as a redirect and device sign-in allowed."
         )
     try:
         # The same checks any command makes on the address: https, no key in it.
@@ -2767,14 +2783,34 @@ def login(
             use_saved=False,
         )
         assert checked is not None
-        provider = discover(checked.url)
+        # A token is no safer over plain HTTP than a key.
+        _checked(Server(checked.url, who="the sign-in", options=checked.options))
+        wire = checked.client()._wire
+        verify = checked.options.get("verify", True)
+        provider = discover(
+            checked.url, verify=verify, well_known=wire.path(WELL_KNOWN), mcp_path=wire.path("/mcp")
+        )
+        allowed = pinned(provider, _os.environ.get("VECTRIXDB_LOGIN_SCOPES", ""))
+    except ConfigurationError as exc:
+        raise _fail(str(exc), 1)
+    # A token is good wherever its scopes say, so the person sees where they
+    # sign in and what for before anything is asked of them.
+    _say(
+        f"{clean(checked.url)} signs people in at {clean(provider.issuer)}, "
+        f"for {', '.join(clean(s) for s in provider.scopes) or 'your account alone'}."
+    )
+    if not (yes or allowed) and not typer.confirm("Sign in?", default=False):
+        raise _fail("Not signed in.", 1)
+    try:
         signed = (login_with_device if device else login_with_browser)(
-            checked.url, client, provider=provider, say=_say
+            checked.url, client, provider=provider, say=_say, post=poster(verify)
         )
     except ConfigurationError as exc:
         raise _fail(str(exc), 1)
-    probe = Server(
-        checked.url, token=signed.access_token, who="the new sign-in", options=checked.options
+    probe = _checked(
+        Server(
+            checked.url, token=signed.access_token, who="the new sign-in", options=checked.options
+        )
     )
     with _Talk(probe) as remote:
         me = remote.whoami()

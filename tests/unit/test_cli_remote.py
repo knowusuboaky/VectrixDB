@@ -36,6 +36,7 @@ from vectrixdb.remote import (  # noqa: E402
     discover,
     login_with_browser,
     login_with_device,
+    pinned,
     server_from,
 )
 
@@ -101,8 +102,8 @@ def cli(tmp_path, monkeypatch):
     monkeypatch.setenv("VECTRIXDB_CONFIG_DIR", str(tmp_path / "config"))
     runner = CliRunner()
 
-    def run(args, **env):
-        result = runner.invoke(app, args, env={k: str(v) for k, v in env.items()})
+    def run(args, stdin=None, **env):
+        result = runner.invoke(app, args, input=stdin, env={k: str(v) for k, v in env.items()})
         return result.exit_code, result.output
 
     return run
@@ -123,7 +124,8 @@ def test_a_collection_made_filled_searched_and_deleted_on_a_server(served, cli, 
 
     code, out = cli(["ingest", str(folder), "--name", "handbook", "--url", served], **key)
     assert code == 0, out
-    assert "Created handbook" in out and "handbook.md: 3 chunks" in flat(out)
+    # Rich wraps at the runner's width, mid-word on a long path, so the words are read unwrapped.
+    assert "Created handbook" in out and "handbook.md:3chunks" in "".join(out.split())
 
     code, out = cli(["list", "--json"], VECTRIXDB_URL=served, **key)
     assert code == 0, out
@@ -295,17 +297,17 @@ def test_the_gateway_and_the_ca_come_from_the_settings(tmp_path):
 
 
 def _login(url="https://vectors.example.com", **over) -> Login:
-    fields = dict(
-        url=url,
-        issuer="https://login.example.com",
-        client_id="cli",
-        token_endpoint="https://login.example.com/token",
-        access_token="access-1",
-        expires_at=time.time() + 3600,
-        refresh_token="refresh-1",
-        scope="openid offline_access",
-        who="ada@example.com",
-    )
+    fields = {
+        "url": url,
+        "issuer": "https://login.example.com",
+        "client_id": "cli",
+        "token_endpoint": "https://login.example.com/token",
+        "access_token": "access-1",
+        "expires_at": time.time() + 3600,
+        "refresh_token": "refresh-1",
+        "scope": "openid offline_access",
+        "who": "ada@example.com",
+    }
     fields.update(over)
     return Login(**fields)
 
@@ -385,6 +387,7 @@ PROVIDER = Provider(
 def test_the_server_names_the_provider_and_the_provider_must_agree():
     answers = {
         "https://v.example.com/.well-known/oauth-protected-resource": {
+            "resource": "https://v.example.com/mcp",
             "authorization_servers": ["https://login.example.com"],
             "scopes_supported": ["api://vectors/.default"],
         },
@@ -405,16 +408,92 @@ def test_the_server_names_the_provider_and_the_provider_must_agree():
         discover("https://v.example.com", get=lambda url, what: answers[url])
 
     answers["https://v.example.com/.well-known/oauth-protected-resource"] = {
-        "authorization_servers": ["http://login.example.com"]
+        "resource": "https://v.example.com",
+        "authorization_servers": ["http://login.example.com"],
     }
     with pytest.raises(ConfigurationError, match="https"):
         discover("https://v.example.com", get=lambda url, what: answers[url])
 
     answers["https://v.example.com/.well-known/oauth-protected-resource"] = {
-        "authorization_servers": []
+        "resource": "https://v.example.com/mcp",
+        "authorization_servers": [],
     }
     with pytest.raises(ConfigurationError, match="API key"):
         discover("https://v.example.com", get=lambda url, what: answers[url])
+
+
+def test_a_server_cannot_pass_off_another_servers_sign_in():
+    """The document must name the address asked, and pinned scopes bound what may be asked for."""
+    answers = {
+        "https://evil.test/.well-known/oauth-protected-resource": {
+            "resource": "https://vectors.company.com/mcp",
+            "authorization_servers": ["https://login.example.com"],
+            "scopes_supported": ["api://vectors/.default"],
+        },
+    }
+    with pytest.raises(ConfigurationError, match="says it is https://vectors.company.com"):
+        discover("https://evil.test", get=lambda url, what: answers[url])
+    answers["https://evil.test/.well-known/oauth-protected-resource"].pop("resource")
+    with pytest.raises(ConfigurationError, match="names no resource"):
+        discover("https://evil.test", get=lambda url, what: answers[url])
+
+    assert pinned(PROVIDER, "") is False
+    assert pinned(PROVIDER, "api://vectors/.default openid") is True
+    with pytest.raises(ConfigurationError, match="does not allow"):
+        pinned(PROVIDER, "api://other/.default")
+
+
+def _provider_for(monkeypatch, provider=PROVIDER):
+    """The CLI's login finds ``provider`` without asking anyone; any sign-in flow is a failure."""
+    import vectrixdb.remote as remote
+
+    seen = {}
+
+    def found(url, **kwargs):
+        seen.update(kwargs, url=url)
+        return provider
+
+    def no_sign_in(*args, **kwargs):
+        raise AssertionError("signed in without being allowed to")
+
+    monkeypatch.setattr(remote, "discover", found)
+    monkeypatch.setattr(remote, "login_with_browser", no_sign_in)
+    monkeypatch.setattr(remote, "login_with_device", no_sign_in)
+    return seen
+
+
+def test_login_shows_where_and_what_for_and_waits_for_a_yes(cli, monkeypatch):
+    seen = _provider_for(monkeypatch)
+    code, out = cli(
+        ["login", "--url", "https://vectors.example.com", "--client-id", "cli"], stdin="n\n"
+    )
+    assert code == 1 and "Not signed in" in out
+    assert "https://login.example.com" in out and "api://vectors/.default" in out
+    assert seen["url"] == "https://vectors.example.com"
+    assert seen["well_known"] == "/.well-known/oauth-protected-resource"
+
+
+def test_login_with_pinned_scopes_refuses_a_server_asking_for_others(cli, monkeypatch):
+    _provider_for(monkeypatch)
+    code, out = cli(
+        ["login", "--url", "https://vectors.example.com", "--client-id", "cli"],
+        VECTRIXDB_LOGIN_SCOPES="api://other/.default",
+    )
+    assert code == 1 and "does not allow" in flat(out)
+
+
+def test_login_goes_through_the_gateway_and_never_over_plain_http(cli, monkeypatch):
+    seen = _provider_for(monkeypatch)
+    code, out = cli(["login", "--url", "http://vectors.example.com", "--client-id", "cli"])
+    assert code == 1 and "VECTRIXDB_ALLOW_HTTP" in flat(out) and not seen
+
+    code, out = cli(
+        ["login", "--url", "https://gateway.example.com", "--client-id", "cli"],
+        stdin="n\n",
+        VECTRIXDB_PREFIX="/acme",
+        VECTRIXDB_GATEWAY_PATHS=".well-known=/files/auth",
+    )
+    assert seen["well_known"] == "/files/auth/acme/.well-known/oauth-protected-resource"
 
 
 def test_a_device_sign_in_waits_slows_down_and_keeps_the_tokens():
@@ -463,15 +542,13 @@ def test_a_browser_sign_in_checks_the_state_and_sends_the_verifier():
         query = {k: v[0] for k, v in parse_qs(urlsplit(address).query).items()}
         assert query["code_challenge_method"] == "S256" and query["response_type"] == "code"
         redirect = query["redirect_uri"]
-        assert redirect.startswith("http://localhost:")
+        # The address, not the name localhost, which can resolve elsewhere.
+        assert redirect.startswith("http://127.0.0.1:")
 
         def answer():
             # A request with another state is turned away, and the real one still lands.
-            httpx.get(redirect.replace("localhost", "127.0.0.1") + "?code=x&state=forged")
-            httpx.get(
-                redirect.replace("localhost", "127.0.0.1")
-                + f"?code=the-code&state={query['state']}"
-            )
+            httpx.get(redirect + "?code=x&state=forged")
+            httpx.get(redirect + f"?code=the-code&state={query['state']}")
 
         threading.Thread(target=answer, daemon=True).start()
         sent.append(query)
@@ -503,7 +580,7 @@ def test_a_refused_browser_sign_in_says_what_the_provider_said():
 
     def open_browser(address):
         query = {k: v[0] for k, v in parse_qs(urlsplit(address).query).items()}
-        target = query["redirect_uri"].replace("localhost", "127.0.0.1")
+        target = query["redirect_uri"]
         threading.Thread(
             target=lambda: httpx.get(
                 f"{target}?error=access_denied&error_description=Not+in+the+group%1b[2J&state={query['state']}"

@@ -38,7 +38,8 @@ shell's history and shows in the process list, where anyone on the machine
 can read it. Two of them at once is refused rather than one picked, so it is
 always clear who the server sees. `vectrixdb whoami` says who it took you for.
 
-A key file has to be yours alone, the way ssh treats a private key:
+A key file has to be yours alone, the way ssh treats a private key (on
+Windows, keep it under your own profile, which only you can read):
 
 ```bash
 chmod 600 ~/.config/vectrixdb/handbook.key
@@ -53,8 +54,16 @@ People sign in with the account they already have, and never handle a key:
 vectrixdb login --url https://vectors.company.com
 ```
 
-A browser opens at your company's sign-in page; when you are done, the
-command keeps the sign-in for that address. From SSH, a container or any
+```text
+https://vectors.company.com signs people in at https://login.microsoftonline.com/<tenant>/v2.0, for api://vectrixdb/search.
+Sign in? [y/N]: y
+```
+
+The command says where you will sign in and what the token will be good
+for, and asks first: a token is good wherever its scopes say, so a server you
+were sent to by mistake cannot quietly collect one for another. A browser then
+opens at your company's sign-in page; when you are done, the command keeps the
+sign-in for that address. From SSH, a container or any
 machine without a browser, sign in with a code on your phone instead:
 
 ```bash
@@ -78,12 +87,19 @@ How it works, for whoever sets it up:
   reads, from `VECTRIXDB_OIDC_ISSUER` and `VECTRIXDB_OIDC_API_AUDIENCE`. A
   server without an API audience takes no sign-in tokens, and `login` says to
   use a key instead.
+- The server's document has to name the address you gave as itself, so a
+  server cannot pass off another's sign-in as its own. Behind a gateway, set
+  the server's `VECTRIXDB_PUBLIC_URL` to the address people use.
 - The command line needs a client id at the identity provider:
   register a **public client** (no secret), allow
-  `http://localhost` as a redirect, and turn on the device code flow. Give
+  `http://127.0.0.1` as a redirect (any port), and turn on the device code flow. Give
   people its id as `VECTRIXDB_LOGIN_CLIENT_ID`, or `--client-id`. In Entra ID
   that is an app registration with "Allow public client flows" on and the
   API's permission granted.
+- Set `VECTRIXDB_LOGIN_SCOPES` to the scopes your server asks for, in the
+  same place as the client id. Then a server asking for any other is refused,
+  and nobody is asked to confirm. `--yes` skips the question too, for a script
+  that knows the address.
 - The browser sign-in is the authorization code flow with PKCE, answered on
   127.0.0.1 on a port the system picks (RFC 8252); the device sign-in is RFC
   8628. Both work with Entra ID, Okta, Auth0, Keycloak, Google and any
@@ -95,7 +111,9 @@ How it works, for whoever sets it up:
   `%APPDATA%\vectrixdb` on Windows, `~/Library/Application Support/vectrixdb`
   on macOS, and `$XDG_CONFIG_HOME/vectrixdb` or `~/.config/vectrixdb`
   elsewhere. The file is written readable by you alone, and the command
-  refuses to read it when anyone else can.
+  refuses to read it when anyone else can. On Windows the folder under your
+  profile is already yours alone, and the command does not change its
+  permissions; keep `VECTRIXDB_CONFIG_DIR` there, not on a shared drive.
 
 ## Every command
 

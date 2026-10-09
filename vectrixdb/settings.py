@@ -766,6 +766,11 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 "",
             ),
             (
+                "LOGIN_SCOPES",
+                "The scopes vectrixdb login may ask for, space-separated. Set, a server asking for any other is refused and nobody is asked to confirm.",
+                "api://vectrixdb/search",
+            ),
+            (
                 "CONFIG_DIR",
                 "Where vectrixdb login keeps sign-ins. Unset, the platform's config folder.",
                 "",

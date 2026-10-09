@@ -53,6 +53,7 @@ for the command line, as a public client: ``--client-id`` or
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import html
 import json
@@ -78,12 +79,16 @@ __all__ = [
     "clean",
     "login_with_browser",
     "login_with_device",
+    "pinned",
+    "poster",
     "server_from",
 ]
 
 _ON = {"1", "true", "yes", "on"}
 #: A token this close to expiring is refreshed before it is used.
 REFRESH_EARLY = 120
+#: Where a server names the identity provider it trusts (RFC 9728).
+WELL_KNOWN = "/.well-known/oauth-protected-resource"
 #: How long a browser sign-in is waited for.
 BROWSER_WAIT = 300
 #: Characters a terminal acts on rather than prints: all controls but tab and newline.
@@ -211,6 +216,7 @@ def server_from(
     if given:
         source, kind, key, token = given[0]
         return _checked(Server(address, key=key, token=token, who=source, options=options))
+    post = post or poster(options.get("verify", True))
     saved = (logins or Logins()).fresh(address, post=post) if use_saved else None
     if saved is not None:
         return _checked(
@@ -391,10 +397,10 @@ def _http() -> Any:
     return _httpx()
 
 
-def _get_json(url: str, what: str) -> Dict[str, Any]:
+def _get_json(url: str, what: str, verify: Any = True) -> Dict[str, Any]:
     httpx = _http()
     try:
-        response = httpx.get(url, timeout=20, follow_redirects=False)
+        response = httpx.get(url, timeout=20, follow_redirects=False, verify=_verify(verify))
     except httpx.HTTPError as exc:
         raise ConfigurationError(f"{what} at {url} could not be reached: {exc}") from None
     if response.status_code != 200:
@@ -408,7 +414,7 @@ def _get_json(url: str, what: str) -> Dict[str, Any]:
     return found
 
 
-def _post_form(url: str, form: Mapping[str, str]) -> Dict[str, Any]:
+def _post_form(url: str, form: Mapping[str, str], verify: Any = True) -> Dict[str, Any]:
     """POST a form to an identity provider; its JSON answer, errors included, as a dict."""
     httpx = _http()
     try:
@@ -418,6 +424,7 @@ def _post_form(url: str, form: Mapping[str, str]) -> Dict[str, Any]:
             headers={"accept": "application/json"},
             timeout=30,
             follow_redirects=False,
+            verify=_verify(verify),
         )
     except httpx.HTTPError as exc:
         raise ConfigurationError(f"{url} could not be reached: {exc}") from None
@@ -429,6 +436,18 @@ def _post_form(url: str, form: Mapping[str, str]) -> Dict[str, Any]:
         raise ConfigurationError(f"{url} answered {response.status_code}, not a JSON object")
     found.setdefault("_status", response.status_code)
     return found
+
+
+def _verify(verify: Any) -> Any:
+    """What httpx is given to check certificates: always checked, against a company CA when one is named."""
+    from .client import _tls
+
+    return _tls(verify, None)
+
+
+def poster(verify: Any = True) -> Callable[..., Dict[str, Any]]:
+    """``_post_form`` checking certificates against ``verify``: a CA bundle's path, or True."""
+    return functools.partial(_post_form, verify=verify)
 
 
 def _https(url: str, what: str) -> str:
@@ -455,10 +474,42 @@ class Provider:
     device_authorization_endpoint: str = ""
 
 
-def discover(url: str, get: Callable[[str, str], Dict[str, Any]] = _get_json) -> Provider:
-    """The identity provider ``url`` trusts, from its protected-resource document, and that provider's endpoints."""
+def _same(a: str, b: str) -> bool:
+    one, two = urlsplit(a.rstrip("/")), urlsplit(b.rstrip("/"))
+    return (one.scheme.lower(), (one.netloc or "").lower(), one.path) == (
+        two.scheme.lower(),
+        (two.netloc or "").lower(),
+        two.path,
+    )
+
+
+def discover(
+    url: str,
+    get: Optional[Callable[[str, str], Dict[str, Any]]] = None,
+    *,
+    verify: Any = True,
+    well_known: str = WELL_KNOWN,
+    mcp_path: str = "/mcp",
+) -> Provider:
+    """The identity provider ``url`` trusts, from its protected-resource document, and that provider's endpoints.
+
+    The document has to name ``url`` itself as the resource (RFC 9728, section
+    3.3), so a server cannot pass off another's sign-in as its own, and the
+    provider has to call itself what the server named.
+    """
+    get = get or functools.partial(_get_json, verify=verify)
     base = url.rstrip("/")
-    resource = get(base + "/.well-known/oauth-protected-resource", "The server")
+    resource = get(base + well_known, "The server")
+    named = str(resource.get("resource") or "")
+    if not any(_same(named, mine) for mine in (base, base + "/mcp", base + mcp_path)):
+        said = named[: -len("/mcp")] if named.endswith("/mcp") else named
+        raise ConfigurationError(
+            f"{base} says it is {clean(said) or 'nothing'}, so a sign-in got for it would not be its own. "
+            f"Sign in with the address it gives: vectrixdb login --url {clean(said)}. "
+            "If that is wrong, its admin sets VECTRIXDB_PUBLIC_URL to the address people use"
+            if said
+            else f"{base} names no resource in its protected-resource document, so it cannot be signed in to"
+        )
     issuers = [str(i) for i in resource.get("authorization_servers") or [] if i]
     if not issuers:
         raise ConfigurationError(
@@ -469,7 +520,7 @@ def discover(url: str, get: Callable[[str, str], Dict[str, Any]] = _get_json) ->
     found = get(issuer.rstrip("/") + "/.well-known/openid-configuration", "The identity provider")
     if str(found.get("issuer", "")).rstrip("/") != issuer.rstrip("/"):
         raise ConfigurationError(
-            f"The identity provider at {issuer} calls itself {found.get('issuer')!r}; refusing a provider that is not who the server named"
+            f"The identity provider at {issuer} calls itself {clean(found.get('issuer'))!r}; refusing a provider that is not who the server named"
         )
     provider = Provider(
         issuer=issuer,
@@ -479,6 +530,25 @@ def discover(url: str, get: Callable[[str, str], Dict[str, Any]] = _get_json) ->
         device_authorization_endpoint=str(found.get("device_authorization_endpoint") or ""),
     )
     return provider
+
+
+def pinned(provider: Provider, scopes: str) -> bool:
+    """Whether the scopes the server asks for are the ones ``scopes`` (VECTRIXDB_LOGIN_SCOPES) allows.
+
+    Refused when the server asks for any other, since a token is good wherever
+    its scopes say: a server naming another's would get a token for that one.
+    False when nothing is pinned, so the person is asked instead.
+    """
+    allowed = scopes.replace(",", " ").split()
+    if not allowed:
+        return False
+    other = [s for s in provider.scopes if s not in allowed]
+    if other:
+        raise ConfigurationError(
+            f"The server asks for {', '.join(clean(s) for s in other)}, which VECTRIXDB_LOGIN_SCOPES "
+            f"({' '.join(allowed)}) does not allow. Not signing in"
+        )
+    return True
 
 
 def _scope(provider: Provider) -> str:
@@ -524,6 +594,8 @@ class _Callback(BaseHTTPRequestHandler):
 
     got: Dict[str, str] = {}
     expected_state = ""
+    # A connection that sends nothing cannot hold the one listener up.
+    timeout = 5
 
     def do_GET(self) -> None:  # noqa: N802 - the http.server name
         query = {k: v[0] for k, v in parse_qs(urlsplit(self.path).query).items()}
@@ -572,7 +644,8 @@ def login_with_browser(
     handler: Any = type("Callback", (_Callback,), {"got": {}, "expected_state": state})
     # Bound to the loopback address alone, on a port the system picks.
     listener = HTTPServer(("127.0.0.1", 0), handler)
-    redirect = f"http://localhost:{listener.server_port}/callback"
+    # 127.0.0.1, not localhost: the name can resolve elsewhere (RFC 8252, 8.3).
+    redirect = f"http://127.0.0.1:{listener.server_port}/callback"
     address = (
         provider.authorization_endpoint
         + ("&" if "?" in provider.authorization_endpoint else "?")

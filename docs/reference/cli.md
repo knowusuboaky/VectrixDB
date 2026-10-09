@@ -340,6 +340,7 @@ Sign in to a server with your company account, and keep the sign-in for that add
 | `--url` | Use the server at this address instead of a folder here: https://vectors.company.com. Default: VECTRIXDB_URL |  |
 | `--client-id` | The command line's client id at your identity provider. Default: VECTRIXDB_LOGIN_CLIENT_ID |  |
 | `--device` | Sign in with a code on any device: for SSH, containers, no browser | off |
+| `--yes`, `-y` | Do not ask before signing in. VECTRIXDB_LOGIN_SCOPES pins what may be asked for instead | off |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 
 ## logout

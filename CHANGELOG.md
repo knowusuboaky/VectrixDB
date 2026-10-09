@@ -35,7 +35,10 @@ may change at any time.
 - **Clients safe to point anywhere.** All four clients refuse to send a key
   or token over plain HTTP to another machine (`allow_http` says otherwise),
   never follow a redirect, so a key goes only to the address it was given
-  for, always check certificates, and never print a key. They take a
+  for, always check certificates, and never print a key. A name or id of
+  `.` or `..`, which would reach another route, a key with a control
+  character and an address with a password in it are refused before
+  anything is sent. They take a
   gateway's key header and token header, extra headers, its `prefix` and
   `gateway_paths` (read exactly as the server's `VECTRIXDB_GATEWAY_PATHS`),
   a private CA and a client certificate, and honour `HTTPS_PROXY`. The Go
@@ -49,7 +52,10 @@ may change at any time.
   `vectrixdb login`, which signs a person in with the identity provider the
   server names (a browser with PKCE, or `--device` from SSH and containers)
   and keeps the sign-in for that address alone, readable by its owner, and
-  refreshed before it expires. There is no `--key`, which shell history
+  refreshed before it expires. `login` says where you sign in and what for
+  and asks first (`VECTRIXDB_LOGIN_SCOPES` pins the scopes instead), takes
+  only a server that names itself, and never goes over plain HTTP. There is
+  no `--key`, which shell history
   would keep. `vectrixdb whoami`, `vectrixdb logout`, `--json` for scripts,
   exit codes 0, 1 and 2, and `VECTRIXDB_CA_BUNDLE`,
   `VECTRIXDB_CLIENT_CERT` and the gateway settings for a company network.
