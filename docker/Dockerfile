@@ -33,6 +33,19 @@
 #
 #   docker build --secret id=ca,src=company-ca.pem -f docker/Dockerfile .
 #
+# A company whose builds reach packages only through its own registry (JFrog
+# Artifactory, Nexus) hands the build a pip.conf naming it, and a file of
+# mirror settings for the models; both are read for the build alone and never
+# written into a layer, credentials and all:
+#
+#   docker build --secret id=pip,src=pip.conf --secret id=mirrors,src=mirrors.env \
+#     --build-arg MODELS=all -f docker/Dockerfile .
+#
+# mirrors.env holds VECTRIXDB_MODELS_URL and VECTRIXDB_MODELS_TOKEN for the
+# model releases, and HF_ENDPOINT and HF_TOKEN for the speech model the
+# extraction image fetches. The how-to "Run it inside your company's registry"
+# has each line.
+#
 # A company that mirrors base images names its copy with
 # --build-arg PYTHON_IMAGE=registry.example.com/python:3.12-slim, and one whose
 # builds cannot reach Debian's archive adds --build-arg DEBIAN_UPDATES=0.
@@ -57,8 +70,9 @@ FROM ${PYTHON_IMAGE} AS wheel-build
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE NOTICE ./
 COPY vectrixdb ./vectrixdb
-RUN --mount=type=secret,id=ca \
+RUN --mount=type=secret,id=ca --mount=type=secret,id=pip \
     if [ -s /run/secrets/ca ]; then export PIP_CERT=/run/secrets/ca; fi; \
+    if [ -s /run/secrets/pip ]; then export PIP_CONFIG_FILE=/run/secrets/pip; fi; \
     PIP_DISABLE_PIP_VERSION_CHECK=1 pip wheel --no-cache-dir --no-deps --wheel-dir /out .
 
 FROM scratch AS wheels
@@ -95,10 +109,12 @@ ARG MODELS=
 # The package is the very wheel being released. What it pulls in is what pip
 # resolves on the day of the build, and the SBOM a release attaches records it.
 # hadolint ignore=DL3013
-RUN --mount=type=secret,id=ca \
+RUN --mount=type=secret,id=ca --mount=type=secret,id=pip --mount=type=secret,id=mirrors \
     if [ -s /run/secrets/ca ]; then \
         export PIP_CERT=/run/secrets/ca SSL_CERT_FILE=/run/secrets/ca REQUESTS_CA_BUNDLE=/run/secrets/ca; \
     fi; \
+    if [ -s /run/secrets/pip ]; then export PIP_CONFIG_FILE=/run/secrets/pip; fi; \
+    if [ -s /run/secrets/mirrors ]; then set -a; . /run/secrets/mirrors; set +a; fi; \
     set -eu; \
     wheel="$(ls /wheels/vectrixdb-*.whl)"; \
     pip install "dumb-init==1.2.5" "${wheel}[${SERVER_EXTRAS}]"; \
@@ -118,10 +134,12 @@ ARG EXTRACT_EXTRAS=api,signin,tracing,extract,youtube,ocr-azure,jobs-azure
 ARG WHISPER_MODEL=base
 ENV HF_HOME=/opt/vectrixdb/huggingface
 # hadolint ignore=DL3013
-RUN --mount=type=secret,id=ca \
+RUN --mount=type=secret,id=ca --mount=type=secret,id=pip --mount=type=secret,id=mirrors \
     if [ -s /run/secrets/ca ]; then \
         export PIP_CERT=/run/secrets/ca SSL_CERT_FILE=/run/secrets/ca REQUESTS_CA_BUNDLE=/run/secrets/ca; \
     fi; \
+    if [ -s /run/secrets/pip ]; then export PIP_CONFIG_FILE=/run/secrets/pip; fi; \
+    if [ -s /run/secrets/mirrors ]; then set -a; . /run/secrets/mirrors; set +a; fi; \
     set -eu; \
     wheel="$(ls /wheels/vectrixdb-*.whl)"; \
     pip install "dumb-init==1.2.5" "${wheel}[${EXTRACT_EXTRAS}]"; \

@@ -102,6 +102,10 @@ signin = [
     "pyjwt[crypto]>=2.8.0",
     "qrcode>=7.4",
 ]
+# Talking to a server from Python: connect(), VectrixClient and AsyncVectrixClient
+client = [
+    "httpx>=0.24.0",
+]
 # MCP server, so an assistant can use a collection as a tool
 mcp = [
     # 2 or later: the server's /mcp endpoint is built on its MCPServer.
@@ -263,7 +267,7 @@ asr-aws = [
 # Everything a user might want at runtime. Deliberately excludes `dev`, `docs`
 # and `test`, which are contributor tooling rather than features, and the local
 # readers in `extract`, whose speech models are large enough to ask for by name.
-all = ["vectrixdb[api,signin,mcp,documents,viz,hf,fastembed,aws,azure,databricks,postgres,tracing,feeds]"]
+all = ["vectrixdb[api,signin,mcp,client,documents,viz,hf,fastembed,aws,azure,databricks,postgres,tracing,feeds]"]
 
 [project.scripts]
 vectrixdb = "vectrixdb.cli:app"

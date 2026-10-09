@@ -1,0 +1,27 @@
+[package]
+name = "vectrixdb"
+version = "2.2.0"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0"
+repository = "https://github.com/knowusuboaky/VectrixDB"
+description = "Client for VectrixDB: collections, documents, text search, sources."
+readme = "README.md"
+keywords = ["vectrixdb", "vector", "search", "rag", "client"]
+categories = ["api-bindings", "database"]
+
+[features]
+default = []
+# A synchronous client that drives the async one on its own runtime.
+blocking = ["tokio/rt"]
+
+[dependencies]
+reqwest = { version = "0.12.9", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.128"
+thiserror = "1.0.64"
+# Only the timer, for the retry wait; reqwest already runs on tokio.
+tokio = { version = "1.41.0", default-features = false, features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1.41.0", features = ["macros", "rt-multi-thread"] }

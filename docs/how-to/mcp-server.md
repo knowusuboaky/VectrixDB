@@ -181,6 +181,10 @@ export VECTRIXDB_MCP=1
     Register the audience as an API, register the client with PKCE, and name
     the scopes it asks for in `VECTRIXDB_MCP_SCOPES`.
 
+A server with `VECTRIXDB_OIDC_API_CLIENTS` set takes tokens from the apps it
+names alone, so the MCP client's own client id goes on that list too
+([Run it inside your company's registry](inside-your-registry.md#require-the-companys-own-tool)).
+
 A browser's dashboard session is not a way in: a page could otherwise make an
 assistant's request for whoever has the dashboard open.
 

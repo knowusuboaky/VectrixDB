@@ -185,6 +185,9 @@ Triplet
 V
 VectorCache
 Vectrix
+connect
+VectrixClient
+AsyncVectrixClient
 VectrixDB
 VectrixError
 VectrixSync

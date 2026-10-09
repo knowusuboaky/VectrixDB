@@ -132,6 +132,17 @@ SETTINGS: Tuple[Setting, ...] = tuple(
             ("OFFLINE", "1 refuses every download: the bundled models only.", ""),
             ("MODELS_DIR", "Where models are kept, when not beside the package.", ""),
             ("AUTO_DOWNLOAD", "1 fetches a missing model on first use.", ""),
+            (
+                "MODELS_URL",
+                "A company's mirror of the model releases, in place of GitHub: an Artifactory or Nexus remote serving the same <tag>/<asset>.zip paths. Checked against the same checksums.",
+                "https://acme.jfrog.io/artifactory/vectrixdb-models",
+            ),
+            (
+                "MODELS_TOKEN",
+                "The token the mirror asks for, sent as a Bearer token to MODELS_URL alone, never on to a redirect.",
+                "",
+                "secret",
+            ),
         ],
     )
     + _s(
@@ -298,6 +309,11 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 "OIDC_API_AUDIENCE",
                 "The audience of an access token taken as a Bearer token, so an app acts as the person using it: api://vectrixdb. Empty: no token is taken.",
                 "",
+            ),
+            (
+                "OIDC_API_CLIENTS",
+                "The apps an access token may come from, by client id, separated by spaces: a company's own wrapper and the MCP clients it allows. Empty: any app the provider gave a token for OIDC_API_AUDIENCE.",
+                "<wrapper client id> <MCP client id>",
             ),
             (
                 "OIDC_TOKEN_ROLE",
@@ -738,6 +754,55 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 "Threads that insert into the vector index. 1 makes every build of the same vectors the same graph, and is slower; empty is every core.",
                 "",
             ),
+        ],
+    )
+    + _s(
+        "The command line, on a server",
+        [
+            (
+                "URL",
+                "The server the vectrixdb command and the clients' examples talk to, instead of a folder here. Read on the caller's machine, not by the server.",
+                "https://vectors.company.com",
+            ),
+            ("KEY", "The API key they send. Never put it on the command line.", "", "secret"),
+            (
+                "KEY_FILE",
+                "A file holding that key, readable by its owner alone, as a mounted secret.",
+                "",
+            ),
+            (
+                "TOKEN",
+                "A company sign-in token your own tooling fetched, sent instead of a key.",
+                "",
+                "secret",
+            ),
+            (
+                "LOGIN_CLIENT_ID",
+                "The client id vectrixdb login uses: a public client registered at the identity provider for the command line.",
+                "",
+            ),
+            (
+                "LOGIN_SCOPES",
+                "The scopes vectrixdb login may ask for, space-separated. Set, a server asking for any other is refused and nobody is asked to confirm.",
+                "api://vectrixdb/search",
+            ),
+            (
+                "CONFIG_DIR",
+                "Where vectrixdb login keeps sign-ins. Unset, the platform's config folder.",
+                "",
+            ),
+            (
+                "ALLOW_HTTP",
+                "1 lets the command send a key or token over plain HTTP to another machine, on a network you trust.",
+                "0",
+            ),
+            ("CA_BUNDLE", "A CA bundle to trust, for a company's own CA.", ""),
+            (
+                "CLIENT_CERT",
+                "A client certificate for a gateway that asks for one, PEM.",
+                "",
+            ),
+            ("CLIENT_CERT_KEY", "Its private key, readable by its owner alone.", ""),
         ],
     )
 )
