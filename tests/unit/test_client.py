@@ -43,27 +43,30 @@ def _free_port() -> int:
 @pytest.fixture(scope="module")
 def served(tmp_path_factory):
     """A server on a free port that keeps each document's Markdown."""
-    import os
-
     import uvicorn
 
     from vectrixdb.api.server import create_app
 
-    os.environ["VECTRIXDB_API_KEY"] = KEY
-    os.environ["VECTRIXDB_KEEP_SOURCE"] = "1"
-    port = _free_port()
-    app = create_app(db_path=str(tmp_path_factory.mktemp("db")), enable_dashboard=False)
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    for _ in range(200):
-        if server.started:
-            break
-        time.sleep(0.05)
-    assert server.started
-    yield f"http://127.0.0.1:{port}"
-    server.should_exit = True
-    thread.join(timeout=5)
+    # Set for this module alone: the server reads them at each request, and
+    # other tests in the same worker must not find a key they never set.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("VECTRIXDB_API_KEY", KEY)
+        patch.setenv("VECTRIXDB_KEEP_SOURCE", "1")
+        port = _free_port()
+        app = create_app(db_path=str(tmp_path_factory.mktemp("db")), enable_dashboard=False)
+        server = uvicorn.Server(
+            uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+        )
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        for _ in range(200):
+            if server.started:
+                break
+            time.sleep(0.05)
+        assert server.started
+        yield f"http://127.0.0.1:{port}"
+        server.should_exit = True
+        thread.join(timeout=5)
 
 
 def walk(db: VectrixClient, url: str) -> None:
