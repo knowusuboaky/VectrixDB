@@ -141,6 +141,10 @@ VectrixDB doctor, for ./vectrixdb_data
 1 error, 0 warnings. Each says what to do under it.
 ```
 
+On a fresh install with no settings, offline, every part it can try answers:
+
+![vectrixdb doctor --offline in an empty folder: the install, the embedding model and the reranker each loading and timed, the readers, the server, the models not installed with the command that adds each, and what reads scans, pictures and recordings](../images/terminal/doctor.gif)
+
 | It tries | How |
 | --- | --- |
 | The data folder | writes a file and removes it, and reads the free space |

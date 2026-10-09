@@ -127,12 +127,14 @@ def coloured(reply: str) -> str:
 class Terminal:
     """A terminal on the page, filmed by ``reel``: typed commands and what they printed."""
 
-    def __init__(self, reel: shots.Reel, folder: Path, title: str) -> None:
+    def __init__(self, reel: shots.Reel, folder: Path, title: str, height: int = HEIGHT) -> None:
         self.reel = reel
         page = folder / "terminal.html"
-        page.write_text(TERMINAL.replace("TITLE", html.escape(title)), encoding="utf-8")
+        drawn = TERMINAL.replace("TITLE", html.escape(title))
+        drawn = drawn.replace("height: 552px;", f"height: {height - 48}px;")
+        page.write_text(drawn, encoding="utf-8")
         browser = reel.browser
-        browser.size(WIDTH, HEIGHT)
+        browser.size(WIDTH, height)
         browser.send("Page.navigate", url=page.as_uri())
         browser.wait_for("document.readyState === 'complete' && !!window.__prompt")
 

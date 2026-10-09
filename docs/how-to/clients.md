@@ -69,6 +69,8 @@ says how to ask for a key made for your app.
     }
     ```
 
+![One server and one document: the Python client adds handbook.md, then the same search run from the Python, TypeScript, Go and Rust examples answers with the same three citations and scores](../images/terminal/clients.gif)
+
 The server reads the file, cuts it into chunks and embeds them, so the client
 sends bytes and nothing else: no model runs on your side. `citation` is the
 string the server stamped on the chunk, `handbook.pdf#p12` or
