@@ -565,7 +565,7 @@ class _Rules:
 #: robotparsers kept the $ quoted as %24 and newer ones drop it, so the anchor
 #: is carried through as letters every version keeps.
 _END = "VXRULEEND"
-_ANCHOR = re.compile(r"(?im)^(\s*(?:dis)?allow\s*:\s*\S*?)\$[ 	]*$")
+_ANCHOR = re.compile(r"(?im)^(\s*(?:dis)?allow\s*:\s*\S*?)\$[ \t]*$")
 
 
 def _pattern(path: str) -> Optional["re.Pattern[str]"]:
