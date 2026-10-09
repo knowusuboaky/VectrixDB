@@ -52,6 +52,7 @@ PAGES = [
     "docs/how-to/offline.md",
     "docs/how-to/rest-api.md",
     "docs/how-to/build-an-app.md",
+    "docs/how-to/clients.md",
     "docs/how-to/storage-backends.md",
     "docs/how-to/tips.md",
     "docs/how-to/tracing.md",

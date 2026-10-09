@@ -132,8 +132,10 @@ server's detail. Each language names the same kinds:
 | 429, 503 | `BusyError` | `BusyError` | `ErrBusy` | `Busy` |
 
 ```python
+from vectrixdb import connect
 from vectrixdb.client import NotFoundError
 
+db = connect("https://vectors.company.com", key=KEY)
 try:
     db.describe("handbok")
 except NotFoundError as refused:
