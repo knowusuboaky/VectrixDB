@@ -29,6 +29,10 @@ may change at any time.
   fix to the image itself could never reach a released version. It now
   builds the release's wheel with main's Dockerfile and checks, and refuses
   to run from any other branch.
+- **Publishing a release's images counts each image's own builds.** The
+  server's builds were matched as `vectrixdb-*`, which took the multilingual
+  and extraction builds too, so tagging stopped at "6 found" with nothing
+  pushed. Each image now takes its Intel and ARM build by name.
 
 ## [2.2.0] - 2026-10-09
 ### Added

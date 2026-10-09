@@ -435,7 +435,11 @@ jobs:
           publish() { # local name, repository, tags, description
             local name="$1" repo="$2" tags="$3" description="$4" args=() sources=()
             for tag in $tags; do args+=(--tag "$repo:$tag"); done
-            for file in "$RUNNER_TEMP/digests/$name"-*; do sources+=("$repo@$(cat "$file")"); done
+            # By architecture, since vectrixdb-* would also take vectrixdb-full-*.
+            for arch in amd64 arm64; do
+              file="$RUNNER_TEMP/digests/$name-$arch"
+              if [ -f "$file" ]; then sources+=("$repo@$(cat "$file")"); fi
+            done
             if [ "${#sources[@]}" != 2 ]; then
               echo "::error::$name: an Intel and an ARM build were expected, ${#sources[@]} found"
               exit 1
