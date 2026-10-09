@@ -209,6 +209,31 @@ registry = "sparse+https://acme.jfrog.io/artifactory/api/cargo/cargo-virtual/ind
 checksum database; `github.com/knowusuboaky/VectrixDB/sdk/go/v2` is public,
 so its checksums are still checked there.
 
+## What a person at the company does
+
+The registry hands out the software and nothing else: once installed, the
+command and the clients talk to the company's VectrixDB server directly,
+through its gateway, and the registry is not in the way of a single search.
+
+Each machine is pointed at the registry once, by whoever looks after
+machines: a `pip.conf`, an `.npmrc`, `GOPROXY`, a `.cargo/config.toml`, put
+there by device management, the JFrog CLI or a CI template. After that,
+nobody types the registry's address or its credentials again, and nothing
+needs the public internet.
+
+| Who | Installs | Then |
+|---|---|---|
+| Anyone with a terminal | `pip install acme-cli` | `acme vectors login --device`, signed in with their work account; `acme vectors query "refunds" --name handbook` |
+| A Python developer | `pip install acme-vectors` | `acme_vectors.connect(token=...)`, everything else filled in |
+| A TypeScript developer | `npm install @acme/vectors` | `connect({ token })` |
+| A Go developer | `go get acme.com/vectors` | `acmevectors.Connect(key)` |
+| A Rust developer | `cargo add acme-vectors` | `acme_vectors::connect(&key)?` |
+| A CI job | the same, from the same registry | a key from the CI's secret store, as `VECTRIXDB_KEY` |
+
+Who may search what is still the server's to say, for each person or key,
+whatever package they came through
+([Use the command line on a server](command-line-server.md#who-you-are)).
+
 ## Keep it working
 
 - **Pin the major version**, `>=2.2,<3` or its equivalent, and let the
