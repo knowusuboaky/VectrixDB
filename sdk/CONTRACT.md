@@ -22,7 +22,7 @@ same names, spelled the language's way (`add_document`, `addDocument`,
 | Call | Route | Returns |
 |---|---|---|
 | `health()` | `GET /health` | `true` when the process answers |
-| `ready()` | `GET /ready`, falling back to `/health` when the server has no `/ready` (404) | `true` when models are loaded |
+| `ready()` | `GET /ready`, falling back to `/health` when the server has no `/ready` (404, servers before 2.2); a 503 means not ready yet | `true` when models are loaded |
 | `whoami()` | `GET /auth/me` | the `data` object as the server sends it |
 | `collections()` | `GET /api/v1/collections` | list of `Collection` |
 | `describe(name)` | `GET /api/v1/collections/{name}` | one `Collection` |
@@ -46,8 +46,10 @@ same names, spelled the language's way (`add_document`, `addDocument`,
 The server answers in two envelopes. Most routes send
 `{"ok": true, "message": ..., "data": {...}}` and the client returns `data`.
 Three list routes send the list at the top: `{"collections": [...], "total": n}`,
-`{"documents": [...]}`, `{"sources": [...]}`. Document upload and delete, and
-sources refresh, send a flat object with `ok` and their fields.
+`{"documents": [...]}`, `{"sources": [...]}`. Document upload (`doc_id`, `chunks`, ...) and delete (`chunks_removed`), and
+sources refresh, send a flat object with `ok` and their fields. Adding a
+source sends `{"ok": true, "source": {...}}`; read `source`, else `data`.
+Text upsert's count is `data.added`.
 
 - `Collection`: `name`, `dimension`, `metric`, `count`, `size_bytes`,
   `description`, `has_text_index`, `tags`, `created_at`, `updated_at`,
