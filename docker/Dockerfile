@@ -106,6 +106,22 @@ ARG SERVER_EXTRAS=api,signin,mcp,tracing,documents,feeds,azure,aws,postgres,jobs
 # all: the multilingual embedding model and reranker as well, about 280 MB
 # more, for collections in the hundred-odd languages besides English.
 ARG MODELS=
+# 1 builds the Postgres driver from source against Debian's libpq, which
+# Debian keeps patched. The psycopg2-binary wheel carries its own copies of
+# libpq, OpenSSL, pcre2 and Kerberos from the distribution it was built on,
+# and those go stale: on arm64 they are AlmaLinux 8's, with known critical
+# holes a scan rightly refuses. 0 takes the wheel, for a build Debian's archive
+# is out of reach of.
+ARG POSTGRES_FROM_SOURCE=1
+# hadolint ignore=DL3008
+RUN set -eu; \
+    if [ "${POSTGRES_FROM_SOURCE}" = "1" ]; then \
+        apt-get update; \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc libc6-dev libpq-dev; \
+        rm -rf /var/lib/apt/lists/*; \
+    elif [ "${POSTGRES_FROM_SOURCE}" != "0" ]; then \
+        echo "POSTGRES_FROM_SOURCE is 1 or 0" >&2; exit 2; \
+    fi
 # The package is the very wheel being released. What it pulls in is what pip
 # resolves on the day of the build, and the SBOM a release attaches records it.
 # hadolint ignore=DL3013
@@ -117,7 +133,12 @@ RUN --mount=type=secret,id=ca --mount=type=secret,id=pip --mount=type=secret,id=
     if [ -s /run/secrets/mirrors ]; then set -a; . /run/secrets/mirrors; set +a; fi; \
     set -eu; \
     wheel="$(ls /wheels/vectrixdb-*.whl)"; \
-    pip install "dumb-init==1.2.5" "${wheel}[${SERVER_EXTRAS}]"; \
+    from_source=""; \
+    if [ "${POSTGRES_FROM_SOURCE}" = "1" ]; then from_source="--no-binary=psycopg2-binary"; fi; \
+    pip install ${from_source} "dumb-init==1.2.5" "${wheel}[${SERVER_EXTRAS}]"; \
+    if [ -n "${from_source}" ] && ls /opt/vectrixdb/lib/python3*/site-packages/psycopg2_binary.libs >/dev/null 2>&1; then \
+        echo "psycopg2 still carries its own libraries" >&2; exit 1; \
+    fi; \
     if [ "${MODELS}" = "all" ]; then \
         vectrixdb download-models --type all; \
     elif [ -n "${MODELS}" ]; then \
@@ -261,7 +282,19 @@ CMD ["extract-serve", "--host", "0.0.0.0"]
 # turns it off, and every tool call is held to the caller's key or token.
 
 FROM runtime AS server
+ARG POSTGRES_FROM_SOURCE=1
+# The driver built from source links Debian's libpq, patched with the rest of
+# the system by the runtime's upgrade; the import proves it is found.
+# hadolint ignore=DL3008
+RUN set -eu; \
+    if [ "${POSTGRES_FROM_SOURCE}" = "1" ]; then \
+        apt-get update; \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libpq5; \
+        apt-get clean; \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
 COPY --from=server-venv /opt/vectrixdb /opt/vectrixdb
+RUN python -c "import psycopg2; print('psycopg2', psycopg2.__version__, 'libpq', psycopg2.extensions.libpq_version())"
 ENV VECTRIXDB_LISTEN_PORT=7337 \
     VECTRIXDB_MCP=1 \
     VECTRIXDB_WARM=1
