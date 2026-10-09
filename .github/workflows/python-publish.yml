@@ -15,12 +15,19 @@
 #      wheel is under PyPI's 100 MB limit;
 # and then the "pypi" environment waits for one approval from the maintainer.
 # Once PyPI has it, containers.yml builds the container images from the same
-# wheel, checks them, and pushes them to ghcr.io signed.
+# wheel, checks them, and pushes them to ghcr.io signed, and the clients go
+# out at the same version: npm `vectrixdb` from sdk/typescript, crates.io
+# `vectrixdb` from sdk/rust, and the tag sdk/go/v<version> that Go reads for
+# github.com/knowusuboaky/VectrixDB/sdk/go/v2. A version a registry already
+# has is skipped, so a release can be run again after a failure.
 #
 # Publishing uses PyPI Trusted Publishing (OIDC), configured at
 # https://pypi.org/manage/project/vectrixdb/settings/publishing/ with owner
 # `knowusuboaky`, repo `VectrixDB`, workflow `python-publish.yml` and
-# environment `pypi`. That names this file, so it keeps its name.
+# environment `pypi`. That names this file, so it keeps its name. npm and
+# crates.io take the same kind of trusted publisher (repo `VectrixDB`, workflow
+# `python-publish.yml`, no environment), set up in each package's settings;
+# until it is, the secrets NPM_TOKEN and CARGO_REGISTRY_TOKEN stand in.
 
 name: Release
 
@@ -47,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      client_version: ${{ steps.clients.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,6 +87,23 @@ jobs:
       - name: The changelog has a dated section for it
         run: python scripts/release_notes.py "${{ steps.version.outputs.version }}" --check > /dev/null
 
+      # The four clients ship at one version, so a release cannot carry a
+      # client that still says the last one. npm, crates.io and Go write a
+      # pre-release as 2.3.0-rc.1 where PyPI has 2.3.0rc1.
+      - name: The clients declare the same version
+        id: clients
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python scripts/release.py --clients "$VERSION"
+          module="$(sed -n 's/^module //p' sdk/go/go.mod)"
+          major="${VERSION%%.*}"
+          if [ "$major" -ge 2 ] && [ "${module##*/}" != "v$major" ]; then
+            echo "::error::sdk/go/go.mod is $module; a $major.x release needs /v$major at its end"
+            exit 1
+          fi
+          echo "version=$(python scripts/release.py --client-version "$VERSION")" >> "$GITHUB_OUTPUT"
+
       - name: No tag for it exists yet
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -92,9 +117,14 @@ jobs:
     needs: [prepare]
     uses: ./.github/workflows/ci.yml
 
+  sdk:
+    name: The clients must pass
+    needs: [prepare]
+    uses: ./.github/workflows/sdk.yml
+
   release-build:
     name: Build and check
-    needs: [prepare, ci]
+    needs: [prepare, ci, sdk]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -234,3 +264,108 @@ jobs:
       id-token: write
       attestations: write
       security-events: write # the weekly scan's, asked for though a release skips it
+
+  # The clients, at the same version, once PyPI has the package. Each step
+  # asks its registry first and skips a version that is already there.
+  npm-publish:
+    name: Publish the TypeScript client to npm
+    needs: [prepare, pypi-publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # trusted publishing, and the provenance npm shows
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@11
+
+      - name: Publish, unless npm has it already
+        env:
+          VERSION: ${{ needs.prepare.outputs.client_version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if npm view "vectrixdb@$VERSION" version > /dev/null 2>&1; then
+            echo "npm already has vectrixdb $VERSION"; exit 0
+          fi
+          cp ../../LICENSE ../../NOTICE .
+          npm ci
+          npm run build
+          # A pre-release goes out under "next", so `npm install vectrixdb`
+          # keeps giving the last release.
+          case "$VERSION" in
+            *-*) npm publish --access public --provenance --tag next ;;
+            *) npm publish --access public --provenance ;;
+          esac
+
+  crates-publish:
+    name: Publish the Rust client to crates.io
+    needs: [prepare, pypi-publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # trusted publishing
+    env:
+      HAS_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+    defaults:
+      run:
+        working-directory: sdk/rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Does crates.io have it already
+        id: there
+        env:
+          VERSION: ${{ needs.prepare.outputs.client_version }}
+        run: |
+          code="$(curl -s -o /dev/null -w '%{http_code}' -A 'VectrixDB release' \
+            "https://crates.io/api/v1/crates/vectrixdb/$VERSION")"
+          if [ "$code" = "200" ]; then
+            echo "crates.io already has vectrixdb $VERSION"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sign in to crates.io as this workflow
+        id: auth
+        if: steps.there.outputs.skip != 'true' && env.HAS_TOKEN != 'true'
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish
+        if: steps.there.outputs.skip != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cp ../../LICENSE ../../NOTICE .
+          cargo publish --locked --allow-dirty
+
+  go-tag:
+    name: Tag the Go client
+    needs: [prepare, pypi-publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the tag
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Go finds a module in a subfolder by a tag of that folder's path and
+      # the version, at the commit that was released.
+      - name: Tag sdk/go/v${{ needs.prepare.outputs.client_version }}
+        env:
+          VERSION: ${{ needs.prepare.outputs.client_version }}
+        run: |
+          tag="sdk/go/v$VERSION"
+          if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+            echo "$tag exists already"; exit 0
+          fi
+          git tag "$tag" "$GITHUB_SHA"
+          git push origin "$tag"

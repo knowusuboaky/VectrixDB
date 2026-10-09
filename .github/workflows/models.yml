@@ -1,0 +1,100 @@
+# Publish model release assets: the zips `vectrixdb download-models` fetches
+# from github.com/knowusuboaky/VectrixDB/releases/download/<tag>/<asset>.zip,
+# and that a company's model mirror copies (VECTRIXDB_MODELS_URL).
+#
+# Run by hand (Actions > Models > Run workflow) with the types to publish. It
+# zips each from the models in this checkout's git LFS, checks every file
+# against the checksum manifest the wheel carries, and makes the release for its tag, or replaces the asset on a
+# release that exists. The nightly "Model release assets exist" job is what
+# says one is missing.
+
+name: Models
+
+on:
+  workflow_dispatch:
+    inputs:
+      types:
+        description: Model types, as vectrixdb download-models --type names them
+        required: true
+        default: "dense_en reranker_en late_interaction_en"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: models
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish model release assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install -e .
+
+      - name: Zip each model and check it against the manifest
+        env:
+          TYPES: ${{ github.event.inputs.types }}
+        run: |
+          # shellcheck disable=SC2086 # the types are separate words on purpose
+          python scripts/publish_models.py $TYPES
+
+      # A download is verified against the manifest, so a zip that does not
+      # match it would fail for everyone who fetched it.
+      - name: Each zip is what the manifest records
+        run: |
+          python - <<'PY'
+          import sys, tempfile, zipfile
+          from pathlib import Path
+          from vectrixdb.models import checksums
+          manifest = checksums.load_manifest()
+          for archive in sorted(Path("dist/models").glob("*.zip")):
+              asset = archive.stem
+              if asset not in manifest:
+                  sys.exit(f"{asset}: no checksums on record")
+              with tempfile.TemporaryDirectory() as where:
+                  zipfile.ZipFile(archive).extractall(where)
+                  files = checksums.verify(asset, Path(where), manifest)
+              print(f"{archive.name}: {len(files)} files match the manifest")
+          PY
+
+      - name: Make or update each release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TYPES: ${{ github.event.inputs.types }}
+        run: |
+          for type in $TYPES; do
+            read -r tag asset < <(python - "$type" <<'PY'
+          import sys
+          from vectrixdb.models.downloader import RELEASE_ASSETS, _config_key
+          from vectrixdb.models.embedded import MODEL_CONFIG
+          t = sys.argv[1]
+          print(MODEL_CONFIG[_config_key(t)]["github_release"], RELEASE_ASSETS[t][0])
+          PY
+            )
+            zip="dist/models/$asset.zip"
+            if gh release view "$tag" > /dev/null 2>&1; then
+              gh release upload "$tag" "$zip" --clobber
+            else
+              gh release create "$tag" "$zip" --target "$GITHUB_SHA" \
+                --title "$asset model" --notes "ONNX INT8 $asset for vectrixdb download-models"
+            fi
+            echo "$type: $tag/$asset.zip"
+          done
+
+      - name: Each can be fetched
+        env:
+          TYPES: ${{ github.event.inputs.types }}
+        run: |
+          # shellcheck disable=SC2086
+          python scripts/check_model_releases.py $TYPES

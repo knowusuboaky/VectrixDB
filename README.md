@@ -86,6 +86,37 @@ check a signature before anything runs.
   <img src="docs/images/containers/compose.gif" alt="Compose starting the server, the extraction service and Jaeger, then a scan read by the extraction service and a search that finds its words" width="860">
 </p>
 
+## From the command line, four languages, or an assistant
+
+The same server answers the `vectrixdb` command, clients in Python,
+TypeScript, Go and Rust, and an assistant over MCP. Every client keeps the same
+safety rules: no key over plain HTTP, no redirects, certificates always checked.
+
+| | Install | Guide |
+|---|---|---|
+| Command line | `pip install "vectrixdb[client]"` | [Use the command line on a server](docs/how-to/command-line-server.md) |
+| Python | `pip install "vectrixdb[client]"` | [Use it from Python, TypeScript, Go or Rust](docs/how-to/clients.md) |
+| TypeScript | `npm install vectrixdb` | [npm](https://www.npmjs.com/package/vectrixdb) |
+| Go | `go get github.com/knowusuboaky/VectrixDB/sdk/go/v2` | [pkg.go.dev](https://pkg.go.dev/github.com/knowusuboaky/VectrixDB/sdk/go/v2) |
+| Rust | `cargo add vectrixdb` | [crates.io](https://crates.io/crates/vectrixdb) |
+| MCP | `pip install "vectrixdb[mcp]"` | [Use your collections from an assistant over MCP](docs/how-to/mcp-server.md) |
+
+<p align="center">
+  <img src="docs/images/terminal/clients.gif" alt="One server and one document: the same search run from the Python, TypeScript, Go and Rust clients answers with the same citations" width="860">
+</p>
+
+<p align="center">
+  <img src="docs/images/terminal/cli.gif" alt="The vectrixdb command pointed at a server: a folder ingested, a search with each result's citation, whoami naming the key, and a plain-HTTP address it refuses to send the key to" width="860">
+</p>
+
+<p align="center">
+  <img src="docs/images/dashboard/tour-mcp.gif" alt="An assistant connects over MCP, lists the collections and searches: real calls to a sample server and the answers that came back" width="860">
+</p>
+
+A company can ship its own command or client on these
+([Ship your own client or command](docs/how-to/wrap-it.md)) and serve all of
+it from its own registry ([Run it inside your company's registry](docs/how-to/inside-your-registry.md)).
+
 ## Documentation
 
 Grouped by what you came for: learning it, doing one thing, looking something

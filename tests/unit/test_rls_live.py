@@ -9,7 +9,8 @@ the filter, where an application bug cannot reach it.
 
 So this module is gated. It runs when `VECTRIXDB_LIVE_BACKENDS` names
 `postgres_rls` and `VECTRIXDB_RLS_DSN` points at a database where the test
-user may create roles and tables, which means a throwaway database. The
+user may create roles and tables, which means a throwaway database, with
+pgvector installed: the backend creates the extension when it connects. The
 nightly workflow gives it one. Nothing here runs in the default suite, and
 nothing here is mocked: a mocked row level security test would assert that
 the mock does what it was told to do.
@@ -31,6 +32,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import pytest
 
@@ -113,8 +115,22 @@ def storage(database):
     """An Aurora backend bound to the same database, connected."""
     from vectrixdb.core.storage import AuroraPostgreSQLStorage, StorageBackend, StorageConfig
 
+    # The backend takes its connection as separate aurora_* fields rather
+    # than a DSN, so the one address the workflow gives is taken apart here.
+    # TLS only when the address asks for it: Aurora requires it, and the
+    # service container the nightly job runs does not speak it.
+    dsn = urlsplit(DSN)
+    sslmode = parse_qs(dsn.query).get("sslmode", ["disable"])[-1]
     backend = AuroraPostgreSQLStorage(
-        StorageConfig(backend=StorageBackend.AURORA_POSTGRESQL, connection_string=DSN)
+        StorageConfig(
+            backend=StorageBackend.AURORA_POSTGRESQL,
+            aurora_host=dsn.hostname or "localhost",
+            aurora_port=dsn.port or 5432,
+            aurora_database=unquote(dsn.path.lstrip("/")) or "postgres",
+            aurora_user=unquote(dsn.username) if dsn.username else None,
+            aurora_password=unquote(dsn.password) if dsn.password else None,
+            aurora_ssl=sslmode not in ("disable", "allow", "prefer"),
+        )
     )
     backend.connect()
     yield backend

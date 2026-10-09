@@ -326,8 +326,15 @@ class TestBotChecks:
             (200, {"Content-Type": "application/json"}, json.dumps({"rate": 4.5}).encode()),
             (200, {}, b"<html><title>Just a moment...</title><p>A poem about waiting.</p></html>"),
             (200, {}, b""),
-            # Larger than any bot check: a page, whatever it quotes.
-            (200, {}, CLOUDFLARE_JS + b"<!--" + b"x" * (300 * 1024) + b"-->"),
+            # Larger than any bot check: a page, whatever it quotes. Named, since
+            # pytest puts a test's id in an environment variable, and Windows
+            # refuses one longer than 32767 characters.
+            pytest.param(
+                200,
+                {},
+                CLOUDFLARE_JS + b"<!--" + b"x" * (300 * 1024) + b"-->",
+                id="larger-than-any-bot-check",
+            ),
         ],
     )
     def test_a_page_is_not_one(self, status, headers, body):

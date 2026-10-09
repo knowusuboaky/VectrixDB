@@ -16,6 +16,18 @@ may change at any time.
 
 ### Added
 
+- **One release, every registry.** The Release workflow runs each client's
+  own checks and its walk against a real server (the new SDKs workflow, also
+  run on every pull request that touches a client or the server), then, once
+  PyPI has the package, publishes the TypeScript client to npm and the Rust
+  client to crates.io at the same version, and tags `sdk/go/v<version>` for
+  Go, next to the release's own `v<version>`. A version a registry already
+  has is skipped. `python scripts/release.py X.Y.Z` stamps the version in
+  every client too, and a release is refused while any client says another
+  one; a pre-release such as 2.3.0rc1 goes to npm, crates.io and Go as
+  2.3.0-rc.1, and to npm under `next`.
+- **The documentation's home page shows every way in:** the command line, the
+  four clients and MCP, each with its install line, its clip and its guide.
 - **A client in four languages, one surface.** `vectrixdb.connect(url,
   key=...)` returns a `VectrixClient` with the same calls as `Vectrix`:
   `search` returns the same `Results` with the same citations, `add_document`
