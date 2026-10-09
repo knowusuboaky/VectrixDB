@@ -7,8 +7,16 @@ Go 1.22 or newer.
 ## Install
 
 ```
-go get github.com/knowusuboaky/VectrixDB/sdk/go
+go get github.com/knowusuboaky/VectrixDB/sdk/go/v2
 ```
+
+```go
+import vectrixdb "github.com/knowusuboaky/VectrixDB/sdk/go/v2"
+```
+
+The SDK is versioned 2.x, so the module path ends in `/v2`. It lives in a
+subdirectory of the repository, so its releases are tagged `sdk/go/v2.2.0`
+(not `v2.2.0`), which is what `go get ...@v2.2.0` resolves.
 
 ## Quickstart
 
@@ -71,9 +79,90 @@ if errors.Is(err, vectrixdb.ErrNotFound) {
 A connection failure is returned at once, with the server's address in the
 message.
 
+A redirect is never followed, since the key would go with it to wherever it
+points: a 3xx is a plain `*vectrixdb.Error` whose message names the status
+and the `Location`, and it is not retried.
+
+## Safety
+
+- **No key over plain HTTP.** A key or token for an `http://` address is
+  refused unless the host is this machine (`localhost`, `127.0.0.0/8`,
+  `::1`) or `WithAllowHTTP()` is given. Without a key or token, `http://` is
+  fine. `New` returns no error, so the client keeps the refusal: `db.Err()`
+  reports it at once, and every call returns it. It wraps
+  `vectrixdb.ErrConfig`, as do refused header names and gateway paths.
+
+  ```go
+  db := vectrixdb.New("http://vectors.internal", vectrixdb.WithKey(key))
+  if err := db.Err(); err != nil {
+  	log.Fatal(err) // ... use an https:// address, or WithAllowHTTP() ...
+  }
+  ```
+
+- **TLS** is always checked. A private CA and a client certificate go in the
+  `http.Client` you hand to `WithHTTPClient`:
+
+  ```go
+  pool, _ := x509.SystemCertPool()
+  ca, _ := os.ReadFile("company-ca.pem")
+  pool.AppendCertsFromPEM(ca)
+  cert, err := tls.LoadX509KeyPair("client.crt", "client.key")
+  if err != nil {
+  	log.Fatal(err)
+  }
+  transport := http.DefaultTransport.(*http.Transport).Clone() // keeps the proxy settings
+  transport.TLSClientConfig = &tls.Config{RootCAs: pool, Certificates: []tls.Certificate{cert}}
+  db := vectrixdb.New("https://vectors.example.com",
+  	vectrixdb.WithKey(key),
+  	vectrixdb.WithHTTPClient(&http.Client{Transport: transport}))
+  ```
+
+  The client sets `CheckRedirect` on a copy of that `http.Client` so it does
+  not follow redirects; your own value is not changed, and a `CheckRedirect`
+  you set yourself is kept.
+
+- **Proxies**: `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured, as
+  `http.DefaultTransport` does.
+- The key and token never appear in an error, and `fmt.Print(db)` (`%v`,
+  `%+v`, `%#v`) shows only the address and the header the credential goes in.
+
+## Behind a company gateway
+
+A gateway that publishes each part of the server under a path of its own,
+wants the key in a header of its own, or wants a subscription key as well as
+the person's token:
+
+```go
+db := vectrixdb.New("https://gateway.example.com",
+	vectrixdb.WithToken(token),
+	vectrixdb.WithHeader("Ocp-Apim-Subscription-Key", subscription),
+	vectrixdb.WithPrefix("/acme"),
+	vectrixdb.WithGatewayPaths("api/v1=/files/search, auth=/files/auth"),
+)
+```
+
+- `WithKeyHeader(name)` (default `api-key`) and `WithTokenHeader(name)`
+  (default `Authorization`; the token always goes as `Bearer <token>`) name
+  the headers; the server's `VECTRIXDB_KEY_HEADER` and
+  `VECTRIXDB_TOKEN_HEADER` are the same settings on its side.
+- `WithHeader(name, value)` adds a header to every request. It never
+  replaces the user-agent or the key or token header.
+- `WithPrefix` is the path every route lives under; `WithGatewayPaths` is
+  the list the gateway team hands over (`WithGatewayPathMap` takes it as a
+  map). A request goes to `<gateway path><prefix><route>`, the gateway path
+  being that of the longest name the route equals or falls under
+  (`name/...`), else none. With the settings above, `/api/v1/collections`
+  goes to `/files/search/acme/api/v1/collections`, `/auth/me` to
+  `/files/auth/acme/auth/me`, and `/health` to `/acme/health`.
+- Names and paths are read as the server reads them: slashes trimmed,
+  doubled ones dropped, `.` and `..` refused, both sides of `=` required, a
+  name given twice refused. One list serves both sides.
+
 ## Tests
 
-`go test ./...` runs two tests. `spec_test.go` parses
+`go test ./...` runs the unit tests (`client_test.go`, and `safety_test.go`
+for the options above, with the same cases as the other SDKs) and two
+more. `spec_test.go` parses
 `docs/reference/openapi.json` and checks that every route and request field
 the client uses is in it, so a renamed route fails without a server.
 `conformance_test.go` runs the walk in `sdk/CONTRACT.md` against a real

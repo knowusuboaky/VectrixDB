@@ -22,6 +22,8 @@ var (
 
 // Error is every refusal the server sends: the HTTP status, the one-sentence
 // message, and the detail (a string, or on a 422 the list of field errors).
+// A redirect (3xx) is one too, never followed, its message naming the status
+// and the location it pointed to.
 type Error struct {
 	Status  int
 	Message string
@@ -76,4 +78,17 @@ func newError(status int, url string, body []byte) *Error {
 		e.Message = fmt.Sprintf("%d from %s", status, url)
 	}
 	return e
+}
+
+// redirectError is a 3xx: the client never follows a redirect, since the key
+// would go with it. It is the base kind, none of the Err* sentinels.
+func redirectError(status int, url, location string) *Error {
+	if location == "" {
+		location = "no location"
+	}
+	return &Error{
+		Status:  status,
+		URL:     url,
+		Message: fmt.Sprintf("%d redirect to %s refused: the client does not follow redirects, so the key does not go with one", status, location),
+	}
 }

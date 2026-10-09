@@ -16,7 +16,7 @@ says how to ask for a key made for your app.
 |---|---|
 | Python | `pip install "vectrixdb[client]"` |
 | TypeScript | `npm install vectrixdb` |
-| Go | `go get github.com/knowusuboaky/VectrixDB/sdk/go` |
+| Go | `go get github.com/knowusuboaky/VectrixDB/sdk/go/v2` |
 | Rust | `cargo add vectrixdb` |
 
 ## Add a document, search, cite

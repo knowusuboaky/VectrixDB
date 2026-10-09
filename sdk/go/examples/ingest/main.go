@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	vectrixdb "github.com/knowusuboaky/VectrixDB/sdk/go"
+	vectrixdb "github.com/knowusuboaky/VectrixDB/sdk/go/v2"
 )
 
 func main() {

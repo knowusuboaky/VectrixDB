@@ -4,6 +4,11 @@
 // a sign-in token, create collections, add documents or texts, search with
 // citations, and keep up with feeds and pages. Every call takes a
 // context.Context first and returns a typed result or an *Error.
+//
+// The module is github.com/knowusuboaky/VectrixDB/sdk/go/v2; the package is
+// vectrixdb:
+//
+//	import vectrixdb "github.com/knowusuboaky/VectrixDB/sdk/go/v2"
 package vectrixdb
 
 import (
@@ -26,43 +31,107 @@ const Version = "2.2.0"
 const userAgent = "vectrixdb-go/" + Version
 
 // Client talks to one VectrixDB server. Make one with New.
+//
+// A Client never prints its key or token: its String and GoString name only
+// the address and the header the credential goes in.
 type Client struct {
-	base    string
-	key     string
-	token   string
-	timeout time.Duration
-	http    *http.Client
+	base         string
+	key          string
+	token        string
+	keyHeader    string
+	tokenHeader  string
+	headers      map[string]string
+	prefix       string
+	gatewayPaths map[string]string
+	allowHTTP    bool
+	timeout      time.Duration
+	http         *http.Client
+	// err is the first refusal of the client's settings; every call returns it.
+	err error
 }
 
 // Option configures a Client.
 type Option func(*Client)
 
-// WithKey sends the API key in the api-key header.
+// WithKey sends the API key in the api-key header, or the one WithKeyHeader
+// names.
 func WithKey(key string) Option { return func(c *Client) { c.key = key } }
 
 // WithToken sends a company sign-in token as Authorization: Bearer <token>
-// in place of a key.
+// in place of a key; WithTokenHeader names another header.
 func WithToken(token string) Option { return func(c *Client) { c.token = token } }
 
 // WithTimeout sets the per-request timeout. The default is 30 seconds.
 func WithTimeout(d time.Duration) Option { return func(c *Client) { c.timeout = d } }
 
-// WithHTTPClient sends requests through the given http.Client.
+// WithHTTPClient sends requests through the given http.Client: the place for
+// a private CA bundle (Transport's TLSClientConfig.RootCAs) and a client
+// certificate (TLSClientConfig.Certificates). The client never follows a
+// redirect, so unless h has a CheckRedirect of its own, a shallow copy of h
+// with one that refuses redirects is used; h itself is not changed.
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
 
 // New returns a client for the server at url, for example
-// New("http://127.0.0.1:8000", WithKey(key)).
+// New("https://vectors.example.com", WithKey(key)).
+//
+// New refuses a key or token for a plain http:// address unless the host is
+// this machine (localhost, 127.0.0.0/8, ::1) or WithAllowHTTP is given, and
+// refuses header names and gateway paths that do not read. Since New returns
+// no error, the client keeps the refusal: Err reports it, and every call
+// returns it, wrapping ErrConfig.
 func New(url string, opts ...Option) *Client {
 	c := &Client{
-		base:    strings.TrimRight(url, "/"),
-		timeout: 30 * time.Second,
-		http:    http.DefaultClient,
+		base:        strings.TrimRight(url, "/"),
+		keyHeader:   DefaultKeyHeader,
+		tokenHeader: DefaultTokenHeader,
+		timeout:     30 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	switch {
+	case c.http == nil:
+		// No Transport: http.DefaultTransport, which honours HTTPS_PROXY,
+		// HTTP_PROXY and NO_PROXY and always checks certificates.
+		c.http = &http.Client{CheckRedirect: noRedirects}
+	case c.http.CheckRedirect == nil:
+		h := *c.http
+		h.CheckRedirect = noRedirects
+		c.http = &h
+	}
+	if !headerValueOK(c.key) {
+		c.refuse(fmt.Errorf("%w: the key holds a character a header cannot carry", ErrConfig))
+	}
+	if !headerValueOK(c.token) {
+		c.refuse(fmt.Errorf("%w: the token holds a character a header cannot carry", ErrConfig))
+	}
+	c.refuse(c.checkPlainHTTP())
 	return c
 }
+
+// noRedirects hands a 3xx back as it is: following it would send the key
+// to wherever it points.
+func noRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// Err is the refusal of the client's settings New kept, or nil. Every call
+// returns the same error.
+func (c *Client) Err() error { return c.err }
+
+// String names the address and where the credential goes, never the
+// credential itself.
+func (c Client) String() string {
+	cred := "no key"
+	switch {
+	case c.token != "":
+		cred = "token in " + c.tokenHeader
+	case c.key != "":
+		cred = "key in " + c.keyHeader
+	}
+	return fmt.Sprintf("vectrixdb.Client(%s, %s)", c.base, cred)
+}
+
+// GoString is String, so %#v does not print the credential either.
+func (c Client) GoString() string { return c.String() }
 
 // URL is the server address the client was made with.
 func (c *Client) URL() string { return c.base }
@@ -91,7 +160,10 @@ var backoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 // do sends a request, retrying a 429 or a 503 up to three times, and turns
 // any other 4xx or 5xx into an *Error.
 func (c *Client) do(ctx context.Context, r request) (*response, error) {
-	full := c.base + r.path
+	if c.err != nil {
+		return nil, c.err
+	}
+	full := c.base + c.address(r.path)
 	if len(r.query) > 0 {
 		full += "?" + r.query.Encode()
 	}
@@ -114,6 +186,9 @@ func (c *Client) do(ctx context.Context, r request) (*response, error) {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+	if out.status >= 300 && out.status < 400 {
+		return nil, redirectError(out.status, full, out.header.Get("Location"))
 	}
 	if out.status >= 400 {
 		return nil, newError(out.status, full, out.body)
@@ -144,18 +219,23 @@ func (c *Client) once(ctx context.Context, r request, full string) (*response, e
 	if err != nil {
 		return nil, fmt.Errorf("vectrixdb: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/json, text/markdown, text/plain")
+	// Extra headers first, so the request's own, the user-agent and the
+	// credential header are set after them and cannot be replaced.
+	for k, v := range c.headers {
+		req.Header.Set(k, v)
+	}
 	if r.contentType != "" {
 		req.Header.Set("Content-Type", r.contentType)
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	} else if c.key != "" {
-		req.Header.Set("api-key", c.key)
-	}
 	for k, v := range r.headers {
 		req.Header.Set(k, v)
+	}
+	req.Header.Set("User-Agent", userAgent)
+	if c.token != "" {
+		req.Header.Set(c.tokenHeader, "Bearer "+c.token)
+	} else if c.key != "" {
+		req.Header.Set(c.keyHeader, c.key)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
