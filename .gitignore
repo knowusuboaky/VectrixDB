@@ -85,3 +85,6 @@ docker/*.key
 
 # A collection written by 2.1.7, which the suite opens: kept, whatever its files are called
 !tests/fixtures/legacy_2_1_7/**
+
+# Hypothesis keeps its example database here.
+.hypothesis/
