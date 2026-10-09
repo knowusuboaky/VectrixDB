@@ -86,6 +86,9 @@ _LAZY: Dict[str, Tuple[str, Optional[str]]] = {
     "ModelNotFoundError": (".exceptions", "ModelNotFoundError"),
     "ModelDownloadError": (".exceptions", "ModelDownloadError"),
     "Vectrix": (".easy", "Vectrix"),
+    "connect": (".client", "connect"),
+    "VectrixClient": (".client", "VectrixClient"),
+    "AsyncVectrixClient": (".client", "AsyncVectrixClient"),
     "Result": (".easy", "Result"),
     "Results": (".easy", "Results"),
     "RevocationReport": (".easy", "RevocationReport"),
@@ -612,6 +615,10 @@ if TYPE_CHECKING:  # the real imports, for type checkers and IDEs only
 __all__ = [
     # Easy API (Recommended)
     "Vectrix",
+    # A server, from Python
+    "connect",
+    "VectrixClient",
+    "AsyncVectrixClient",
     "V",  # Backwards compatibility alias
     "Result",
     "Results",
