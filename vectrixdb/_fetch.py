@@ -561,14 +561,22 @@ class _Rules:
         return allowed
 
 
-def _pattern(path: str) -> Optional["re.Pattern[str]"]:
-    """A rule's path as robotparser kept it, quoted, as a pattern: ``*`` any run, a final ``$`` the end."""
+def _pattern(path: str, anchored: Optional[bool] = None) -> Optional["re.Pattern[str]"]:
+    """A rule's path as robotparser kept it, as a pattern: ``*`` any run, a final ``$`` the end.
+
+    Older robotparsers keep the path quoted, ``*`` as ``%2A`` and the end
+    anchor as ``%24``; from Python 3.13.14 they keep both raw, strip the
+    anchor into the line's ``fullmatch`` and quote nothing else. Both forms
+    are brought to the quoted one, which is how the target is quoted too.
+    """
     if not path:
         return None
-    raw = path.replace("%2A", "*").replace("%2a", "*")
-    anchored = raw.endswith("%24")
-    if anchored:
-        raw = raw[:-3]
+    raw = quote(unquote(path))
+    if anchored is None:
+        anchored = raw.endswith("%24")
+        if anchored:
+            raw = raw[:-3]
+    raw = raw.replace("%2A", "*")
     body = "".join(".*" if ch == "*" else re.escape(ch) for ch in raw)
     return re.compile(body + (r"\Z" if anchored else ""))
 
@@ -590,9 +598,10 @@ def _rules_from(text: str, token: str = PRODUCT) -> _Rules:
     delays: List[float] = []
     for entry in mine:
         for line in entry.rulelines:
-            pattern = _pattern(str(line.path))
+            path = str(line.path)
+            pattern = _pattern(path, getattr(line, "fullmatch", None))
             if pattern is not None:
-                rules.append((bool(line.allowance), pattern, len(str(line.path))))
+                rules.append((bool(line.allowance), pattern, len(quote(unquote(path)))))
         if getattr(entry, "delay", None) is not None:
             try:
                 delays.append(min(float(entry.delay), MAX_DEFER))

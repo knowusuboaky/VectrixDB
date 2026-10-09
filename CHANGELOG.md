@@ -30,7 +30,9 @@ may change at any time.
   metadata address however the name resolves, every redirect checked again
   and a key or cookie never sent on to another site, size and time capped
   however slowly a server answers, plain http refused through a proxy,
-  robots.txt and `Crawl-delay` obeyed, and a site that asks for time left
+  robots.txt and `Crawl-delay` obeyed (wildcards and the end anchor on
+  every Python, including 3.13.14 and later, whose robotparser keeps them
+  raw), and a site that asks for time left
   alone until then, a week at the most, by every refresh the process runs, a
   forced one too. A secret is written into an address as `${NAME}` and read
   from the environment, never kept or shown. A licensed feed is a `Source`
