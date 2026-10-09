@@ -175,11 +175,14 @@ jobs:
     #
     # A service container rather than a cloud database on purpose: no
     # secrets, no account, nothing to leave running, and the postgres image
-    # enforces row level security exactly as Aurora does.
+    # enforces row level security exactly as Aurora does. It is the pgvector
+    # build of postgres 16, not postgres:16 itself: the Aurora backend runs
+    # CREATE EXTENSION vector when it connects, and the plain image has no
+    # such extension, so every test stopped in the fixture.
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_PASSWORD: vectrix
           POSTGRES_DB: vectrix
@@ -264,4 +267,13 @@ jobs:
         # Fails on a known vulnerability in anything installed. Nightly rather
         # than per push so an upstream CVE cannot block unrelated work, and
         # loud enough that it is seen the next morning.
-        run: python -m pip_audit --progress-spinner off --desc on
+        #
+        # One advisory is set aside, by its id, so a new one still fails.
+        # PYSEC-2026-4114 is a timing comparison in oauthlib's authorization
+        # server, where it checks a PKCE verifier; the fix is oauthlib 4.0.
+        # oauthlib is here only through databricks-sql-connector (the
+        # databricks extra), which pins it below 4.0 as of 4.6.0 and uses
+        # only its client, to sign in to a workspace. Nothing in VectrixDB
+        # imports oauthlib, and no installed code runs its server, so the
+        # comparison is never made. Remove this once the connector allows 4.0.
+        run: python -m pip_audit --progress-spinner off --desc on --ignore-vuln PYSEC-2026-4114

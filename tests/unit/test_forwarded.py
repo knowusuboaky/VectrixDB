@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+# The module needs nothing itself, but it lives in vectrixdb.api, whose
+# package refuses to import without the api extra.
+pytest.importorskip("fastapi", reason="the API extra is not installed")
+
 from vectrixdb.api.forwarded import caller, client_address, parse_proxies, trusted_from_env
 
 PROXIES = parse_proxies("10.0.0.0/8, 192.168.1.5")
