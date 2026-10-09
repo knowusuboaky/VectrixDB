@@ -80,7 +80,11 @@ func (c *Client) Collections(ctx context.Context) ([]Collection, error) {
 
 // Describe returns one collection.
 func (c *Client) Describe(ctx context.Context, name string) (*Collection, error) {
-	body, err := c.getJSON(ctx, join("api", "v1", "collections", name), nil)
+	path, err := join("api", "v1", "collections", name)
+	if err != nil {
+		return nil, err
+	}
+	body, err := c.getJSON(ctx, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +132,11 @@ func (c *Client) CreateCollection(ctx context.Context, name string, opts *Create
 
 // DeleteCollection removes a collection and everything in it.
 func (c *Client) DeleteCollection(ctx context.Context, name string) error {
-	_, err := c.delete(ctx, join("api", "v1", "collections", name), nil)
+	path, err := join("api", "v1", "collections", name)
+	if err != nil {
+		return err
+	}
+	_, err = c.delete(ctx, path, nil)
 	return err
 }
 

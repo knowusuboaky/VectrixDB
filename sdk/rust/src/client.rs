@@ -89,20 +89,38 @@ fn encode(segment: &str) -> String {
     out
 }
 
+/// A header value with no control character: CR, LF, NUL, tab, the rest of
+/// C0 and DEL are refused (`HeaderValue` alone would let a tab through).
+fn header_value(value: &str) -> std::result::Result<HeaderValue, ()> {
+    if value.bytes().any(|b| b < 0x20 || b == 0x7f) {
+        return Err(());
+    }
+    HeaderValue::from_str(value).map_err(|_| ())
+}
+
 /// Fill a route template's `{...}` segments, in order, with encoded values.
-fn fill(template: &str, values: &[&str]) -> String {
+///
+/// An empty name or id, `.` or `..` is refused with [`Error::Transport`]
+/// before anything is sent: URL parsing collapses dot segments (`%2E%2E`
+/// too), so `delete_document("c", "..")` would otherwise become
+/// `DELETE /api/v1/collections/c`, the whole collection.
+fn fill(template: &str, values: &[&str]) -> Result<String> {
     let mut values = values.iter();
-    template
-        .split('/')
-        .map(|part| {
-            if part.starts_with('{') {
-                values.next().map(|v| encode(v)).unwrap_or_default()
-            } else {
-                part.to_owned()
+    let mut parts = Vec::new();
+    for part in template.split('/') {
+        if part.starts_with('{') {
+            let value = values.next().copied().unwrap_or_default();
+            if matches!(value, "" | "." | "..") {
+                return Err(Error::Transport(format!(
+                    "{value:?} cannot be a collection name, document id or source id; nothing was sent"
+                )));
             }
-        })
-        .collect::<Vec<_>>()
-        .join("/")
+            parts.push(encode(value));
+        } else {
+            parts.push(part.to_owned());
+        }
+    }
+    Ok(parts.join("/"))
 }
 
 #[derive(Clone)]
@@ -259,8 +277,22 @@ impl ClientBuilder {
 
     pub fn build(self) -> Result<Client> {
         let base = self.url.trim().trim_end_matches('/').to_owned();
-        let parsed = Url::parse(&base)
-            .map_err(|_| Error::Transport(format!("{base:?} is not a server address")))?;
+        let parsed = Url::parse(&base).map_err(|_| {
+            // Not quoted when it may hold a password.
+            let shown = if base.contains('@') {
+                "the address".to_owned()
+            } else {
+                format!("{base:?}")
+            };
+            Error::Transport(format!("{shown} is not a server address"))
+        })?;
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            // Not quoted: the password is in it.
+            return Err(Error::Transport(
+                "the address has a user name or password in it; take it out and use .key() or .token()"
+                    .into(),
+            ));
+        }
         let credential = match &self.auth {
             Auth::None => None,
             Auth::Key(key) => Some((header_name(&self.key_header, "key_header")?, key.clone())),
@@ -288,7 +320,7 @@ impl ClientBuilder {
             if name == USER_AGENT_HEADER || credential.as_ref().is_some_and(|(n, _)| *n == name) {
                 continue;
             }
-            let mut value = HeaderValue::from_str(value).map_err(|_| {
+            let mut value = header_value(value).map_err(|_| {
                 Error::Transport(format!(
                     "the {name} header holds characters a header cannot"
                 ))
@@ -297,7 +329,7 @@ impl ClientBuilder {
             headers.insert(name, value);
         }
         if let Some((name, value)) = credential {
-            let mut value = HeaderValue::from_str(&value).map_err(|_| {
+            let mut value = header_value(&value).map_err(|_| {
                 Error::Transport(format!(
                     "the {} holds characters a header cannot",
                     self.auth.describe()
@@ -391,10 +423,10 @@ impl Client {
 
     // ---- transport -------------------------------------------------------
 
-    fn request(&self, route: (&str, &str), values: &[&str]) -> reqwest::RequestBuilder {
+    fn request(&self, route: (&str, &str), values: &[&str]) -> Result<reqwest::RequestBuilder> {
         let method = Method::from_bytes(route.0.to_uppercase().as_bytes()).expect("a method");
-        let path = self.gateway.address(&fill(route.1, values));
-        self.http.request(method, format!("{}{}", self.base, path))
+        let path = self.gateway.address(&fill(route.1, values)?);
+        Ok(self.http.request(method, format!("{}{}", self.base, path)))
     }
 
     /// Send, retrying a 429 or 503 up to three times, waiting the server's
@@ -481,7 +513,7 @@ impl Client {
 
     /// `true` when the process answers.
     pub async fn health(&self) -> Result<bool> {
-        let request = self.built(self.request(routes::HEALTH, &[]))?;
+        let request = self.built(self.request(routes::HEALTH, &[])?)?;
         self.send(request).await?;
         Ok(true)
     }
@@ -489,7 +521,7 @@ impl Client {
     /// `true` when models are loaded. Falls back to [`health`](Self::health)
     /// on a server without `/ready`.
     pub async fn ready(&self) -> Result<bool> {
-        let request = self.built(self.request(routes::READY, &[]))?;
+        let request = self.built(self.request(routes::READY, &[])?)?;
         match self.send(request).await {
             Ok(_) => Ok(true),
             Err(e) if e.is_not_found() => self.health().await,
@@ -501,17 +533,17 @@ impl Client {
 
     /// Who the key or token is, as the server's `data` object.
     pub async fn whoami(&self) -> Result<Value> {
-        let request = self.built(self.request(routes::WHOAMI, &[]))?;
+        let request = self.built(self.request(routes::WHOAMI, &[])?)?;
         self.data(request).await
     }
 
     pub async fn collections(&self) -> Result<Vec<Collection>> {
-        let request = self.built(self.request(routes::COLLECTIONS, &[]))?;
+        let request = self.built(self.request(routes::COLLECTIONS, &[])?)?;
         self.list(request, "collections").await
     }
 
     pub async fn describe(&self, name: &str) -> Result<Collection> {
-        let request = self.built(self.request(routes::DESCRIBE, &[name]))?;
+        let request = self.built(self.request(routes::DESCRIBE, &[name])?)?;
         parse(self.data(request).await?)
     }
 
@@ -528,12 +560,12 @@ impl Client {
             description: options.description,
             ..Default::default()
         };
-        let request = self.built(self.request(routes::CREATE, &[]).json(&body))?;
+        let request = self.built(self.request(routes::CREATE, &[])?.json(&body))?;
         parse(self.data(request).await?)
     }
 
     pub async fn delete_collection(&self, name: &str) -> Result<()> {
-        let request = self.built(self.request(routes::DELETE_COLLECTION, &[name]))?;
+        let request = self.built(self.request(routes::DELETE_COLLECTION, &[name])?)?;
         self.send(request).await.map(drop)
     }
 
@@ -562,7 +594,7 @@ impl Client {
             query.push(("overlap", v.to_string()));
         }
         let request = self.built(
-            self.request(routes::ADD_DOCUMENT, &[collection])
+            self.request(routes::ADD_DOCUMENT, &[collection])?
                 .query(&query)
                 .header(CONTENT_TYPE, "application/octet-stream")
                 .header("x-filename", filename)
@@ -585,7 +617,7 @@ impl Client {
                 })
                 .collect(),
         };
-        let request = self.built(self.request(routes::ADD_TEXTS, &[collection]).json(&body))?;
+        let request = self.built(self.request(routes::ADD_TEXTS, &[collection])?.json(&body))?;
         let data = self.data(request).await?;
         Ok(data.get("added").and_then(Value::as_u64).unwrap_or(0))
     }
@@ -619,7 +651,7 @@ impl Client {
             Mode::Meaning => routes::SEARCH,
             Mode::Hybrid => routes::HYBRID,
         };
-        let request = self.built(self.request(route, &[collection]).json(&body))?;
+        let request = self.built(self.request(route, &[collection])?.json(&body))?;
         let mut data = self.data(request).await?;
         let results = data
             .as_object_mut()
@@ -630,13 +662,13 @@ impl Client {
     }
 
     pub async fn documents(&self, collection: &str) -> Result<Vec<Document>> {
-        let request = self.built(self.request(routes::DOCUMENTS, &[collection]))?;
+        let request = self.built(self.request(routes::DOCUMENTS, &[collection])?)?;
         self.list(request, "documents").await
     }
 
     /// The Markdown the document was indexed from.
     pub async fn open_document(&self, collection: &str, doc_id: &str) -> Result<String> {
-        let request = self.built(self.request(routes::OPEN_DOCUMENT, &[collection, doc_id]))?;
+        let request = self.built(self.request(routes::OPEN_DOCUMENT, &[collection, doc_id])?)?;
         let response = self.send(request).await?;
         let url = response.url().to_string();
         response
@@ -647,7 +679,7 @@ impl Client {
 
     /// Remove a document; returns how many chunks went with it.
     pub async fn delete_document(&self, collection: &str, doc_id: &str) -> Result<u64> {
-        let request = self.built(self.request(routes::DELETE_DOCUMENT, &[collection, doc_id]))?;
+        let request = self.built(self.request(routes::DELETE_DOCUMENT, &[collection, doc_id])?)?;
         let body = self.json(request).await?;
         Ok(body
             .get("chunks_removed")
@@ -656,7 +688,7 @@ impl Client {
     }
 
     pub async fn sources(&self, collection: &str) -> Result<Vec<Source>> {
-        let request = self.built(self.request(routes::SOURCES, &[collection]))?;
+        let request = self.built(self.request(routes::SOURCES, &[collection])?)?;
         self.list(request, "sources").await
     }
 
@@ -672,7 +704,7 @@ impl Client {
             every: options.every.map(Value::String),
             ..Default::default()
         };
-        let request = self.built(self.request(routes::ADD_SOURCE, &[collection]).json(&body))?;
+        let request = self.built(self.request(routes::ADD_SOURCE, &[collection])?.json(&body))?;
         // A flat reply: `{"ok": true, "source": {...}}`.
         let mut reply = self.json(request).await?;
         let source = reply
@@ -685,7 +717,7 @@ impl Client {
     /// Read the sources that are due and write what changed.
     pub async fn refresh_sources(&self, collection: &str) -> Result<Refreshed> {
         let body = RefreshRequest::default();
-        let request = self.built(self.request(routes::REFRESH, &[collection]).json(&body))?;
+        let request = self.built(self.request(routes::REFRESH, &[collection])?.json(&body))?;
         parse(self.json(request).await?)
     }
 
@@ -696,7 +728,7 @@ impl Client {
         delete_documents: bool,
     ) -> Result<()> {
         let request = self.built(
-            self.request(routes::DELETE_SOURCE, &[collection, source_id])
+            self.request(routes::DELETE_SOURCE, &[collection, source_id])?
                 .query(&[("delete_documents", delete_documents)]),
         )?;
         self.send(request).await.map(drop)
@@ -750,9 +782,19 @@ mod tests {
     fn ids_are_one_segment() {
         assert_eq!(encode("reports/2024 q1.pdf"), "reports%2F2024%20q1.pdf");
         assert_eq!(
-            fill(routes::OPEN_DOCUMENT.1, &["docs", "a/b"]),
+            fill(routes::OPEN_DOCUMENT.1, &["docs", "a/b"]).unwrap(),
             "/api/v1/collections/docs/documents/a%2Fb"
         );
+        assert_eq!(
+            fill(routes::DESCRIBE.1, &["a..b"]).unwrap(),
+            "/api/v1/collections/a..b"
+        );
+        for bad in ["", ".", ".."] {
+            assert!(matches!(
+                fill(routes::DELETE_DOCUMENT.1, &["c", bad]),
+                Err(Error::Transport(_))
+            ));
+        }
     }
 
     #[test]

@@ -83,7 +83,14 @@ the key or token header.
 A key or token is refused over plain `http://` unless the host is this
 machine (`localhost`, `127.x.x.x`, `::1`) or `allowHttp: true` is set, and a
 redirect is never followed: a 3xx is thrown as a `VectrixError` naming the
-status and its `location`. For a private CA, Node reads
+status and its `location`, even with a `fetch` of your own (every request
+is sent with `redirect: "manual"`, and a response that followed one anyway is
+refused). A key, token or header value with a control character, or an
+address with a user name or password in it (`https://user:pw@host`), is
+refused with a `TypeError` that does not repeat it. A collection name,
+document id or source id is sent as one path segment (`/` as `%2F`); an empty
+one, `.` or `..` is refused with a `TypeError` before anything is sent. For a
+private CA, Node reads
 `NODE_EXTRA_CA_CERTS`; for a proxy, run Node with `NODE_USE_ENV_PROXY=1` to
 honour `HTTPS_PROXY`/`NO_PROXY`, or pass a `fetch` of your own.
 

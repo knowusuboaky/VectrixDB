@@ -358,13 +358,17 @@ def _ok(_response: Any, _body: Any) -> None:
 
 
 def _collection_path(name: str) -> str:
-    return f"/api/v1/collections/{quote(str(name), safe='')}"
+    return f"/api/v1/collections/{_segment(name, 'a collection name')}"
 
 
-def _segment(value: str) -> str:
+def _segment(value: str, what: str = "an id") -> str:
     # A document or source id may contain "/", which the route reads back
-    # from one encoded segment.
-    return quote(str(value), safe="")
+    # from one encoded segment. "." and ".." are refused: HTTP stacks collapse
+    # dot segments, so a document id of ".." would delete its collection.
+    text = str(value)
+    if text in ("", ".", ".."):
+        raise ValueError(f"{what} cannot be {text!r}: it would name another route")
+    return quote(text, safe="")
 
 
 def _bytes_of(data: Union[bytes, bytearray, str, Path, Any]) -> bytes:
@@ -611,6 +615,8 @@ class _Calls:
 
 #: RFC 9110 token characters: what an HTTP header's name may be made of.
 _HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+#: What a header value may not hold: controls, which would split or end it.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def _names(value: Any, what: str) -> str:
@@ -712,7 +718,7 @@ class _Wire:
     """How every request is made: the base address, the headers, the route map, the TLS settings."""
 
     url: str
-    headers: Dict[str, str]
+    headers: Dict[str, str] = field(repr=False)
     prefix: str
     paths: Dict[str, str]
     verify: Any
@@ -737,6 +743,20 @@ class _Wire:
         parts = urlsplit(base)
         if parts.scheme not in ("http", "https") or not parts.hostname:
             raise ConfigurationError(f"{url!r} is not an address: https://vectors.example.com")
+        if parts.username or parts.password:
+            raise ConfigurationError(
+                "Put the key in key= or token=, not in the address, where logs and printed forms keep it"
+            )
+        for what, value in (
+            ("The key", key),
+            ("The token", token),
+            *((f"The header {name}", v) for name, v in (headers or {}).items()),
+        ):
+            if value is not None and _CONTROL.search(str(value)):
+                # The value is not repeated: it is likely a secret with a stray line break.
+                raise ConfigurationError(
+                    f"{what} has a line break or another control character in it. Copy it again"
+                )
         if (
             (key or token)
             and parts.scheme == "http"
@@ -904,6 +924,11 @@ class VectrixClient(_Calls):
                 raise ConnectionFailed(f"{self.url} could not be reached: {exc}") from exc
             except httpx.TimeoutException as exc:
                 raise ConnectionFailed(f"{self.url} did not answer in time: {exc}") from exc
+            except httpx.HTTPError as exc:
+                # Its text may quote a request header, the key's included, so only its kind is said.
+                raise ConnectionFailed(
+                    f"{self.url} could not be asked: {type(exc).__name__}"
+                ) from None
             if _retry(response, attempt):
                 time.sleep(_wait_for(response, attempt))
                 attempt += 1
@@ -1102,6 +1127,11 @@ class AsyncVectrixClient(_Calls):
                 raise ConnectionFailed(f"{self.url} could not be reached: {exc}") from exc
             except httpx.TimeoutException as exc:
                 raise ConnectionFailed(f"{self.url} did not answer in time: {exc}") from exc
+            except httpx.HTTPError as exc:
+                # Its text may quote a request header, the key's included, so only its kind is said.
+                raise ConnectionFailed(
+                    f"{self.url} could not be asked: {type(exc).__name__}"
+                ) from None
             if _retry(response, attempt):
                 await asyncio.sleep(_wait_for(response, attempt))
                 attempt += 1

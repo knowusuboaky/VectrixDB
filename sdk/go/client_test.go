@@ -81,7 +81,7 @@ func TestConnectionFailure(t *testing.T) {
 
 // Ids are escaped one segment at a time, "/" included.
 func TestPathEscaping(t *testing.T) {
-	if got := join("api", "v1", "collections", "c", "documents", "a/b c.md"); got != "/api/v1/collections/c/documents/a%2Fb%20c.md" {
-		t.Fatal(got)
+	if got, err := join("api", "v1", "collections", "c", "documents", "a/b c.md"); err != nil || got != "/api/v1/collections/c/documents/a%2Fb%20c.md" {
+		t.Fatal(got, err)
 	}
 }

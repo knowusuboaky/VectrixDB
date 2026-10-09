@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -47,7 +48,11 @@ func TestGatewayMapping(t *testing.T) {
 		t.Error(got)
 	}
 	// An escaped id stays one segment and the query is not part of the match.
-	if got := c.address(join("api", "v1", "collections", "c", "documents", "a/b c.md")); got != "/files/search/acme/api/v1/collections/c/documents/a%2Fb%20c.md" {
+	path, err := join("api", "v1", "collections", "c", "documents", "a/b c.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.address(path); got != "/files/search/acme/api/v1/collections/c/documents/a%2Fb%20c.md" {
 		t.Error(got)
 	}
 }
@@ -168,11 +173,21 @@ func TestNoRedirects(t *testing.T) {
 		t.Errorf("the redirect was followed %d times", reached.Load())
 	}
 
-	// A CheckRedirect of the user's own is kept.
-	own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("mine") }}
-	_, err := New(srv.URL, WithHTTPClient(own)).Health(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "mine") {
-		t.Errorf("the user's CheckRedirect was not kept: %v", err)
+	// A CheckRedirect of the user's own is replaced, never called: one that
+	// would follow is refused all the same, so the key never goes with it.
+	var asked atomic.Int32
+	follows := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { asked.Add(1); return nil }}
+	check(New(srv.URL, WithKey("secret-key"), WithHTTPClient(follows)))
+	errs := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { asked.Add(1); return errors.New("mine") }}
+	check(New(srv.URL, WithKey("secret-key"), WithHTTPClient(errs)))
+	if asked.Load() != 0 {
+		t.Errorf("the user's CheckRedirect was called %d times", asked.Load())
+	}
+	if reached.Load() != 0 {
+		t.Errorf("the redirect was followed %d times", reached.Load())
+	}
+	if follows.CheckRedirect == nil || errs.CheckRedirect == nil {
+		t.Error("the user's http.Client was changed")
 	}
 }
 
@@ -263,5 +278,76 @@ func TestKeyNeverShown(t *testing.T) {
 	}
 	if s := fmt.Sprintf("%+v", clients[0]); !strings.Contains(s, srv.URL) || !strings.Contains(s, "api-key") {
 		t.Errorf("printed form: %s", s)
+	}
+}
+
+// A collection name, document id or source id of "", "." or ".." is refused,
+// wrapping ErrConfig, and nothing is sent; dots inside a name are one segment.
+func TestDotSegmentsRefused(t *testing.T) {
+	var calls atomic.Int32
+	var mu sync.Mutex
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		mu.Lock()
+		paths = append(paths, r.URL.EscapedPath())
+		mu.Unlock()
+		w.Write([]byte(`{"ok": true, "data": {"name": "x"}, "deleted_chunks": 0}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, WithKey("k"))
+	ctx := context.Background()
+	refused := map[string]error{}
+	_, refused[`Describe("..")`] = c.Describe(ctx, "..")
+	_, refused[`Describe(".")`] = c.Describe(ctx, ".")
+	_, refused[`Describe("")`] = c.Describe(ctx, "")
+	refused[`DeleteCollection("..")`] = c.DeleteCollection(ctx, "..")
+	_, refused[`DeleteDocument("c", "..")`] = c.DeleteDocument(ctx, "c", "..")
+	_, refused[`DeleteDocument("..", "d")`] = c.DeleteDocument(ctx, "..", "d")
+	_, refused[`OpenDocument("c", ".")`] = c.OpenDocument(ctx, "c", ".")
+	refused[`DeleteSource("c", ".")`] = c.DeleteSource(ctx, "c", ".", false)
+	for call, err := range refused {
+		if !errors.Is(err, ErrConfig) {
+			t.Errorf("%s: %v", call, err)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("%d requests were sent", calls.Load())
+	}
+
+	for _, name := range []string{"a..b", "..x"} {
+		if _, err := c.Describe(ctx, name); err != nil {
+			t.Errorf("Describe(%q): %v", name, err)
+		}
+	}
+	if _, err := c.DeleteDocument(ctx, "c", "../x"); err != nil {
+		t.Error(err)
+	}
+	want := []string{"/api/v1/collections/a..b", "/api/v1/collections/..x", "/api/v1/collections/c/documents/..%2Fx"}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(paths, " ") != strings.Join(want, " ") {
+		t.Errorf("paths %v, want %v", paths, want)
+	}
+}
+
+// A key, token or extra header value with a control character is refused
+// without repeating it, and so is an address with a user name or password.
+func TestControlCharactersAndUserinfo(t *testing.T) {
+	const secret = "s3cret-value"
+	for _, ch := range []string{"\r", "\n", "\x00", "\t", "\x01", "\x1f", "\x7f"} {
+		v := secret + ch + "x"
+		for _, opt := range []Option{WithKey(v), WithToken(v), WithHeader("X-Sub", v)} {
+			err := New("https://vectors.example.com", opt).Err()
+			if !errors.Is(err, ErrConfig) || strings.Contains(err.Error(), secret) {
+				t.Errorf("%q: %v", ch, err)
+			}
+		}
+	}
+	for _, addr := range []string{"https://user:pw-secret@vectors.example.com", "https://user@vectors.example.com", "http://:pw-secret@localhost:8000"} {
+		err := New(addr).Err()
+		if !errors.Is(err, ErrConfig) || strings.Contains(err.Error(), "pw-secret") || !strings.Contains(err.Error(), "user name or password") {
+			t.Errorf("%s: %v", addr, err)
+		}
 	}
 }

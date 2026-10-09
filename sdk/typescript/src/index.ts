@@ -258,6 +258,11 @@ export class VectrixClient {
   constructor(options: VectrixClientOptions) {
     if (!options.url) throw new TypeError("VectrixClient needs a url");
     this.url = options.url.replace(/\/+$/, "");
+    const parsed = parseUrl(this.url);
+    if (parsed && (parsed.username || parsed.password)) {
+      // Not quoted: the password is in it.
+      throw new TypeError("url: an address with a user name or password in it is refused; pass a key or token instead");
+    }
     this.#key = options.key || undefined;
     this.#token = options.token || undefined;
     for (const [what, value] of [["key", this.#key], ["token", this.#token]] as const) {
@@ -526,6 +531,14 @@ export class VectrixClient {
           this.#redact(`refusing to follow ${status} from ${url} to ${location}: a client never follows a redirect`),
         );
       }
+      if (res.redirected) {
+        // A fetch of the caller's own that followed it anyway: refuse what came back.
+        await res.body?.cancel().catch(() => undefined);
+        throw new VectrixError(
+          0,
+          this.#redact(`refusing a response from ${url} that followed a redirect to ${res.url || "another address"}`),
+        );
+      }
       if (res.ok) return res;
       const retryable = res.status === 429 || res.status === 503;
       if (retryable && attempt < RETRY_WAITS_MS.length) {
@@ -589,8 +602,8 @@ const DEFAULT_KEY_HEADER = "api-key";
 const DEFAULT_TOKEN_HEADER = "authorization";
 /** RFC 9110 token characters: what a header's name may be made of. */
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
-/** What fetch accepts in a header's value: no control characters but tab, nothing past one byte. */
-const HEADER_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/;
+/** A header value we send: no control characters (tab, CR, LF, NUL, DEL...), nothing past one byte. */
+const HEADER_VALUE = /^[\x20-\x7e\x80-\xff]*$/;
 
 function headerName(given: string | undefined, fallback: string, option: string): string {
   const name = (given ?? "").trim() || fallback;
@@ -598,16 +611,20 @@ function headerName(given: string | undefined, fallback: string, option: string)
   return name.toLowerCase();
 }
 
-/** The host of an `http://` address, or undefined for any other. */
-function httpHost(url: string): string | undefined {
-  let parsed: URL;
+/** The address parsed, or undefined when it cannot be (fetch will say what is wrong with it). */
+function parseUrl(url: string): URL | undefined {
   try {
     const base = (globalThis as { location?: { href?: string } }).location?.href;
-    parsed = base ? new URL(url, base) : new URL(url);
+    return base ? new URL(url, base) : new URL(url);
   } catch {
-    return undefined; // fetch will say what is wrong with it
+    return undefined;
   }
-  return parsed.protocol === "http:" ? parsed.hostname.toLowerCase() : undefined;
+}
+
+/** The host of an `http://` address, or undefined for any other. */
+function httpHost(url: string): string | undefined {
+  const parsed = parseUrl(url);
+  return parsed?.protocol === "http:" ? parsed.hostname.toLowerCase() : undefined;
 }
 
 /** This machine: `localhost`, `127.0.0.0/8`, `::1`. */
@@ -661,7 +678,20 @@ function readGatewayPaths(value: string | Record<string, string> | undefined): R
 
 function fill(path: string, params: Record<string, string>): string {
   // Ids are encoded whole, `/` included, so "a/b.md" is one path segment.
-  return path.replace(/\{(\w+)\}/g, (_, k: string) => encodeURIComponent(params[k] ?? ""));
+  return path.replace(/\{(\w+)\}/g, (_, k: string) => segment(params[k], k));
+}
+
+/**
+ * One path segment for a name or id. Empty, `.` and `..` are refused before
+ * anything is sent: URL parsing collapses dot segments (even `%2e%2e`), so
+ * `deleteDocument("c", "..")` would otherwise become `DELETE /api/v1/collections/c`.
+ */
+function segment(value: string | undefined, what: string): string {
+  const s = String(value ?? "");
+  if (s === "" || s === "." || s === "..") {
+    throw new TypeError(`${what}: ${JSON.stringify(s)} is not a name or id that can be sent`);
+  }
+  return encodeURIComponent(s);
 }
 
 function queryString(query: Query | undefined): string {

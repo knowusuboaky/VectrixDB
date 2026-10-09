@@ -117,10 +117,19 @@ and the `Location`, and it is not retried.
   	vectrixdb.WithHTTPClient(&http.Client{Transport: transport}))
   ```
 
-  The client sets `CheckRedirect` on a copy of that `http.Client` so it does
-  not follow redirects; your own value is not changed, and a `CheckRedirect`
-  you set yourself is kept.
+  The client sets `CheckRedirect` on a copy of that `http.Client` so it never
+  follows a redirect: a `CheckRedirect` you set yourself is replaced on the
+  copy and never called (Go would carry the key header to wherever a redirect
+  points), and your own value is not changed.
 
+- **Names and ids are one path segment.** A `/` in a document id travels as
+  `%2F`. An empty name or id, `.` or `..` is refused before anything is sent,
+  with an error wrapping `vectrixdb.ErrConfig`: dot segments are collapsed on
+  the way, so `DeleteDocument(ctx, "c", "..")` would otherwise reach the
+  delete-collection route.
+- A key, token or `WithHeader` value with a control character (CR, LF, NUL,
+  tab, the rest of C0, DEL) is refused, and so is an address with a user name
+  or password in it (`https://user:pw@host`); neither message repeats it.
 - **Proxies**: `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured, as
   `http.DefaultTransport` does.
 - The key and token never appear in an error, and `fmt.Print(db)` (`%v`,

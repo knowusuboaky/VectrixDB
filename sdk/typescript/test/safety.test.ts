@@ -165,3 +165,83 @@ test("the key never appears in an error or the client's printed form", async () 
     assert.ok(!shown.includes("sub-secret"), shown);
   }
 });
+
+test("names and ids: empty, . and .. are refused before anything is sent", async () => {
+  const f = scripted([]);
+  const c = new VectrixClient({ url: "https://g", key: "k", fetch: f.fetch });
+  const refused = (e: unknown) => e instanceof TypeError && !(e instanceof VectrixError);
+  await assert.rejects(c.describe(".."), refused);
+  await assert.rejects(c.describe("."), refused);
+  await assert.rejects(c.describe(""), refused);
+  await assert.rejects(c.deleteCollection(".."), refused);
+  await assert.rejects(c.deleteDocument("c", ".."), refused);
+  await assert.rejects(c.deleteDocument("..", "doc"), refused);
+  await assert.rejects(c.deleteSource("c", "."), refused);
+  await assert.rejects(c.openDocument("c", ""), refused);
+  assert.equal(f.calls.length, 0);
+});
+
+test("names and ids: dots inside a name are one encoded segment", async () => {
+  const f = scripted([ok, ok, ok]);
+  const c = new VectrixClient({ url: "https://g", fetch: f.fetch });
+  await c.describe("a..b");
+  await c.describe("..x");
+  await c.deleteDocument("c", "../etc/x");
+  assert.equal(f.calls[0]?.url, "https://g/api/v1/collections/a..b");
+  assert.equal(f.calls[1]?.url, "https://g/api/v1/collections/..x");
+  assert.equal(f.calls[2]?.url, "https://g/api/v1/collections/c/documents/..%2Fetc%2Fx");
+});
+
+test("control characters in a key, token or header value are refused without repeating it", () => {
+  const secret = "s3cret-value";
+  const controls = ["\r", "\n", "\0", "\t", "\x01", "\x1f", "\x7f"];
+  for (const ch of controls) {
+    const value = `${secret}${ch}x`;
+    for (const options of [{ key: value }, { token: value }, { headers: { "x-sub": value } }]) {
+      assert.throws(
+        () => new VectrixClient({ url: "https://g", ...options }),
+        (e: unknown) => e instanceof TypeError && !e.message.includes(secret),
+        JSON.stringify({ ch, options: Object.keys(options) }),
+      );
+    }
+  }
+});
+
+test("an address with a user name or password is refused", () => {
+  for (const url of ["https://user:pw-secret@host", "https://user@host", "http://:pw-secret@localhost:8000"]) {
+    assert.throws(
+      () => new VectrixClient({ url }),
+      (e: unknown) => e instanceof TypeError && /user name or password/.test(e.message) && !e.message.includes("pw-secret"),
+      url,
+    );
+  }
+});
+
+test("a fetch of the caller's own: redirect manual on every call, any redirect refused", async () => {
+  const opaque = () => {
+    const r = new Response(null, { status: 200 });
+    Object.defineProperty(r, "type", { value: "opaqueredirect" });
+    Object.defineProperty(r, "status", { value: 0 });
+    Object.defineProperty(r, "ok", { value: false });
+    return r;
+  };
+  const followed = () => {
+    const r = new Response(JSON.stringify({ ok: true, data: [] }), { status: 200 });
+    Object.defineProperty(r, "redirected", { value: true });
+    Object.defineProperty(r, "url", { value: "https://elsewhere.example/x" });
+    return r;
+  };
+  for (const status of [301, 302, 303, 307, 308]) {
+    const f = scripted([() => new Response(null, { status, headers: { location: "https://elsewhere.example/" } })]);
+    const c = new VectrixClient({ url: "https://g", key: "k", fetch: f.fetch });
+    await assert.rejects(c.deleteCollection("c"), (e: unknown) => e instanceof VectrixError && e.status === status);
+    assert.equal(f.calls.length, 1);
+  }
+  const f = scripted([opaque, followed, ok]);
+  const c = new VectrixClient({ url: "https://g", key: "k", fetch: f.fetch });
+  await assert.rejects(c.collections(), (e: unknown) => e instanceof VectrixError && /redirect/.test(e.message));
+  await assert.rejects(c.collections(), (e: unknown) => e instanceof VectrixError && /redirect/.test(e.message));
+  await c.whoami();
+  assert.equal(f.calls.length, 3);
+  for (const call of f.calls) assert.equal(call.redirect, "manual");
+});

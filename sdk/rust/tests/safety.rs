@@ -389,3 +389,91 @@ async fn the_key_never_shows() {
         .unwrap_err();
     assert!(!err.to_string().contains(KEY), "{err}");
 }
+
+// ---- names and ids are one path segment ---------------------------------------
+
+#[tokio::test]
+async fn dot_names_and_ids_are_refused_before_sending() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let db = Client::new(local(port)).key(KEY).build().unwrap();
+    let refused = |r: Result<(), Error>| match r {
+        Err(Error::Transport(said)) => assert!(said.contains("nothing was sent"), "{said}"),
+        other => panic!("not refused: {other:?}"),
+    };
+    refused(db.describe("..").await.map(drop));
+    refused(db.describe(".").await.map(drop));
+    refused(db.describe("").await.map(drop));
+    refused(db.delete_collection("..").await);
+    refused(db.delete_document("c", "..").await.map(drop));
+    refused(db.delete_document("..", "d").await.map(drop));
+    refused(db.open_document("c", ".").await.map(drop));
+    refused(db.delete_source("c", ".", false).await);
+
+    // Nothing reached the server.
+    listener.set_nonblocking(true).unwrap();
+    match listener.accept() {
+        Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+        other => panic!("a request was sent: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn dots_inside_a_name_are_one_segment() {
+    let (port, seen) = listen(|_| ok("# doc"));
+    let db = Client::new(local(port)).build().unwrap();
+    db.open_document("a..b", "..x").await.unwrap();
+    assert_eq!(
+        seen.join().unwrap().line,
+        "GET /api/v1/collections/a..b/documents/..x HTTP/1.1"
+    );
+
+    let (port, seen) = listen(|_| ok("# doc"));
+    let db = Client::new(local(port)).build().unwrap();
+    db.open_document("c", "../x").await.unwrap();
+    assert_eq!(
+        seen.join().unwrap().line,
+        "GET /api/v1/collections/c/documents/..%2Fx HTTP/1.1"
+    );
+}
+
+// ---- control characters and user info -----------------------------------------
+
+#[test]
+fn control_characters_are_refused_without_repeating_the_value() {
+    for ch in ['\r', '\n', '\0', '\t', '\x01', '\x1f', '\x7f'] {
+        let value = format!("{KEY}{ch}x");
+        let builders = [
+            Client::new("https://vectors.example.com").key(&value),
+            Client::new("https://vectors.example.com").token(&value),
+            Client::new("https://vectors.example.com").header("x-sub", &value),
+        ];
+        for builder in builders {
+            match builder.build() {
+                Err(err @ Error::Transport(_)) => {
+                    let said = err.to_string();
+                    assert!(!said.contains(KEY), "{said}");
+                }
+                other => panic!("{ch:?} was taken: {:?}", other.map(|_| ())),
+            }
+        }
+    }
+}
+
+#[test]
+fn an_address_with_user_info_is_refused() {
+    for url in [
+        "https://user:pw-secret@vectors.example.com",
+        "https://user@vectors.example.com",
+        "http://:pw-secret@localhost:8000",
+    ] {
+        match Client::new(url).build() {
+            Err(err @ Error::Transport(_)) => {
+                let said = err.to_string();
+                assert!(said.contains("user name or password"), "{said}");
+                assert!(!said.contains("pw-secret"), "{said}");
+            }
+            other => panic!("{url} was taken: {:?}", other.map(|_| ())),
+        }
+    }
+}

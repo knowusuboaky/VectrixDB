@@ -382,3 +382,37 @@ def test_certificates_cannot_be_switched_off_and_a_header_name_is_checked():
         VectrixClient("https://s.test", verify=False)
     with pytest.raises(ConfigurationError, match="HTTP header"):
         VectrixClient("https://s.test", key="k", key_header="bad header")
+
+
+@pytest.mark.parametrize("name", ["", ".", ".."])
+def test_a_name_or_id_that_would_name_another_route_is_refused(name):
+    """``..`` would reach /api/v1/collections itself, so deleting it could take a whole collection."""
+    import httpx
+
+    sent = []
+    transport = httpx.MockTransport(lambda request: sent.append(request) or httpx.Response(200))
+    with VectrixClient("https://s.test", key="k1", transport=transport) as db:
+        with pytest.raises(ValueError, match="another route"):
+            db.delete_document("handbook", name)
+        with pytest.raises(ValueError, match="another route"):
+            db.delete_collection(name)
+    assert sent == []
+
+
+def test_a_key_in_the_address_or_with_a_control_character_is_refused_unshown():
+    from vectrixdb.exceptions import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="not in the address") as refused:
+        VectrixClient("https://ada:secret-key@s.test")
+    assert "secret-key" not in str(refused.value)
+    for bad in ("secret\nkey", "secret\rX-Evil: 1"):
+        with pytest.raises(ConfigurationError) as refused:
+            VectrixClient("https://s.test", key=bad)
+        assert "secret" not in str(refused.value)
+    with pytest.raises(ConfigurationError):
+        VectrixClient("https://s.test", headers={"x-team": "a\nb"})
+
+
+def test_the_key_is_never_in_the_clients_printed_form():
+    with VectrixClient("https://s.test", key="secret-key", headers={"x-team": "t"}) as db:
+        assert "secret-key" not in repr(db) and "secret-key" not in repr(db._wire)

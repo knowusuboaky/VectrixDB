@@ -61,6 +61,19 @@ leak by accident.
   `NODE_USE_ENV_PROXY=1`, or a `fetch` of your own).
 - A key or token never appears in an error message, a log line or the
   client's printed form.
+- **Names and ids are one path segment.** A collection name, document id or
+  source id is percent-encoded as one segment (`/` becomes `%2F`), and an
+  empty one, `.` or `..` is refused before anything is sent: HTTP stacks
+  collapse dot segments, so `delete_document("c", "..")` would otherwise
+  become `DELETE /api/v1/collections/c`, the whole collection. The error is
+  a configuration or argument error, not a request.
+- **A key, token or extra header value with a control character** (CR, LF,
+  tab, NUL and the rest) is refused when the client is made, with a message that
+  does not repeat the value. An address with a user name or password in it
+  (`https://user:pw@host`) is refused too.
+- **A caller's own HTTP client** (Go `WithHTTPClient`, a TypeScript `fetch`)
+  still never follows a redirect: the client refuses it whatever the
+  caller's client would do.
 
 ## The calls
 

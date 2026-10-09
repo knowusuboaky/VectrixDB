@@ -61,9 +61,13 @@ func (c *Client) AddDocument(ctx context.Context, collection string, r io.Reader
 	setInt(query, "overlap", params.Overlap)
 	setString(query, "metadata", params.Metadata)
 
+	path, err := join("api", "v1", "collections", collection, "documents")
+	if err != nil {
+		return nil, err
+	}
 	out, err := c.do(ctx, request{
 		method:      http.MethodPost,
-		path:        join("api", "v1", "collections", collection, "documents"),
+		path:        path,
 		query:       query,
 		body:        data,
 		contentType: "application/octet-stream",
@@ -83,7 +87,11 @@ func (c *Client) AddDocument(ctx context.Context, collection string, r io.Reader
 
 // Documents lists the kept documents of a collection.
 func (c *Client) Documents(ctx context.Context, collection string) ([]Document, error) {
-	body, err := c.getJSON(ctx, join("api", "v1", "collections", collection, "documents"), nil)
+	path, err := join("api", "v1", "collections", collection, "documents")
+	if err != nil {
+		return nil, err
+	}
+	body, err := c.getJSON(ctx, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -107,9 +115,13 @@ func (c *Client) Documents(ctx context.Context, collection string) ([]Document, 
 
 // OpenDocument returns the Markdown a document was indexed from.
 func (c *Client) OpenDocument(ctx context.Context, collection, docID string) (string, error) {
+	path, err := join("api", "v1", "collections", collection, "documents", docID)
+	if err != nil {
+		return "", err
+	}
 	out, err := c.do(ctx, request{
 		method: http.MethodGet,
-		path:   join("api", "v1", "collections", collection, "documents", docID),
+		path:   path,
 	})
 	if err != nil {
 		return "", err
@@ -119,7 +131,11 @@ func (c *Client) OpenDocument(ctx context.Context, collection, docID string) (st
 
 // DeleteDocument removes a document and returns how many chunks went.
 func (c *Client) DeleteDocument(ctx context.Context, collection, docID string) (int, error) {
-	body, err := c.delete(ctx, join("api", "v1", "collections", collection, "documents", docID), nil)
+	path, err := join("api", "v1", "collections", collection, "documents", docID)
+	if err != nil {
+		return 0, err
+	}
+	body, err := c.delete(ctx, path, nil)
 	if err != nil {
 		return 0, err
 	}

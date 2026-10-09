@@ -16,7 +16,11 @@ type SourceOptions struct {
 
 // Sources lists the feeds and pages a collection keeps up with.
 func (c *Client) Sources(ctx context.Context, collection string) ([]Source, error) {
-	body, err := c.getJSON(ctx, join("api", "v1", "collections", collection, "sources"), nil)
+	path, err := join("api", "v1", "collections", collection, "sources")
+	if err != nil {
+		return nil, err
+	}
+	body, err := c.getJSON(ctx, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +55,11 @@ func (c *Client) AddSource(ctx context.Context, collection, address string, opts
 	if opts.Every != "" {
 		req.Every = &opts.Every
 	}
-	body, err := c.postJSON(ctx, join("api", "v1", "collections", collection, "sources"), req)
+	path, err := join("api", "v1", "collections", collection, "sources")
+	if err != nil {
+		return nil, err
+	}
+	body, err := c.postJSON(ctx, path, req)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +79,11 @@ func (c *Client) AddSource(ctx context.Context, collection, address string, opts
 
 // RefreshSources reads the sources that are due and reports what changed.
 func (c *Client) RefreshSources(ctx context.Context, collection string) (*Refreshed, error) {
-	body, err := c.postJSON(ctx, join("api", "v1", "collections", collection, "sources", "refresh"), RefreshRequest{})
+	path, err := join("api", "v1", "collections", collection, "sources", "refresh")
+	if err != nil {
+		return nil, err
+	}
+	body, err := c.postJSON(ctx, path, RefreshRequest{})
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +102,10 @@ func (c *Client) DeleteSource(ctx context.Context, collection, sourceID string, 
 	if deleteDocuments {
 		query.Set("delete_documents", "true")
 	}
-	_, err := c.delete(ctx, join("api", "v1", "collections", collection, "sources", sourceID), query)
+	path, err := join("api", "v1", "collections", collection, "sources", sourceID)
+	if err != nil {
+		return err
+	}
+	_, err = c.delete(ctx, path, query)
 	return err
 }

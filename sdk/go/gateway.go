@@ -151,10 +151,11 @@ func checkHeaderName(name, option string) error {
 	return nil
 }
 
-// headerValueOK refuses the control characters a header value cannot carry.
+// headerValueOK refuses control characters: CR, LF, NUL, tab and the rest
+// of C0, and DEL.
 func headerValueOK(v string) bool {
 	for i := 0; i < len(v); i++ {
-		if b := v[i]; (b < 0x20 && b != '\t') || b == 0x7f {
+		if b := v[i]; b < 0x20 || b == 0x7f {
 			return false
 		}
 	}
@@ -262,6 +263,17 @@ func isLoopback(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// checkUserinfo refuses an address with a user name or password in it
+// (https://user:pw@host). The message does not repeat the address.
+func (c *Client) checkUserinfo() error {
+	u, err := url.Parse(c.base)
+	if err != nil || u.User == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: the address has a user name or password in it; "+
+		"take it out and use WithKey or WithToken", ErrConfig)
 }
 
 // checkPlainHTTP refuses a key or token for an http:// address whose host

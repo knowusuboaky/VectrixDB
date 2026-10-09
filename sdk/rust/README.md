@@ -88,8 +88,13 @@ let db = Client::new("https://gateway.example.com")
 - `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured.
 
 Every setting is checked by `build()`, which says what is wrong as an
-`Error::Transport`. The key and token never appear in an error message or in
-the `Debug` form of the builder or the client.
+`Error::Transport`: among them a key, token or header value with a control
+character, and an address with a user name or password in it
+(`https://user:pw@host`), neither repeated in the message. The key and token
+never appear in an error message or in the `Debug` form of the builder or the
+client. A collection name, document id or source id is sent as one path
+segment (`/` as `%2F`); an empty one, `.` or `..` is refused with an
+`Error::Transport` before anything is sent.
 
 ## The calls
 

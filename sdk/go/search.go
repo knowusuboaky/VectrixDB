@@ -40,7 +40,11 @@ func (c *Client) AddTexts(ctx context.Context, collection string, texts []Text) 
 		}
 		req.Points = append(req.Points, p)
 	}
-	body, err := c.postJSON(ctx, join("api", "v1", "collections", collection, "text-upsert"), req)
+	path, err := join("api", "v1", "collections", collection, "text-upsert")
+	if err != nil {
+		return 0, err
+	}
+	body, err := c.postJSON(ctx, path, req)
 	if err != nil {
 		return 0, err
 	}
@@ -81,7 +85,11 @@ func (c *Client) Search(ctx context.Context, collection, query string, opts *Sea
 		filter := opts.Filter
 		req.Filter = &filter
 	}
-	body, err := c.postJSON(ctx, join("api", "v1", "collections", collection, route), req)
+	path, err := join("api", "v1", "collections", collection, route)
+	if err != nil {
+		return nil, err
+	}
+	body, err := c.postJSON(ctx, path, req)
 	if err != nil {
 		return nil, err
 	}

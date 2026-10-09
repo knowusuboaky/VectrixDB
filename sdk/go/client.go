@@ -67,8 +67,9 @@ func WithTimeout(d time.Duration) Option { return func(c *Client) { c.timeout = 
 // WithHTTPClient sends requests through the given http.Client: the place for
 // a private CA bundle (Transport's TLSClientConfig.RootCAs) and a client
 // certificate (TLSClientConfig.Certificates). The client never follows a
-// redirect, so unless h has a CheckRedirect of its own, a shallow copy of h
-// with one that refuses redirects is used; h itself is not changed.
+// redirect, whatever h's own CheckRedirect would do (Go would carry the key
+// header to wherever it points), so a shallow copy of h whose CheckRedirect
+// refuses every redirect is used; h itself is not changed.
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
 
 // New returns a client for the server at url, for example
@@ -89,12 +90,12 @@ func New(url string, opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
-	switch {
-	case c.http == nil:
+	if c.http == nil {
 		// No Transport: http.DefaultTransport, which honours HTTPS_PROXY,
 		// HTTP_PROXY and NO_PROXY and always checks certificates.
 		c.http = &http.Client{CheckRedirect: noRedirects}
-	case c.http.CheckRedirect == nil:
+	} else {
+		// The caller's CheckRedirect is replaced, never called.
 		h := *c.http
 		h.CheckRedirect = noRedirects
 		c.http = &h
@@ -105,6 +106,7 @@ func New(url string, opts ...Option) *Client {
 	if !headerValueOK(c.token) {
 		c.refuse(fmt.Errorf("%w: the token holds a character a header cannot carry", ErrConfig))
 	}
+	c.refuse(c.checkUserinfo())
 	c.refuse(c.checkPlainHTTP())
 	return c
 }
@@ -316,12 +318,18 @@ func decode(data []byte, v any, raw *map[string]any) error {
 }
 
 // Path segments are escaped one by one, so a document id with a "/" in it
-// travels as %2F and reaches the server as one id.
-func join(parts ...string) string {
+// travels as %2F and reaches the server as one id. An empty segment, "." or
+// ".." is refused, wrapping ErrConfig, before anything is sent: a URL's dot
+// segments are collapsed on the way (escaping the dots does not help), so
+// DeleteDocument(ctx, "c", "..") would otherwise delete collection c.
+func join(parts ...string) (string, error) {
 	var b strings.Builder
 	for _, p := range parts {
+		if p == "" || p == "." || p == ".." {
+			return "", fmt.Errorf("%w: %q cannot be a collection name, document id or source id", ErrConfig, p)
+		}
 		b.WriteByte('/')
 		b.WriteString(url.PathEscape(p))
 	}
-	return b.String()
+	return b.String(), nil
 }
