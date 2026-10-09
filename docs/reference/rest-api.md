@@ -2,7 +2,7 @@
 
 # REST API
 
-Every documented route the server answers, 108 of them, grouped as the interactive docs at `/docs` group them. The last column is who may call it once sign-in is on: the action the role table places it under, the roles that hold that action, the key roles that do, and whether it needs a check from the last ten minutes. With sign-in off, the API key rules in [Run the REST API](../how-to/rest-api.md) apply instead. A route no action places is for admins only, so an endpoint added later is closed until somebody decides who it is for. Older aliases under `/api/` that the dashboard used are left out.
+Every documented route the server answers, 111 of them, grouped as the interactive docs at `/docs` group them. The last column is who may call it once sign-in is on: the action the role table places it under, the roles that hold that action, the key roles that do, and whether it needs a check from the last ten minutes. With sign-in off, the API key rules in [Run the REST API](../how-to/rest-api.md) apply instead. A route no action places is for admins only, so an endpoint added later is closed until somebody decides who it is for. Older aliases under `/api/` that the dashboard used are left out.
 
 ## Auth
 
@@ -116,8 +116,10 @@ Every documented route the server answers, 108 of them, grouped as the interacti
 | `GET` | `/api/v1/about/licence` | The Apache License, Version 2.0, as the package carries it, in plain text. | `about.read`: admin |
 | `GET` | `/api/v1/info` | Get database information. | `meta.read`: viewer, operator, admin; keys: reader, searcher, operator |
 | `GET` | `/api/v1/info/extended` | Get extended database information including storage, cache, and scaling stats. | `meta.read`: viewer, operator, admin; keys: reader, searcher, operator |
+| `GET` | `/api/v1/whoami` | Who the caller is, how they came in, their role, what it allows, and which collections they reach. | `meta.read`: viewer, operator, admin; keys: reader, searcher, operator |
 | `GET` | `/api/v1/ws/status` | Get WebSocket connection status. | `meta.read`: viewer, operator, admin; keys: reader, searcher, operator |
-| `GET` | `/health` | Health check. | anybody |
+| `GET` | `/health` | Health check: the process is up and answering. What a liveness probe asks. | anybody |
+| `GET` | `/ready` | Readiness: the models are loaded, or load on first use. What a readiness probe asks. | anybody |
 
 ## Inspect
 
@@ -164,6 +166,7 @@ Every documented route the server answers, 108 of them, grouped as the interacti
 | `POST` | `/api/v1/collections/{name}/hybrid-search` | Hybrid search combining vector similarity and keyword matching. | `search`: operator, admin; keys: searcher, operator |
 | `POST` | `/api/v1/collections/{name}/keyword-search` | Full-text keyword search using BM25 ranking. | `search`: operator, admin; keys: searcher, operator |
 | `POST` | `/api/v1/collections/{name}/search` | Search for similar vectors. | `search`: operator, admin; keys: searcher, operator |
+| `POST` | `/api/v1/collections/{name}/similar` | The chunks most like one chunk, judged as the caller. | `search`: operator, admin; keys: searcher, operator |
 | `POST` | `/api/v1/collections/{name}/sparse-search` | Search using sparse vectors only. | `search`: operator, admin; keys: searcher, operator |
 | `POST` | `/api/v1/collections/{name}/text-hybrid-search` | Hybrid search with automatic text embedding. | `search`: operator, admin; keys: searcher, operator |
 | `POST` | `/api/v1/collections/{name}/text-search` | Semantic search using text query. | `search`: operator, admin; keys: searcher, operator |

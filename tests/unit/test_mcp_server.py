@@ -244,3 +244,20 @@ class TestServer:
         assert len(printed.splitlines()) == 1
         assert "pip install vectrixdb[mcp]" in printed
         assert "Traceback" not in printed
+
+
+def test_the_command_passes_allow_writes_on(monkeypatch, tmp_path):
+    """`vectrixdb mcp --allow-writes` reaches the server's own flag, as the docs say."""
+    from typer.testing import CliRunner
+
+    import vectrixdb.mcp_server as mcp_server
+    from vectrixdb.cli import app
+
+    seen = []
+    monkeypatch.setattr(mcp_server, "main", lambda argv: seen.append(argv))
+    result = CliRunner().invoke(
+        app,
+        ["mcp", "--path", str(tmp_path), "--transport", "streamable-http", "--allow-writes"],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen and seen[0][-1] == "--allow-writes"

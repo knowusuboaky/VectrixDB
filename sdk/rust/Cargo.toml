@@ -1,0 +1,30 @@
+[package]
+name = "vectrixdb"
+version = "2.2.0"
+edition = "2021"
+rust-version = "1.75"
+description = "The client for a VectrixDB server: search, add and read collections as one caller."
+license = "Apache-2.0"
+authors = ["Kwadwo Daddy Nyame Owusu - Boakye"]
+repository = "https://github.com/knowusuboaky/VectrixDB"
+homepage = "https://knowusuboaky.github.io/VectrixDB/how-to/clients/"
+documentation = "https://docs.rs/vectrixdb"
+readme = "README.md"
+keywords = ["vectrixdb", "vector-database", "search", "rag", "client"]
+categories = ["api-bindings", "database"]
+
+[features]
+default = ["rustls"]
+# TLS by rustls, so nothing needs OpenSSL on the machine.
+rustls = ["reqwest/rustls-tls"]
+# The same calls, blocking, for a program that does not run an async runtime.
+blocking = ["tokio/rt"]
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "time"] }

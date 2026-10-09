@@ -86,3 +86,15 @@ def _chat_routes_start_fresh():
     ChatRoute._REFUSED.clear()
     yield
     ChatRoute._REFUSED.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_company_defaults(monkeypatch, tmp_path_factory):
+    """A wrapper package or a defaults file on the machine that runs the tests changes nothing in them."""
+    from vectrixdb import company
+
+    nowhere = tmp_path_factory.getbasetemp() / "no-company-defaults.toml"
+    monkeypatch.setattr(company, "machine_file", lambda env=None: nowhere)
+    monkeypatch.setattr(company, "_entry_points", lambda: [])
+    for name in ("VECTRIXDB_DEFAULTS_FILE", "VECTRIXDB_DEFAULTS"):
+        monkeypatch.delenv(name, raising=False)

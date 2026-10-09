@@ -42,7 +42,7 @@ from typing import Dict, List, Optional, Tuple
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
-from .embedded import get_models_dir, MODEL_CONFIG, GITHUB_REPO, GITHUB_RELEASE_BASE
+from .embedded import get_models_dir, MODEL_CONFIG, GITHUB_REPO, release_base
 from .checksums import verify as _verify_checksums
 from .._net import assert_network
 from ..exceptions import ModelDownloadError
@@ -98,7 +98,7 @@ def release_asset_url(model_type: str) -> Optional[str]:
     if not tag:
         return None
     asset, _folder = RELEASE_ASSETS[model_type]
-    return f"{GITHUB_RELEASE_BASE}/{tag}/{asset}.zip"
+    return f"{release_base()}/{tag}/{asset}.zip"
 
 
 def publish_commands(model_type: str, tag: Optional[str] = None) -> List[str]:
@@ -229,7 +229,7 @@ class ModelDownloader:
             return False
 
         # GitHub release URL: https://github.com/REPO/releases/download/TAG/MODEL.zip
-        zip_url = f"{GITHUB_RELEASE_BASE}/{github_release}/{model_type}.zip"
+        zip_url = f"{release_base()}/{github_release}/{model_type}.zip"
 
         print(f"  Trying GitHub fallback: {zip_url}")
 

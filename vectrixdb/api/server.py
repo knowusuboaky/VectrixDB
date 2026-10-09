@@ -16,6 +16,7 @@ import contextlib
 import logging
 import hmac
 import os
+import threading
 import uuid
 import asyncio
 import json
@@ -173,6 +174,7 @@ READ_ONLY_METHODS = {"GET", "HEAD", "OPTIONS"}
 # and the access log. With sign-in off it behaves as this class always did,
 # so the name stays for anything that imported it.
 from . import chunk_source  # noqa: E402
+from . import inference  # noqa: E402
 from .replies import message_of, refusal  # noqa: E402
 from .signin import AccessMiddleware as ApiKeyAuthMiddleware  # noqa: E402
 from .signin import (
@@ -395,6 +397,8 @@ def _record_decision(
     )
     try:
         sink.write(record)
+        # The reply names its record, so "the assistant told me this" leads to one row.
+        request.state.decision_id = record.decision_id
     except AuditUnavailable as exc:
         # The library's rule, kept here: a decision that cannot be recorded is not served.
         raise HTTPException(
@@ -438,6 +442,9 @@ def _snipped(results_dict: dict, request: Request) -> dict:
     rest of a chunk is a second request, for one chunk, that is recorded.
     Without the parameter nothing changes: a program that searches wants the text.
     """
+    decided = getattr(request.state, "decision_id", None)
+    if decided:
+        results_dict["decision_id"] = decided
     raw = request.query_params.get("snippet")
     if not raw:
         return results_dict
@@ -1160,6 +1167,9 @@ async def lifespan(app: FastAPI):
 
     from .mcp import running as mcp_running
 
+    if inference.warm_enabled():
+        # In a thread: /health answers while the models load, /ready once they have.
+        inference.start_warming()
     async with mcp_running(app):
         yield
 
@@ -1644,8 +1654,22 @@ async def brand_logo_dark(request: Request):
 
 @router.get("/health", tags=["info"])
 async def health():
-    """Health check."""
+    """Health check: the process is up and answering. What a liveness probe asks."""
     return {"status": "healthy", "timestamp": utcnow().isoformat()}
+
+
+@router.get("/ready", tags=["info"])
+async def ready():
+    """Readiness: the models are loaded, or load on first use. What a readiness probe asks.
+
+    503 while ``VECTRIXDB_WARM`` is loading them, or when loading failed, with
+    the reason, so an orchestrator sends no traffic to a server that would
+    answer the first search by loading a model.
+    """
+    state = inference.readiness()
+    if not state["ready"]:
+        return JSONResponse(status_code=503, content=state)
+    return state
 
 
 # ============================================================================
@@ -2034,6 +2058,7 @@ async def get_collection(name: str, request: Request):
     try:
         collection = db.get_collection(name)
         row = collection.info().to_dict()
+        row["fields"] = _filterable_fields(collection)
         if (
             chunk_source.shared(collection) is not None
             and getattr(collection, "policy", None) is None
@@ -2043,6 +2068,115 @@ async def get_collection(name: str, request: Request):
         return ApiResponse(ok=True, data=row)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Collection '{name}' not found")
+
+
+#: Rows read to name a collection's metadata fields: enough to find them, not to read it.
+_FIELD_SAMPLE = 200
+
+
+def _filterable_fields(collection: Any) -> List[str]:
+    """The metadata fields a search can filter on, from a sample of rows: names only, never values.
+
+    What an assistant needs to write a filter without guessing a field's
+    name. The library's own fields, ``_vx_`` and the text, are left out.
+    """
+    found: set = set()
+    try:
+        for index, (_id, _text, meta) in enumerate(collection._iter_documents_raw()):
+            if index >= _FIELD_SAMPLE:
+                break
+            found.update(
+                key for key in (meta or {}) if not str(key).startswith("_vx") and key != "text"
+            )
+    except Exception:  # noqa: BLE001 - a store that cannot list says nothing, not an error
+        return []
+    return sorted(str(key) for key in found)
+
+
+class SimilarRequest(BaseModel):
+    """More like this: the chunks nearest to one the caller can already see."""
+
+    id: str = Field(..., description="The chunk's id, as a search result gives it.")
+    limit: int = Field(default=10, gt=0, le=100)
+    filter: Optional[dict[str, Any]] = None
+
+
+@router.post("/api/v1/collections/{name}/similar", tags=["search"])
+async def similar(name: str, request: SimilarRequest, req: Request):
+    """The chunks most like one chunk, judged as the caller.
+
+    The chunk is looked up as the caller, so one they may not see is not
+    found, the same answer as one that is not there; the search is theirs
+    too, under the collection's policy.
+    """
+    db = get_db()
+    collection, principal = _servable_as(db, name, req)
+    started = time.perf_counter()
+    point = (
+        collection.get(request.id, principal=principal)
+        if principal is not None
+        else collection.get(request.id)
+    )
+    if point is None or point.vector is None:
+        raise HTTPException(status_code=404, detail=f"Point '{request.id}' not found")
+    vector = point.vector if isinstance(point.vector, list) else point.vector.tolist()
+    try:
+        results = collection.search(
+            query=vector,
+            limit=request.limit + 1,
+            filter=request.filter,
+            **({"principal": principal} if principal is not None else {}),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _record_decision(req, collection, principal, f"similar:{request.id}", results, started)
+    found = _judged(results.to_dict(), principal)
+    found["results"] = [r for r in found.get("results", []) if r.get("id") != request.id][
+        : request.limit
+    ]
+    found["similar_to"] = request.id
+    results_dict = _snipped(found, req)
+    if not is_authenticated(req):
+        results_dict = redact_search_results(results_dict)
+    return ApiResponse(ok=True, data=results_dict)
+
+
+@router.get("/api/v1/whoami", tags=["info"])
+async def whoami(req: Request):
+    """Who the caller is, how they came in, their role, what it allows, and which collections they reach.
+
+    A key's name and a person's address are theirs to see; no secret is
+    ever in the answer.
+    """
+    from ..signin import roles as role_table
+    from .signin import caller_of
+
+    caller = caller_of(req)
+    if caller is None:
+        return ApiResponse(
+            ok=True,
+            data={
+                "who": None,
+                "method": "none",
+                "role": None,
+                "actions": [],
+                "collections": "every collection",
+                "note": "This server has no sign-in and no key: anyone who reaches it may use it.",
+            },
+        )
+    return ApiResponse(
+        ok=True,
+        data={
+            "who": caller.email or caller.name or caller.who,
+            "method": caller.method,
+            "role": caller.role,
+            "actions": sorted(
+                a for a in role_table.ACTIONS if role_table.can(caller.role, a, caller.grants)
+            ),
+            "collections": list(caller.collections) or "every collection",
+            "sees_content": caller.sees_content,
+        },
+    )
 
 
 @router.delete("/api/v1/collections/{name}", tags=["collections"])
@@ -2699,8 +2833,10 @@ async def search(name: str, request: SearchRequest, req: Request):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# Cached embedder instance for text search
+# Cached embedder instance for text search, built once even when two first
+# requests arrive together: each session holds the model's weights in memory.
 _text_embedder = None
+_text_embedder_lock = threading.Lock()
 
 
 def _default_query_model() -> str:
@@ -2743,9 +2879,13 @@ def get_text_embedder(model: Optional[str] = None):
     """
     global _text_embedder
     wanted = model or DEFAULT_QUERY_MODEL
-    if _text_embedder is not None and getattr(_text_embedder, "_vectrix_model", None) != wanted:
-        _text_embedder = None
-    if _text_embedder is None:
+    current = _text_embedder
+    if current is not None and getattr(current, "_vectrix_model", None) == wanted:
+        return current
+    with _text_embedder_lock:
+        current = _text_embedder
+        if current is not None and getattr(current, "_vectrix_model", None) == wanted:
+            return current
         try:
             from ..models import DenseEmbedder
 
@@ -2757,7 +2897,7 @@ def get_text_embedder(model: Optional[str] = None):
                 status_code=503,
                 detail=f"Text embedder not available. Run: vectrixdb download-models. Error: {str(e)}",
             )
-    return _text_embedder
+        return embedder
 
 
 @router.post("/api/v1/collections/{name}/text-search", tags=["search"])
@@ -2777,10 +2917,11 @@ async def text_search(name: str, request: TextSearchRequest, req: Request):
     collection, principal = _servable_as(db, name, req)
     started = time.perf_counter()
 
-    # Get embedder and embed query text
+    # Embed the query off the event loop, in line with every other model call.
     try:
-        embedder = get_text_embedder()
-        query_vector = embedder.embed(request.query_text)[0].tolist()
+        query_vector = (await inference.embed([request.query_text]))[0].tolist()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to embed query: {str(e)}")
 
@@ -2789,15 +2930,19 @@ async def text_search(name: str, request: TextSearchRequest, req: Request):
         # search runs: a slightly worse order is a fair price for never
         # scoring a document the person may not see.
         if request.rerank and principal is None:
-            with _in_words(collection, request.query_text):
-                results = collection.search_with_rerank(
-                    query=query_vector,
-                    limit=request.limit,
-                    rerank_limit=max(50, request.limit * 5),
-                    filter=request.filter,
-                    rerank_method="cross_encoder",
-                    query_text=request.query_text,
-                )
+            # The cross-encoder is a model too: it runs in the line, off the event loop.
+            def reranked() -> Any:
+                with _in_words(collection, request.query_text):
+                    return collection.search_with_rerank(
+                        query=query_vector,
+                        limit=request.limit,
+                        rerank_limit=max(50, request.limit * 5),
+                        filter=request.filter,
+                        rerank_method="cross_encoder",
+                        query_text=request.query_text,
+                    )
+
+            results = await inference.run_in_line(reranked)
         else:
             with _in_words(collection, request.query_text):
                 results = collection.search(
@@ -2849,21 +2994,26 @@ async def text_upsert(name: str, request: TextUpsertRequest):
 
     collection = _servable(db, name)
 
-    # Get embedder
+    # The model loads off the event loop; then every text is embedded there too, a batch at a time, in line.
+    from starlette.concurrency import run_in_threadpool
+
+    all_texts = [p.text for p in request.points]
     try:
-        embedder = get_text_embedder()
+        embedder = await run_in_threadpool(get_text_embedder)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Text embedder not available: {str(e)}")
+    try:
+        all_embeddings = await inference.embed(all_texts, embedder)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to embed and insert: {str(e)}")
 
     try:
         ids = []
         vectors = []
         metadata_list = []
         texts = []
-
-        # Embed all texts
-        all_texts = [p.text for p in request.points]
-        all_embeddings = embedder.embed(all_texts)
 
         for i, point in enumerate(request.points):
             ids.append(point.id)
@@ -2953,10 +3103,11 @@ async def text_hybrid_search(name: str, request: TextSearchRequest, req: Request
             detail="Hybrid search requires text index. Create collection with enable_text_index=True",
         )
 
-    # Get embedder and embed query text
+    # Embed the query off the event loop, in line with every other model call.
     try:
-        embedder = get_text_embedder()
-        query_vector = embedder.embed(request.query_text)[0].tolist()
+        query_vector = (await inference.embed([request.query_text]))[0].tolist()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to embed query: {str(e)}")
 
@@ -3157,14 +3308,16 @@ async def search_with_rerank(name: str, request: RerankSearchRequest):
     collection = _servable(db, name)
 
     try:
-        results = collection.search_with_rerank(
-            query=request.query,
-            limit=request.limit,
-            rerank_limit=request.rerank_limit,
-            filter=request.filter,
-            rerank_method=request.rerank_method,
-            diversity_lambda=request.diversity_lambda,
-            query_text=request.query_text,
+        results = await inference.run_in_line(
+            lambda: collection.search_with_rerank(
+                query=request.query,
+                limit=request.limit,
+                rerank_limit=request.rerank_limit,
+                filter=request.filter,
+                rerank_method=request.rerank_method,
+                diversity_lambda=request.diversity_lambda,
+                query_text=request.query_text,
+            )
         )
         return ApiResponse(ok=True, data=results.to_dict())
     except ValueError as e:
@@ -3551,6 +3704,9 @@ def run_server(
     )
     os.environ["VECTRIXDB_PATH"] = db_path
     os.environ["VECTRIXDB_DASHBOARD"] = "1" if enable_dashboard else "0"
+    # A server that will take traffic loads its models before it says it is
+    # ready, not on the first search. VECTRIXDB_WARM=0 turns it off.
+    os.environ.setdefault("VECTRIXDB_WARM", "1")
     if api_key:
         os.environ["VECTRIXDB_API_KEY"] = api_key
     if read_only_key:

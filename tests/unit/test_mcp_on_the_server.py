@@ -167,12 +167,25 @@ class TestTheEndpoint:
 
     def test_the_tools_say_what_they_do_and_that_they_only_read(self, server):
         listed = rpc(server, {"api-key": make_key(server)}, "tools/list")["tools"]
-        assert [t["name"] for t in listed] == ["list_collections", "search", "open_source"]
+        assert [t["name"] for t in listed] == [
+            "list_collections",
+            "whoami",
+            "describe_collection",
+            "list_documents",
+            "similar",
+            "search",
+            "open_source",
+        ]
         assert all(t["annotations"]["readOnlyHint"] for t in listed)
 
     def test_the_answer_from_documents_prompt_is_offered(self, server):
         prompts = rpc(server, {"api-key": make_key(server)}, "prompts/list")["prompts"]
-        assert [p["name"] for p in prompts] == ["answer_from_documents"]
+        assert [p["name"] for p in prompts] == [
+            "answer_from_documents",
+            "summarise_document",
+            "whats_in_collection",
+            "compare_documents",
+        ]
 
 
 # ------------------------------------------------------------------ a key
@@ -229,7 +242,7 @@ class TestATeamKey:
 
     def test_a_role_that_may_not_search_may_not_search_through_mcp(self, server):
         key = {"api-key": make_key(server, role="reader")}
-        assert tools(server, key)[:2] == ["list_collections", "search"], "a reader may connect"
+        assert "search" in tools(server, key), "a reader may connect and sees the tools"
         refused, text = call(server, key, "search", collection="handbook", query="refunds")
         assert refused and "role does not allow" in text
 
@@ -348,6 +361,19 @@ class TestAPersonSignedInWithTheCompany:
         assert not refused, text
         assert "w-acme" in text and "w-zeta" not in text
 
+    def test_a_judged_search_names_its_record_in_the_reply(self, sso, idp, tmp_path, monkeypatch):
+        records = tmp_path / "decisions.jsonl"
+        monkeypatch.setenv("VECTRIXDB_AUDIT_JSONL", str(records))
+        idp.person = {"sub": "u-8", "email": "ama@example.com", "groups": ["acme"]}
+        reply = sso.post(
+            "/api/v1/collections/walled/text-search",
+            headers={"Authorization": f"Bearer {idp.access_token()}"},
+            json={"query_text": "loan covenant review", "limit": 3},
+        )
+        assert reply.status_code == 200, reply.text
+        decided = reply.json()["data"]["decision_id"]
+        assert decided and decided in records.read_text(encoding="utf-8")
+
     def test_it_is_recorded_under_their_name(self, sso, idp, data):
         idp.person = {"sub": "u-7", "email": "olu@example.com", "groups": ["g-ops"]}
         call(
@@ -443,3 +469,299 @@ class TestTheAnswerIsHonest:
 
     def test_nothing_found_says_what_to_try(self):
         assert "Try another mode" in door.render_hits("handbook", [], 2000)
+
+
+# ------------------------------------------------------- the newer tools
+
+
+class TestTheNewerTools:
+    def test_whoami_says_who_and_what(self, server):
+        key = {"api-key": make_key(server, name="for-legal", collections=["handbook"])}
+        refused, text = call(server, key, "whoami")
+        assert not refused, text
+        assert "through an API key" in text and "role searcher" in text
+        assert "only handbook" in text
+
+    def test_describe_collection_names_the_fields_to_filter_on(self, server):
+        master = {"api-key": KEY}
+        server.post(
+            "/api/v1/collections/handbook/text-upsert",
+            headers=master,
+            json={
+                "points": [
+                    {
+                        "id": "h2",
+                        "text": "Travel is booked by the office.",
+                        "payload": {"department": "ops"},
+                    }
+                ]
+            },
+        )
+        refused, text = call(
+            server, {"api-key": make_key(server)}, "describe_collection", collection="handbook"
+        )
+        assert not refused, text
+        assert text.startswith("[i] handbook") and "- Filter on: department." in text
+        assert "hybrid works" in text
+
+    def test_search_counts_facets_over_its_results(self, server):
+        master = {"api-key": KEY}
+        server.post(
+            "/api/v1/collections/handbook/text-upsert",
+            headers=master,
+            json={
+                "points": [
+                    {
+                        "id": "f1",
+                        "text": "Refunds for travel are paid by finance.",
+                        "payload": {"department": "finance"},
+                    },
+                    {
+                        "id": "f2",
+                        "text": "Refunds for training are paid by finance.",
+                        "payload": {"department": "finance"},
+                    },
+                ]
+            },
+        )
+        refused, text = call(
+            server,
+            {"api-key": make_key(server)},
+            "search",
+            collection="handbook",
+            query="refunds",
+            facets=["department"],
+        )
+        assert not refused, text
+        assert "Facets over these" in text and "department: finance 2" in text
+
+    def test_similar_finds_more_like_a_result_and_not_itself(self, server):
+        master = {"api-key": KEY}
+        server.post(
+            "/api/v1/collections/handbook/text-upsert",
+            headers=master,
+            json={"points": [{"id": "s1", "text": "Refunds are paid back to the card used."}]},
+        )
+        refused, text = call(
+            server, {"api-key": make_key(server)}, "similar", collection="handbook", id="handbook-1"
+        )
+        assert not refused, text
+        assert text.startswith("[i] Most like handbook-1") and "id=handbook-1" not in text
+        assert "id=s1" in text
+
+    def test_similar_does_not_find_what_the_caller_may_not_see(self, server):
+        key = {"api-key": make_key(server)}
+        refused, text = call(server, key, "similar", collection="handbook", id="no-such-chunk")
+        assert refused and "not found" in text
+
+    def test_list_documents_says_what_a_collection_holds(self, data, mcp_on, monkeypatch):
+        from vectrixdb.api.server import create_app
+
+        monkeypatch.setenv("VECTRIXDB_API_KEY", KEY)
+        monkeypatch.setenv("VECTRIXDB_KEEP_SOURCE", "1")
+        with TestClient(
+            create_app(db_path=str(data), enable_dashboard=False, signin=_signin(data)),
+            base_url=PUBLIC,
+        ) as client:
+            client.post(
+                "/api/v1/collections/handbook/documents",
+                headers={
+                    "api-key": KEY,
+                    "content-type": "application/octet-stream",
+                    "x-filename": "travel.md",
+                },
+                content=b"# Travel\n\nEconomy fares for every trip under six hours.",
+            )
+            reader = {"api-key": make_key(client, role="operator")}
+            refused, text = call(client, reader, "list_documents", collection="handbook")
+            assert not refused, text
+            assert "travel.md" in text
+            refused, text = call(
+                client, reader, "list_documents", collection="handbook", title="nothing-like-it"
+            )
+            assert "No documents matching" in text
+
+    def test_the_collection_resource_reads_as_the_caller(self, server):
+        key = {"api-key": make_key(server, collections=["handbook"])}
+        templates = rpc(server, key, "resources/templates/list")["resourceTemplates"]
+        assert {t["uriTemplate"] for t in templates} == {
+            "vectrixdb://collections/{collection}",
+            "vectrixdb://collections/{collection}/documents/{+document}",
+        }
+        read = rpc(server, key, "resources/read", {"uri": "vectrixdb://collections/handbook"})
+        assert read["contents"][0]["text"].startswith("[i] handbook")
+
+    def test_a_scoped_key_cannot_read_another_collection_as_a_resource(self, server):
+        key = {"api-key": make_key(server, collections=["handbook"])}
+        reply = server.post(
+            "/mcp",
+            headers={**ACCEPT, **key},
+            content=json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "resources/read",
+                    "params": {"uri": "vectrixdb://collections/payroll"},
+                }
+            ),
+        )
+        body = reply.json()
+        assert "error" in body or body.get("result", {}).get("isError"), body
+
+    def test_the_writing_tools_are_offered_only_with_writes_on(self, server):
+        offered = tools(server, {"api-key": make_key(server, role="operator")})
+        for name in ("create_collection", "delete_document", "add_source", "refresh_source"):
+            assert name not in offered
+
+
+class TestTheNewerWritingTools:
+    @pytest.fixture
+    def writable(self, data, mcp_on, monkeypatch):
+        from vectrixdb.api.server import create_app
+
+        monkeypatch.setenv("VECTRIXDB_API_KEY", KEY)
+        monkeypatch.setenv("VECTRIXDB_MCP_WRITES", "1")
+        with TestClient(
+            create_app(db_path=str(data), enable_dashboard=False, signin=_signin(data)),
+            base_url=PUBLIC,
+        ) as client:
+            yield client
+
+    def test_delete_is_marked_destructive_and_the_rest_are_not(self, writable):
+        listed = {
+            t["name"]: t["annotations"]
+            for t in rpc(writable, {"api-key": KEY}, "tools/list")["tools"]
+        }
+        assert listed["delete_document"]["destructiveHint"] is True
+        assert listed["create_collection"]["destructiveHint"] is False
+        assert listed["search"]["readOnlyHint"] is True
+
+    def test_an_admin_makes_a_collection_and_a_searcher_may_not(self, writable):
+        searcher = {"api-key": make_key(writable, name="reads", role="searcher")}
+        refused, text = call(writable, searcher, "create_collection", collection="notes")
+        assert refused and "role does not allow" in text
+        refused, text = call(
+            writable,
+            {"api-key": KEY},
+            "create_collection",
+            collection="notes",
+            description="Team notes",
+        )
+        assert not refused and text.startswith("Made notes"), text
+        assert (
+            writable.get("/api/v1/collections/notes", headers={"api-key": KEY}).status_code == 200
+        )
+
+    def test_an_operator_deletes_a_document(self, writable):
+        operator = {"api-key": make_key(writable, name="writes", role="operator")}
+        refused, text = call(
+            writable,
+            operator,
+            "add_document",
+            collection="handbook",
+            text="# Gone\n\nSoon gone.",
+            title="gone",
+        )
+        assert not refused, text
+        refused, text = call(
+            writable, operator, "delete_document", collection="handbook", document="gone.md"
+        )
+        assert not refused and text.startswith("Deleted gone.md from handbook"), text
+
+    def test_a_source_is_added_and_refreshed_through_the_routes(self, writable, monkeypatch):
+        seen = []
+
+        async def fake_call(ctx, method, path, **kw):
+            seen.append((method, path, kw.get("body")))
+
+            class Reply:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    if path.endswith("/refresh"):
+                        return {
+                            "ok": True,
+                            "added": 3,
+                            "updated": 0,
+                            "unchanged": 1,
+                            "removed": 0,
+                            "failed": 0,
+                        }
+                    return {"ok": True, "source": {"id": "src-1"}}
+
+            return Reply()
+
+        monkeypatch.setattr(door, "_call", fake_call)
+        operator = {"api-key": make_key(writable, name="feeds", role="operator")}
+        refused, text = call(
+            writable,
+            operator,
+            "add_source",
+            collection="handbook",
+            address="https://news.example.com/feed",
+            every="1d",
+        )
+        assert not refused and "Its id is src-1" in text, text
+        refused, text = call(
+            writable, operator, "refresh_source", collection="handbook", source="src-1"
+        )
+        assert not refused and "3 added" in text and "1 unchanged" in text, text
+        assert seen[0] == (
+            "POST",
+            "/api/v1/collections/handbook/sources",
+            {"address": "https://news.example.com/feed", "every": "1d"},
+        )
+        assert seen[1] == (
+            "POST",
+            "/api/v1/collections/handbook/sources/refresh",
+            {"force": False, "source": "src-1"},
+        )
+
+
+def test_the_named_lists_are_what_the_server_offers():
+    """READ_TOOLS, WRITE_TOOLS, PROMPTS and RESOURCES are what the skill and the docs are held to."""
+    import asyncio
+
+    server = door.build_server(writes=True)
+
+    async def offered():
+        return (
+            [t.name for t in await server.list_tools()],
+            [p.name for p in await server.list_prompts()],
+            [r.uri_template for r in await server.list_resource_templates()],
+        )
+
+    tools_offered, prompts, resources = asyncio.run(offered())
+    assert sorted(tools_offered) == sorted(door.READ_TOOLS + door.WRITE_TOOLS)
+    assert tuple(prompts) == door.PROMPTS
+    assert tuple(resources) == door.RESOURCES
+    reading = asyncio.run(door.build_server(writes=False).list_tools())
+    assert [t.name for t in reading] == list(door.READ_TOOLS)
+
+
+def test_a_tool_call_and_the_search_it_makes_are_one_trace(server):
+    """The tool's span, then the server's search inside it, in the same trace."""
+    pytest.importorskip("opentelemetry.sdk")
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from vectrixdb import tracing
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    assert tracing.enable(provider)
+    try:
+        refused, text = call(
+            server, {"api-key": make_key(server)}, "search", collection="handbook", query="refunds"
+        )
+        assert not refused, text
+    finally:
+        tracing.disable()
+    found = exporter.get_finished_spans()
+    tool = next(s for s in found if s.name == "vectrixdb.mcp.tool")
+    search = next(s for s in found if s.name == "vectrixdb.search")
+    assert tool.attributes["vectrixdb.tool"] == "search"
+    assert search.context.trace_id == tool.context.trace_id, "the search is in the tool's trace"

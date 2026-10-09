@@ -128,6 +128,30 @@ def _words() -> Set[str]:
         | _extras()
         | set(known())
         | errors
+        | _mcp_names()
+    )
+
+
+def _mcp_names() -> Set[str]:
+    """The server's MCP tools, prompts and resources, and the skill beside this one."""
+    from vectrixdb.api import mcp
+
+    return (
+        set(mcp.READ_TOOLS + mcp.WRITE_TOOLS + mcp.PROMPTS + mcp.RESOURCES)
+        | set(mcp.MODES)
+        | {
+            "vectrixdb-mcp",
+            "id",
+            "collection",
+            "query",
+            "mode",
+            "filter",
+            "facets",
+            "limit",
+            "around",
+            "token_budget",
+            "title",
+        }
     )
 
 
@@ -332,3 +356,36 @@ def test_a_name_the_code_does_not_have_is_caught():
         "Vectrix has no drop",
         "Golden is used and never imported or assigned",
     ]
+
+
+# --------------------------------------------- the skill for an MCP client
+
+MCP_SKILL = ROOT / "skills" / "vectrixdb-mcp" / "SKILL.md"
+
+
+def test_the_mcp_skill_opens_with_its_name_and_description():
+    fields, body = _split(MCP_SKILL.read_text(encoding="utf-8"))
+    assert set(fields) == {"name", "description"}
+    assert fields["name"] == MCP_SKILL.parent.name == "vectrixdb-mcp"
+    assert 0 < len(fields["description"]) <= 1024
+    assert ": " not in fields["description"] and " #" not in fields["description"]
+    assert body.lstrip().startswith("# VectrixDB over MCP")
+
+
+def test_the_mcp_skill_names_only_what_the_server_has():
+    _, body = _split(MCP_SKILL.read_text(encoding="utf-8"))
+    spans = _spans(body)
+    assert len(spans) > 20
+    wrong = [f"`{span}`: {why}" for span in spans for why in [_missing(span)] if why]
+    assert wrong == [], "names in skills/vectrixdb-mcp/SKILL.md the server does not have:\n" + (
+        "\n".join(wrong)
+    )
+
+
+def test_the_mcp_skill_tells_of_every_tool_and_prompt():
+    from vectrixdb.api import mcp
+
+    _, body = _split(MCP_SKILL.read_text(encoding="utf-8"))
+    spans = set(_spans(body))
+    missing = set(mcp.READ_TOOLS + mcp.WRITE_TOOLS + mcp.PROMPTS + mcp.RESOURCES) - spans
+    assert missing == set(), f"the skill says nothing of {sorted(missing)}"

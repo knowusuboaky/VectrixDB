@@ -43,7 +43,8 @@ dependencies = [
     "numpy>=1.24.0",
     "usearch>=2.0.0",
     # Embedded ONNX models, so search works offline with no API keys
-    "onnxruntime>=1.15.0",
+    # Below 2: a major release of the runtime is tested before it is allowed.
+    "onnxruntime>=1.15.0,<2",
     # Required by the `vectrixdb` console script declared in [project.scripts]
     "rich>=13.0.0",
     "typer>=0.9.0",
@@ -101,6 +102,13 @@ api = [
 signin = [
     "pyjwt[crypto]>=2.8.0",
     "qrcode>=7.4",
+]
+# The client for a VectrixDB server: vectrixdb.connect(url, key=...).
+client = [
+    "httpx>=0.24.0",
+    # verify="system": the operating system's certificates, so a company's own
+    # authority and a TLS-inspecting proxy are trusted the way a browser does.
+    "truststore>=0.9; python_version >= '3.10'",
 ]
 # MCP server, so an assistant can use a collection as a tool
 mcp = [
@@ -185,6 +193,8 @@ azure = [
 # Databricks Delta Lake / Lakebase backends
 databricks = [
     "databricks-sql-connector>=3.0.0",
+    # Lakebase is Postgres: its backend connects with psycopg2.
+    "psycopg2-binary>=2.9.0",
 ]
 postgres = [
     "psycopg2-binary>=2.9.0",

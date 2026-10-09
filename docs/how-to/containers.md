@@ -39,7 +39,7 @@ downloaded into a folder of their own:
 ```bash
 cd docker
 python -c "import secrets; print(secrets.token_urlsafe(32))" > vectrixdb.key
-chmod 644 vectrixdb.key
+sudo chown 10001 vectrixdb.key && sudo chmod 400 vectrixdb.key
 docker compose up -d --wait
 ```
 
@@ -53,8 +53,9 @@ endpoint off.
 
 The containers run as user 10001 and read the key through a bind mount, which
 keeps the file's owner and permissions, so on Linux the file must be readable
-by that user. `sudo chown 10001 vectrixdb.key && chmod 400 vectrixdb.key` does
-that and keeps it from the machine's other users. `VECTRIXDB_KEY_FILE` names a
+by that user: the `chown` gives it to that user and the `chmod` keeps it from
+the machine's other users. On Docker Desktop, for Windows and macOS, leave out
+the `sudo` line; the file is shared into the containers readable. `VECTRIXDB_KEY_FILE` names a
 key kept somewhere else, and `VECTRIXDB_HOST_PORT` publishes the server on
 another port than 7337.
 

@@ -202,7 +202,7 @@ _ROUTES: tuple[tuple[str, str, str], ...] = (
     (
         "POST",
         _C
-        + r"/(?:search(?:/[a-z]+)?|text-search|hybrid-search|text-hybrid-search|keyword-search|sparse-search|dense-sparse-search)",
+        + r"/(?:search(?:/[a-z]+)?|text-search|hybrid-search|text-hybrid-search|keyword-search|sparse-search|dense-sparse-search|similar)",
         "search",
     ),
     ("POST", _C + r"/(?:rebuild|graph/extract)", "collection.maintain"),
@@ -226,6 +226,8 @@ _ROUTES: tuple[tuple[str, str, str], ...] = (
     ("POST", r"/api/v1/documents", "content.write"),
     ("DELETE", r"/api/v1/documents/.+", "content.write"),
     ("GET", r"/api/v1/?", "meta.read"),
+    # Who the caller is and what they may do: theirs to read, whoever they are.
+    ("GET", r"/api/v1/whoami", "meta.read"),
     ("GET", r"/api(?:/v1)?/info(?:/extended)?", "meta.read"),
     # Connecting is all the endpoint is: each tool call comes back through here as its own request.
     ("*", r"/mcp", "mcp.connect"),

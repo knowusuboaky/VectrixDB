@@ -49,6 +49,7 @@ Run a search, open Jaeger at http://localhost:16686 and pick the `vectrixdb` ser
 | `vectrixdb.rechunk` | `rechunk()` and `rechunk_preview()` | collection, preview, chunks, documents |
 | `vectrixdb.write_golden` | drafting golden questions | collection, limit, questions |
 | `vectrixdb.evaluate` | an evaluation run | questions, setups, collections |
+| `vectrixdb.mcp.tool` | each tool an assistant calls on the server's [MCP endpoint](mcp-server.md), and each resource it reads; the search the tool makes sits inside it | tool, collection, refused |
 
 Every attribute is named `vectrixdb.<name>`, and every span carries `vectrixdb.duration_ms`. A search that calls itself again, a fallback or a second home, is one span. A rechunk holds a span for each document it adds again, and an evaluation holds a span for each search it runs on a VectrixDB collection, so a slow run shows which step was slow.
 

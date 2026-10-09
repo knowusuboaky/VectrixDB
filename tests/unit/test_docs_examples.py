@@ -55,8 +55,23 @@ PAGES = [
     "docs/how-to/storage-backends.md",
     "docs/how-to/tips.md",
     "docs/how-to/tracing.md",
+    "docs/how-to/async.md",
+    "docs/how-to/chunking.md",
+    "docs/how-to/embedding-models.md",
+    "docs/how-to/extraction-quality.md",
+    "docs/how-to/mcp-local.md",
+    "docs/how-to/recordings.md",
+    "docs/how-to/search-options.md",
+    "docs/how-to/sizing.md",
+    "docs/how-to/troubleshoot.md",
     "docs/reference/filters.md",
 ]
+
+# Pages whose Python is one session with a server, each fence carrying on from
+# the one before: none runs alone here. test_client.py makes the same calls
+# against a real server in the suite, and sdk/conformance/serve.py does for
+# the other languages.
+NEEDS_A_SERVER = ("docs/how-to/clients.md",)
 
 # Not Python, or not a complete program: shell lines, REPL transcripts and
 # snippets written around a placeholder the reader is meant to replace.
@@ -85,6 +100,16 @@ NOT_EXECUTABLE = (
     # reader puts in their .env, and whose Azure services are the reader's
     # own. Every route it serves is held to in test_extraction_app.py.
     "create_extraction_app(",
+    # A VectrixDB server at an address the reader replaces. Every call is held
+    # to its word against a real server in test_client.py.
+    "vectrixdb.connect(",
+    "connect_async(",
+    # A chat model the reader serves, cutting or describing chunks.
+    "llm_cutter(",
+    "context_writer(",
+    # A recording and the speech model or service that hears it.
+    "Whisper(",
+    "AzureSpeech(",
 )
 
 # Needs a package that is not a dependency, or a network hop.
@@ -173,5 +198,5 @@ def test_the_page_list_covers_every_page_with_a_python_fence():
         for p in [ROOT / "README.md", *sorted((ROOT / "docs").rglob("*.md"))]
         if "```python\n" in p.read_text(encoding="utf-8")
     }
-    missing = sorted(with_fences - set(PAGES))
+    missing = sorted(with_fences - set(PAGES) - set(NEEDS_A_SERVER))
     assert not missing, f"pages with examples that nothing runs: {missing}"

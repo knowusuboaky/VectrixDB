@@ -46,6 +46,9 @@ theme:
 extra_css:
   - stylesheets/extra.css
 
+extra_javascript:
+  - javascripts/overlay.js
+
 plugins:
   - search
   - mkdocstrings:
@@ -76,39 +79,81 @@ markdown_extensions:
 # it does. Each answers a different question; mixing them serves nobody.
 nav:
   - Home: index.md
-  - Tutorial:
+  - Start:
       - Getting started: tutorial/getting-started.md
+      - Install what you need: how-to/install.md
       - Add it with your coding agent: how-to/coding-agents.md
-  - How-to guides:
-      - Handle errors: how-to/handle-errors.md
-      - Choose a storage backend: how-to/storage-backends.md
-      - Run the REST API: how-to/rest-api.md
-      - Build an app on it: how-to/build-an-app.md
-      - Sign people in: how-to/sign-in.md
-      - Put your company's name on it: how-to/branding.md
-      - Deploy the server: how-to/deploy.md
-      - Run it in containers: how-to/containers.md
-      - Put it behind a gateway: how-to/behind-a-gateway.md
-      - Use the dashboard: how-to/dashboard.md
-      - Tips and tricks: how-to/tips.md
-      - Restrict what a search can see: how-to/entitlements.md
-      - Trace an answer to its source: how-to/lineage.md
-      - Keep conversation memory: how-to/conversation-memory.md
-      - Use it from an assistant over MCP: how-to/mcp-server.md
-      - Trace searches and ingestion: how-to/tracing.md
-      - Run without a network: how-to/offline.md
-      - Back up, move and restore: how-to/export-import.md
+  - Ingest:
       - Ingest documents: how-to/ingest-documents.md
+      - Chunking: how-to/chunking.md
+      - Extraction quality and blocked pages: how-to/extraction-quality.md
+      - Videos, podcasts and recordings: how-to/recordings.md
+      - Embedding models: how-to/embedding-models.md
       - Extract, keep, index: how-to/extract-keep-index.md
       - Ingest when a file lands: how-to/ingest-on-event.md
-      - Keep a collection in step with feeds and pages: how-to/sources.md
+      - Keep in step with feeds and pages: how-to/sources.md
       - Run an extraction service: how-to/extraction-service.md
+  - Search and evaluate:
+      - Search options: how-to/search-options.md
       - Measure retrieval: how-to/measure-retrieval.md
       - Evaluate every setup: how-to/evaluate-setups.md
-      - LangChain, LlamaIndex, plugins, CLI: how-to/integrations.md
       - Work with the knowledge graph: how-to/knowledge-graph.md
+      - Trace an answer to its source: how-to/lineage.md
+  - Assistants and agents:
+      - MCP:
+          - Use it from an assistant over MCP: how-to/mcp-server.md
+          - Connect your client: how-to/mcp-connect.md
+          - Company sign-in for MCP: how-to/mcp-sign-in.md
+          - Keys for a team: how-to/mcp-keys.md
+          - Tools reference: how-to/mcp-tools.md
+          - On your own machine: how-to/mcp-local.md
+      - Keep conversation memory: how-to/conversation-memory.md
+  - Secure:
+      - Sign people in: how-to/sign-in.md
+      - Keys and roles: how-to/keys-and-roles.md
+      - Collection policies: how-to/collection-policies.md
+      - Restrict what a search can see: how-to/entitlements.md
+      - Masking: how-to/masking.md
+      - Audit trail: how-to/audit-trail.md
+      - Put your company's name on it: how-to/branding.md
+  - Run in production:
+      - Deploy the server: how-to/deploy.md
+      - Check and doctor: how-to/troubleshoot.md
+      - Size the server for load: how-to/sizing.md
+      - Scale out: how-to/scale.md
+      - Run it in containers: how-to/containers.md
+      - Put it behind a gateway: how-to/behind-a-gateway.md
+      - Trace searches and ingestion: how-to/tracing.md
+      - Choose a storage backend: how-to/storage-backends.md
+      - Run without a network: how-to/offline.md
+      - Back up, move and restore: how-to/export-import.md
+      - Use the dashboard: how-to/dashboard.md
+  - Build on it:
+      - Call a server from your code: how-to/clients.md
+      - Use the command line against a server: how-to/command-line.md
+      - Wrap it for your company: how-to/wrap-for-your-company.md
+      - Distribute it through JFrog Artifactory: how-to/artifactory.md
+      - Run the REST API: how-to/rest-api.md
+      - Build an app on it: how-to/build-an-app.md
+      - Use it from async code: how-to/async.md
+      - Handle errors: how-to/handle-errors.md
+      - LangChain, LlamaIndex, plugins, CLI: how-to/integrations.md
+      - Tips and tricks: how-to/tips.md
   - Reference:
       - Easy API: reference/easy.md
+      - Client: reference/client.md
+      - Company defaults: reference/company.md
+      - Async: reference/aio.md
+      - Sources: reference/sources.md
+      - Ingest: reference/ingest.md
+      - Extract: reference/extract.md
+      - Chunk models: reference/chunk-models.md
+      - Extraction quality: reference/quality.md
+      - Evaluation: reference/evaluation.md
+      - Policy: reference/policy.md
+      - Masking: reference/masking.md
+      - Conversation memory: reference/memory.md
+      - Tracing: reference/tracing.md
       - Exceptions: reference/exceptions.md
       - Filters: reference/filters.md
       - Command line: reference/cli.md

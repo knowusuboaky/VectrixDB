@@ -44,6 +44,8 @@ from collections import Counter
 from dataclasses import dataclass
 import numpy as np
 
+from ._threads import session_threads
+
 from ..exceptions import ModelNotFoundError
 
 
@@ -51,6 +53,7 @@ __all__ = [
     "MODEL_CONFIG",
     "GITHUB_REPO",
     "GITHUB_RELEASE_BASE",
+    "release_base",
     "get_models_dir",
     "is_models_installed",
     "download_models",
@@ -275,6 +278,12 @@ MODEL_CONFIG: Dict[str, Dict[str, Any]] = {
 # GitHub repository for model releases (fallback when HuggingFace is blocked)
 GITHUB_REPO = "knowusuboaky/VectrixDB"
 GITHUB_RELEASE_BASE = f"https://github.com/{GITHUB_REPO}/releases/download"
+
+
+def release_base() -> str:
+    """Where the models' release files are fetched: VECTRIXDB_MODELS_URL, a company's mirror of the releases, else GitHub."""
+    mirror = os.environ.get("VECTRIXDB_MODELS_URL", "").strip().rstrip("/")
+    return mirror or GITHUB_RELEASE_BASE
 
 
 # ============================================================================
@@ -955,7 +964,7 @@ class DenseEmbedder:
 
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        sess_options.intra_op_num_threads = 4
+        sess_options.intra_op_num_threads = session_threads()
 
         self._session = ort.InferenceSession(
             str(model_path), sess_options=sess_options, providers=providers
@@ -1181,7 +1190,7 @@ class SparseEmbedder:
 
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        sess_options.intra_op_num_threads = 4
+        sess_options.intra_op_num_threads = session_threads()
 
         self._session = ort.InferenceSession(
             str(model_path), sess_options=sess_options, providers=providers
@@ -1570,7 +1579,7 @@ class RerankerEmbedder:
 
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        sess_options.intra_op_num_threads = 4
+        sess_options.intra_op_num_threads = session_threads()
 
         self._session = ort.InferenceSession(
             str(model_path), sess_options=sess_options, providers=providers
@@ -1864,7 +1873,7 @@ class LateInteractionEmbedder:
 
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        sess_options.intra_op_num_threads = 4
+        sess_options.intra_op_num_threads = session_threads()
 
         self._session = ort.InferenceSession(
             str(model_path), sess_options=sess_options, providers=providers
@@ -2296,7 +2305,7 @@ class GraphExtractor:
 
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        sess_options.intra_op_num_threads = 4
+        sess_options.intra_op_num_threads = session_threads()
 
         self._encoder_session = ort.InferenceSession(
             str(encoder_path), sess_options=sess_options, providers=providers

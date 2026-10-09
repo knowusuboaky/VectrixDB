@@ -97,7 +97,9 @@ bundled model stays the offline default.
 
 **Text that is not English needs two things.** The models in the wheel are
 English: `vectrixdb download-models` fetches the multilingual dense model and
-reranker once, about 230 MB, and `Vectrix(name, language="multi")` uses them.
+reranker once, about 230 MB, and naming them uses them:
+`Vectrix(name, dense_model="vectrixdb/multilingual", reranker_model="multilingual")`.
+See [Embedding models](embedding-models.md).
 And set `text_language=` on the collection, so keyword search stops stemming
 its words as English. See [Search modes](../explanation/search-modes.md#languages).
 

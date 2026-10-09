@@ -245,12 +245,13 @@ CMD ["extract-serve", "--host", "0.0.0.0"]
 FROM runtime AS server
 COPY --from=server-venv /opt/vectrixdb /opt/vectrixdb
 ENV VECTRIXDB_LISTEN_PORT=7337 \
-    VECTRIXDB_MCP=1
+    VECTRIXDB_MCP=1 \
+    VECTRIXDB_WARM=1
 LABEL org.opencontainers.image.title="VectrixDB" \
       org.opencontainers.image.description="The VectrixDB server: REST API, dashboard and MCP endpoint, with the embedding and reranking models inside."
 USER 10001:0
 EXPOSE 7337
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD ["python", "-c", "import os, urllib.request as u; u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:%s/health' % os.environ.get('VECTRIXDB_LISTEN_PORT', '7337'), timeout=4)"]
+    CMD ["python", "-c", "import os, urllib.request as u; u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:%s/ready' % os.environ.get('VECTRIXDB_LISTEN_PORT', '7337'), timeout=4)"]
 ENTRYPOINT ["dumb-init", "--", "vectrixdb"]
 CMD ["serve", "--host", "0.0.0.0"]

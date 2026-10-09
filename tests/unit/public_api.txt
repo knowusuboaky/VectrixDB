@@ -60,6 +60,14 @@ Excludes
 ExtractionQuality
 ExtractionQualityError
 ExtractionQualityWarning
+ServerRefused
+ServerSignInRequired
+ServerPermissionDenied
+ServerNotFound
+ServerRejected
+ServerBusy
+connect
+connect_async
 ExtractorType
 FacetAggregator
 FacetConfig

@@ -569,7 +569,7 @@ function attentionItems() {
   for (const c of state.collections) {
     const h = state.health[c.name] || {};
     if (h.state === 'rebuild') out.push({ kind: 'warn', icon: 'alert', html: `<b>${esc(c.name)}</b> is ${Math.round(h.tombstone_ratio * 100)}% deleted vectors, so every search does work for documents that are gone. <a href="#/collections/${encodeURIComponent(c.name)}/builds">Rebuild</a>` });
-    if (['e5-small-v2', 'dense_en'].includes(h.embedding_model) && state.models && !modelPresent('dense_en')) out.push({ kind: 'bad', icon: 'x', html: `<b>${esc(c.name)}</b> was written with e5-small-v2, which is not on this machine. <a href="#/settings">Download it</a> or reembed to the current model.` });
+    if (['e5-small-v2', 'dense_en'].includes(h.embedding_model) && state.models && !modelPresent('dense_en')) out.push({ kind: 'bad', icon: 'x', html: `<b>${esc(c.name)}</b> was written with e5-small-v2, which is not on this machine. Download it on the server with <code>vectrixdb download-models --type dense_en</code>, or reembed to the current model.` });
   }
   return out;
 }

@@ -8,11 +8,12 @@ hide:
 
 # The vector database that works <em>with no network and no accounts</em>
 
-<p class="lead">Embedded ONNX models, GraphRAG, and eight storage backends.
+<p class="lead">Embedded ONNX models, GraphRAG, MCP for assistants, and eight storage backends.
 Nothing to sign up for, no API key, no service to run. <code>pip install</code> and search.</p>
 
 <div class="vx-actions" markdown>
 [Get started](tutorial/getting-started.md){ .md-button .md-button--primary }
+[Connect an assistant](how-to/mcp-server.md){ .md-button }
 [Use the dashboard](how-to/dashboard.md){ .md-button }
 [GitHub](https://github.com/knowusuboaky/VectrixDB){ .md-button }
 </div>
@@ -38,6 +39,40 @@ print(results.top.text)
 
 That is the whole setup. The embedding model ships in the package, so the first
 search works offline on a machine that has never seen an API key.
+
+## New in 2.2
+
+<div class="vx-tours" markdown>
+
+<div class="vx-tour" markdown>
+![An assistant connects over MCP, lists the collections it may reach, and searches, every answer with its citation](images/dashboard/tour-mcp.gif)
+### An assistant searches over MCP <span class="vx-new">2.2</span>
+As the person it works for: their role, their collections, every policy. [MCP](how-to/mcp-server.md)
+</div>
+
+<div class="vx-tour" markdown>
+![A key made for one collection sees only that one, a reader may not search, and a call with no key is told where to sign in](images/dashboard/tour-mcp-keys.gif)
+### A key for one collection <span class="vx-new">2.2</span>
+It cannot tell the others exist, and every refusal comes back in words. [Keys for a team](how-to/mcp-keys.md)
+</div>
+
+<div class="vx-tour" markdown>
+![Compose starting the server, the extraction service and Jaeger, then a scan read and a search that finds its words](images/containers/compose.gif)
+### Containers <span class="vx-new">2.2</span>
+Compose starts the server, the extraction service and Jaeger. A scan goes in and a search finds it. [Run it in containers](how-to/containers.md)
+</div>
+
+<div class="vx-tour" markdown>
+![Jaeger with the scan's trace, from the server into the extraction service, and a search's attributes](images/containers/trace.gif)
+### Traces <span class="vx-new">2.2</span>
+One trace from the server into the extraction service: counts and timings, never the text. [Tracing](how-to/tracing.md)
+</div>
+
+</div>
+
+Also new: clients for [Python, TypeScript, Go and Rust](how-to/clients.md), a server
+that [stays up under load](how-to/sizing.md), collections that keep up with
+[feeds and pages](how-to/sources.md), and [`vectrixdb doctor`](how-to/troubleshoot.md).
 
 ## See it work
 
@@ -83,59 +118,93 @@ Build a request, send it, and copy the curl that does the same.
 Overview, Collections, the evaluation run with its picks, and Audit.
 </div>
 
-<div class="vx-tour" markdown>
-![Compose starting the server, the extraction service and Jaeger, then a scan read and a search that finds its words](images/containers/compose.gif)
-### Containers
-Compose starts the server, the extraction service and Jaeger. A scan goes in and a search finds it.
-</div>
-
-<div class="vx-tour" markdown>
-![Jaeger with the scan's trace, from the server into the extraction service, and a search's attributes](images/containers/trace.gif)
-### Traces
-One trace from the server into the extraction service: counts and timings, never the text.
-</div>
-
 </div>
 
 ## Where to go next
 
-<div class="grid cards" markdown>
+### Start
+
+<div class="grid cards vx-three" markdown>
 
 - **[Getting started](tutorial/getting-started.md)**
 
-    Learn the library by building something small, end to end.
+    Build something small, end to end.
 
-- **[How-to guides](how-to/handle-errors.md)**
+- **[Install what you need](how-to/install.md)**
 
-    Recipes for specific jobs: error handling, storage backends, the REST API.
+    Which extra adds what.
 
-- **[Reference](reference/easy.md)**
+- **[Add it with your coding agent](how-to/coding-agents.md)**
 
-    Signatures and behaviour, generated from the source.
+    One prompt, a skill, and llms.txt.
 
-- **[Explanation](explanation/why-vectrixdb.md)**
+</div>
 
-    Why the search modes differ, and where the pure-Python index runs out.
+### Assistants and agents
+
+<div class="grid cards vx-three" markdown>
+
+- **[MCP](how-to/mcp-server.md)**
+
+    An assistant searches as the person it works for.
+
+- **[Connect your client](how-to/mcp-connect.md)**
+
+    VS Code, Cursor, a desktop assistant, a command line.
 
 - **[Conversation memory](how-to/conversation-memory.md)**
 
-    Turns, pinned facts and a context block sized to a token budget.
+    Turns, pinned facts, a context sized to a budget.
 
-- **[MCP server](how-to/mcp-server.md)**
+</div>
 
-    Give an assistant a collection to search and remember into.
+### Ingest, search, evaluate
 
-- **[Use the dashboard](how-to/dashboard.md)**
+<div class="grid cards vx-three" markdown>
 
-    Every page of the server's dashboard, with pictures, and who sees which.
+- **[Ingest documents](how-to/ingest-documents.md)**
 
-- **[Deploy the server](how-to/deploy.md)**
+    PDF, Office, scans, speech and video, cut and cited.
 
-    One settings file, checked before a start, read by every command.
+- **[Keep in step with feeds and pages](how-to/sources.md)**
+
+    A collection that keeps itself current.
 
 - **[Measure retrieval](how-to/measure-retrieval.md)**
 
-    Golden questions written from your own documents, and checked against them.
+    Golden questions written from your own documents.
+
+</div>
+
+### Secure and run
+
+<div class="grid cards vx-three" markdown>
+
+- **[Sign people in](how-to/sign-in.md)**
+
+    Company single sign-on, passkeys, roles.
+
+- **[Deploy the server](how-to/deploy.md)**
+
+    One settings file, checked, then tried with doctor.
+
+- **[Run it in containers](how-to/containers.md)**
+
+    Two images, Compose and Kubernetes.
+
+</div>
+
+### Build on it
+
+<div class="grid cards vx-three" markdown>
+
+- **[Clients and SDKs](how-to/clients.md)**
+
+    Python, TypeScript, Go and Rust, the same calls in each.
+
+- **[Run the REST API](how-to/rest-api.md)**
+
+    Every route, and the OpenAPI document to generate from.
 
 - **[What it does not do](explanation/limits.md)**
 
@@ -163,6 +232,8 @@ pip install vectrixdb              # core
 pip install vectrixdb[api]         # + REST API and dashboard
 pip install vectrixdb[signin]      # + people signing in: single sign-on, passkeys, codes
 pip install vectrixdb[mcp]         # + MCP server for assistants
+pip install vectrixdb[client]      # + the client for a VectrixDB server, vectrixdb.connect
+pip install vectrixdb[tracing]     # + OpenTelemetry spans
 pip install vectrixdb[documents]   # + PDF, Word and Excel readers
 pip install vectrixdb[extract]     # + every local reader: documents, OCR, speech, video
 pip install vectrixdb[aws]         # + OpenSearch and Aurora

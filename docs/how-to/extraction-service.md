@@ -61,8 +61,12 @@ Welcome to the quarterly results. Revenue grew in every region.
 
 ```bash
 pip install "vectrixdb[api,extract]"
-VECTRIXDB_API_KEY=... vectrixdb extract-serve --host 0.0.0.0
+export VECTRIXDB_API_KEY_FILE=/run/secrets/extract.key   # a file only this user may read
+vectrixdb extract-serve --host 0.0.0.0
 ```
+
+The key comes from a file rather than the command line, where the shell's
+history would keep it; `VECTRIXDB_API_KEY` works too, set from a secret store.
 
 It listens on port 7338, or `VECTRIXDB_EXTRACT_LISTEN_PORT`, under `VECTRIXDB_EXTRACT_PREFIX` when that is set, with the services the settings below name. The image `ghcr.io/knowusuboaky/vectrixdb-extract` runs the same command with every reader on the machine inside it, Whisper's model among them, and the Compose and Kubernetes setups beside the server image let only the server call it. See [Run it in containers](containers.md).
 

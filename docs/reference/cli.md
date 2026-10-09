@@ -52,6 +52,8 @@ Create a new collection.
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 | `--metric`, `-m` | Distance metric | `cosine` |
+| `--server` | Send this to a VectrixDB server, by its address. Default: VECTRIXDB_URL |  |
+| `--key-file` | With --server: a file holding the key ('-' reads it from stdin). Default: VECTRIXDB_KEY, then what vectrixdb login kept |  |
 
 ## delete
 
@@ -67,6 +69,8 @@ Delete a collection.
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 | `--force`, `-f` | Skip confirmation | off |
+| `--server` | Send this to a VectrixDB server, by its address. Default: VECTRIXDB_URL |  |
+| `--key-file` | With --server: a file holding the key ('-' reads it from stdin). Default: VECTRIXDB_KEY, then what vectrixdb login kept |  |
 
 ## doctor
 
@@ -243,6 +247,8 @@ Load, chunk and index files: PDF, DOCX, HTML, Markdown, text.
 | `--parent-size` | store sections for search --parents |  |
 | `--dedupe` | skip near-duplicates at or above this similarity |  |
 | `--glob` | pattern for files inside directories | `*` |
+| `--server` | Send this to a VectrixDB server, by its address. Default: VECTRIXDB_URL |  |
+| `--key-file` | With --server: a file holding the key ('-' reads it from stdin). Default: VECTRIXDB_KEY, then what vectrixdb login kept |  |
 
 ## keys
 
@@ -305,6 +311,38 @@ List all collections.
 | --- | --- | --- |
 | `PATH` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--server` | Send this to a VectrixDB server, by its address. Default: VECTRIXDB_URL |  |
+| `--key-file` | With --server: a file holding the key ('-' reads it from stdin). Default: VECTRIXDB_KEY, then what vectrixdb login kept |  |
+| `--json` | print JSON instead of a table | off |
+
+## login
+
+```text
+vectrixdb login [OPTIONS]
+```
+
+Sign in to a server with the company (a code typed in a browser), or keep a key for it.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `--server` | Send this to a VectrixDB server, by its address. Default: VECTRIXDB_URL |  |
+| `--key-file` | Keep a key, read from this file ('-' reads stdin), not a sign-in |  |
+| `--client-id` | The company's client id for the command line. Default: VECTRIXDB_CLIENT_ID |  |
+| `--scope` | The scopes to ask for. Default: what the server names |  |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+
+## logout
+
+```text
+vectrixdb logout [OPTIONS]
+```
+
+Forget the sign-in or key kept for a server.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `--server` | The server to forget. Default: VECTRIXDB_URL, then the last signed in to |  |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 
 ## mcp
 
@@ -321,6 +359,7 @@ Serve a collection over MCP so an assistant can use it as a tool.
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 | `--mode` | dense, hybrid, ultimate or graph |  |
 | `--transport` | stdio, sse or streamable-http | `stdio` |
+| `--allow-writes` | Over HTTP, also offer remember, feedback and forget. stdio always has them | off |
 
 ## models-info
 
@@ -409,6 +448,8 @@ Search a collection from the shell.
 | `--parents` | return the enclosing sections | off |
 | `--explain` | show score components | off |
 | `--json` | print JSON instead of a table | off |
+| `--server` | Send this to a VectrixDB server, by its address. Default: VECTRIXDB_URL |  |
+| `--key-file` | With --server: a file holding the key ('-' reads it from stdin). Default: VECTRIXDB_KEY, then what vectrixdb login kept |  |
 
 ## serve
 
@@ -452,6 +493,8 @@ Keep a collection up with a feed or a page. Nothing is written until a refresh.
 | `--delete-when-gone` | A page: remove its chunks when it answers 404 or 410 | off |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--server` | Send this to a VectrixDB server, by its address. Default: VECTRIXDB_URL |  |
+| `--key-file` | With --server: a file holding the key ('-' reads it from stdin). Default: VECTRIXDB_KEY, then what vectrixdb login kept |  |
 
 ### sources list
 
@@ -466,6 +509,8 @@ The feeds and pages a collection keeps up with, and how each last went.
 | `--name`, `-n` | Collection name | `docs` |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--server` | Send this to a VectrixDB server, by its address. Default: VECTRIXDB_URL |  |
+| `--key-file` | With --server: a file holding the key ('-' reads it from stdin). Default: VECTRIXDB_KEY, then what vectrixdb login kept |  |
 
 ### sources refresh
 
@@ -482,6 +527,8 @@ Read the sources that are due and write only what changed. Run it from cron or a
 | `--max-items` | Entries written per source this time | `50` |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--server` | Send this to a VectrixDB server, by its address. Default: VECTRIXDB_URL |  |
+| `--key-file` | With --server: a file holding the key ('-' reads it from stdin). Default: VECTRIXDB_KEY, then what vectrixdb login kept |  |
 
 ### sources remove
 
@@ -512,6 +559,8 @@ Size, model and mode of a collection.
 | `--name`, `-n` | Collection name | `docs` |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--server` | Send this to a VectrixDB server, by its address. Default: VECTRIXDB_URL |  |
+| `--key-file` | With --server: a file holding the key ('-' reads it from stdin). Default: VECTRIXDB_KEY, then what vectrixdb login kept |  |
 
 ## sweep
 
@@ -539,3 +588,18 @@ vectrixdb version
 ```
 
 Show version information.
+
+## whoami
+
+```text
+vectrixdb whoami [OPTIONS]
+```
+
+Who a server says you are: how you came in, your role, the collections you reach.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `--server` | Default: VECTRIXDB_URL, then the last signed in to |  |
+| `--key-file` | With --server: a file holding the key ('-' reads it from stdin). Default: VECTRIXDB_KEY, then what vectrixdb login kept |  |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+| `--json` | print JSON | off |

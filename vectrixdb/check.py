@@ -361,7 +361,22 @@ def _signin(
     read_only = _key(report, env, "VECTRIXDB_READ_ONLY_API_KEY")
     if not config.enabled:
         if full or read_only:
-            report.ok("Access", "API keys, and no sign-in: scripts only, and nobody in particular")
+            open_reads = str(env.get("VECTRIXDB_OPEN_READS", "") or "").strip().lower() not in (
+                "0",
+                "false",
+                "no",
+                "off",
+            )
+            if open_reads:
+                report.warn(
+                    "Access",
+                    "API keys, and no sign-in, and a read needs no key: anybody who reaches the port "
+                    "searches and reads every collection. Set VECTRIXDB_OPEN_READS=0 unless that is meant",
+                )
+            else:
+                report.ok(
+                    "Access", "API keys, and no sign-in: every call needs a key, scripts only"
+                )
         elif str(env.get("VECTRIXDB_ALLOW_OPEN", "") or "").strip().lower() in (
             "1",
             "true",

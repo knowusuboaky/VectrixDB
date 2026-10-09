@@ -1,0 +1,47 @@
+{
+  "name": "vectrixdb",
+  "version": "2.2.0",
+  "description": "The client for a VectrixDB server: search, add and read collections as one caller, from Node, browsers, Deno and Bun.",
+  "license": "Apache-2.0",
+  "author": "Kwadwo Daddy Nyame Owusu - Boakye",
+  "homepage": "https://knowusuboaky.github.io/VectrixDB/how-to/clients/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/knowusuboaky/VectrixDB.git",
+    "directory": "sdk/typescript"
+  },
+  "keywords": [
+    "vectrixdb",
+    "vector database",
+    "search",
+    "rag",
+    "client"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/client.test.ts",
+    "test:server": "python ../conformance/serve.py -- node --test test/client.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.3"
+  }
+}

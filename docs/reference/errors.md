@@ -22,7 +22,7 @@ Every way the server and the extraction service say no, read off the code, so a 
 
 Exceptions the library raises in Python are on [Exceptions](exceptions.md); the table at the end lists them. The server turns a `PolicyError` into 403 (or 503 for a records store that cannot be read), a `StorageError` from the store behind a collection into 502 with the store's own words, a route's `HTTPException` into its own status, and a body that is not the shape asked for into 422. The extraction service turns a `DependencyError` into 503, an `ExtractionError` into 503 when a service it uses is busy, 502 when one answered badly and 422 when the file could not be read, and a `ConfigurationError` in what was asked into 422.
 
-## What a route can send, 149 refusals
+## What a route can send, 150 refusals
 
 ### Sign-in and the door
 
@@ -102,7 +102,7 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 400 | Hybrid search requires text index. Create collection with enable_text_index=True | `text_hybrid_search` |
 | 400 | Invalid metric: {request.metric} | `create_collection`, `create_collection_v2` |
 | 400 | Missing required field: {e} | `add_points_v2`, `add_points_with_sparse` |
-| 400 | the error's own words | `create_collection`, `create_collection_v2`, `set_policy`, `add_points`, `add_points_v2`, `search`, `text_search`, `text_upsert`, `hybrid_search`, `text_hybrid_search`, `keyword_search`, `sparse_search`, `dense_sparse_search`, `add_points_with_sparse`, `search_with_rerank`, `search_with_facets`, `search_with_acl`, `enterprise_search` |
+| 400 | the error's own words | `create_collection`, `create_collection_v2`, `similar`, `set_policy`, `add_points`, `add_points_v2`, `search`, `text_search`, `text_upsert`, `hybrid_search`, `text_hybrid_search`, `keyword_search`, `sparse_search`, `dense_sparse_search`, `add_points_with_sparse`, `search_with_rerank`, `search_with_facets`, `search_with_acl`, `enterprise_search` |
 | 400 | {name} was not made for graph search, so it has no knowledge graph. A collection gets one when it is made with mode="graph" in the library, --mode graph with vectrixdb ingest, or the Graph tag over the API. | `_no_graph` |
 | 403 | this collection carries an entitlement policy, and this API does not resolve principals. Serve it from a tier that does. | `_policy_refusal` |
 | 404 | Collection '{name}' not found | `_servable`, `_servable_as`, `get_collection`, `delete_collection`, `set_policy` |
@@ -111,6 +111,7 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 404 | no logo is set | `_logo_response` |
 | 404 | Nothing is gated on this server: set VECTRIXDB_COLLECTION_STORE to where each collection's record is kept | `set_policy` |
 | 404 | Point '{point_id}' not found | `get_point` |
+| 404 | Point '{request.id}' not found | `similar` |
 | 404 | the licence file is not in this install | `about_licence` |
 | 409 | the error's own words | `create_collection`, `create_collection_v2` |
 | 422 | what did not validate, in words, with the fields in detail | `_not_the_shape_asked_for` |
@@ -143,7 +144,7 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 400 | metadata is a JSON object | `add_document` |
 | 400 | metadata is not JSON: {exc} | `add_document` |
 | 400 | Name the file in X-Filename, for example X-Filename: report.pdf | `_upload` |
-| 400 | the error's own words | `write_document` |
+| 400 | the error's own words | `store_document` |
 | 400 | The form has no file field | `_upload` |
 | 400 | The request has no file in it | `_upload` |
 | 404 | No document {doc_id} | `delete_document` |
@@ -151,13 +152,13 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 404 | This server does not keep documents. Start it with VECTRIXDB_KEEP_SOURCE=1 and the Markdown each document was indexed from is kept and served here. | `_kept` |
 | 413 | The file is larger than {MAX_UPLOAD_BYTES} bytes | `_upload` |
 | 415 | A multipart form needs python-multipart on the server. Send the file as the request body with its name in X-Filename instead, which needs nothing. | `_upload` |
-| 422 | Nothing could be read from {what or document_id} | `write_document` |
-| 422 | the error's own words | `write_document` |
-| 500 | Text embedder not available: {exc} | `write_document` |
+| 422 | Nothing could be read from {what or document_id} | `prepare_and_embed` |
+| 422 | the error's own words | `prepare_and_embed` |
+| 500 | Text embedder not available: {exc} | `prepare_and_embed` |
 | 500 | the error's own words | `configured_extractors` |
 | 500 | VECTRIXDB_KEEP_SOURCE is a Blob address with no container in it | `_files_at` |
 | 502 or 422 | the error's own words | `add_document` |
-| 503 | the error's own words | `add_document` |
+| 503 | the error's own words | `write_document`, `add_document` |
 
 ### Feeds and pages a collection keeps up with
 
@@ -269,3 +270,9 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | `MetadataContractWarning` | `UserWarning` | A document was written without a field the policy decides by. |
 | `ExtractionQualityError` | `VectrixError, ValueError` | A document arrived whose text reads as a failed extraction. |
 | `ExtractionQualityWarning` | `UserWarning` | A document whose text reads as a failed extraction was written anyway. |
+| `ServerRefused` | `VectrixError` | A VectrixDB server said no. ``status`` is its HTTP status; ``said`` its own words. |
+| `ServerSignInRequired` | `ServerRefused` | 401: no key or token, or one the server does not take. |
+| `ServerPermissionDenied` | `ServerRefused` | 403: the caller is known and may not do this: its role, its key's collections, or a policy. |
+| `ServerNotFound` | `ServerRefused` | 404: no such collection or document, or none this caller may see, which is the same answer. |
+| `ServerRejected` | `ServerRefused` | 400, 422 or another 4xx: the request itself is wrong, and the words say what to change. |
+| `ServerBusy` | `ServerRefused` | 429 or 503, still, after the client waited and asked again: come back later. |

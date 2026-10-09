@@ -84,3 +84,7 @@ docker/*.key
 
 # A collection written by 2.1.7, which the suite opens: kept, whatever its files are called
 !tests/fixtures/legacy_2_1_7/**
+
+# The SDKs' own build output and dependencies
+node_modules/
+sdk/rust/target/

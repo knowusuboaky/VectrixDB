@@ -132,6 +132,33 @@ SETTINGS: Tuple[Setting, ...] = tuple(
             ("OFFLINE", "1 refuses every download: the bundled models only.", ""),
             ("MODELS_DIR", "Where models are kept, when not beside the package.", ""),
             ("AUTO_DOWNLOAD", "1 fetches a missing model on first use.", ""),
+            (
+                "MODELS_URL",
+                "Where model downloads come from instead of GitHub's releases: a company's mirror of them, such as an Artifactory generic remote repository. The same paths below it: <tag>/<model>.zip.",
+                "https://acme.jfrog.io/artifactory/vectrixdb-models/knowusuboaky/VectrixDB/releases/download",
+            ),
+            (
+                "WARM",
+                "1 loads the embedding model at start, and /ready says so once it has. On under "
+                "vectrixdb serve and in the image; 0 loads it on the first search.",
+                "1",
+            ),
+            (
+                "THREADS",
+                "Threads one model session uses. Left out, the CPUs this process may use, the "
+                "container's quota when there is one, at most 4.",
+                "2",
+            ),
+            (
+                "INFERENCE_CONCURRENCY",
+                "Model calls the server runs at once; the rest wait their turn, a batch at a time.",
+                "2",
+            ),
+            (
+                "INFERENCE_WAIT_SECONDS",
+                "How long a request waits for its turn before it is answered 503 with Retry-After.",
+                "30",
+            ),
         ],
     )
     + _s(
@@ -168,7 +195,7 @@ SETTINGS: Tuple[Setting, ...] = tuple(
             ),
             (
                 "MCP_WRITES",
-                "1 offers add_document over MCP, to a caller whose role may write. Off unless set, so an assistant only reads.",
+                "1 offers the tools that write over MCP (add_document, create_collection, delete_document, add_source, refresh_source), to a caller whose role may. Off unless set, so an assistant only reads.",
                 "",
             ),
             (
@@ -736,6 +763,63 @@ SETTINGS: Tuple[Setting, ...] = tuple(
             (
                 "BUILD_THREADS",
                 "Threads that insert into the vector index. 1 makes every build of the same vectors the same graph, and is slower; empty is every core.",
+                "",
+            ),
+        ],
+    )
+    + _s(
+        "The command line, against a server",
+        [
+            (
+                "URL",
+                "The server list, create, delete, ingest, query, stats, sources and whoami go to when --server is left out. Left out too, they use the data on this machine.",
+                "https://vectors.company.com",
+            ),
+            (
+                "KEY",
+                "The key those commands call the server with, for scripts and CI. Wins over what vectrixdb login kept; --key-file wins over it.",
+                "",
+                "secret",
+            ),
+            (
+                "TOKEN",
+                "A person's or an app's access token from the identity provider, sent as a bearer token, when there is no key.",
+                "",
+                "secret",
+            ),
+            (
+                "CA_FILE",
+                "The company's certificate authority, as a PEM file or a folder of them, or system for the operating system's own store: for a server or a TLS-inspecting proxy the default bundle does not trust.",
+                "system",
+            ),
+            (
+                "ALLOW_HTTP",
+                "1 lets a key or token go to another machine over plain http://. Off: only https://, or http:// to this machine.",
+                "",
+            ),
+            (
+                "CLIENT_ID",
+                "The company's client id for the command line at its identity provider: a public client with the device code flow allowed. vectrixdb login uses it.",
+                "",
+            ),
+            (
+                "CREDENTIALS",
+                "Where vectrixdb login keeps a sign-in: keyring for the system keychain, file for a file only this user may read. Left out, the keychain when the keyring package is installed.",
+                "",
+            ),
+            (
+                "DEFAULTS_FILE",
+                "A company's defaults file for the client and the command line (TOML, or JSON by its suffix). Left out, /etc/vectrixdb/defaults.toml, %ProgramData%\\vectrixdb\\defaults.toml or /Library/Application Support/vectrixdb/defaults.toml when there is one.",
+                "",
+            ),
+            (
+                "DEFAULTS",
+                "With more than one wrapper package installed, the one whose defaults apply, by its entry point name.",
+                "",
+            ),
+            (
+                "CONFIG_DIR",
+                "The folder that file is in. Left out, the platform's own: %APPDATA%\\vectrixdb, ~/Library/Application Support/vectrixdb, or ~/.config/vectrixdb.",
                 "",
             ),
         ],
