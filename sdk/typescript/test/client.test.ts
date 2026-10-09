@@ -40,13 +40,13 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 
 test("the key goes in api-key, a token in Authorization, and the user-agent is set", async () => {
   const a = fake([json(200, { ok: true, data: { role: "admin" } })]);
-  await new VectrixClient({ url: "http://x/", key: "k", fetch: a.fetch }).whoami();
-  assert.equal(a.calls[0]?.url, "http://x/auth/me");
+  await new VectrixClient({ url: "https://x/", key: "k", fetch: a.fetch }).whoami();
+  assert.equal(a.calls[0]?.url, "https://x/auth/me");
   assert.equal(a.calls[0]?.headers["api-key"], "k");
   assert.equal(a.calls[0]?.headers["user-agent"], "vectrixdb-typescript/2.2.0");
 
   const b = fake([json(200, { ok: true, data: {} })]);
-  await new VectrixClient({ url: "http://x", token: "t", fetch: b.fetch }).whoami();
+  await new VectrixClient({ url: "https://x", token: "t", fetch: b.fetch }).whoami();
   assert.equal(b.calls[0]?.headers.authorization, "Bearer t");
   assert.equal(b.calls[0]?.headers["api-key"], undefined);
 });
@@ -57,20 +57,20 @@ test("429 and 503 are retried, honouring Retry-After, then BusyError", async () 
     json(503, { ok: false, message: "warming" }, { "retry-after": "0" }),
     json(200, { ok: true, data: { added: 1 } }),
   ]);
-  const client = new VectrixClient({ url: "http://x", key: "k", fetch: ok.fetch });
+  const client = new VectrixClient({ url: "https://x", key: "k", fetch: ok.fetch });
   assert.equal(await client.addTexts("c", [{ id: "a", text: "b" }]), 1);
   assert.equal(ok.calls.length, 3);
 
   const busy = fake(Array.from({ length: 4 }, () => json(429, { ok: false, message: "slow down" }, { "retry-after": "0" })));
   await assert.rejects(
-    new VectrixClient({ url: "http://x", key: "k", fetch: busy.fetch }).collections(),
+    new VectrixClient({ url: "https://x", key: "k", fetch: busy.fetch }).collections(),
     (err: unknown) => err instanceof BusyError && err.status === 429 && err.message === "slow down",
   );
   assert.equal(busy.calls.length, 4);
 
   const once = fake([json(500, { ok: false, message: "broken" })]);
   await assert.rejects(
-    new VectrixClient({ url: "http://x", key: "k", fetch: once.fetch }).collections(),
+    new VectrixClient({ url: "https://x", key: "k", fetch: once.fetch }).collections(),
     (err: unknown) => err instanceof VectrixError && err.status === 500 && !(err instanceof BusyError),
   );
   assert.equal(once.calls.length, 1);
@@ -83,7 +83,7 @@ test("refusals become the named error kinds, with detail", async () => {
     json(422, { ok: false, message: "dimension must be above 0", data: null, detail: [{ loc: ["body", "dimension"] }] }),
     () => new Response("<html>bad gateway</html>", { status: 502 }),
   ]);
-  const client = new VectrixClient({ url: "http://x", key: "k", fetch: f.fetch });
+  const client = new VectrixClient({ url: "https://x", key: "k", fetch: f.fetch });
   await assert.rejects(client.collections(), (e: unknown) => e instanceof AuthError && e.status === 401);
   await assert.rejects(client.describe("x"), (e: unknown) => e instanceof NotFoundError && /not found/.test(e.message));
   await assert.rejects(
@@ -92,7 +92,7 @@ test("refusals become the named error kinds, with detail", async () => {
   );
   await assert.rejects(
     client.collections(),
-    (e: unknown) => e instanceof VectrixError && e.status === 502 && e.message === "502 from http://x/api/v1/collections",
+    (e: unknown) => e instanceof VectrixError && e.status === 502 && e.message === "502 from https://x/api/v1/collections",
   );
 });
 
@@ -112,7 +112,7 @@ test("metadata is sent as payload; ids are encoded with their slashes", async ()
     () => new Response("# Hi", { status: 200, headers: { "content-type": "text/markdown" } }),
     json(200, { ok: true, doc_id: "a/b.md", chunks: 3, citations: ["a/b.md#Hi"], kept: true }),
   ]);
-  const client = new VectrixClient({ url: "http://x", key: "k", fetch: f.fetch });
+  const client = new VectrixClient({ url: "https://x", key: "k", fetch: f.fetch });
   await client.addTexts("c", [{ id: "t1", text: "hello", metadata: { team: "payroll" } }, { id: "t2", text: "bye" }]);
   assert.deepEqual(JSON.parse(f.calls[0]?.body ?? ""), {
     points: [
@@ -122,7 +122,7 @@ test("metadata is sent as payload; ids are encoded with their slashes", async ()
   });
 
   assert.equal(await client.openDocument("c", "a/b.md"), "# Hi");
-  assert.equal(f.calls[1]?.url, "http://x/api/v1/collections/c/documents/a%2Fb.md");
+  assert.equal(f.calls[1]?.url, "https://x/api/v1/collections/c/documents/a%2Fb.md");
 
   const added = await client.addDocument("c", "# Hi", "b.md", { docId: "a/b.md", metadata: { k: 1 }, chunkSize: 500 });
   const call = f.calls[2];
@@ -151,9 +151,9 @@ test("search reads the data envelope and derives citation", async () => {
       },
     }),
   ]);
-  const client = new VectrixClient({ url: "http://x", key: "k", fetch: f.fetch });
+  const client = new VectrixClient({ url: "https://x", key: "k", fetch: f.fetch });
   const results = await client.search("c", "refunds", { limit: 3, mode: "hybrid", rerank: true });
-  assert.equal(f.calls[0]?.url, "http://x/api/v1/collections/c/text-hybrid-search");
+  assert.equal(f.calls[0]?.url, "https://x/api/v1/collections/c/text-hybrid-search");
   assert.deepEqual(JSON.parse(f.calls[0]?.body ?? ""), { query_text: "refunds", limit: 3, filter: null, rerank: true });
   assert.deepEqual(results.map((r) => r.citation), ["handbook.md#Refunds", "web", "bare"]);
   assert.equal(results[1]?.text, "from meta");

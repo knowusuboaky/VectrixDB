@@ -59,6 +59,34 @@ Options: `timeoutMs` (default 30 000 per request) and `fetch` (your own
 implementation, for proxies or tests). A 429 or 503 is retried up to three
 times, waiting the server's `Retry-After` or 1 s, 2 s, 4 s.
 
+## Behind a company gateway
+
+```ts
+const client = new VectrixClient({
+  url: "https://gateway.example.com",
+  key: process.env.VECTRIXDB_KEY,
+  keyHeader: "Ocp-Apim-Subscription-Key",
+  prefix: "/acme",
+  gatewayPaths: "api/v1=/files/search, auth=/files/auth",
+});
+// GET https://gateway.example.com/files/search/acme/api/v1/collections
+await client.collections();
+```
+
+Each route goes to `<gateway path><prefix><route>`, the gateway path being
+that of the longest name in `gatewayPaths` the route falls under (or none).
+`gatewayPaths` may also be a map, `{ "api/v1": "/files/search" }`. A token
+goes in `tokenHeader` (default `authorization`), always as `Bearer <token>`;
+`headers` adds headers to every request but never replaces `user-agent` or
+the key or token header.
+
+A key or token is refused over plain `http://` unless the host is this
+machine (`localhost`, `127.x.x.x`, `::1`) or `allowHttp: true` is set, and a
+redirect is never followed: a 3xx is thrown as a `VectrixError` naming the
+status and its `location`. For a private CA, Node reads
+`NODE_EXTRA_CA_CERTS`; for a proxy, run Node with `NODE_USE_ENV_PROXY=1` to
+honour `HTTPS_PROXY`/`NO_PROXY`, or pass a `fetch` of your own.
+
 ## In a browser
 
 Pass `token` (a company sign-in token, sent as `Authorization: Bearer`),
@@ -108,12 +136,15 @@ npm run typecheck
 npm test
 ```
 
-`npm test` runs three files with Node's test runner:
+`npm test` runs four files with Node's test runner:
 
 - `test/openapi.test.ts` checks every route and body field the client uses
   against `../../docs/reference/openapi.json`, with no server.
 - `test/client.test.ts` checks retries, error kinds and the wire shapes
   against a fake `fetch`.
+- `test/safety.test.ts` checks the gateway paths, the HTTP and redirect
+  rules, the header options, and that a key never shows in an error or the
+  client's printed form, with the cases every language client shares.
 - `test/conformance.test.ts` runs the conformance walk from
   `sdk/CONTRACT.md` against a real server: `VECTRIXDB_URL` and
   `VECTRIXDB_KEY` when set, else it starts `sdk/conformance/serve.py` with

@@ -152,14 +152,38 @@ export interface Refreshed {
 export interface VectrixClientOptions {
   /** The server, such as `http://localhost:8000`. */
   url: string;
-  /** An API key, sent as the `api-key` header. Not for browsers. */
+  /** An API key, sent in the `keyHeader` header (`api-key`). Not for browsers. */
   key?: string;
-  /** A company sign-in token, sent as `Authorization: Bearer`. */
+  /** A company sign-in token, sent in the `tokenHeader` header (`authorization`) as `Bearer <token>`. */
   token?: string;
   /** Per request, in milliseconds. Default 30 000. */
   timeoutMs?: number;
-  /** A fetch to use instead of the global one. */
+  /**
+   * A fetch to use instead of the global one: for a proxy, a private CA or a
+   * client certificate (Node also honours `NODE_EXTRA_CA_CERTS`, and the
+   * `HTTPS_PROXY` family with `NODE_USE_ENV_PROXY=1`).
+   */
   fetch?: typeof fetch;
+  /**
+   * Allow a key or token over plain `http://` to a host other than this
+   * machine. Default false: such a client refuses to be made.
+   */
+  allowHttp?: boolean;
+  /** The header the key goes in. Default `api-key`; a gateway may want `Ocp-Apim-Subscription-Key`. */
+  keyHeader?: string;
+  /** The header the token goes in, always as `Bearer <token>`. Default `authorization`. */
+  tokenHeader?: string;
+  /** Extra headers on every request. They never replace `user-agent` or the key or token header. */
+  headers?: Record<string, string>;
+  /** The path every route lives under, such as `/acme`. */
+  prefix?: string;
+  /**
+   * Each route's own gateway path, as the gateway team hands them over:
+   * `"api/v1=/files/search, auth=/files/auth"`, or the same as a map. A
+   * request goes to `<gateway path><prefix><route>`, the gateway path being
+   * that of the longest name the route falls under.
+   */
+  gatewayPaths?: string | Record<string, string>;
 }
 
 export interface CreateCollectionOptions {
@@ -220,20 +244,85 @@ const RETRY_WAITS_MS = [1000, 2000, 4000];
 
 export class VectrixClient {
   readonly url: string;
-  private readonly key: string | undefined;
-  private readonly token: string | undefined;
-  private readonly timeoutMs: number;
-  private readonly fetchImpl: typeof fetch;
+  readonly prefix: string;
+  readonly gatewayPaths: Readonly<Record<string, string>>;
+  readonly keyHeader: string;
+  readonly tokenHeader: string;
+  // ES private fields: not enumerable, so never in JSON, inspect or a spread.
+  readonly #key: string | undefined;
+  readonly #token: string | undefined;
+  readonly #headers: Record<string, string>;
+  readonly #timeoutMs: number;
+  readonly #fetch: typeof fetch;
 
   constructor(options: VectrixClientOptions) {
     if (!options.url) throw new TypeError("VectrixClient needs a url");
     this.url = options.url.replace(/\/+$/, "");
-    this.key = options.key;
-    this.token = options.token;
-    this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.#key = options.key || undefined;
+    this.#token = options.token || undefined;
+    for (const [what, value] of [["key", this.#key], ["token", this.#token]] as const) {
+      // Checked here so a bad character never reaches fetch, whose error would quote the value.
+      if (value !== undefined && !HEADER_VALUE.test(value)) {
+        throw new TypeError(`the ${what} holds characters a header cannot`);
+      }
+    }
+    if ((this.#key || this.#token) && !options.allowHttp) {
+      const host = httpHost(this.url);
+      if (host !== undefined && !isLoopback(host)) {
+        throw new TypeError(
+          `refusing to send a ${this.#token ? "token" : "key"} over plain http to ${host}: ` +
+            "use https, or set allowHttp: true",
+        );
+      }
+    }
+    this.keyHeader = headerName(options.keyHeader, DEFAULT_KEY_HEADER, "keyHeader");
+    this.tokenHeader = headerName(options.tokenHeader, DEFAULT_TOKEN_HEADER, "tokenHeader");
+    // The header the credential goes in wins over an extra one of the same name.
+    const reserved = new Set(["user-agent"]);
+    if (this.#token) reserved.add(this.tokenHeader);
+    else if (this.#key) reserved.add(this.keyHeader);
+    this.#headers = {};
+    for (const [name, value] of Object.entries(options.headers ?? {})) {
+      const lower = headerName(name, "", "headers");
+      if (typeof value !== "string" || !HEADER_VALUE.test(value)) {
+        throw new TypeError(`headers: the value of ${lower} holds characters a header cannot`);
+      }
+      if (!reserved.has(lower)) this.#headers[lower] = value;
+    }
+    this.prefix = names(options.prefix, "prefix", "a route prefix");
+    this.gatewayPaths = Object.freeze(readGatewayPaths(options.gatewayPaths));
+    this.#timeoutMs = options.timeoutMs ?? 30_000;
     const f = options.fetch ?? globalThis.fetch;
     if (typeof f !== "function") throw new TypeError("no fetch available; pass one in options.fetch");
-    this.fetchImpl = f;
+    this.#fetch = f;
+  }
+
+  /** The address a route is requested at: `<url><gateway path><prefix><route>`. */
+  address(route: string): string {
+    const bare = route.split("?", 1)[0]?.replace(/^\/+/, "") ?? "";
+    let best = "";
+    for (const name of Object.keys(this.gatewayPaths)) {
+      if ((bare === name || bare.startsWith(`${name}/`)) && name.length > best.length) best = name;
+    }
+    return this.url + (best ? this.gatewayPaths[best] : "") + this.prefix + route;
+  }
+
+  toString(): string {
+    return `VectrixClient(${this.url})`;
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      url: this.url,
+      prefix: this.prefix,
+      gatewayPaths: this.gatewayPaths,
+      keyHeader: this.keyHeader,
+      tokenHeader: this.tokenHeader,
+    };
+  }
+
+  [Symbol.for("nodejs.util.inspect.custom")](): string {
+    return this.toString();
   }
 
   // -- server ---------------------------------------------------------------
@@ -408,20 +497,35 @@ export class VectrixClient {
   // -- the wire -------------------------------------------------------------
 
   private async request(method: string, path: string, options: RequestOptions = {}): Promise<Response> {
-    const url = this.url + path + queryString(options.query);
-    const headers: Record<string, string> = { accept: "application/json, text/markdown, text/plain", ...options.headers };
-    if (this.token) headers.authorization = `Bearer ${this.token}`;
-    else if (this.key) headers["api-key"] = this.key;
-    // Browsers set their own user-agent and drop this one; only set it elsewhere.
-    if (typeof document === "undefined") headers["user-agent"] = USER_AGENT;
+    const url = this.address(path + queryString(options.query));
+    const headers: Record<string, string> = {
+      accept: "application/json, text/markdown, text/plain",
+      ...this.#headers,
+      ...options.headers,
+    };
     let body: BodyInit | undefined = options.body;
     if (options.json !== undefined) {
       headers["content-type"] = "application/json";
       body = JSON.stringify(options.json);
     }
+    // Set last, so nothing above can replace them.
+    if (this.#token) headers[this.tokenHeader] = `Bearer ${this.#token}`;
+    else if (this.#key) headers[this.keyHeader] = this.#key;
+    // Browsers set their own user-agent and drop this one; only set it elsewhere.
+    if (typeof document === "undefined") headers["user-agent"] = USER_AGENT;
 
     for (let attempt = 0; ; attempt++) {
-      const res = await this.send(url, { method: method.toUpperCase(), headers, body });
+      // Never followed: the key would go with it to wherever it points.
+      const res = await this.send(url, { method: method.toUpperCase(), headers, body, redirect: "manual" });
+      if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
+        await res.body?.cancel().catch(() => undefined);
+        const status = res.status || "a redirect";
+        const location = res.headers.get("location") ?? "an address the browser does not show";
+        throw new VectrixError(
+          res.status,
+          this.#redact(`refusing to follow ${status} from ${url} to ${location}: a client never follows a redirect`),
+        );
+      }
       if (res.ok) return res;
       const retryable = res.status === 429 || res.status === 503;
       if (retryable && attempt < RETRY_WAITS_MS.length) {
@@ -435,18 +539,27 @@ export class VectrixClient {
 
   private async send(url: string, init: RequestInit): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
     try {
-      return await this.fetchImpl(url, { ...init, signal: controller.signal });
+      return await this.#fetch(url, { ...init, signal: controller.signal });
     } catch (err) {
       if (controller.signal.aborted) {
-        throw new VectrixError(0, `timed out after ${this.timeoutMs} ms: ${url}`);
+        throw new VectrixError(0, this.#redact(`timed out after ${this.#timeoutMs} ms: ${url}`));
       }
       const cause = err instanceof Error ? causeMessage(err) : String(err);
-      throw new VectrixError(0, `could not reach ${url}: ${cause}`);
+      throw new VectrixError(0, this.#redact(`could not reach ${url}: ${cause}`));
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** The message with the key and token taken out, wherever they came from. */
+  #redact(message: string): string {
+    let out = message;
+    for (const secret of [this.#key, this.#token]) {
+      if (secret) out = out.split(secret).join("[redacted]");
+    }
+    return out;
   }
 
   private async refusal(res: Response, url: string): Promise<VectrixError> {
@@ -464,8 +577,83 @@ export class VectrixClient {
     } catch {
       // Not JSON: an HTML page from a proxy, say.
     }
-    return errorFor(res.status, message ?? `${res.status} from ${url}`, detail);
+    if (typeof detail === "string") detail = this.#redact(detail);
+    return errorFor(res.status, this.#redact(message ?? `${res.status} from ${url}`), detail);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Safety and the company network
+
+const DEFAULT_KEY_HEADER = "api-key";
+const DEFAULT_TOKEN_HEADER = "authorization";
+/** RFC 9110 token characters: what a header's name may be made of. */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+/** What fetch accepts in a header's value: no control characters but tab, nothing past one byte. */
+const HEADER_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/;
+
+function headerName(given: string | undefined, fallback: string, option: string): string {
+  const name = (given ?? "").trim() || fallback;
+  if (!HEADER_NAME.test(name)) throw new TypeError(`${option}: ${JSON.stringify(name)} is not a header name`);
+  return name.toLowerCase();
+}
+
+/** The host of an `http://` address, or undefined for any other. */
+function httpHost(url: string): string | undefined {
+  let parsed: URL;
+  try {
+    const base = (globalThis as { location?: { href?: string } }).location?.href;
+    parsed = base ? new URL(url, base) : new URL(url);
+  } catch {
+    return undefined; // fetch will say what is wrong with it
+  }
+  return parsed.protocol === "http:" ? parsed.hostname.toLowerCase() : undefined;
+}
+
+/** This machine: `localhost`, `127.0.0.0/8`, `::1`. */
+function isLoopback(host: string): boolean {
+  return host === "localhost" || host === "::1" || host === "[::1]" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/** `/one/two`, or `""`: a path of names, whatever it was written as. */
+function names(value: unknown, option: string, what: string): string {
+  const parts = String(value ?? "").trim().split("/").filter((p) => p !== "");
+  if (parts.some((p) => p === "." || p === "..")) {
+    throw new TypeError(`${option}: ${what} is a path of names, not ${JSON.stringify(String(value))}`);
+  }
+  return parts.length ? `/${parts.join("/")}` : "";
+}
+
+/** Each route's gateway path, `{ "api/v1": "/files/search" }`, read the way the server reads it. */
+function readGatewayPaths(value: string | Record<string, string> | undefined): Record<string, string> {
+  const option = "gatewayPaths";
+  if (!value) return {};
+  const pairs: [string, string][] = [];
+  if (typeof value === "string") {
+    for (const entry of value.split(",")) {
+      if (!entry.trim()) continue;
+      const at = entry.indexOf("=");
+      if (at < 0) throw new TypeError(`${option}: a gateway path is route=path, not ${JSON.stringify(entry.trim())}`);
+      pairs.push([entry.slice(0, at), entry.slice(at + 1)]);
+    }
+  } else {
+    for (const [route, path] of Object.entries(value)) pairs.push([route, String(path ?? "")]);
+  }
+  // No prototype, so a route named `__proto__` is just a name.
+  const paths = Object.create(null) as Record<string, string>;
+  for (const [route, path] of pairs) {
+    const name = names(route, option, "a route").slice(1);
+    const where = names(path, option, "a gateway path");
+    if (!name || !where) {
+      const given = `${route.trim()}=${path.trim()}`;
+      throw new TypeError(`${option}: a gateway path is route=path with both given, not ${JSON.stringify(given)}`);
+    }
+    if (Object.prototype.hasOwnProperty.call(paths, name)) {
+      throw new TypeError(`${option}: ${name} is given two gateway paths`);
+    }
+    paths[name] = where;
+  }
+  return paths;
 }
 
 // ---------------------------------------------------------------------------
