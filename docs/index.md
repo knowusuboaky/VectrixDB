@@ -42,8 +42,8 @@ search works offline on a machine that has never seen an API key.
 ## See it work
 
 `pip install "vectrixdb[api]"` and `vectrixdb serve` give the same collections
-a REST API and a dashboard. These are the real pages, filmed by the same script
-that keeps the still pictures current.
+a REST API and a dashboard. These are the real pages and the real containers,
+filmed by the scripts that keep the pictures current.
 
 <div class="vx-tours" markdown>
 
@@ -81,6 +81,18 @@ Build a request, send it, and copy the curl that does the same.
 ![A walk through Overview, Collections, Evaluate and Audit](images/dashboard/tour-pages.gif)
 ### The whole walk
 Overview, Collections, the evaluation run with its picks, and Audit.
+</div>
+
+<div class="vx-tour" markdown>
+![Compose starting the server, the extraction service and Jaeger, then a scan read and a search that finds its words](images/containers/compose.gif)
+### Containers
+Compose starts the server, the extraction service and Jaeger. A scan goes in and a search finds it.
+</div>
+
+<div class="vx-tour" markdown>
+![Jaeger with the scan's trace, from the server into the extraction service, and a search's attributes](images/containers/trace.gif)
+### Traces
+One trace from the server into the extraction service: counts and timings, never the text.
 </div>
 
 </div>

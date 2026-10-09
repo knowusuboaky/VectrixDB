@@ -342,6 +342,11 @@ def main(argv: Optional[list] = None) -> None:
         help="MCP transport (stdio is what a desktop assistant starts as a command)",
     )
     args = parser.parse_args(argv)
+    from . import tracing
+
+    if tracing.enabled():
+        # This process is the MCP server's own, so nothing else will set up where spans go.
+        tracing.export_to_otlp()
     db = Vectrix(args.name, path=args.path, mode=args.mode)
     try:
         build_server(db).run(transport=args.transport)

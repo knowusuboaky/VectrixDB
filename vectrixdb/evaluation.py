@@ -105,6 +105,7 @@ from ._eval_report import PICKS, ReportStore, build_report, choose
 from ._eval_tuning import answer_cutoff, sweep, sweep_markdown
 from ._eval_writer import ChatWriter, GoldenWriting, WriterUnavailable, write_golden
 from ._setups import Target, _engine, _storage_of, describe_target, search_of, setups_of
+from .tracing import traced
 
 __all__ = [
     "ADDS",
@@ -1714,6 +1715,14 @@ def missing_documents(
     return out
 
 
+@traced(
+    "evaluate",
+    after=lambda report: {
+        "questions": len(report.get("question_ids") or ()),
+        "setups": len(report.get("setups") or ()),
+        "collections": len(report.get("collections") or ()),
+    },
+)
 def evaluate(
     targets: Any,
     golden: Union[str, Path, Golden, Sequence[Question]],

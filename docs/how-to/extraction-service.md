@@ -15,8 +15,8 @@ It answers at the paths such a server is already called at, `/extract/pdf`, `/tr
 | `POST /transcribe/audio`, `video` | the file as the body, `?language=en-US` | a timed transcript, who said what, and for a video what its screen shows |
 | `POST /transcribe/webpage` | `{"url": ...}` | the page's text |
 | `POST /transcribe/image_url`, `audio_url`, `video_url` | `{"url": ..., "language": "en-US"}` | as for the file routes |
-| `POST /transcribe/youtube` | `{"url": ..., "language": "en-US"}` | the video's timed transcript |
-| `POST /transcribe/youtube_save` | `{"url": ..., "output_dir": "output", "auto_delete": true}` | `202` and a job |
+| `POST /transcribe/youtube` | `{"url": ..., "language": "en-US", "captions": "uploaded"}` | the video's timed transcript, from its captions or its sound |
+| `POST /transcribe/youtube_save` | `{"url": ..., "output_dir": "output", "auto_delete": true, "captions": "uploaded"}` | `202` and a job |
 | `POST /transcribe/auto` | `{"url": ...}` | a YouTube video, or whatever the address turns out to be |
 | `POST /translate/text` | `{"text": ..., "to": "fr", "from_lang": null}` | the translations |
 | `POST /translate/detect` | `{"text": ...}` | the language of each |
@@ -41,7 +41,8 @@ Every route answers Markdown, the way such a server does, or JSON when the reque
 - URL: https://www.youtube.com/watch?v=q3Results01
 - Channel: Northwind Bank
 - Duration: 3:32
-- Language: en-US
+- Language: en
+- Words: the uploader's captions
 
 ---
 
@@ -55,6 +56,15 @@ Welcome to the quarterly results. Revenue grew in every region.
 
 **[0:04 → 0:09]** Revenue grew in every region.
 ```
+
+## From the command line, or in a container
+
+```bash
+pip install "vectrixdb[api,extract]"
+VECTRIXDB_API_KEY=... vectrixdb extract-serve --host 0.0.0.0
+```
+
+It listens on port 7338, or `VECTRIXDB_EXTRACT_LISTEN_PORT`, under `VECTRIXDB_EXTRACT_PREFIX` when that is set, with the services the settings below name. The image `ghcr.io/knowusuboaky/vectrixdb-extract` runs the same command with every reader on the machine inside it, Whisper's model among them, and the Compose and Kubernetes setups beside the server image let only the server call it. See [Run it in containers](containers.md).
 
 ## As a FastAPI app
 
@@ -197,9 +207,13 @@ curl -X POST https://<app>/extract/pdf -H "api-key: $KEY" -H "X-Filename: q3.pdf
 # a recording, in French, answered at once
 curl -X POST "https://<app>/transcribe/audio?language=fr-FR" -H "api-key: $KEY" --data-binary @call.wav
 
-# a video
+# a video: the uploader's captions, else its sound
 curl -X POST https://<app>/transcribe/youtube -H "api-key: $KEY" -H "Content-Type: application/json" \
      -d '{"url": "https://youtu.be/q3Results01", "language": "en-US"}'
+
+# a video, from YouTube's automatic captions when the uploader made none
+curl -X POST https://<app>/transcribe/youtube -H "api-key: $KEY" -H "Content-Type: application/json" \
+     -d '{"url": "https://youtu.be/q3Results01", "captions": "automatic"}'
 
 # a video saved: a job at once, the transcript when it is done
 curl -X POST https://<app>/transcribe/youtube_save -H "api-key: $KEY" -H "Content-Type: application/json" \
@@ -340,6 +354,25 @@ A locale that cannot tell voices apart is asked again without, and `0` asks for 
 
 A video's sound is read the same way, and its screen too, when a picture reader is set. The whole video is looked over twice a second for the moments its picture changes, a slide coming in or a cut, and a frame is taken half a second after each, when the new picture has settled: at most `VECTRIXDB_VIDEO_FRAMES`, twelve by default, spread over the whole length. What each frame says joins the transcript at its second, `On screen: Q3 RESULTS`, and a slide still showing is not read twice. A video with no sound track is read for its screen alone and says `sound_track: false`. Every frame is a paid page for Document Intelligence; `0` reads the sound alone.
 
+### YouTube videos
+
+A YouTube video is read from its captions first, and from its sound only when they will not do. Captions cost nothing: no sound is downloaded and Speech is not paid. `captions` in the body of `/transcribe/youtube` and `/transcribe/youtube_save` says which will do:
+
+| `captions` | Reads | Costs |
+| --- | --- | --- |
+| `"uploaded"`, the default | the captions the uploader made, else the sound | nothing when the uploader made some; a download and a Speech transcription when not |
+| `"automatic"` | the uploader's, else YouTube's automatic captions, else the sound | nothing for most videos, and rougher words |
+| `"translated"` | as `"automatic"`, then YouTube's machine translation into `language`, else the sound | nothing, and words nobody said |
+| `"never"` | always the sound, as the server this stands in for did | a download and a Speech transcription, every time |
+
+The uploader's captions are the default because somebody wrote and checked them. YouTube's automatic captions have no punctuation and more mistakes than Speech makes, so a video that has only those is read by Speech unless the body asks for them. A machine translation is never read unless asked for.
+
+`language` picks the track, `en-US` taking an `en` one, and it is what Speech listens for when the sound is read. A language with no track is heard by Speech, not read from captions in another. The body's `language` is `en-US` when left out, so name the video's language to have its own captions read: a French video's French captions are read with `"language": "fr-CA"`, and without it Speech is asked to hear the video in English.
+
+The reply says where the words came from: the JSON's `metadata` has `transcript_source`, `captions` or `speech`, with `caption_language` and `caption_automatic` for captions and `captions_unused` saying why Speech was paid instead; the Markdown has a `- Words: the uploader's captions` line when the words are captions. A finished `youtube_save` job carries `transcript_source`, `caption_language` and `caption_automatic` too. With captions nothing was downloaded, so `media_deleted` is `null`, and `"auto_delete": false` has no sound to keep; `"captions": "never"` always downloads it.
+
+`/transcribe/auto` reads a YouTube address the same way, with the default.
+
 ## Who can call it
 
 **Nobody, until you say.** With no `VECTRIXDB_API_KEY` and no sign-in, `create_extraction_app` refuses to start: every call spends money on a paid service, and an open service would spend it for anybody who found the address. That is the same rule `vectrixdb serve` applies before it listens beyond the machine.
@@ -354,6 +387,12 @@ A video's sound is read the same way, and its screen too, when a picture reader 
 The address routes fetch only from the hosts in `VECTRIXDB_EXTRACT_URL_HOSTS`: exact names, or `*.example.com` for a domain's subdomains. With none set, every address route refuses. A service that fetches whatever a caller names can be pointed at addresses only the service can reach, such as the cloud's metadata endpoint at `169.254.169.254`.
 
 A redirect is followed only to another allowed host. Checking only the first address is not enough: an allowed host that answers `302` with an internal address would otherwise be followed there.
+
+**A signed link is fetched whole and never repeated whole.** An address with an Azure SAS signature, an S3 or Cloud Storage signature, or a `token`, `key` or `code` in it is fetched as it was given, and the `source` in the reply and an error's words carry it without them. They are dropped, not masked, so a document keeps one address however often its link is signed again.
+
+**A bot check is refused, not read.** A site behind Cloudflare, DataDome, HUMAN (PerimeterX), Imperva, Akamai or AWS WAF can answer with a page that asks for JavaScript or a puzzle in place of the one asked for, and read, it would come back as the document. The service answers `502` naming the site and what it sent. A site that answers `429` or `503` gets a `503` back, with how long it asked to be left, so the caller knows to come back.
+
+To keep a collection in step with a feed or a page, rather than read an address once, see [Keep a collection in step with feeds and pages](sources.md).
 
 YouTube is the exception, and needs no setting: the YouTube routes fetch from YouTube's own hosts and nothing else, and take one video, never a playlist, which would transcribe and bill every video in it.
 
@@ -376,13 +415,18 @@ A finished job carries the fields a synchronous save would have answered with, s
     "video_title": "Quarterly results, explained",
     "transcript_file": "https://<account>.blob.core.windows.net/extraction/transcripts/output/q3Results01_transcript.md",
     "transcript_filename": "q3Results01_transcript.md",
-    "media_deleted": "q3Results01.m4a",
+    "media_deleted": null,
     "auto_delete_enabled": true,
     "duration": 212,
-    "channel": "Northwind Bank"
+    "channel": "Northwind Bank",
+    "transcript_source": "captions",
+    "caption_language": "en",
+    "caption_automatic": false
   }
 }
 ```
+
+`media_deleted` names the sound that was deleted, `q3Results01.m4a`, when the words were heard from it; read from captions, nothing was downloaded and it is `null`.
 
 A job that fails says why, in `error`, and is not tried again. A video YouTube refused once it refuses again, and each try is paid for.
 
@@ -396,7 +440,7 @@ A job that fails says why, in `error`, and is not tried again. A video YouTube r
 | `VECTRIXDB_SIGNIN` | sign-in, so named keys and tokens are accepted |
 | `VECTRIXDB_ALLOW_OPEN` | `1`: something in front of it does the asking |
 | `AZURE_DOCINTEL_ENDPOINT`, `AZURE_DOCINTEL_KEY` | pictures, and scanned PDF pages |
-| `AZURE_SPEECH_ENDPOINT`, `AZURE_SPEECH_KEY` | recordings, videos and YouTube |
+| `AZURE_SPEECH_ENDPOINT`, `AZURE_SPEECH_KEY` | recordings, videos, and YouTube videos read from their sound |
 | `VECTRIXDB_SPEECH_LOCALES` | the languages a recording may be in, `en-US,fr-CA` by default |
 | `VECTRIXDB_SPEECH_SPEAKERS` | how many voices to tell apart, 4 by default; `0` for none |
 | `VECTRIXDB_VIDEO_FRAMES` | the most frames of a video read for what is on screen, 12 by default; `0` for none |
@@ -419,9 +463,10 @@ A job that fails says why, in `error`, and is not tried again. A video YouTube r
 
 ## Where it differs from a hand-written server
 
-It keeps the paths, the request bodies and the reply shapes of the server it stands in for, and differs in four places, each on purpose:
+It keeps the paths, the request bodies and the reply shapes of the server it stands in for, and differs in five places, each on purpose:
 
 - **`youtube_save` is a job**, for the reason in [Long jobs](#long-jobs). Its finished job carries the same fields.
+- **A YouTube video is read from its captions first.** That server downloaded and transcribed every video. This reads the uploader's captions when there are some, which costs nothing, and the sound when not, as [YouTube videos](#youtube-videos) says; `"captions": "never"` does what that server did.
 - **`output_dir` is a folder name**, not a path the caller chooses.
 - **`transcribe/webpage` reads the page's content and not what it embeds.** The menus, banner, footer and hidden parts around the content are left out, as [Ingest documents](ingest-documents.md) describes. Each embedded picture or video is another address, usually on a CDN nobody allowed, so `include_images`, `include_audio` and `include_video` are accepted and not acted on, and the JSON reply says `"embedded_media": "not read"`.
 - **`transcribe/auto` takes YouTube, and no other video site.** Handing any address to a video downloader would let it fetch from over a thousand sites.

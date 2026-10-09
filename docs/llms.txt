@@ -1,0 +1,79 @@
+# VectrixDB
+
+> VectrixDB is a Python vector database that works with no network and no accounts. The embedding model ships inside the package, so `pip install vectrixdb` and `Vectrix("name").search(...)` work offline. It adds hybrid search with a reranker, document ingestion with citations, per-person access rules, evaluation that picks a setup, a REST server with a dashboard, an MCP server, and eight storage backends including Azure AI Search.
+
+Notes for coding agents:
+
+- Start from `from vectrixdb import Vectrix`. `db = Vectrix("docs", path="./data")` persists to SQLite. `db.add(texts, metadata=...)` adds strings; `db.add_document(path_or_markdown)` loads, chunks and cites a file. `db.search(query, limit=10, mode=..., filter=...)` returns `Results`; each item has `.text`, `.score`, `.relevance`, `.metadata` and `.citation`, the string to cite it by.
+- Modes are `dense`, `sparse`, `hybrid`, `ultimate` and `graph`. Hybrid and above rerank with a cross-encoder by default.
+- The base install has five dependencies. Extras add the rest: `api` (REST server and dashboard), `signin`, `mcp`, `documents` (PDF, Office, HTML), `tracing` (OpenTelemetry), `azure`, `aws`, `postgres`, `databricks`, `hf`, `fastembed`, `masking`, `nlp`.
+- Errors are typed: catch `vectrixdb.exceptions.VectrixError` or a subclass, never bare `Exception`.
+- Change chunking with `db.rechunk(...)` only after showing the person `db.rechunk_preview(...)` with the same arguments.
+- Tracing is off unless the person asks for it. Never turn it on silently; it is `pip install "vectrixdb[tracing]"` plus `OTEL_EXPORTER_OTLP_ENDPOINT`, and spans never carry query or document text.
+- Pick a setup with `vectrixdb.evaluation.evaluate(db, "golden.jsonl")` on the person's own questions instead of guessing a mode.
+- To run the server as a service, use the published image `ghcr.io/knowusuboaky/vectrixdb` with `docker/compose.yaml` or `docker/kubernetes` rather than writing a Dockerfile. It refuses to start without `VECTRIXDB_API_KEY` (or `VECTRIXDB_API_KEY_FILE`) or sign-in, and that is on purpose.
+
+## Start here
+
+- [Getting started](https://knowusuboaky.github.io/VectrixDB/tutorial/getting-started/): from an empty directory to a working search
+- [Add VectrixDB with your coding agent](https://knowusuboaky.github.io/VectrixDB/how-to/coding-agents/): a prompt to paste into an agent, and what it should do
+- [The VectrixDB skill](https://github.com/knowusuboaky/VectrixDB/blob/main/skills/vectrixdb/SKILL.md): the same rules as a skill an agent loads by itself, to copy into `.claude/skills/vectrixdb/`
+- [Easy API](https://knowusuboaky.github.io/VectrixDB/reference/easy/): the `Vectrix` surface
+- [Handle errors](https://knowusuboaky.github.io/VectrixDB/how-to/handle-errors/): every exception and what to do about it
+
+## Documents
+
+- [Ingest documents](https://knowusuboaky.github.io/VectrixDB/how-to/ingest-documents/): chunking strategies, parent sections, duplicates
+- [Extract, keep, index](https://knowusuboaky.github.io/VectrixDB/how-to/extract-keep-index/): keep the Markdown, rechunk without re-reading, preview a rechunk
+- [Ingest when a file lands](https://knowusuboaky.github.io/VectrixDB/how-to/ingest-on-event/): blob and S3 events, a worker
+- [Keep a collection in step with feeds and pages](https://knowusuboaky.github.io/VectrixDB/how-to/sources/): RSS, Atom, JSON Feed, podcasts and pages read again on a schedule, only what changed written
+- [Run an extraction service](https://knowusuboaky.github.io/VectrixDB/how-to/extraction-service/): OCR and parsing behind HTTP
+- [Trace an answer to its source](https://knowusuboaky.github.io/VectrixDB/how-to/lineage/): citations and lineage
+
+## Search quality
+
+- [Search modes](https://knowusuboaky.github.io/VectrixDB/explanation/search-modes/): what each mode does and costs
+- [Score and relevance](https://knowusuboaky.github.io/VectrixDB/explanation/relevance/): what the numbers on a result mean
+- [Measure retrieval](https://knowusuboaky.github.io/VectrixDB/how-to/measure-retrieval/): recall, MRR and nDCG on golden questions
+- [Evaluate every setup](https://knowusuboaky.github.io/VectrixDB/how-to/evaluate-setups/): rank every setup and pick three
+- [Work with the knowledge graph](https://knowusuboaky.github.io/VectrixDB/how-to/knowledge-graph/): graph mode
+
+## Apps and servers
+
+- [Run the REST API](https://knowusuboaky.github.io/VectrixDB/how-to/rest-api/): `vectrixdb serve`
+- [Build an app on it](https://knowusuboaky.github.io/VectrixDB/how-to/build-an-app/): from any language, over HTTP
+- [Use the dashboard](https://knowusuboaky.github.io/VectrixDB/how-to/dashboard/): every page
+- [Sign people in](https://knowusuboaky.github.io/VectrixDB/how-to/sign-in/): single sign-on, keys, roles
+- [Restrict what a search can see](https://knowusuboaky.github.io/VectrixDB/how-to/entitlements/): per-person access rules
+- [Deploy the server](https://knowusuboaky.github.io/VectrixDB/how-to/deploy/): one file of settings, checked before a start
+- [Run it in containers](https://knowusuboaky.github.io/VectrixDB/how-to/containers/): the signed images, Docker Compose, Kubernetes
+- [Put it behind a gateway](https://knowusuboaky.github.io/VectrixDB/how-to/behind-a-gateway/): APIM, API Gateway, any proxy
+- [Put your company's name on it](https://knowusuboaky.github.io/VectrixDB/how-to/branding/): branding
+- [Trace searches and ingestion](https://knowusuboaky.github.io/VectrixDB/how-to/tracing/): opt-in OpenTelemetry spans
+- [Use it from an assistant over MCP](https://knowusuboaky.github.io/VectrixDB/how-to/mcp-server/): the MCP server
+- [Keep conversation memory](https://knowusuboaky.github.io/VectrixDB/how-to/conversation-memory/): memory for agents
+
+## Storage and operations
+
+- [Choose a storage backend](https://knowusuboaky.github.io/VectrixDB/how-to/storage-backends/): SQLite, Azure AI Search, Cosmos DB, Postgres and more
+- [Run without a network](https://knowusuboaky.github.io/VectrixDB/how-to/offline/): models, air-gapped installs
+- [Back up, move and restore](https://knowusuboaky.github.io/VectrixDB/how-to/export-import/): export and import
+- [Settings](https://knowusuboaky.github.io/VectrixDB/reference/settings/): every environment variable
+- [Command line](https://knowusuboaky.github.io/VectrixDB/reference/cli/): every command and option
+- [REST API reference](https://knowusuboaky.github.io/VectrixDB/reference/rest-api/): every route
+- [Filters](https://knowusuboaky.github.io/VectrixDB/reference/filters/): the filter grammar
+
+## Optional
+
+- [Tips and tricks](https://knowusuboaky.github.io/VectrixDB/how-to/tips/)
+- [LangChain, LlamaIndex, plugins, CLI](https://knowusuboaky.github.io/VectrixDB/how-to/integrations/)
+- [What VectrixDB does not do](https://knowusuboaky.github.io/VectrixDB/explanation/limits/)
+- [Threads and processes](https://knowusuboaky.github.io/VectrixDB/explanation/concurrency/)
+- [HNSW and its limits](https://knowusuboaky.github.io/VectrixDB/explanation/hnsw/)
+- [Memory per vector](https://knowusuboaky.github.io/VectrixDB/explanation/memory/)
+- [Writing past RAM](https://knowusuboaky.github.io/VectrixDB/explanation/larger-than-ram/)
+- [Benchmarks](https://knowusuboaky.github.io/VectrixDB/explanation/benchmarks/)
+- [Why VectrixDB](https://knowusuboaky.github.io/VectrixDB/explanation/why-vectrixdb/)
+- [Exceptions](https://knowusuboaky.github.io/VectrixDB/reference/exceptions/)
+- [Errors](https://knowusuboaky.github.io/VectrixDB/reference/errors/)
+- [Changelog](https://github.com/knowusuboaky/VectrixDB/blob/main/CHANGELOG.md)

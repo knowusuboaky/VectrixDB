@@ -57,6 +57,62 @@ would start and then surprise you, like a misspelt name, which does nothing at
 all. Errors come last, and the command exits `1` while there is one, so it can
 gate a deployment pipeline.
 
+## What reads each kind of file
+
+A reader that is missing stops nothing at a start. The first file that needs
+it is refused, as a 503 from the upload. So the check says, under
+**Extraction**, who reads each kind of file this server is sent, and how to
+have one read that nothing reads:
+
+```text
+  ok     Extraction   PDFs with a text layer, Word, Excel, PowerPoint, OpenDocument, RTF, HTML, Markdown, CSV and text files are read here by the built-in readers
+  ok     Extraction   YouTube addresses are read with yt-dlp 2025.9.26
+  warn   Extraction   Nothing reads scanned PDF pages here: a page with no text is left out, and a PDF of scans alone is refused. To read them, set VECTRIXDB_EXTRACTOR_URL to an extraction service that has AZURE_DOCINTEL_ENDPOINT and AZURE_DOCINTEL_KEY
+  warn   Extraction   Nothing reads pictures here. pip install 'vectrixdb[ocr]', or set VECTRIXDB_EXTRACTOR_URL to an extraction service that has AZURE_DOCINTEL_ENDPOINT and AZURE_DOCINTEL_KEY
+  warn   Extraction   Recordings are read here by faster-whisper, and the first one downloads its base model from Hugging Face while its upload waits. Fetch it ahead: python -c "from faster_whisper import download_model; download_model('base')"
+  warn   Extraction   Nothing reads videos here: the video reader finds ffmpeg through imageio-ffmpeg, which is not installed, and does not use the ffmpeg on PATH without it. pip install 'vectrixdb[video]', or set VECTRIXDB_EXTRACTOR_URL to an extraction service that has the ffmpeg extra, AZURE_SPEECH_ENDPOINT and AZURE_SPEECH_KEY
+```
+
+| Kind of file | Read on this server by | Extra |
+| --- | --- | --- |
+| PDFs with a text layer, Word, Excel | the built-in readers | `documents` |
+| PowerPoint, OpenDocument, RTF, HTML, Markdown, CSV, text | the built-in readers | none |
+| Scanned PDF pages | nobody; an extraction service with Document Intelligence | none |
+| Pictures | RapidOCR, whose models come with it | `ocr` |
+| Recordings | faster-whisper, whose model is downloaded the first time | `asr` |
+| Videos | ffmpeg through imageio-ffmpeg for the sound, then faster-whisper | `video` |
+| YouTube addresses | yt-dlp, in the library and an extraction service | `youtube` |
+
+The machine is asked, and nothing is changed. Each package is imported, the
+one way to know a binary wheel works here, so a package installed that does
+not import is an error with the reason, `libGL.so.1` missing say. ffmpeg is
+run with `-version` and a ten-second timeout, the one imageio-ffmpeg would
+pick: `IMAGEIO_FFMPEG_EXE`, then its own, then conda's, then the one on PATH.
+One there that does not run is said, and none that runs is an error. The
+speech model is looked for in the Hugging Face cache and never fetched;
+with `VECTRIXDB_OFFLINE` set, a model that is not there means nothing reads
+recordings, and the warning gives the command to fetch it where there is a
+network. See [Run without a network](offline.md).
+
+A file type `VECTRIXDB_EXTRACTOR_ROUTES` sends to an extraction service is said
+to go there, and the rest of its kind is named. With no routes set, the server
+sends `.pdf`, `.docx`, `.doc`, `.png`, `.jpg`, `.jpeg`, `.wav`, `.mp3`, `.m4a`
+and `.mp4`, so a `.tiff` or a `.mov` is still read here, or by nobody.
+
+When the settings of an extraction service are there, the check says what one
+started with them reads with, since `vectrixdb serve` reads none of them:
+Document Intelligence for pictures and scanned pages, Azure Speech for
+recordings, the chat model and Azure Vision that describe pictures, and
+Translator. What would stop it at its start is an error, a Speech address that
+is not https say. What it starts without and shows at the first file is a
+warning: one setting of a pair without the other, a deployment with no key
+and no `azure-identity` for the managed identity, a Translator key with no
+region.
+
+The masking engine is held to the same, under **Masking**: `presidio` with a
+language whose spaCy model is not installed fails the first document masked,
+and the check says so before.
+
 ## Every command reads the same file
 
 ```bash

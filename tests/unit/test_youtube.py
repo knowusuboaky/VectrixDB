@@ -218,11 +218,30 @@ class TestKeepingIt:
 
 
 class TestTheRealDownloader:
-    """The default path, through a stand-in for yt-dlp, so its options are held."""
+    """The default path, through a stand-in for yt-dlp, so its options and its calls are held."""
+
+    CAPTIONS_URL = f"https://www.youtube.com/api/timedtext?v={VIDEO}&lang=en&fmt=json3"
+    JSON3 = (
+        b'{"events": [{"tStartMs": 0, "dDurationMs": 4200,'
+        b' "segs": [{"utf8": "Welcome to the quarterly results."}]}]}'
+    )
 
     @pytest.fixture
     def ytdlp(self, monkeypatch):
-        seen = {}
+        seen = {"calls": [], "info": dict(INFO)}
+
+        class Reply:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return self.body
 
         class YoutubeDL:
             def __init__(self, options):
@@ -232,16 +251,27 @@ class TestTheRealDownloader:
                 return self
 
             def __exit__(self, *exc):
+                seen["calls"].append(("closed",))
                 return False
 
-            def extract_info(self, url, download):
-                seen["url"], seen["download"] = url, download
+            def extract_info(self, url, download=True, process=True):
+                seen["calls"].append(("extract_info", url, download, process))
                 if seen.get("refuse"):
                     raise Exception(seen["refuse"])
-                Path(
-                    seen["options"]["outtmpl"].replace("%(id)s", VIDEO).replace("%(ext)s", "m4a")
-                ).write_bytes(b"sound")
-                return dict(INFO, ext="m4a")
+                return (
+                    self.process_ie_result(dict(seen["info"]), download)
+                    if process
+                    else dict(seen["info"])
+                )
+
+            def process_ie_result(self, info, download=True):
+                if not any(call[0] == "extract_info" and call[3] for call in seen["calls"]):
+                    seen["calls"].append(("process_ie_result", info["id"], download))
+                if seen.get("refuse_download") and download:
+                    raise Exception(seen["refuse_download"])
+                if download:
+                    Path(self.prepare_filename(dict(info, ext="m4a"))).write_bytes(b"sound")
+                return dict(info, ext="m4a")
 
             def prepare_filename(self, info):
                 return (
@@ -250,8 +280,18 @@ class TestTheRealDownloader:
                     .replace("%(ext)s", info["ext"])
                 )
 
+            def urlopen(self, url):
+                seen["calls"].append(("urlopen", url))
+                if seen.get("refuse_captions"):
+                    raise Exception(seen["refuse_captions"])
+                return Reply(seen["tracks"][url])
+
         monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=YoutubeDL))
         return seen
+
+    def with_captions(self, ytdlp):
+        ytdlp["info"]["subtitles"] = {"en": [{"ext": "json3", "url": self.CAPTIONS_URL}]}
+        ytdlp["tracks"] = {self.CAPTIONS_URL: self.JSON3}
 
     def test_it_asks_for_the_sound_alone_and_one_video(self, ytdlp):
         load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener())
@@ -259,17 +299,79 @@ class TestTheRealDownloader:
         assert options["format"].startswith("bestaudio[ext=m4a]"), (
             "m4a first, which Speech reads as it comes"
         )
-        assert options["noplaylist"] is True and ytdlp["download"] is True
+        assert options["noplaylist"] is True
+        assert ("process_ie_result", VIDEO, True) in ytdlp["calls"]
+
+    def test_it_looks_first_and_downloads_nothing_while_looking(self, ytdlp):
+        load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener())
+        assert ytdlp["calls"][0] == (
+            "extract_info",
+            f"https://www.youtube.com/watch?v={VIDEO}",
+            False,
+            False,
+        ), "a look: nothing downloaded and no format chosen"
+
+    def test_with_no_captions_worth_having_the_look_is_downloaded_not_asked_again(self, ytdlp):
+        """One question to YouTube, not two: each is another chance to be refused as a bot."""
+        load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener())
+        assert [call[0] for call in ytdlp["calls"]] == [
+            "extract_info",
+            "process_ie_result",
+            "closed",
+        ]
+
+    def test_captions_are_fetched_by_the_same_yt_dlp_and_nothing_is_downloaded(self, ytdlp):
+        """The same YoutubeDL, so the captions go out with the look's headers, cookies and proxy."""
+        self.with_captions(ytdlp)
+        listener = Listener()
+        doc = load_youtube(f"https://youtu.be/{VIDEO}", audio=listener)
+        assert ("urlopen", self.CAPTIONS_URL) in ytdlp["calls"]
+        assert not any(call[0] == "process_ie_result" for call in ytdlp["calls"])
+        assert listener.heard == [] and doc.text == "Welcome to the quarterly results."
+        assert doc.metadata["transcript_source"] == "captions"
+        assert ytdlp["calls"][-1] == ("closed",)
+
+    def test_captions_that_cannot_be_fetched_are_read_from_the_sound(self, ytdlp):
+        self.with_captions(ytdlp)
+        ytdlp["refuse_captions"] = "HTTP Error 429: Too Many Requests"
+        listener = Listener()
+        doc = load_youtube(f"https://youtu.be/{VIDEO}", audio=listener)
+        assert listener.heard == [(b"sound", f"{VIDEO}.m4a")]
+        assert doc.metadata["transcript_source"] == "speech"
+        assert "could not be read: HTTP Error 429" in doc.metadata["captions_unused"]
+
+    def test_never_asks_once_for_the_sound_as_before(self, ytdlp):
+        self.with_captions(ytdlp)
+        load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener(), captions="never")
+        assert [call[:4] for call in ytdlp["calls"] if call[0] != "closed"] == [
+            ("extract_info", f"https://www.youtube.com/watch?v={VIDEO}", True, True)
+        ]
 
     def test_a_refusal_as_a_bot_says_why(self, ytdlp):
         ytdlp["refuse"] = "ERROR: [youtube] Sign in to confirm you're not a bot"
         with pytest.raises(ExtractionError, match="cloud addresses"):
             load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener())
 
+    def test_a_refusal_as_a_bot_at_the_download_says_why_too(self, ytdlp):
+        ytdlp["refuse_download"] = "ERROR: [youtube] Sign in to confirm you're not a bot"
+        with pytest.raises(ExtractionError, match="cloud addresses"):
+            load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener())
+
+    def test_a_refusal_as_a_bot_says_why_when_only_the_sound_is_asked_for(self, ytdlp):
+        ytdlp["refuse"] = "ERROR: [youtube] Sign in to confirm you're not a bot"
+        with pytest.raises(ExtractionError, match="cloud addresses"):
+            load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener(), captions="never")
+
     def test_any_other_refusal_is_passed_on(self, ytdlp):
         ytdlp["refuse"] = "ERROR: Video unavailable"
         with pytest.raises(ExtractionError, match="Video unavailable"):
             load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener())
+
+    def test_it_is_closed_when_it_fails(self, ytdlp):
+        ytdlp["refuse_download"] = "ERROR: Video unavailable"
+        with pytest.raises(ExtractionError, match="would not give the sound"):
+            load_youtube(f"https://youtu.be/{VIDEO}", audio=Listener())
+        assert ytdlp["calls"][-1] == ("closed",)
 
     def test_it_says_which_package_it_needs(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "yt_dlp", None)

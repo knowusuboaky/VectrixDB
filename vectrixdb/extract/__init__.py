@@ -33,6 +33,7 @@ from pathlib import PurePosixPath
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 from urllib.parse import urlparse
 
+from .. import tracing
 from ..exceptions import ExtractionError
 from ..ingest import LoadedDocument, _labels_from, markdown_document
 
@@ -381,6 +382,9 @@ class HttpExtractor:
     The bytes of every file with a routed suffix are sent to ``base_url``,
     so it is an address the host chose. Only ``http`` and ``https`` are
     accepted. ``headers`` is where a key for the service goes, if it has one.
+    With tracing on, the request carries a ``traceparent`` header, so a
+    service that traces, VectrixDB's own among them, reads the file in the
+    caller's trace.
 
     ``mask`` asks the service to mask identifiers as it reads, the way
     VectrixDB's own extraction service does with ``?mask=1``: ``True`` for
@@ -440,8 +444,10 @@ class HttpExtractor:
     ) -> Optional["HttpExtractor"]:
         """The service ``VECTRIXDB_EXTRACTOR_URL`` names, or None when it names none.
 
-        ``VECTRIXDB_EXTRACTOR_KEY`` goes in the header ``VECTRIXDB_EXTRACTOR_KEY_HEADER``
-        names, ``x-api-key`` by default; ``VECTRIXDB_EXTRACTOR_BODY`` is ``raw``
+        ``VECTRIXDB_EXTRACTOR_KEY``, or the file ``VECTRIXDB_EXTRACTOR_KEY_FILE``
+        names, as a container's secrets are mounted, goes in the header
+        ``VECTRIXDB_EXTRACTOR_KEY_HEADER`` names, ``x-api-key`` by default;
+        ``VECTRIXDB_EXTRACTOR_BODY`` is ``raw``
         (the default) or ``multipart``; ``VECTRIXDB_EXTRACTOR_TIMEOUT`` is in
         seconds, 300 by default. ``VECTRIXDB_EXTRACTOR_ROUTES``, a JSON mapping
         of suffix to route, wins over ``routes``, which is what the caller
@@ -472,7 +478,9 @@ class HttpExtractor:
             raise ConfigurationError(
                 f"VECTRIXDB_EXTRACTOR_URL is {url} and nothing says which route reads what"
             )
-        key = str(found.get("VECTRIXDB_EXTRACTOR_KEY") or "").strip()
+        from ..signin.keys import env_secret
+
+        key = env_secret(found, "VECTRIXDB_EXTRACTOR_KEY") or ""
         header = str(found.get("VECTRIXDB_EXTRACTOR_KEY_HEADER") or "").strip() or "x-api-key"
         try:
             return cls(
@@ -534,6 +542,8 @@ class HttpExtractor:
             payload, content_type = _multipart(self.field, name, bytes(data))
             headers["Content-Type"] = content_type
         headers.setdefault("Accept", "application/json, text/plain;q=0.9, */*;q=0.1")
+        # With tracing on, the service's spans join the trace this call is in.
+        tracing.inject(headers)
         attempt = 0
         while True:
             try:
@@ -759,12 +769,21 @@ def load_url(
     ``.pdf``. An address with no suffix that answers with HTML is read as a
     page. Only ``http`` and ``https``. This fetches whatever address it is
     given, so it is for addresses the host chose, not ones a request named.
+
+    The address is fetched whole and kept without its credentials: a signed
+    link's signature, a token or a key never reaches the document's
+    ``source``, its citations or an error message. A bot check sent in place
+    of the page, Cloudflare's "Just a moment..." or a CAPTCHA, raises
+    :class:`ExtractionError` naming the site and what it sent, rather than
+    being read as the page.
     """
+    from .._web import bot_check, bot_check_message, redact_message, redact_url, status_message
     from ..ingest import load_bytes
 
     parsed = urlparse(url)
+    shown = redact_url(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError(f"url is an http or https address, got {url!r}")
+        raise ValueError(f"url is an http or https address, got {shown!r}")
     send = dict(headers or {})
     send.setdefault("Accept", "text/html, application/pdf;q=0.9, */*;q=0.5")
     try:
@@ -772,9 +791,14 @@ def load_url(
             "GET", url, send, b"", float(timeout)
         )
     except Exception as exc:
-        raise ExtractionError(f"{url} could not be reached: {exc}") from exc
+        # The transport's own words can carry the address, signature and all,
+        # or only its path and query, as http.client's do.
+        raise ExtractionError(f"{shown} could not be reached: {redact_message(exc, url)}") from None
+    reason = bot_check(int(status), reply_headers or {}, bytes(body or b""))
+    if reason:
+        raise ExtractionError(bot_check_message(url, int(status), reason), status=int(status))
     if not 200 <= int(status) < 300:
-        raise ExtractionError(f"{url} answered {status}", status=int(status))
+        raise ExtractionError(status_message(shown, int(status), reply_headers), status=int(status))
     name = PurePosixPath(parsed.path).name
     content_type = ""
     for key, value in (reply_headers or {}).items():
@@ -784,7 +808,7 @@ def load_url(
         name = (name or parsed.netloc) + (
             ".html" if "html" in content_type or not content_type else ".txt"
         )
-    return load_bytes(bytes(body), name, extractors=extractors, source=url, images=images)
+    return load_bytes(bytes(body), name, extractors=extractors, source=shown, images=images)
 
 
 # ============================================================================

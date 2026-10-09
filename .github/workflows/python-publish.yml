@@ -1,33 +1,101 @@
-# Publish to PyPI when a GitHub release is published.
+# Release VectrixDB: one button, one approval.
 #
-# Two things differ from the usual template:
-#   1. The full CI suite must pass before anything is built. A release that
-#      cannot pass its own tests should never reach PyPI.
-#   2. Publishing uses PyPI Trusted Publishing (OIDC) instead of a stored API
-#      token, so there is no long-lived credential in repository secrets.
-#      Configure it once at https://pypi.org/manage/project/vectrixdb/settings/publishing/
-#      with owner `knowusuboaky`, repo `VectrixDB`, workflow `python-publish.yml`,
-#      environment `pypi`. The old PYPI_API_TOKEN secret can then be deleted.
+# Two ways in, one path out:
+#   * Actions > "Release" > Run workflow. It reads the version from
+#     pyproject.toml (or the one you type), and makes the tag and the GitHub
+#     release itself, with the changelog's section as its notes.
+#   * Publishing a release by hand on GitHub, as before. The tag must match
+#     the packaged version.
+#
+# Either way, nothing reaches PyPI unless:
+#   1. CHANGELOG.md has a dated section for the version, not "Unreleased";
+#   2. no tag for it exists yet (when the workflow makes the tag);
+#   3. the full CI suite passes;
+#   4. the built version matches, the metadata is valid for PyPI and the
+#      wheel is under PyPI's 100 MB limit;
+# and then the "pypi" environment waits for one approval from the maintainer.
+# Once PyPI has it, containers.yml builds the container images from the same
+# wheel, checks them, and pushes them to ghcr.io signed.
+#
+# Publishing uses PyPI Trusted Publishing (OIDC), configured at
+# https://pypi.org/manage/project/vectrixdb/settings/publishing/ with owner
+# `knowusuboaky`, repo `VectrixDB`, workflow `python-publish.yml` and
+# environment `pypi`. That names this file, so it keeps its name.
 
-name: Upload Python Package
+name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, such as 2.2.0. Empty: the version in pyproject.toml."
+        required: false
+        default: ""
   release:
     types: [published]
 
 permissions:
   contents: read
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    name: Version, changelog and tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Work out the version
+        id: version
+        env:
+          ASKED: ${{ github.event.inputs.version }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          declared="$(python scripts/release_notes.py --version)"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            wanted="${TAG#v}"
+          else
+            wanted="${ASKED#v}"
+            wanted="${wanted:-$declared}"
+          fi
+          if [ "$wanted" != "$declared" ]; then
+            echo "::error::pyproject.toml declares $declared, not $wanted. Bump the version first."
+            exit 1
+          fi
+          echo "version=$wanted" >> "$GITHUB_OUTPUT"
+          echo "Releasing $wanted"
+
+      - name: The changelog has a dated section for it
+        run: python scripts/release_notes.py "${{ steps.version.outputs.version }}" --check > /dev/null
+
+      - name: No tag for it exists yet
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${{ steps.version.outputs.version }}" > /dev/null; then
+            echo "::error::v${{ steps.version.outputs.version }} is already tagged. Bump the version for a new release."
+            exit 1
+          fi
+
   ci:
     name: CI must pass
+    needs: [prepare]
     uses: ./.github/workflows/ci.yml
 
   release-build:
-    needs: [ci]
+    name: Build and check
+    needs: [prepare, ci]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # to attach the OpenAPI document to the release
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,37 +110,99 @@ jobs:
 
       - name: Build release distributions
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install --upgrade pip build twine
           python -m build
 
-      - name: Verify the tag matches the packaged version
+      - name: The built version is the one being released
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           python - <<'PY'
           import os, pathlib, re, sys
-          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          wanted = os.environ["VERSION"]
           wheel = next(pathlib.Path("dist").glob("*.whl")).name
           built = re.match(r"vectrixdb-([^-]+)-", wheel).group(1)
-          if tag != built:
-              sys.exit(f"release tag {tag!r} does not match built version {built!r}")
-          print(f"tag and version agree: {built}")
+          if wanted != built:
+              sys.exit(f"releasing {wanted!r} but built {built!r}")
+          print(f"version agrees: {built}")
           PY
 
-      # A gateway team imports this to make its operations, so every release
-      # carries the route table it was built from, at a stable address. The
-      # suite that ran above holds it to the routes the server serves.
-      - name: Attach the OpenAPI document to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" docs/reference/openapi.json --clobber
+      - name: PyPI will accept it
+        run: |
+          python -m twine check --strict dist/*
+          python - <<'PY'
+          import pathlib, sys
+          limit = 100 * 1024 * 1024
+          for f in pathlib.Path("dist").iterdir():
+              size = f.stat().st_size
+              print(f"{f.name}: {size / 1024 / 1024:.1f} MiB")
+              if size > limit:
+                  sys.exit(f"{f.name} is over PyPI's 100 MB limit")
+          PY
+
+      # The optional models are fetched from Hugging Face first and from
+      # these releases when it is blocked. A missing one is reported here and
+      # on the run's summary, and does not stop the release.
+      - name: The optional model releases are there
+        continue-on-error: true
+        run: |
+          {
+            echo "### Optional model releases"
+            echo '```'
+            python scripts/check_model_releases.py || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          python scripts/check_model_releases.py
+
+      - name: Release notes from the changelog
+        run: python scripts/release_notes.py "${{ needs.prepare.outputs.version }}" > dist-notes.md
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:
           name: release-dists
-          path: dist/
+          path: |
+            dist/
+            dist-notes.md
+            docs/reference/openapi.json
+
+  github-release:
+    name: Tag and GitHub release
+    needs: [prepare, release-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Retrieve release distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dists
+          path: out/
+
+      # Run from Actions: make the tag at the commit that was tested, and the
+      # release with the changelog as its notes. Published by hand: attach the
+      # files to the release that is already there. A gateway team imports
+      # the OpenAPI document, so every release carries the route table it was
+      # built from.
+      - name: Make or fill the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            gh release create "$tag" out/dist/* out/docs/reference/openapi.json \
+              --target "$GITHUB_SHA" \
+              --title "VectrixDB $VERSION" \
+              --notes-file out/dist-notes.md
+          else
+            gh release upload "$tag" out/dist/* out/docs/reference/openapi.json --clobber
+          fi
 
   pypi-publish:
-    needs: [release-build]
+    name: Publish to PyPI
+    needs: [github-release]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -82,9 +212,25 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: release-dists
-          path: dist/
+          path: out/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist/
+          packages-dir: out/dist/
+
+  # A failure here leaves the release on PyPI as it is: Actions > Containers >
+  # Run workflow, with the version, builds the images again.
+  containers:
+    name: Container images
+    needs: [prepare, pypi-publish]
+    uses: ./.github/workflows/containers.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      wheels-artifact: release-dists
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write # the weekly scan's, asked for though a release skips it

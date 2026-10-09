@@ -202,6 +202,11 @@ _ROUTES: tuple[tuple[str, str, str], ...] = (
         "search",
     ),
     ("POST", _C + r"/(?:rebuild|graph/extract)", "collection.maintain"),
+    # The feeds and pages a collection keeps up with: listed with where its
+    # chunks came from, changed and refreshed as writes.
+    ("GET", _C + r"/sources", "content.index"),
+    ("POST", _C + r"/sources(?:/refresh)?", "content.write"),
+    ("DELETE", _C + r"/sources/[^/]+", "content.write"),
     ("POST", _C + r"/(?:points(?:/sparse)?|text-upsert|documents)", "content.write"),
     ("DELETE", _C + r"/(?:points|documents/.+)", "content.write"),
     ("GET", _C + r"/points", "content.index"),

@@ -66,6 +66,29 @@ def levels(findings, level):
     return [f.text for f in findings if f.level == level]
 
 
+class NoReaders:
+    """A machine with no file reader installed. What reads files is the machine's, and
+    its findings are warnings, so a test of the rest does not depend on this one."""
+
+    def installed(self, module):
+        return False
+
+    def imports(self, module):
+        return "missing", ""
+
+    def version(self, distribution):
+        return ""
+
+    def ffmpeg_binaries(self):
+        return []
+
+    def answers(self, argv, timeout=10.0):
+        return False, "not run"
+
+    def whisper_model_here(self, model):
+        return False
+
+
 # ------------------------------------------------------------------ the list ---
 
 
@@ -84,7 +107,9 @@ class TestTheList:
             for name in ("PASSWORD", "TOTP")
             for twin in ("", "_FILE")
         }
-        missing = sorted(read - settings.known() - retired)
+        # Named only to say they are not settings: what Kubernetes sets for a Service.
+        links = {"VECTRIXDB_PORT", "VECTRIXDB_PORT_7337_TCP", "VECTRIXDB_SERVICE_HOST"}
+        missing = sorted(read - settings.known() - retired - links)
         assert missing == [], (
             f"read by the code and not on the list, so the template leaves them out: {missing}"
         )
@@ -153,7 +178,11 @@ class TestTheEnvFile:
 
 class TestTheCheck:
     def test_a_clean_open_server_on_this_machine(self, tmp_path):
-        found = run(str(tmp_path / "data"), {"VECTRIXDB_OFFLINE": "1"})
+        found = [
+            f
+            for f in run(str(tmp_path / "data"), {"VECTRIXDB_OFFLINE": "1"}, machine=NoReaders())
+            if f.area != "Extraction"
+        ]
         assert levels(found, "error") == [] and levels(found, "warn") == []
         assert any("listens on this machine only" in text for text in levels(found, "ok"))
 
@@ -275,6 +304,34 @@ class TestTheCheck:
             (f.level for f in found), key=["ok", "warn", "error"].index
         ), "most serious last"
 
+    def test_what_kubernetes_sets_for_a_service_is_not_called_a_typo(self, tmp_path):
+        """A pod gets VECTRIXDB_SERVICE_HOST and friends for a Service named vectrixdb, unless told not to."""
+        links = {
+            "VECTRIXDB_SERVICE_HOST": "10.96.0.12",
+            "VECTRIXDB_SERVICE_PORT": "7337",
+            "VECTRIXDB_SERVICE_PORT_HTTP": "7337",
+            "VECTRIXDB_PORT": "tcp://10.96.0.12:7337",
+            "VECTRIXDB_PORT_7337_TCP": "tcp://10.96.0.12:7337",
+            "VECTRIXDB_PORT_7337_TCP_ADDR": "10.96.0.12",
+            "VECTRIXDB_PORT_7337_TCP_PORT": "7337",
+            "VECTRIXDB_PORT_7337_TCP_PROTO": "tcp",
+            "VECTRIXDB_EXTRACT_SERVICE_HOST": "10.96.0.13",
+            "VECTRIXDB_EXTRACT_PORT": "tcp://10.96.0.13:7338",
+        }
+        assert settings.unknown(links) == []
+        assert settings.unknown({"VECTRIXDB_LISTEN_PROT": "1"}) == [
+            ("VECTRIXDB_LISTEN_PROT", "VECTRIXDB_LISTEN_PORT")
+        ]
+
+    def test_a_port_kubernetes_overwrote_says_how_to_stop_it(self, tmp_path):
+        """A Service named vectrixdb-redis gives every pod VECTRIXDB_REDIS_PORT=tcp://..., over the setting."""
+        found = run(
+            str(tmp_path), signin_env(tmp_path, VECTRIXDB_REDIS_PORT="tcp://10.96.0.9:6379")
+        )
+        errors = " | ".join(levels(found, "error"))
+        assert "Kubernetes sets for a Service named vectrixdb-redis" in errors
+        assert "enableServiceLinks: false" in errors
+
     def test_a_secret_file_that_is_not_there_is_one_error(self, tmp_path):
         """Sign-in cannot read the secret either, for the same reason: saying it twice reads as two faults."""
         env = signin_env(tmp_path, VECTRIXDB_SIGNIN_SECRET_FILE=str(tmp_path / "gone.txt"))
@@ -292,6 +349,13 @@ class TestTheCheck:
 
 
 class TestTheCommand:
+    @pytest.fixture(autouse=True)
+    def _no_readers(self, monkeypatch):
+        """The exit code is the subject here, not what this machine has installed."""
+        from vectrixdb import check
+
+        monkeypatch.setattr(check, "_Machine", NoReaders)
+
     def test_the_template_is_printed(self):
         result = CliRunner().invoke(app, ["check", "--template"])
         assert result.exit_code == 0 and "# VECTRIXDB_SIGNIN_SECRET=\n" in result.output

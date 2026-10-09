@@ -2189,7 +2189,9 @@ async function openAccount() {
   const first = menu.querySelector('a:not([hidden]), button:not([hidden])'); if (first) first.focus();
   try { await Promise.all([loadInfo(), loadAuth()]); } catch (e) { /* the menu still opens */ }
   const access = state.me ? null : (state.authEnabled ? 'API key required' : 'open, no key set');
-  $('set-server').innerHTML = [['Server', location.host], ['Storage', (state.info && state.info.storage_backend) || 'sqlite'], ...(access ? [['Access', access]] : [])]
+  const tr = state.info && state.info.tracing;
+  const tracing = !tr ? null : (tr.on ? (tr.to ? `on, sending to ${tr.to}` : 'on') : 'off');
+  $('set-server').innerHTML = [['Server', location.host], ['Storage', (state.info && state.info.storage_backend) || 'sqlite'], ...(access ? [['Access', access]] : []), ...(tracing ? [['Tracing', tracing]] : [])]
     .map(([k, v]) => `<span class="k">${esc(k)}</span><span class="v">${esc(v)}</span>`).join('');
 }
 function closeAccount(refocus) {

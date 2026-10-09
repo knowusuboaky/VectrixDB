@@ -8,7 +8,7 @@ A file becomes an index entry in three steps: something turns the file into text
 |---|---|---|
 | `.md` `.txt` `.html` `.csv` `.pptx` | built in | nothing |
 | `.pdf` `.docx` `.xlsx` | built in | `pip install vectrixdb[documents]` |
-| `.png` `.jpg` `.tif` and scanned PDF pages | `RapidOcr` | `pip install vectrixdb[ocr]` |
+| `.png` `.jpg` `.tif`, and scanned PDF pages once `RapidOcr()` is registered for `.pdf` | `RapidOcr` | `pip install vectrixdb[ocr]` |
 | `.wav` `.mp3` `.m4a` `.flac` | `Whisper` | `pip install vectrixdb[asr]` |
 | `.mp4` `.mov` `.webm` | `Video`, the sound only | `pip install vectrixdb[video]` |
 | anything | a function, or an endpoint | whatever it needs |
@@ -182,6 +182,35 @@ Each is built around a client, or a key, that you made. Nothing here reads a cre
 | `Textract(client)` | Amazon Textract | an image goes in the request; a multi-page PDF is read in S3 as a job |
 | `Transcribe(client, s3, output_bucket)` | Amazon Transcribe | reads media from S3, so it runs behind the worker with an S3 fetcher |
 
+## A YouTube video
+
+```python
+from vectrixdb import load_youtube
+
+doc = load_youtube("https://youtu.be/q3Results01")                         # the uploader's captions, else the sound
+doc = load_youtube("https://youtu.be/q3Results01", captions="automatic")  # YouTube's own captions will do
+doc.metadata["transcript_source"]                                          # "captions" or "speech"
+```
+
+`load_youtube` takes one video, never a playlist, and gives you its words as a transcript cited by the minute, like any recording. It reads the video's captions first and its sound only when they will not do, because captions cost nothing: no sound is downloaded, no ffmpeg runs and no speech engine is paid. The sound, when it is read, goes to `audio=`, `AzureSpeech(endpoint, key)` or Whisper on the machine by default. `pip install vectrixdb[youtube]` brings yt-dlp, which does the fetching.
+
+`captions=` says which captions will do:
+
+| `captions` | Reads | Costs |
+| --- | --- | --- |
+| `"uploaded"`, the default | the captions the uploader made, else the sound | nothing when the uploader made some; a download and a transcription when not |
+| `"automatic"` | the uploader's, else YouTube's automatic captions, else the sound | nothing for most videos, and rougher words |
+| `"translated"` | as `"automatic"`, then YouTube's machine translation into `language`, else the sound | nothing, and words nobody said |
+| `"never"` | always the sound, which is what every call did before 2.2 | a download and a transcription, every time |
+
+The uploader's captions are the default because somebody wrote and checked them. YouTube's automatic captions have no punctuation and more mistakes than Azure Speech makes, so a video that has only those is still read from its sound unless you ask for them. A machine translation is never read unless you ask: YouTube lists one in every language it knows.
+
+`language="fr-FR"` picks the track and is what speech listens for. `fr-FR` takes an `fr` track, and a video with no French track is heard in French rather than read in English. Left out, the track is the video's own language, then English, then the uploader's first.
+
+The metadata says where the words came from. `transcript_source` is `captions` or `speech`; with captions, `caption_language` and `caption_automatic`, and `caption_translated_from` for a translation; with speech, `captions_unused` says why the captions were not read. `save_to="output"` writes the transcript as `<video id>_transcript.md`, and its `- Words: the uploader's captions` line says it too. `keep_audio=True` keeps the sound beside it when there is one: with captions nothing was downloaded, so nothing is kept, and `captions="never"` always downloads it.
+
+YouTube refuses more and more requests from cloud addresses as coming from a bot, captions and sound alike, so a video that reads on your laptop can fail in a function app; the error says when that is why. The extraction service takes the same choice: see [YouTube videos](extraction-service.md#youtube-videos).
+
 ## Keep what was extracted
 
 By default the document is gone the moment it is chunked: the index holds pieces, and nothing holds the whole. That is fine for a folder of text files and wrong for anything that cost money to read. `keep_source=True` keeps the Markdown every document was indexed from, beside the collection.
@@ -230,6 +259,17 @@ db.rechunk()            # every kept document, with what each was last cut with
 ```
 
 `rechunk()` reads the kept Markdown and never calls an extractor, so a new chunk size over ten thousand OCRed pages costs an embedding pass and not an OCR bill. What is not given is what the document was last indexed with, and its metadata is what it was written with. On an empty collection opened over the same store it fills the index from the store alone, which is the recovery path for a backend that has no backup of its own. Every document is its own ingestion, with its own record and build, as it was when it first went in.
+
+To see what a rechunk would do before it does it, ask for a preview with the same arguments. Each kept document is cut and counted; nothing is written, deleted or embedded:
+
+```python
+planned = db.rechunk_preview(chunk_size=500)
+print(planned)                    # 1,204 documents, 1,204 would change: 9,880 chunks now, 18,113 after
+for doc in planned.changed[:5]:
+    print(doc.doc_id, doc.chunks_now, "->", doc.chunks_after, doc.chunking_after)
+```
+
+`planned.to_dict()` is the same as JSON, for a review step in a pipeline. Semantic chunking still asks the embedder where topics turn and llm chunking still asks `cut_with`, since that is where their cuts come from; a model's note is not written, since it does not move a cut.
 
 `reextract(where=...)` is for when the reader got better. It fetches originals from the `source` kept with each document and reads only the ones the function picks:
 

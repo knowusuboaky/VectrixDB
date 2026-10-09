@@ -1,0 +1,27 @@
+# Only the server may call the extraction service: every call can spend money
+# on a paid reader, and nothing else in the cluster has a reason to. A cluster
+# whose network plugin enforces policies (Calico, Cilium, the cloud ones) holds
+# to it; elsewhere it is a note of intent.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vectrixdb-extract-from-server-only
+  labels:
+    app.kubernetes.io/name: vectrixdb-extract
+    app.kubernetes.io/component: extraction
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vectrixdb-extract
+      app.kubernetes.io/component: extraction
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vectrixdb
+              app.kubernetes.io/component: server
+      ports:
+        - port: http
+          protocol: TCP

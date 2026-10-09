@@ -1,0 +1,39 @@
+# Jaeger beside VectrixDB, to see each search, ingest and evaluation run as a
+# trace: which mode ran, how many results, how well the best one scored, and
+# where the time went. Never the query, the documents or a key.
+#
+#   docker compose -f compose.yaml -f compose.tracing.yaml up -d
+#
+# Jaeger's own page is then at http://localhost:16686. The server and the
+# extraction service send their spans to Jaeger over OTLP, and a file the
+# server hands the extraction service is one trace across the two. Pointing
+# OTEL_EXPORTER_OTLP_ENDPOINT at another collector (Grafana Tempo, Honeycomb,
+# Datadog, Azure Monitor) is all a deployment that has one already needs.
+# Jaeger keeps traces in memory here, so they go when it stops.
+
+services:
+  server:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: vectrixdb
+    depends_on:
+      jaeger:
+        condition: service_started
+
+  extract:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: vectrixdb-extract
+    depends_on:
+      jaeger:
+        condition: service_started
+
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${JAEGER_HOST_PORT:-16686}:16686"

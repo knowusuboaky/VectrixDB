@@ -126,7 +126,7 @@ MODEL_CONFIG: Dict[str, Dict[str, Any]] = {
         "config_file": "config.json",
         "size_mb": 110,  # INT8 quantized
         "huggingface_id": "BAAI/bge-base-en-v1.5",
-        "github_release": "bge-base-en",
+        "github_release": "v1.9.0",  # published with 1.9.0, beside the code
         "languages": "english",
         "quantization": "int8",
         "description": "Higher quality English embeddings (768 dim, +15-20% vs e5-small)",
@@ -211,7 +211,7 @@ MODEL_CONFIG: Dict[str, Dict[str, Any]] = {
         "config_file": "config.json",
         "size_mb": 110,  # INT8 quantized
         "huggingface_id": "BAAI/bge-reranker-base",
-        "github_release": "bge-reranker-base",
+        "github_release": "v1.9.0",  # published with 1.9.0, beside the code
         "languages": "english",
         "quantization": "int8",
         "description": "Higher quality English reranker (+10-15% vs L12)",
@@ -251,7 +251,7 @@ MODEL_CONFIG: Dict[str, Dict[str, Any]] = {
         "config_file": "config.json",
         "size_mb": 110,  # INT8 quantized
         "huggingface_id": "colbert-ir/colbertv2.0",
-        "github_release": "colbert-v2",
+        "github_release": "v1.9.0",  # published with 1.9.0, beside the code
         "languages": "english",
         "quantization": "int8",
         "description": "Higher quality ColBERT v2 late interaction (+5-10%)",

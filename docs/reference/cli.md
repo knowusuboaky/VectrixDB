@@ -100,6 +100,21 @@ Search every golden question every way the collections can be searched, and pick
 | `--balance` | best_for_balance: the fastest within this many points of the most | `4` |
 | `--time` | best_for_time: the fastest within this many points of the most | `8` |
 
+## extract-serve
+
+```text
+vectrixdb extract-serve [OPTIONS]
+```
+
+Start the extraction service: files, addresses and videos in, text out.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `--port`, `-p` | Port to run on. Default: VECTRIXDB_EXTRACT_LISTEN_PORT, else 7338 | `7338` |
+| `--host`, `-h` | Host to bind to | `127.0.0.1` |
+| `--prefix` | The path every route lives under, such as /api. Default: VECTRIXDB_EXTRACT_PREFIX, else the root |  |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+
 ## golden
 
 Golden questions: the questions whose right answers you know.
@@ -389,13 +404,83 @@ Start the VectrixDB server.
 
 | Argument or option | What it does | Default |
 | --- | --- | --- |
-| `--port`, `-p` | Port to run on | `7337` |
+| `--port`, `-p` | Port to run on. Default: VECTRIXDB_LISTEN_PORT, else 7337 | `7337` |
 | `--host`, `-h` | Host to bind to. 0.0.0.0 needs an API key or sign-in | `127.0.0.1` |
 | `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--reload`, `-r` | Enable auto-reload | off |
 | `--dashboard`, `--no-dashboard` | Enable dashboard | on |
 | `--api-key`, `-k` | API key for authentication |  |
 | `--read-only-key` | Read-only API key |  |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+
+## sources
+
+Feeds and pages a collection keeps up with, read again on a schedule.
+
+### sources add
+
+```text
+vectrixdb sources add ADDRESS [OPTIONS]
+```
+
+Keep a collection up with a feed or a page. Nothing is written until a refresh.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `ADDRESS` | The feed's or the page's address. Write ${NAME} where a secret goes. | required |
+| `--name`, `-n` | Collection name | `docs` |
+| `--every` | How often it is read: 30m, 6h, 1d, 1w | `6h` |
+| `--kind` | feed or page. Left out, it is fetched once to tell |  |
+| `--articles` | A feed: index the article each entry links to | off |
+| `--no-transcribe` | A podcast: its show notes, even with an audio engine | off |
+| `--delete-when-gone` | A page: remove its chunks when it answers 404 or 410 | off |
+| `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+
+### sources list
+
+```text
+vectrixdb sources list [OPTIONS]
+```
+
+The feeds and pages a collection keeps up with, and how each last went.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `--name`, `-n` | Collection name | `docs` |
+| `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+
+### sources refresh
+
+```text
+vectrixdb sources refresh [OPTIONS]
+```
+
+Read the sources that are due and write only what changed. Run it from cron or a scheduled job.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `--name`, `-n` | Collection name. Left out, every collection here that keeps up with a source |  |
+| `--force` | Every source, not only the ones due | off |
+| `--max-items` | Entries written per source this time | `50` |
+| `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
+| `--env-file` | Read settings from this file first. What the environment already sets wins |  |
+
+### sources remove
+
+```text
+vectrixdb sources remove SOURCE [OPTIONS]
+```
+
+Stop keeping up with a source. Its documents stay unless --delete-documents.
+
+| Argument or option | What it does | Default |
+| --- | --- | --- |
+| `SOURCE` | The source's id or its address | required |
+| `--name`, `-n` | Collection name | `docs` |
+| `--delete-documents` | Take the documents it wrote too | off |
+| `--path`, `-d` | Database path. Default: VECTRIXDB_PATH, or ./vectrixdb_data |  |
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 
 ## stats

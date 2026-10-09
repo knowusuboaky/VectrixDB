@@ -27,6 +27,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from .._time import parse_iso, utcnow
 from ..exceptions import ConfigurationError, PolicyNotEnforcedWarning, StorageOperationError
+from ..tracing import traced
 from math import log
 from pathlib import Path
 from typing import Dict, Any, Callable, Generator, Iterator, Optional, Sequence, Union, List
@@ -1785,6 +1786,17 @@ class Collection:
             stacklevel=3,
         )
 
+    # A server's searches, and a Vectrix search's own span when it is the caller.
+    @traced(
+        "search",
+        before=lambda a: {
+            "collection": a["self"].name,
+            "mode": "dense",
+            "limit": a["limit"],
+            "filtered": a["filter"] is not None,
+        },
+        after=lambda found: {"results": len(found.results)},
+    )
     def search(
         self,
         query: Union[list[float], np.ndarray],
@@ -2636,6 +2648,17 @@ class Collection:
             search_mode=SearchMode.HYBRID,
         )
 
+    # A server's searches, and a Vectrix search's own span when it is the caller.
+    @traced(
+        "search",
+        before=lambda a: {
+            "collection": a["self"].name,
+            "mode": "keyword",
+            "limit": a["limit"],
+            "filtered": a["filter"] is not None,
+        },
+        after=lambda found: {"results": len(found.results)},
+    )
     def keyword_search(
         self,
         query_text: str,
@@ -2751,6 +2774,17 @@ class Collection:
                 search_mode=SearchMode.KEYWORD,
             )
 
+    # A server's searches, and a Vectrix search's own span when it is the caller.
+    @traced(
+        "search",
+        before=lambda a: {
+            "collection": a["self"].name,
+            "mode": "hybrid",
+            "limit": a["limit"],
+            "filtered": a["filter"] is not None,
+        },
+        after=lambda found: {"results": len(found.results)},
+    )
     def hybrid_search(
         self,
         query: Union[list[float], np.ndarray],

@@ -22,7 +22,7 @@ Every way the server and the extraction service say no, read off the code, so a 
 
 Exceptions the library raises in Python are on [Exceptions](exceptions.md); the table at the end lists them. The server turns a `PolicyError` into 403 (or 503 for a records store that cannot be read), a `StorageError` from the store behind a collection into 502 with the store's own words, a route's `HTTPException` into its own status, and a body that is not the shape asked for into 422. The extraction service turns a `DependencyError` into 503, an `ExtractionError` into 503 when a service it uses is busy, 502 when one answered badly and 422 when the file could not be read, and a `ConfigurationError` in what was asked into 422.
 
-## What a route can send, 145 refusals
+## What a route can send, 149 refusals
 
 ### Sign-in and the door
 
@@ -143,7 +143,7 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 400 | metadata is a JSON object | `add_document` |
 | 400 | metadata is not JSON: {exc} | `add_document` |
 | 400 | Name the file in X-Filename, for example X-Filename: report.pdf | `_upload` |
-| 400 | the error's own words | `add_document` |
+| 400 | the error's own words | `write_document` |
 | 400 | The form has no file field | `_upload` |
 | 400 | The request has no file in it | `_upload` |
 | 404 | No document {doc_id} | `delete_document` |
@@ -151,13 +151,25 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 404 | This server does not keep documents. Start it with VECTRIXDB_KEEP_SOURCE=1 and the Markdown each document was indexed from is kept and served here. | `_kept` |
 | 413 | The file is larger than {MAX_UPLOAD_BYTES} bytes | `_upload` |
 | 415 | A multipart form needs python-multipart on the server. Send the file as the request body with its name in X-Filename instead, which needs nothing. | `_upload` |
-| 422 | Nothing could be read from {filename} | `add_document` |
-| 422 | the error's own words | `add_document` |
-| 500 | Text embedder not available: {exc} | `add_document` |
+| 422 | Nothing could be read from {what or document_id} | `write_document` |
+| 422 | the error's own words | `write_document` |
+| 500 | Text embedder not available: {exc} | `write_document` |
 | 500 | the error's own words | `configured_extractors` |
 | 500 | VECTRIXDB_KEEP_SOURCE is a Blob address with no container in it | `_files_at` |
 | 502 or 422 | the error's own words | `add_document` |
 | 503 | the error's own words | `add_document` |
+
+### Feeds and pages a collection keeps up with
+
+`vectrixdb/api/sources.py`
+
+| Status | Message | Raised by |
+| --- | --- | --- |
+| 400 | An address that reads ${NAME} from the environment is added from Python or the command line on the server, not over the API: a request could otherwise have the server send its own settings to any host. | `add_source` |
+| 400 | the error's own words | `add_source` |
+| 404 | No source {source_id} in {name} | `remove_source` |
+| 404 | the error's own words | `refresh_sources` |
+| 422 | the error's own words | `add_source` |
 
 ### Inspection, provenance and the audit trail
 
@@ -199,17 +211,16 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | --- | --- | --- |
 | 400 | the request has no body: send the file as it is | `_body` |
 | 403 | no address may be fetched: set VECTRIXDB_EXTRACT_URL_HOSTS to the hosts that may | `fetch` |
-| 403 | {req.full_url} redirected to {newurl}, which is not an allowed host | `redirect_request` |
-| 403 | {urlparse(url).hostname or url} is not one of the hosts this service fetches from | `fetch` |
+| 403 | {redact_url(req.full_url)} redirected to {site_of(newurl)}, which is not an allowed host | `redirect_request` |
+| 403 | {urlparse(url).hostname or shown} is not one of the hosts this service fetches from | `fetch` |
 | 404 | there is no job {job} | `job_status` |
 | 413 | the file is larger than {service.max_bytes} bytes | `_body` |
-| 413 | {url} is larger than {self.max_bytes} bytes | `fetch` |
+| 413 | {shown} is larger than {self.max_bytes} bytes | `fetch` |
 | 422 | output_dir is one folder name, letters, digits, spaces, dots, dashes and underscores | `transcribe_youtube_save` |
 | 422 | the error's own words | `_bad_value`, `_answer`, `mask_route` |
 | 422 | what did not validate, in words, with the fields in detail | `_shape` |
 | 422 | {body.url} is not the address of one YouTube video | `transcribe_youtube_save` |
 | 502 | the error's own words | `_translation` |
-| 502 | {url} answered {status} | `fetch` |
 | 502 or 422 | the error's own words | `_unreadable` |
 | 503 | nothing reads pictures: set AZURE_DOCINTEL_ENDPOINT and AZURE_DOCINTEL_KEY | `read_image` |
 | 503 | nothing reads sound: set AZURE_SPEECH_ENDPOINT and AZURE_SPEECH_KEY | `listening_in` |

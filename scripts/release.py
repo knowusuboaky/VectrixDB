@@ -13,9 +13,9 @@ What it does on a version:
 3. Rewrites that heading to ``## [<version>] - <today>`` and inserts a fresh
    ``## [Unreleased]`` above it.
 4. Sets ``version = "<version>"`` in pyproject.toml.
-5. Prints the exact git commands to commit, tag and push. It never runs
-   them: tagging is the maintainer's act, and the publish workflow fires on
-   the GitHub release, not on the tag.
+5. Prints the git commands to commit and push. It never runs them. The
+   Release workflow (Actions > Release > Run workflow) then makes the tag
+   and the GitHub release from the changelog and publishes to PyPI.
 """
 
 from __future__ import annotations
@@ -110,9 +110,10 @@ def stamp(version: str, dry_run: bool) -> int:
         "\nNext, by hand:\n"
         f"  git add CHANGELOG.md pyproject.toml\n"
         f'  git commit -m "Release {version}"\n'
-        f'  git tag -a v{version} -m "VectrixDB {version}"\n'
-        f"  git push && git push origin v{version}\n"
-        "then publish a GitHub release for the tag; the publish workflow runs the suite and uploads to PyPI."
+        "  git push\n"
+        "then Actions > Release > Run workflow. It checks the changelog, runs the suite,\n"
+        f"tags v{version}, writes the GitHub release from the changelog and, after your\n"
+        "approval on the pypi environment, uploads to PyPI."
     )
     return 0
 

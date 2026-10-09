@@ -61,6 +61,7 @@ import uuid
 from datetime import datetime
 from ._ranking import apply_score_gap, fit_to_budget
 from .core import relevance as _relevance
+from .tracing import traced
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -578,6 +579,102 @@ def _row_metadata(row: Dict[str, Any]) -> Dict[str, Any]:
 def _coll(db: "Vectrix") -> Any:
     """The open collection, typed loosely: it is assigned after construction."""
     return db._collection
+
+
+_RECHUNK_OPTIONS = (
+    "chunk",
+    "chunk_size",
+    "overlap",
+    "parent_size",
+    "embed_heading",
+    "dedupe",
+    "threshold",
+    "on_low_quality",
+    "quality_threshold",
+    "progress",
+    "cut_with",
+    "context_with",
+    "late",
+)
+_RECORDED_CHUNKING = ("chunk", "chunk_size", "overlap", "parent_size", "embed_heading")
+
+
+def _rechunk_options(options: Mapping[str, Any], name: str) -> None:
+    unknown = sorted(set(options) - set(_RECHUNK_OPTIONS))
+    if unknown:
+        raise TypeError(f"{name}() does not take {', '.join(unknown)}")
+
+
+def _rechunk_settings(entry: Mapping[str, Any], options: Mapping[str, Any]) -> Dict[str, Any]:
+    """What a kept document is cut with again: what it was cut with before, as
+    add_document takes it, under what was asked now. A model's note was
+    recorded as a flag and cannot be called again from one."""
+    kept = {
+        k: v for k, v in (entry.get("chunking") or {}).items() if v is not None and k != "context"
+    }
+    return {**kept, **options}
+
+
+@dataclass
+class RechunkedDocument:
+    """One document in a :class:`RechunkPreview`: its chunks in the index now
+    and after, and the settings it was cut with and would be cut with."""
+
+    doc_id: str
+    chunks_now: int
+    chunks_after: int
+    chunking_now: Dict[str, Any] = field(default_factory=dict)
+    chunking_after: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def changed(self) -> bool:
+        return self.chunks_now != self.chunks_after or any(
+            self.chunking_now.get(k) != v for k, v in self.chunking_after.items() if v is not None
+        )
+
+
+@dataclass
+class RechunkPreview:
+    """What :meth:`Vectrix.rechunk` would do, from :meth:`Vectrix.rechunk_preview`."""
+
+    documents: List[RechunkedDocument] = field(default_factory=list)
+
+    @property
+    def chunks_now(self) -> int:
+        return sum(d.chunks_now for d in self.documents)
+
+    @property
+    def chunks_after(self) -> int:
+        return sum(d.chunks_after for d in self.documents)
+
+    @property
+    def changed(self) -> List[RechunkedDocument]:
+        """The documents whose chunks or settings would change."""
+        return [d for d in self.documents if d.changed]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "documents": [
+                {
+                    "doc_id": d.doc_id,
+                    "chunks_now": d.chunks_now,
+                    "chunks_after": d.chunks_after,
+                    "chunking_now": dict(d.chunking_now),
+                    "chunking_after": dict(d.chunking_after),
+                    "changed": d.changed,
+                }
+                for d in self.documents
+            ],
+            "chunks_now": self.chunks_now,
+            "chunks_after": self.chunks_after,
+            "changed": len(self.changed),
+        }
+
+    def __str__(self) -> str:
+        return (
+            f"{len(self.documents)} documents, {len(self.changed)} would change: "
+            f"{self.chunks_now} chunks now, {self.chunks_after} after"
+        )
 
 
 @dataclass
@@ -2283,6 +2380,15 @@ class Vectrix:
             out[i] = fresh[j]
         return out
 
+    @traced(
+        "add_document",
+        before=lambda a: {
+            "collection": a["self"].name,
+            "kind": a["kind"],
+            "chunking": a["chunk"],
+        },
+        after=lambda added: {"chunks": added},
+    )
     def add_document(
         self,
         source: Union[str, Path, "LoadedDocument"],
@@ -2515,7 +2621,7 @@ class Vectrix:
                 f"below {cutoff:.2f}: its text reads as a failed extraction. Written "
                 f"anyway because on_low_quality is warn.",
                 ExtractionQualityWarning,
-                stacklevel=2,
+                stacklevel=3,  # past the tracing wrapper, to the caller
             )
         for parent_id, parent_text, parent_meta in prepared.parents:
             self._parents.put(parent_id, parent_text, parent_meta)
@@ -3008,6 +3114,21 @@ class Vectrix:
         return self._documents
 
     @property
+    def sources(self) -> Any:
+        """The feeds and pages this collection keeps up with: :class:`~vectrixdb.sources.Sources`.
+
+        ``db.sources.add("https://example.com/feed.xml", every="6h")``, then
+        ``db.sources.refresh()`` from a schedule writes what is new or changed.
+        """
+        held: Any = getattr(self, "_sources", None)
+        if held is None:
+            from .sources import Sources
+
+            held = Sources.of(self)
+            self._sources = held
+        return held
+
+    @property
     def kept_chunks(self) -> Any:
         """The :class:`~vectrixdb.documents.ChunkStore`, or None."""
         return self._chunk_files
@@ -3031,6 +3152,11 @@ class Vectrix:
             return None
         return self._documents.figure_bytes(doc_id, src)
 
+    @traced(
+        "rechunk",
+        before=lambda a: {"collection": a["self"].name, "preview": False},
+        after=lambda written: {"chunks": written},
+    )
     def rechunk(
         self, doc_id: Optional[Union[str, List[str]]] = None, where: Any = None, **options: Any
     ) -> int:
@@ -3052,38 +3178,14 @@ class Vectrix:
 
         store = self._store()
         wanted = [doc_id] if isinstance(doc_id, str) else doc_id
-        allowed = (
-            "chunk",
-            "chunk_size",
-            "overlap",
-            "parent_size",
-            "embed_heading",
-            "dedupe",
-            "threshold",
-            "on_low_quality",
-            "quality_threshold",
-            "progress",
-            "cut_with",
-            "context_with",
-            "late",
-        )
-        unknown = sorted(set(options) - set(allowed))
-        if unknown:
-            raise TypeError(f"rechunk() does not take {', '.join(unknown)}")
+        _rechunk_options(options, "rechunk")
         written = 0
         for one in matching(store, where, wanted):
             entry = store.entry(one)
             if entry is None:
                 raise DocumentNotFoundError(one)
             doc = store.get(one, images=True)
-            # What it was cut with before, as add_document takes it: a model's
-            # note was recorded as a flag and cannot be called again from one.
-            kept = {
-                k: v
-                for k, v in (entry.get("chunking") or {}).items()
-                if v is not None and k != "context"
-            }
-            settings = {**kept, **options}
+            settings = _rechunk_settings(entry, options)
             self._rechunking = True
             try:
                 self.delete_document(one)
@@ -3112,6 +3214,74 @@ class Vectrix:
                 user_metadata=entry.get("user_metadata") or {},
             )
         return written
+
+    @traced(
+        "rechunk",
+        before=lambda a: {"collection": a["self"].name, "preview": True},
+        after=lambda planned: {
+            "documents": len(planned.documents),
+            "chunks": planned.chunks_after,
+        },
+    )
+    def rechunk_preview(
+        self, doc_id: Optional[Union[str, List[str]]] = None, where: Any = None, **options: Any
+    ) -> "RechunkPreview":
+        """What :meth:`rechunk` with the same arguments would do, without doing it.
+
+        Each kept document is cut with the settings it would get and the
+        chunks are counted beside the ones the index holds for it now.
+        Nothing is written, deleted or embedded, so a preview over a whole
+        collection costs reading its Markdown, apart from what semantic
+        chunking asks the embedder and llm chunking asks ``cut_with``. A
+        model's note (``context_with``) is not written: it does not move a
+        cut. The counts are before ``dedupe``, which can only lower them.
+        """
+        from .documents import matching
+        from .ingest import prepare_document
+
+        store = self._store()
+        wanted = [doc_id] if isinstance(doc_id, str) else doc_id
+        _rechunk_options(options, "rechunk_preview")
+        held: Dict[str, int] = {}
+        for _, _, meta in _coll(self)._iter_documents_raw():
+            one = meta.get("_vx_doc")
+            if one is not None:
+                held[one] = held.get(one, 0) + 1
+        rows: List[RechunkedDocument] = []
+        for one in matching(store, where, wanted):
+            entry = store.entry(one)
+            if entry is None:
+                raise DocumentNotFoundError(one)
+            settings = _rechunk_settings(entry, options)
+            chunk = settings.get("chunk", "recursive")
+            prepared = prepare_document(
+                store.get(one),
+                one,
+                chunk=chunk,
+                chunk_size=settings.get("chunk_size", 1000),
+                overlap=settings.get("overlap", 200),
+                parent_size=settings.get("parent_size"),
+                metadata=entry.get("user_metadata") or None,
+                embed_heading=bool(settings.get("embed_heading", False)),
+                threshold=settings.get("threshold", 0.1),
+                embed=self._embed if chunk == "semantic" else None,
+                quality_threshold=settings.get("quality_threshold"),
+                cut_with=settings.get("cut_with"),
+            )
+            rows.append(
+                RechunkedDocument(
+                    doc_id=one,
+                    chunks_now=held.get(one, 0),
+                    chunks_after=len(prepared.ids) if prepared is not None else 0,
+                    chunking_now={
+                        k: v
+                        for k, v in (entry.get("chunking") or {}).items()
+                        if k in _RECORDED_CHUNKING
+                    },
+                    chunking_after={k: settings.get(k) for k in _RECORDED_CHUNKING},
+                )
+            )
+        return RechunkPreview(documents=rows)
 
     def reextract(
         self, where: Any = None, fetcher: Any = None, doc_id: Optional[Union[str, List[str]]] = None
@@ -4194,6 +4364,23 @@ class Vectrix:
                 f"ColBERT embedder has no encode method. Available: {dir(colbert)}"
             )
 
+    @traced(
+        "search",
+        before=lambda a: {
+            "collection": a["self"].name,
+            "mode": str(a["mode"] or a["self"].default_mode),
+            "limit": a["limit"],
+            "rerank": None if a["rerank"] is None else str(a["rerank"]),
+            "filtered": a["filter"] is not None,
+        },
+        after=lambda found: {
+            "results": len(found.items),
+            "top_relevance": found.items[0].relevance if found.items else None,
+            "top_relevance_kind": found.items[0].relevance_kind if found.items else None,
+            "degraded": bool(found.degraded),
+            "truncated": bool(found.truncated),
+        },
+    )
     def search(
         self,
         query: str,
@@ -5452,7 +5639,22 @@ class Vectrix:
         Example:
             >>> db.clear()
         """
+        # The sources it keeps up with stay, and the next refresh writes
+        # everything they give again: deleting the collection forgets them,
+        # and what they had written is gone with the documents.
+        from .sources import kept_sources, restore_sources
+
+        try:
+            sources_store = getattr(self._db, "sources_store", None)
+            kept = kept_sources(sources_store, self.name) if sources_store is not None else []
+        except Exception as exc:  # the store's own error: clearing goes ahead without them
+            logger.warning(
+                "the sources of %s could not be read before clearing it: %s", self.name, exc
+            )
+            sources_store, kept = None, []
         self._db.delete_collection(self.name)
+        if kept:
+            restore_sources(sources_store, self.name, kept)
         mode_tags = [self.default_mode.capitalize()]
         self._collection = self._db.create_collection(
             name=self.name,
@@ -5740,6 +5942,7 @@ class Vectrix:
             # without this it died with "closed database" instead of the
             # ConfigurationError that names the problem.
             self._embed_cache = None
+            self._sources = None
             self._db.close()
             self._db = None
             self._collection = _Closed(self.name)

@@ -97,6 +97,7 @@ from typing import (
 import numpy as np
 
 from ._chat import ChatRoute, json_in
+from .tracing import traced
 
 logger = logging.getLogger(__name__)
 
@@ -1497,6 +1498,11 @@ class _Likeness:
         return out
 
 
+@traced(
+    "write_golden",
+    before=lambda a: {"collection": getattr(a["db"], "name", None), "limit": a["n"]},
+    after=lambda writing: {"questions": len(writing.rows)},
+)
 def write_golden(
     db: Any,
     path: Optional[Union[str, Path]] = None,

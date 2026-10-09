@@ -340,6 +340,7 @@ _REFUSAL_FILES = [
     ("vectrixdb/api/signin.py", "Sign-in and the door"),
     ("vectrixdb/api/server.py", "Collections, points and search"),
     ("vectrixdb/api/documents.py", "Documents"),
+    ("vectrixdb/api/sources.py", "Feeds and pages a collection keeps up with"),
     ("vectrixdb/api/inspection.py", "Inspection, provenance and the audit trail"),
     ("vectrixdb/api/evaluations.py", "Evaluations"),
     ("vectrixdb/api/replies.py", "The one answer for a collection that is not there"),

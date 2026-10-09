@@ -704,6 +704,26 @@ class TestFromTheEnvironment:
         reader = HttpExtractor.from_environment(env, routes={".pdf": "/extract/pdf"})
         assert reader.headers == {"api-key": "k"} and reader.timeout == 230
 
+    def test_the_key_can_come_from_a_file_as_a_container_mounts_it(self, tmp_path):
+        secret = tmp_path / "extractor.key"
+        secret.write_text("from-a-file\n", encoding="utf-8")
+        env = {**self.URL, "VECTRIXDB_EXTRACTOR_KEY_FILE": str(secret)}
+        reader = HttpExtractor.from_environment(env, routes={".pdf": "/extract/pdf"})
+        assert reader.headers == {"x-api-key": "from-a-file"}
+
+    def test_the_key_and_its_file_together_are_refused(self, tmp_path):
+        from vectrixdb.exceptions import ConfigurationError
+
+        secret = tmp_path / "extractor.key"
+        secret.write_text("k2", encoding="utf-8")
+        env = {
+            **self.URL,
+            "VECTRIXDB_EXTRACTOR_KEY": "k",
+            "VECTRIXDB_EXTRACTOR_KEY_FILE": str(secret),
+        }
+        with pytest.raises(ConfigurationError, match="both set"):
+            HttpExtractor.from_environment(env, routes={".pdf": "/extract/pdf"})
+
     def test_the_key_header_is_x_api_key_unless_told(self):
         reader = HttpExtractor.from_environment(
             {**self.URL, "VECTRIXDB_EXTRACTOR_KEY": "k"}, routes={".pdf": "/extract/pdf"}

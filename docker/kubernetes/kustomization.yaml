@@ -1,0 +1,47 @@
+# VectrixDB on Kubernetes: the server with its dashboard, and the extraction
+# service beside it, which only the server can reach.
+#
+#   kubectl create namespace vectrixdb
+#   kubectl -n vectrixdb create secret generic vectrixdb-key \
+#     --from-literal=api-key="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+#   kubectl -n vectrixdb apply -k docker/kubernetes
+#   kubectl -n vectrixdb port-forward service/vectrixdb 7337:7337
+#
+# The dashboard is then at http://localhost:7337, and every call takes the key
+# in the vectrixdb-key secret. A company that keeps secrets in Vault, Azure
+# Key Vault or AWS Secrets Manager syncs them into that secret instead, with
+# the External Secrets Operator or the Secrets Store CSI driver.
+#
+# Every pod meets the "restricted" Pod Security Standard: no root, no
+# privilege escalation, every capability dropped, the runtime's default
+# seccomp profile and a read-only root filesystem. Label the namespace
+# pod-security.kubernetes.io/enforce=restricted and the cluster holds them to it.
+#
+# The server keeps its collections on one ReadWriteOnce volume, so it runs one
+# replica and restarts rather than rolls. More replicas need state they can
+# share: VECTRIXDB_STORAGE_BACKEND set to azure_search or cosmosdb for the
+# collections, and postgresql:// or cosmos:// for VECTRIXDB_SIGNIN_STORE and
+# VECTRIXDB_COLLECTION_STORE. Then raise replicas and switch the strategy to
+# RollingUpdate.
+#
+# Pin the images by digest for production, so what runs is what was signed:
+#   kustomize edit set image ghcr.io/knowusuboaky/vectrixdb=ghcr.io/knowusuboaky/vectrixdb@sha256:<digest>
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: vectrixdb
+    includeSelectors: false
+
+resources:
+  - server.yaml
+  - extract.yaml
+  - network-policy.yaml
+
+images:
+  - name: ghcr.io/knowusuboaky/vectrixdb
+    newTag: "2.2.0"
+  - name: ghcr.io/knowusuboaky/vectrixdb-extract
+    newTag: "2.2.0"
