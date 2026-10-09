@@ -8,7 +8,7 @@ may call is on [Keys for a team](mcp-keys.md#roles).
 For the one-person server started with `vectrixdb mcp`, see
 [On your own machine](mcp-local.md).
 
-![Three tools called on a real server: whoami, describe_collection naming the team field, and a search counting its results by team](../images/terminal/terminal-mcp.gif)
+![Three tools called on a real server: whoami, describe_collection naming the team field, and a search counting its results by team](../images/terminal/mcp.gif)
 <span class="vx-caption">Real tool calls to a server started for the clip, and what each answered.</span>
 
 ## The tools that read
