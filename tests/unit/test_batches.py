@@ -179,12 +179,15 @@ class TestSound:
         reader = Reader()
         ffmpeg = Ffmpeg(seconds=8.0, pauses=[(2.4, 2.6), (5.4, 5.6), (7.0, 7.1)])
         doc = batched(reader, minutes=0.05, sound=ffmpeg)(b"eight seconds", "call.mp3")
-        assert [name for name, _data, _ in reader.calls] == [
+        # The pieces are read at once, so the order the reader saw them in is
+        # the threads', not the recording's; by name it is the recording's.
+        calls = sorted(reader.calls, key=lambda call: call[0])
+        assert [name for name, _data, _ in calls] == [
             "call.part1.wav",
             "call.part2.wav",
             "call.part3.wav",
         ]
-        assert [round(seconds_of(data), 2) for _name, data, _ in reader.calls] == [2.5, 3.0, 2.5]
+        assert [round(seconds_of(data), 2) for _name, data, _ in calls] == [2.5, 3.0, 2.5]
         assert [(round(a, 2), text) for a, _b, text in doc.segments] == [
             (0.0, "call.part1.wav begins"),
             (1.25, "call.part1.wav ends"),
@@ -266,7 +269,7 @@ class TestPdf:
         reader = Reader()
         batched(reader, pages=20, max_bytes=len(a_pdf(6)))(a_pdf(12), "report.pdf")
         sizes = [name for name, _data, _ in reader.calls]
-        assert len(sizes) > 1 and sizes[0] == "report.pages-1.pdf"
+        assert len(sizes) > 1 and "report.pages-1.pdf" in sizes
 
 
 # ==================================================================== retries ===
@@ -419,7 +422,8 @@ class TestTheRealFfmpeg:
         doc = batched(reader, minutes=0.05, sound=FfmpegSound(pause=0.3))(
             path.read_bytes(), "talk.wav"
         )
-        assert [round(seconds_of(data), 1) for _name, data, _ in reader.calls] == [2.6, 2.9, 2.5]
+        calls = sorted(reader.calls, key=lambda call: call[0])  # read at once, so by name
+        assert [round(seconds_of(data), 1) for _name, data, _ in calls] == [2.6, 2.9, 2.5]
         assert [round(a, 1) for a, _b, _t in doc.segments][::2] == [0.0, 2.6, 5.5]
 
 
