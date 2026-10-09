@@ -16,6 +16,22 @@ may change at any time.
 
 ### Added
 
+- **A client in four languages, one surface.** `vectrixdb.connect(url,
+  key=...)` returns a `VectrixClient` with the same calls as `Vectrix`:
+  `search` returns the same `Results` with the same citations, `add_document`
+  sends a file for the server to read and embed, `add_texts`, `documents`,
+  `open_document`, `delete_document`, `collections`, `describe`,
+  `create_collection`, `sources`, `add_source`, `refresh_sources`, `whoami`,
+  `health` and `ready`. `AsyncVectrixClient` is the same with `await`. A key
+  goes in the `api-key` header, a company sign-in token as a bearer token; a
+  429 or 503 is retried three times honouring `Retry-After`; every refusal is
+  a `RequestError` with `status`, `message` and `detail`, and one named kind
+  per status (`AuthError`, `ForbiddenError`, `NotFoundError`,
+  `InvalidError`, `BusyError`, ...). The `client` extra brings httpx. The
+  TypeScript, Go and Rust clients under `sdk/` offer the same calls, are
+  built from `docs/reference/openapi.json`, and each runs the same
+  conformance walk (`sdk/CONTRACT.md`) against a real server, which
+  `sdk/conformance/serve.py` starts.
 - **`vectrixdb doctor` tries every part of an install.** `vectrixdb check`
   reads the settings; `doctor` runs it and then tries each part for real: it
   writes and removes a file in the data folder, loads the embedding model and

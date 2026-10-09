@@ -84,6 +84,7 @@ nav:
       - Choose a storage backend: how-to/storage-backends.md
       - Run the REST API: how-to/rest-api.md
       - Build an app on it: how-to/build-an-app.md
+      - Use it from Python, TypeScript, Go or Rust: how-to/clients.md
       - Sign people in: how-to/sign-in.md
       - Put your company's name on it: how-to/branding.md
       - Deploy the server: how-to/deploy.md
@@ -109,6 +110,7 @@ nav:
       - Work with the knowledge graph: how-to/knowledge-graph.md
   - Reference:
       - Easy API: reference/easy.md
+      - Python client: reference/client.md
       - Exceptions: reference/exceptions.md
       - Filters: reference/filters.md
       - Command line: reference/cli.md
