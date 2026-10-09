@@ -24,6 +24,11 @@ may change at any time.
   the system, and a build checks that no bundled copy is left.
   `POSTGRES_FROM_SOURCE=0` takes the wheel, for a build Debian's archive is
   out of reach of.
+- **A rebuild of a release's images takes main's Dockerfile.** Run by hand
+  with a version, the Containers workflow checked out the release's tag, so a
+  fix to the image itself could never reach a released version. It now
+  builds the release's wheel with main's Dockerfile and checks, and refuses
+  to run from any other branch.
 
 ## [2.2.0] - 2026-10-09
 ### Added
