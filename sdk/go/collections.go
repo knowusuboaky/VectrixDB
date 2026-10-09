@@ -30,6 +30,10 @@ func (c *Client) Ready(ctx context.Context) (bool, error) {
 	if errors.Is(err, ErrNotFound) {
 		return c.Health(ctx)
 	}
+	// 503 after the retries: the models are still loading.
+	if errors.Is(err, ErrBusy) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}

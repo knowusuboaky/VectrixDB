@@ -299,6 +299,8 @@ impl Client {
         match self.send(request).await {
             Ok(_) => Ok(true),
             Err(e) if e.is_not_found() => self.health().await,
+            // 503 after the retries: the models are still loading.
+            Err(e) if e.is_busy() => Ok(false),
             Err(e) => Err(e),
         }
     }

@@ -251,6 +251,8 @@ export class VectrixClient {
       return res.ok;
     } catch (err) {
       if (err instanceof NotFoundError) return this.health();
+      // 503 after the retries: the models are still loading.
+      if (err instanceof BusyError) return false;
       throw err;
     }
   }
