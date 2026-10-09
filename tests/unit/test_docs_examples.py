@@ -82,6 +82,9 @@ NOT_EXECUTABLE = (
     # The page is about calling one over HTTP, and there is none here; what
     # those calls return is held to in test_signin_key_scope.py instead.
     "vectors.company.com",
+    # The same, through a company's gateway; the gateway options are held to
+    # in test_client.py against a stand-in transport.
+    "gateway.company.com",
     # An extraction service, which refuses to be built without the key the
     # reader puts in their .env, and whose Azure services are the reader's
     # own. Every route it serves is held to in test_extraction_app.py.

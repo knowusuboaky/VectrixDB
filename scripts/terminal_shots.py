@@ -3,6 +3,9 @@
     python scripts/terminal_shots.py              # every clip
     python scripts/terminal_shots.py clients      # one of them
 
+cli.gif points the vectrixdb command at a server serve.py started: a folder
+ingested, a search with its citations, whoami, and the plain-HTTP address it
+refuses to send a key to.
 clients.gif starts a server with sdk/conformance/serve.py, adds a document
 with the Python client, and runs the same search with each client's own
 example: Python, TypeScript, Go and Rust, each answering with the same
@@ -12,7 +15,7 @@ is shown under it is what it printed. Both are saved in docs/images/terminal,
 960 wide.
 
 Needs Pillow, websocket-client, Edge or Chrome (VECTRIXDB_BROWSER names one
-somewhere else), and for clients.gif node with sdk/typescript's packages
+somewhere else), jq for cli.gif, and for clients.gif node with sdk/typescript's packages
 installed, go and cargo. The Go and Rust examples are built before filming,
 so the clip shows what they print and not the compiler.
 """
@@ -42,6 +45,7 @@ OUT = ROOT / "docs" / "images" / "terminal"
 CLIPS = {
     "clients": "One server, one document, the same search from Python, TypeScript, Go and Rust",
     "doctor": "vectrixdb doctor trying every part of a fresh install",
+    "cli": "The vectrixdb command on a server: ingest, search, whoami, and a key it will not send",
 }
 QUERY = "how long do refunds take?"
 #: The clips are taller than the containers page's, so a whole run fits without scrolling.
@@ -199,7 +203,86 @@ def film_doctor(reel: shots.Reel, scratch: Path) -> None:
         term.show(line, 260 if at < len(lines) - 1 else 4000)
 
 
-FILMS = {"clients": film_clients, "doctor": film_doctor}
+def _command() -> str:
+    beside = Path(sys.executable).with_name("vectrixdb")
+    return str(beside) if beside.exists() else "vectrixdb"
+
+
+def film_cli(reel: shots.Reel, scratch: Path) -> None:
+    server = subprocess.Popen(
+        [sys.executable, str(SDK / "conformance" / "serve.py")],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        assert server.stdout is not None
+        where = json.loads(server.stdout.readline())
+        folder = scratch / "policies"
+        folder.mkdir()
+        (folder / "handbook.md").write_bytes((SDK / "conformance" / "handbook.md").read_bytes())
+        quiet = {"COLUMNS": "100", "TERM": "dumb", "NO_COLOR": "1"}
+        env = {"VECTRIXDB_URL": where["url"], "VECTRIXDB_KEY": where["key"], **quiet}
+
+        def vx(*args: str, extra: Optional[Dict[str, str]] = None, fails: bool = False) -> str:
+            done = subprocess.run(
+                [_command(), *args],
+                cwd=scratch,
+                env={
+                    **{k: v for k, v in os.environ.items() if not k.startswith("VECTRIXDB_")},
+                    **(extra if extra is not None else env),
+                },
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+            if (done.returncode != 0) != fails:
+                raise SystemExit(
+                    f"vectrixdb {' '.join(args)}: {(done.stdout + done.stderr)[-800:]}"
+                )
+            return (done.stdout + done.stderr).rstrip("\n")
+
+        term = terminal.Terminal(reel, scratch, "vectrixdb, on a server", HEIGHT)
+        reel.hold(600)
+        term.type(f"export VECTRIXDB_URL={where['url']}", 200)
+        term.type('export VECTRIXDB_KEY="$(cat handbook.key)"', 300)
+        printed = vx("ingest", "policies", "--name", "handbook")
+        term.type("vectrixdb ingest policies --name handbook", 300)
+        term.show(html.escape(printed), 1300)
+        printed = vx("query", QUERY, "--name", "handbook", "--limit", "2", "--json")
+        term.type(
+            f'vectrixdb query "{QUERY}" --name handbook --limit 2 --json | jq ".items[] | {{score, citation}}"',
+            300,
+        )
+        # jq itself, given what the command printed: the clip shows what the pipe prints.
+        picked = subprocess.run(
+            ["jq", ".items[] | {score, citation}"],
+            input=printed,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout.rstrip("\n")
+        term.show(terminal.coloured(picked), 1700)
+        printed = vx("whoami")
+        term.type("vectrixdb whoami", 300)
+        term.show(html.escape(printed), 1400)
+        printed = vx(
+            "list",
+            "--url",
+            "http://vectors.example.com",
+            extra={"VECTRIXDB_KEY": where["key"], **quiet},
+            fails=True,
+        )
+        term.type("vectrixdb list --url http://vectors.example.com", 300)
+        term.show(f'<span class="s">{html.escape(printed)}</span>', 3200)
+    finally:
+        server.terminate()
+        server.wait(timeout=30)
+
+
+FILMS = {"clients": film_clients, "doctor": film_doctor, "cli": film_cli}
 
 
 def main(argv: Optional[List[str]] = None) -> int:

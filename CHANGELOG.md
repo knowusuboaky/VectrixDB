@@ -32,6 +32,29 @@ may change at any time.
   built from `docs/reference/openapi.json`, and each runs the same
   conformance walk (`sdk/CONTRACT.md`) against a real server, which
   `sdk/conformance/serve.py` starts.
+- **Clients safe to point anywhere.** All four clients refuse to send a key
+  or token over plain HTTP to another machine (`allow_http` says otherwise),
+  never follow a redirect, so a key goes only to the address it was given
+  for, always check certificates, and never print a key. They take a
+  gateway's key header and token header, extra headers, its `prefix` and
+  `gateway_paths` (read exactly as the server's `VECTRIXDB_GATEWAY_PATHS`),
+  a private CA and a client certificate, and honour `HTTPS_PROXY`. The Go
+  module is `github.com/knowusuboaky/VectrixDB/sdk/go/v2`, as a 2.x release
+  needs.
+- **The `vectrixdb` command on a server.** Every command that works on a
+  folder takes `--url` (or `VECTRIXDB_URL`) and works on a server instead:
+  `list`, `info`, `stats`, `create`, `delete`, `ingest`, `query`, `sources`
+  and `keys`. Who you are comes from `--key-file` (refused when others can
+  read it), `VECTRIXDB_KEY`, `VECTRIXDB_KEY_FILE`, `VECTRIXDB_TOKEN`, or
+  `vectrixdb login`, which signs a person in with the identity provider the
+  server names (a browser with PKCE, or `--device` from SSH and containers)
+  and keeps the sign-in for that address alone, readable by its owner, and
+  refreshed before it expires. There is no `--key`, which shell history
+  would keep. `vectrixdb whoami`, `vectrixdb logout`, `--json` for scripts,
+  exit codes 0, 1 and 2, and `VECTRIXDB_CA_BUNDLE`,
+  `VECTRIXDB_CLIENT_CERT` and the gateway settings for a company network.
+  What a server sends back is printed with terminal control characters
+  taken out.
 - **`vectrixdb doctor` tries every part of an install.** `vectrixdb check`
   reads the settings; `doctor` runs it and then tries each part for real: it
   writes and removes a file in the data folder, loads the embedding model and

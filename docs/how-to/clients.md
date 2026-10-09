@@ -149,6 +149,50 @@ A 429 or 503 is retried three times first, waiting as long as the server's
 503 with `Retry-After` rather than holding the request, so the retries are
 what spreads the load. Nothing else is retried.
 
+## Behind a company network
+
+Every client takes the same options for what stands between you and the
+server, and refuses the same two mistakes:
+
+```python
+from vectrixdb import connect
+
+db = connect(
+    "https://gateway.company.com",
+    key=KEY,
+    key_header="Ocp-Apim-Subscription-Key",  # the header the gateway wants the key in
+    prefix="/acme",  # the path every route lives under
+    gateway_paths="api/v1=/files/search, auth=/files/auth",  # the gateway team's list
+    verify="/etc/ssl/company-ca.pem",  # a company's own certificate authority
+)
+```
+
+| Option | Python | TypeScript | Go | Rust |
+|---|---|---|---|---|
+| key header | `key_header=` | `keyHeader` | `WithKeyHeader` | `.key_header()` |
+| token header | `token_header=` | `tokenHeader` | `WithTokenHeader` | `.token_header()` |
+| more headers | `headers=` | `headers` | `WithHeader` | `.header()` |
+| gateway paths | `prefix=`, `gateway_paths=` | `prefix`, `gatewayPaths` | `WithPrefix`, `WithGatewayPaths` | `.prefix()`, `.gateway_paths()` |
+| private CA | `verify="ca.pem"` | `NODE_EXTRA_CA_CERTS` | `WithHTTPClient` | `.ca_certificate(pem)` |
+| client certificate | `cert=` | your own `fetch` | `WithHTTPClient` | `.identity(pem)` |
+| proxy | `HTTPS_PROXY` | `NODE_USE_ENV_PROXY=1` | `HTTPS_PROXY` | `HTTPS_PROXY` |
+
+- **No key over plain HTTP.** A client given a key or token for an
+  `http://` address refuses to start unless the address is this machine;
+  `allow_http` (`allowHttp`, `WithAllowHTTP`, `.allow_http(true)`) says
+  otherwise on a network you trust.
+- **No redirects.** A redirect would take the key with it, so it is
+  reported, with the address it named, instead of followed.
+- Certificates are always checked, and a key never appears in an error, a
+  log line or the client's printed form.
+
+The paths are read exactly as the server reads its own
+`VECTRIXDB_GATEWAY_PATHS` ([Behind a gateway](behind-a-gateway.md)), so one
+list serves both sides.
+
+From a terminal, the `vectrixdb` command does all of this too, with a key
+file or your company sign-in: [Use the command line on a server](command-line-server.md).
+
 ## Another language
 
 The four clients are thin: each call is one request, described in

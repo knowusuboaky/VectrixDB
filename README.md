@@ -112,6 +112,8 @@ optional package or a cloud account, so the code on them cannot quietly rot.
   somebody else's server
 - [Use it from Python, TypeScript, Go or Rust](docs/how-to/clients.md), the
   four clients and their one set of calls
+- [Use the command line on a server](docs/how-to/command-line-server.md),
+  with a key file or your company sign-in
 - [Sign people in](docs/how-to/sign-in.md)
 - [Put your company's name on it](docs/how-to/branding.md)
 - [Deploy the server](docs/how-to/deploy.md)

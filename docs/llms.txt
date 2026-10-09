@@ -43,6 +43,7 @@ Notes for coding agents:
 - [Run the REST API](https://knowusuboaky.github.io/VectrixDB/how-to/rest-api/): `vectrixdb serve`
 - [Build an app on it](https://knowusuboaky.github.io/VectrixDB/how-to/build-an-app/): from any language, over HTTP
 - [Use it from Python, TypeScript, Go or Rust](https://knowusuboaky.github.io/VectrixDB/how-to/clients/): the four clients, one surface
+- [Use the command line on a server](https://knowusuboaky.github.io/VectrixDB/how-to/command-line-server/): every command with --url, a key file or a company sign-in, safe behind a gateway
 - [Use the dashboard](https://knowusuboaky.github.io/VectrixDB/how-to/dashboard/): every page
 - [Sign people in](https://knowusuboaky.github.io/VectrixDB/how-to/sign-in/): single sign-on, keys, roles
 - [Restrict what a search can see](https://knowusuboaky.github.io/VectrixDB/how-to/entitlements/): per-person access rules
