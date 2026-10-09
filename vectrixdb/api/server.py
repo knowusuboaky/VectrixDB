@@ -1158,7 +1158,10 @@ async def lifespan(app: FastAPI):
     logger.info("collection records: %s", describe_collection_store(_db.collection_store))
     logger.info("collections loaded: %d", len(_db))
 
-    yield
+    from .mcp import running as mcp_running
+
+    async with mcp_running(app):
+        yield
 
     # Shutdown
     if _db:
@@ -1496,6 +1499,11 @@ def create_app(
     from .sources import router as sources_router
 
     app.include_router(sources_router)
+    # MCP at /mcp, when VECTRIXDB_MCP asks for it: tools that call the routes above as the caller.
+    from . import mcp as mcp_door
+
+    if mcp_door.enabled():
+        mcp_door.mount(app)
     # A gateway path given to a route that is not here is a typing mistake, found now rather than by a caller.
     gateway.check(declared_paths(app.routes))
     return app
@@ -2978,7 +2986,10 @@ async def keyword_search(name: str, request: KeywordSearchRequest, req: Request)
     """
     db = get_db()
 
-    collection = _servable(db, name)
+    # A person is somebody a policy can judge, as text-search does: the library
+    # scores the words over what they may see, so a withheld document moves nothing.
+    collection, principal = _servable_as(db, name, req)
+    started = time.perf_counter()
 
     try:
         results = collection.keyword_search(
@@ -2986,8 +2997,10 @@ async def keyword_search(name: str, request: KeywordSearchRequest, req: Request)
             limit=request.limit,
             filter=request.filter,
             include_highlights=request.include_highlights,
+            **({"principal": principal} if principal is not None else {}),
         )
-        return ApiResponse(ok=True, data=_snipped(results.to_dict(), req))
+        _record_decision(req, collection, principal, request.query_text, results, started)
+        return ApiResponse(ok=True, data=_snipped(_judged(results.to_dict(), principal), req))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:

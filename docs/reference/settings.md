@@ -2,7 +2,7 @@
 
 # Settings
 
-Every setting VectrixDB reads, 157 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
+Every setting VectrixDB reads, 160 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
 
 ## The server
 
@@ -35,6 +35,14 @@ Every setting VectrixDB reads, 157 of them, each an environment variable. `vectr
 | `VECTRIXDB_READ_ONLY_API_KEY` | A key that reads and never writes. (a secret, or `VECTRIXDB_READ_ONLY_API_KEY_FILE`) |  |
 | `VECTRIXDB_READ_ONLY_API_KEY_SHA256` | The read-only key as its SHA-256. |  |
 | `VECTRIXDB_OPEN_READS` | With a key and no sign-in: 0 makes every read ask for the full or the read-only key, the dashboard's live feed too. On unless set, so a read needs no key. | `1` |
+
+## Assistants over MCP
+
+| Setting | What it does | Example or default |
+| --- | --- | --- |
+| `VECTRIXDB_MCP` | 1 answers MCP at /mcp: an assistant searches as the person or key it acts for, through the same checks as the REST API. Off unless set. |  |
+| `VECTRIXDB_MCP_WRITES` | 1 offers add_document over MCP, to a caller whose role may write. Off unless set, so an assistant only reads. |  |
+| `VECTRIXDB_MCP_SCOPES` | The scopes an MCP client asks the identity provider for, separated by spaces. Left out, <OIDC_API_AUDIENCE>/.default when the audience is an api:// one. | `api://vectrixdb/search` |
 
 ## Sign-in
 

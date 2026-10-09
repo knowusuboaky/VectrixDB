@@ -159,6 +159,26 @@ SETTINGS: Tuple[Setting, ...] = tuple(
         ],
     )
     + _s(
+        "Assistants over MCP",
+        [
+            (
+                "MCP",
+                "1 answers MCP at /mcp: an assistant searches as the person or key it acts for, through the same checks as the REST API. Off unless set.",
+                "",
+            ),
+            (
+                "MCP_WRITES",
+                "1 offers add_document over MCP, to a caller whose role may write. Off unless set, so an assistant only reads.",
+                "",
+            ),
+            (
+                "MCP_SCOPES",
+                "The scopes an MCP client asks the identity provider for, separated by spaces. Left out, <OIDC_API_AUDIENCE>/.default when the audience is an api:// one.",
+                "api://vectrixdb/search",
+            ),
+        ],
+    )
+    + _s(
         "Sign-in",
         [
             (

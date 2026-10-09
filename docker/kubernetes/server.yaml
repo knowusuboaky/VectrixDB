@@ -69,6 +69,11 @@ spec:
               value: /var/run/secrets/vectrixdb/api-key
             - name: VECTRIXDB_EXTRACTOR_KEY_HEADER
               value: api-key
+            # Assistants connect at /mcp with a key or a company sign-in;
+            # each tool call is checked as a request of its own. "0" turns
+            # the endpoint off.
+            - name: VECTRIXDB_MCP
+              value: "1"
             # Tracing: name the collector, and every search, ingest and
             # evaluation run becomes a trace there. Never the query text.
             # - name: OTEL_EXPORTER_OTLP_ENDPOINT

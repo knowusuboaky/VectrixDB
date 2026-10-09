@@ -43,28 +43,28 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 401 | API key required. Provide api-key header. | `_keys_only` |
 | 401 | Developer Access is off. Sign in again. | `step_up` |
 | 401 | Emergency sign-in is off. Sign in again. | `step_up` |
-| 401 | Invalid API key | `dispatch` |
-| 401 | Sign in to continue | `dispatch`, `_guest` |
+| 401 | Invalid API key | `_dispatch` |
+| 401 | Sign in to continue | `_dispatch`, `_guest` |
 | 401 | That code was not accepted. Codes change every 30 seconds, and each works once. | `password_reset`, `replace_authenticator_confirm`, `step_up` |
 | 401 | That code was not accepted. Codes change every 30 seconds, and each works once., or That password and code were not accepted together. Check both and try again. when passwords are on | `email_verify` |
 | 401 | That passkey is not registered here. | `passkey_finish` |
 | 401 | That password was not accepted. | `step_up` |
 | 401 | That username and password were not accepted together. Check both and try again. | `developer_signin` |
 | 401 | That username and password were not accepted together. Check both and try again., or That password was used in an earlier emergency, and a password works for one. An operator sets a new one. when spent | `break_glass_signin` |
-| 401 | the reason the provider gave | `passkey_finish`, `step_up_passkey_finish`, `dispatch` |
+| 401 | the reason the provider gave | `passkey_finish`, `step_up_passkey_finish`, `_dispatch` |
 | 403 | `said` | `_sso_first` |
-| 403 | Add a passkey to continue: this server signs people in with passkeys. | `dispatch` |
+| 403 | Add a passkey to continue: this server signs people in with passkeys. | `_dispatch` |
 | 403 | Admins sign in with SSO on this server. | `_admin_needs_sso` |
-| 403 | Confirm it's you to make this change | `dispatch` |
+| 403 | Confirm it's you to make this change | `_dispatch` |
 | 403 | Read-only API key cannot perform write operations | `_keys_only` |
 | 403 | Sign in with your passkey: this server signs people in with passkeys. | `email_verify` |
-| 403 | This change needs the person themselves, signed in at the dashboard. An app acting for them cannot make it. | `dispatch` |
+| 403 | This change needs the person themselves, signed in at the dashboard. An app acting for them cannot make it. | `_dispatch` |
 | 403 | This key reaches {named} and nothing else, so {method} {path} is not its to make. | `outside_the_scope` |
-| 403 | This request did not carry the session's forgery token | `dispatch` |
+| 403 | This request did not carry the session's forgery token | `_dispatch` |
 | 403 | This server signs people in with passkeys. Add a passkey instead. | `replace_authenticator_begin`, `replace_authenticator_confirm` |
 | 403 | This server signs people in with passkeys. Make one to finish setting up. | `enrol_confirm` |
 | 403 | why the policy refused, with its code in data | `_gate` |
-| 403 | Your role does not allow this | `dispatch` |
+| 403 | Your role does not allow this | `_dispatch` |
 | 404 | email sign-in is not turned on | `_email_on` |
 | 404 | no authenticator app is set up | `remove_my_authenticator` |
 | 404 | no such key | `revoke_key` |
@@ -89,7 +89,7 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 429 | Too many wrong codes. Wait {runtime.store.lock_minutes(key)} minutes and try again. | `replace_authenticator_confirm` |
 | 429 | Too many wrong tries. Wait {runtime.store.lock_minutes(held)} minutes and try again. | `_locked_out` |
 | 500 | the error's own words | `access_check`, `_gate` |
-| 503 | The access log cannot be written, so this request was not served | `_timed_search`, `dispatch` |
+| 503 | The access log cannot be written, so this request was not served | `_timed_search`, `_dispatch` |
 | 503 | the error's own words | `access_check`, `_gate` |
 | `status` | the rate limit's words, with retry_after in data | `_refuse` |
 

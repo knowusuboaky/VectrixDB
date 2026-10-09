@@ -99,7 +99,11 @@ signin = [
 ]
 # MCP server, so an assistant can use a collection as a tool
 mcp = [
-    "mcp>=1.0.0",
+    # 2 or later: the server's /mcp endpoint is built on its MCPServer.
+    "mcp>=2.0.0",
+    # The endpoint makes each tool's REST call through httpx. mcp 2 brings
+    # httpx2, a different package, so this one is named here.
+    "httpx>=0.24.0",
 ]
 # Spans for searches, ingestion and evaluation runs, sent to any OpenTelemetry
 # backend. Off until VECTRIXDB_TRACING=1, an OTLP endpoint, or tracing.enable().

@@ -64,6 +64,9 @@ services:
       VECTRIXDB_EXTRACTOR_URL: http://extract:7338
       VECTRIXDB_EXTRACTOR_KEY_FILE: /run/secrets/vectrixdb.key
       VECTRIXDB_EXTRACTOR_KEY_HEADER: api-key
+      # An assistant connects at http://localhost:7337/mcp with a key the
+      # dashboard made it. "0" turns the endpoint off.
+      VECTRIXDB_MCP: "1"
     volumes:
       - server-data:/data
     depends_on:

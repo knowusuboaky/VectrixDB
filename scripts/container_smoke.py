@@ -323,6 +323,57 @@ def server_checks(report: Report, image: str) -> None:
 
         hit = top(first)
         report.check("a search finds the right text first", hit == "password", hit)
+        # An assistant's way in: MCP at /mcp, where each tool call is a request
+        # of its own, made with the key the client sent. (Named keys with a role
+        # of their own come with sign-in; a plain API key is the whole key here.)
+        assistant = key
+
+        def rpc(method: str, params: Any, who: str) -> Tuple[int, Any]:
+            status, _, body = call(
+                "POST",
+                first.base + "/mcp",
+                json.dumps(
+                    {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+                ).encode(),
+                {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "api-key": who,
+                },
+            )
+            try:
+                return status, json.loads(body or b"{}")
+            except ValueError:
+                return status, body[:200]
+
+        status, listed = rpc("tools/list", {}, assistant)
+        names = (
+            sorted(t["name"] for t in listed.get("result", {}).get("tools", []))
+            if isinstance(listed, dict)
+            else []
+        )
+        report.check(
+            "the image answers MCP at /mcp: search, open_source, list_collections, no writes",
+            status == 200 and names == ["list_collections", "open_source", "search"],
+            f"status {status}: {names or listed}",
+        )
+        status, found = rpc(
+            "tools/call",
+            {"name": "search", "arguments": {"collection": "smoke", "query": "change my password"}},
+            assistant,
+        )
+        said = (
+            found.get("result", {}).get("content", [{}])[0].get("text", "")
+            if isinstance(found, dict)
+            else str(found)
+        )
+        report.check(
+            "a search over MCP finds the text and cites it",
+            status == 200 and "password" in said.lower() and "Settings" in said,
+            f"status {status}: {said[:200]}",
+        )
+        status, refused = rpc("tools/list", {}, "wrong-key")
+        report.check("MCP with a wrong key is refused", status == 401, f"status {status}")
         status, headers, page = call("GET", first.base + "/dashboard/")
         report.check(
             "the dashboard is served",

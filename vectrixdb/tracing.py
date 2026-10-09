@@ -81,6 +81,9 @@ SAFE_ATTRIBUTES = frozenset(
         "vectrixdb.setups",
         "vectrixdb.preview",
         "vectrixdb.duration_ms",
+        # An MCP tool call: which tool, by its fixed name, and whether it was refused.
+        "vectrixdb.tool",
+        "vectrixdb.refused",
     }
 )
 

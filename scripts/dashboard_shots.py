@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import html
 import http.cookiejar
 import json
 import os
@@ -45,6 +46,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -489,6 +491,8 @@ class Server:
         os.chdir(folder)
         os.environ["VECTRIXDB_AUDIT_JSONL"] = "audit.jsonl"
         os.environ["VECTRIXDB_AUDIT_QUERY_KEY"] = audit_key.decode()
+        # MCP on, for the clips that show an assistant searching.
+        os.environ["VECTRIXDB_MCP"] = "1"
         config = SignInConfig(
             methods=("email",),
             secrets=(base64.b64encode(os.urandom(36)).decode(),),
@@ -682,11 +686,17 @@ class Browser:
             **group,
         )
         port_file = self.profile / "DevToolsActivePort"
+        written = ""
         for _ in range(300):
-            if port_file.exists() and port_file.read_text().strip():
+            try:
+                # On Windows the file is locked while the browser writes it.
+                written = port_file.read_text().strip() if port_file.exists() else ""
+            except OSError:
+                written = ""
+            if written:
                 break
             time.sleep(0.1)
-        port = port_file.read_text().split()[0]
+        port = written.split()[0]
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=10) as reply:
             self.browser_socket_url = json.loads(reply.read().decode())["webSocketDebuggerUrl"]
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=10) as reply:
@@ -886,6 +896,7 @@ def inside(folder: Path, names: List[str]) -> None:
         print("  three people sign in", file=sys.stderr)
         jars = {email: server.sign_in(email) for email, _ in PEOPLE}
         server.prepare(jars[ADMIN])
+        SAMPLE.update(server=server, admin=jars[ADMIN])
 
         def signed_in() -> Browser:
             fresh = Browser()
@@ -988,6 +999,18 @@ CLIPS: Dict[str, Tuple[int, int, str, str]] = {
         800,
         "light",
         "The Console: a preset, a request typed, sent, its answer and the curl for it",
+    ),
+    "tour-mcp": (
+        1280,
+        800,
+        "dark",
+        "An assistant over MCP: it connects, lists the collections and searches, real calls and answers",
+    ),
+    "tour-mcp-keys": (
+        1280,
+        800,
+        "dark",
+        "Who may do what over MCP: a key for one collection, a role that may not search, no key at all",
     ),
     "tour-ingest": (
         1280,
@@ -1379,7 +1402,247 @@ def clip_console(reel: Reel, base: str, theme: str, folder: Path) -> None:
     reel.hold(2600)
 
 
-#: What each clip does, by name.
+# ============================================================================
+# THE MCP CLIPS
+# ============================================================================
+#
+# INPUT   the sample server, with MCP on, and its admin's cookies
+# OUTPUT  pages that show real MCP calls and their real answers, filmed
+#
+# Nothing on these pages is written by hand: every request is made to the
+# sample server as an MCP client makes it, and every answer is the one that
+# came back, typed out a request at a time.
+
+#: The sample server and its admin, for the clips that make keys and call MCP.
+SAMPLE: Dict[str, Any] = {}
+
+MCP_QUESTION = "How long does a refund take?"
+
+
+def mcp_call(
+    base: str, headers: Dict[str, str], method: str, params: Optional[dict] = None
+) -> Tuple[int, Any, Dict[str, str]]:
+    """One MCP request, as a client sends it: the status, the answer, and the headers that came back."""
+    body = json.dumps(
+        {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
+    ).encode()
+    request = urllib.request.Request(
+        base + "/mcp",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            **headers,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=300) as reply:
+            return reply.status, json.loads(reply.read().decode()), dict(reply.headers)
+    except urllib.error.HTTPError as refused:
+        return refused.code, json.loads(refused.read().decode() or "{}"), dict(refused.headers)
+
+
+def _make_key(name: str, role: str, collections: Optional[List[str]] = None) -> str:
+    body: Dict[str, Any] = {"name": name, "role": role}
+    if collections:
+        body["collections"] = collections
+    made = SAMPLE["server"].call(SAMPLE["admin"], "POST", "/api/v1/keys", body)["data"]
+    return made.get("key") or made.get("secret")
+
+
+def _said(answer: Any) -> Tuple[str, bool]:
+    """A tool call's text and whether it was refused, from the MCP answer."""
+    result = (answer or {}).get("result") or {}
+    content = result.get("content") or [{}]
+    return content[0].get("text", ""), bool(result.get("isError"))
+
+
+SESSION_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root { --ink:#f7f5f1; --dim:#b3a99b; --faint:#8e8a7f; --ground:#120f09; --panel:#1a170f; --line:#2a2619; --amber:#e8a81a; --ok:#7ec97e; --bad:#d3736a; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--ground); color:var(--ink); font:15px/1.5 'IBM Plex Sans', system-ui, sans-serif; padding:28px 34px; }
+header { display:flex; align-items:center; gap:12px; margin-bottom:6px; }
+header svg { width:30px; height:30px; }
+h1 { font-size:20px; font-weight:600; margin:0; }
+.sub { color:var(--dim); font-size:13px; margin:0 0 18px 42px; }
+.sub b { color:var(--amber); font-weight:500; }
+.entry { display:none; margin:0 0 12px; border:1px solid var(--line); border-radius:10px; background:var(--panel); overflow:hidden; }
+.entry.on { display:block; }
+.head { display:flex; gap:10px; align-items:center; padding:8px 14px; border-bottom:1px solid var(--line); font:500 12px 'IBM Plex Mono', monospace; color:var(--dim); }
+.head .dir { color:var(--amber); }
+.entry.answer .head .dir { color:var(--ok); }
+.entry.refused .head .dir, .entry.refused .head .tag { color:var(--bad); }
+.tag { margin-left:auto; }
+pre { margin:0; padding:10px 14px 12px; font:13px/1.55 'IBM Plex Mono', monospace; white-space:pre-wrap; word-break:break-word; color:var(--ink); }
+.entry.request pre { color:#f0c65a; }
+.entry.refused pre { color:#f1b3ad; }
+</style></head><body>
+<header><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#e8a81a"/><g transform="translate(4 4)" fill="none" stroke="#1a170f" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></g></svg><h1>__TITLE__</h1></header>
+<p class="sub">__SUB__</p>
+<div id="log">__ENTRIES__</div>
+<script>
+const all = [...document.querySelectorAll('.entry')];
+window.__vxShow = (i) => { const e = all[i]; e.classList.add('on'); e.scrollIntoView({block:'end'}); };
+window.__vxType = (i, n) => { const e = all[i]; const p = e.querySelector('pre'); if (!p.dataset.full) p.dataset.full = p.textContent; e.classList.add('on'); p.textContent = p.dataset.full.slice(0, n); e.scrollIntoView({block:'end'}); };
+window.__vxLength = (i) => (all[i].querySelector('pre').dataset.full || all[i].querySelector('pre').textContent).length;
+window.__vxCount = () => all.length;
+</script></body></html>"""
+
+
+def _entry(kind: str, head: str, tag: str, body: str) -> str:
+    return (
+        f'<div class="entry {kind}"><div class="head"><span class="dir">{"&rarr;" if kind == "request" else "&larr;"}</span>'
+        f'<span>{html.escape(head)}</span><span class="tag">{html.escape(tag)}</span></div>'
+        f"<pre>{html.escape(body)}</pre></div>"
+    )
+
+
+def _session(folder: Path, name: str, title: str, sub: str, entries: List[str]) -> str:
+    page = folder / f"{name}.html"
+    page.write_text(
+        SESSION_PAGE.replace("__TITLE__", html.escape(title))
+        .replace("__SUB__", sub)
+        .replace("__ENTRIES__", "\n".join(entries)),
+        encoding="utf-8",
+    )
+    return page.resolve().as_uri()
+
+
+def _play(reel: Reel, url: str) -> None:
+    """Load the session page and play it: a request typed out, its answer shown whole and held."""
+    browser = reel.browser
+    browser.send("Page.navigate", url=url)
+    browser.wait_for("document.readyState === 'complete' && document.fonts.status === 'loaded'")
+    reel.hold(700)
+    for i in range(int(browser.js("__vxCount()"))):
+        request = browser.js(
+            f"document.querySelectorAll('.entry')[{i}].classList.contains('request')"
+        )
+        if request:
+            length = int(browser.js(f"__vxLength({i})"))
+            for n in range(0, length + 8, 8):
+                browser.js(f"__vxType({i}, {n})")
+                reel.frame(55)
+            reel.hold(350)
+        else:
+            browser.js(f"__vxShow({i})")
+            length = int(browser.js(f"__vxLength({i})"))
+            reel.hold(min(3200, 900 + length * 5))
+    reel.hold(1500)
+
+
+def _pretty(arguments: dict) -> str:
+    return json.dumps(arguments, indent=2)
+
+
+def clip_mcp(reel: Reel, base: str, theme: str, folder: Path) -> None:
+    key = {"api-key": _make_key("assistant-for-support", "searcher", ["handbook"])}
+    entries: List[str] = []
+    status, answer, _ = mcp_call(
+        base,
+        key,
+        "initialize",
+        {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "assistant", "version": "1"},
+        },
+    )
+    info = answer["result"]["serverInfo"]
+    status, listed, _ = mcp_call(base, key, "tools/list")
+    names = ", ".join(t["name"] for t in listed["result"]["tools"])
+    entries.append(
+        _entry(
+            "request",
+            "initialize",
+            "POST /mcp",
+            "connect, with 'assistant-for-support', a searcher key made for handbook",
+        )
+    )
+    entries.append(
+        _entry(
+            "answer",
+            f"{info['name']} {info.get('version', '')}",
+            f"HTTP {status}",
+            f"tools: {names}",
+        )
+    )
+    for tool, arguments in (
+        ("list_collections", {}),
+        ("search", {"collection": "handbook", "query": MCP_QUESTION}),
+    ):
+        status, answer, _ = mcp_call(
+            base, key, "tools/call", {"name": tool, "arguments": arguments}
+        )
+        text, refused = _said(answer)
+        entries.append(_entry("request", f"tools/call {tool}", "POST /mcp", _pretty(arguments)))
+        entries.append(_entry("refused" if refused else "answer", tool, f"HTTP {status}", text))
+    url = _session(
+        folder,
+        "mcp-session",
+        "An assistant searches over MCP",
+        f"Real calls to <b>/mcp</b> on a sample server, as a searcher key made for one collection. Each answer is the one that came back.",
+        entries,
+    )
+    _play(reel, url)
+
+
+def clip_mcp_keys(reel: Reel, base: str, theme: str, folder: Path) -> None:
+    scoped = {"api-key": _make_key("assistant-for-hr", "searcher", ["hr-archive"])}
+    reader = {"api-key": _make_key("assistant-reads-only", "reader")}
+    entries: List[str] = []
+    for head, headers, tool, arguments in (
+        ("a key made for hr-archive only", scoped, "list_collections", {}),
+        (
+            "the same key, another collection",
+            scoped,
+            "search",
+            {"collection": "handbook", "query": MCP_QUESTION},
+        ),
+        (
+            "a reader key, which may not search",
+            reader,
+            "search",
+            {"collection": "handbook", "query": MCP_QUESTION},
+        ),
+    ):
+        status, answer, _ = mcp_call(
+            base, headers, "tools/call", {"name": tool, "arguments": arguments}
+        )
+        text, refused = _said(answer)
+        entries.append(_entry("request", f"{tool}: {head}", "POST /mcp", _pretty(arguments)))
+        entries.append(
+            _entry(
+                "refused" if refused else "answer",
+                tool,
+                "refused" if refused else f"HTTP {status}",
+                text,
+            )
+        )
+    status, answer, headers_back = mcp_call(base, {}, "tools/list")
+    entries.append(_entry("request", "tools/list: no key at all", "POST /mcp", "{}"))
+    entries.append(
+        _entry(
+            "refused",
+            "401",
+            f"HTTP {status}",
+            f"{answer.get('message', '')}\nWWW-Authenticate: {headers_back.get('WWW-Authenticate') or headers_back.get('www-authenticate')}",
+        )
+    )
+    url = _session(
+        folder,
+        "mcp-keys",
+        "Who may do what, over MCP",
+        "The server decides each call as it decides a REST request: <b>the key's collections, its role, and nothing without one</b>.",
+        entries,
+    )
+    _play(reel, url)
+
+
 CLIP_STEPS: Dict[str, Callable[[Reel, str, str, Path], None]] = {
     "tour-search": clip_search,
     "tour-pages": clip_pages,
@@ -1387,6 +1650,8 @@ CLIP_STEPS: Dict[str, Callable[[Reel, str, str, Path], None]] = {
     "tour-evaluate": clip_evaluate,
     "tour-access": clip_access,
     "tour-console": clip_console,
+    "tour-mcp": clip_mcp,
+    "tour-mcp-keys": clip_mcp_keys,
     "tour-ingest": clip_ingest,
 }
 

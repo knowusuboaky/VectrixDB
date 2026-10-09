@@ -197,8 +197,12 @@ def tool_context(
 # So an assistant can use a collection as a tool.
 
 
-def build_server(db: Vectrix, name: str = "vectrixdb") -> Any:
+def build_server(db: Vectrix, name: str = "vectrixdb", writes: bool = True) -> Any:
     """An MCP server exposing the collection. Needs the ``mcp`` extra, version 1 or 2.
+
+    ``writes=False`` leaves out remember, feedback and forget, the tools that
+    change the collection: what ``vectrixdb mcp`` does over HTTP unless asked,
+    since anything on this machine that reaches the port may call them.
 
     mcp 2 renamed ``FastMCP`` to ``MCPServer`` and kept what is used here:
     the ``tool`` decorator, ``list_tools`` and ``run(transport=)``. A fresh
@@ -246,55 +250,58 @@ def build_server(db: Vectrix, name: str = "vectrixdb") -> Any:
     ) -> str:
         return tool_recall(db, query, session=session, limit=limit, token_budget=token_budget)
 
-    @server.tool(
-        name="remember",
-        description=(
-            "Store a memory. Use session and role for conversation turns; "
-            "pinned=true for a fact that should always be in context."
-        ),
-    )
-    def remember(
-        text: str,
-        session: Optional[str] = None,
-        role: str = "user",
-        pinned: bool = False,
-    ) -> str:
-        return tool_remember(db, text, session=session, role=role, pinned=pinned)
+    if writes:
+        # What changes the collection: memories stored, graded and deleted.
 
-    @server.tool(
-        name="feedback",
-        description=(
-            "Grade a recalled memory: useful, dead_end or corrected. With a "
-            "correction, the corrected text is stored and supersedes the old memory."
-        ),
-    )
-    def feedback(id: str, outcome: str, correction: Optional[str] = None) -> str:
-        return tool_feedback(db, id, outcome, correction=correction)
-
-    @server.tool(
-        name="forget",
-        description=(
-            "Delete memories for good: by ids, or the turns of a session older than "
-            "older_than_days, or with superseded=true only facts a correction has "
-            "already replaced; all_sessions=true with nothing else deletes every "
-            "turn. Nothing else in this server deletes."
-        ),
-    )
-    def forget(
-        session: Optional[str] = None,
-        older_than_days: Optional[float] = None,
-        ids: Optional[list] = None,
-        superseded: bool = False,
-        all_sessions: bool = False,
-    ) -> str:
-        return tool_forget(
-            db,
-            session=session,
-            older_than_days=older_than_days,
-            ids=ids,
-            superseded=superseded,
-            all_sessions=all_sessions,
+        @server.tool(
+            name="remember",
+            description=(
+                "Store a memory. Use session and role for conversation turns; "
+                "pinned=true for a fact that should always be in context."
+            ),
         )
+        def remember(
+            text: str,
+            session: Optional[str] = None,
+            role: str = "user",
+            pinned: bool = False,
+        ) -> str:
+            return tool_remember(db, text, session=session, role=role, pinned=pinned)
+
+        @server.tool(
+            name="feedback",
+            description=(
+                "Grade a recalled memory: useful, dead_end or corrected. With a "
+                "correction, the corrected text is stored and supersedes the old memory."
+            ),
+        )
+        def feedback(id: str, outcome: str, correction: Optional[str] = None) -> str:
+            return tool_feedback(db, id, outcome, correction=correction)
+
+        @server.tool(
+            name="forget",
+            description=(
+                "Delete memories for good: by ids, or the turns of a session older than "
+                "older_than_days, or with superseded=true only facts a correction has "
+                "already replaced; all_sessions=true with nothing else deletes every "
+                "turn. Nothing else in this server deletes."
+            ),
+        )
+        def forget(
+            session: Optional[str] = None,
+            older_than_days: Optional[float] = None,
+            ids: Optional[list] = None,
+            superseded: bool = False,
+            all_sessions: bool = False,
+        ) -> str:
+            return tool_forget(
+                db,
+                session=session,
+                older_than_days=older_than_days,
+                ids=ids,
+                superseded=superseded,
+                all_sessions=all_sessions,
+            )
 
     @server.tool(
         name="context",
@@ -341,6 +348,11 @@ def main(argv: Optional[list] = None) -> None:
         choices=("stdio", "sse", "streamable-http"),
         help="MCP transport (stdio is what a desktop assistant starts as a command)",
     )
+    parser.add_argument(
+        "--allow-writes",
+        action="store_true",
+        help="Over sse or streamable-http, offer remember, feedback and forget too. Always offered over stdio.",
+    )
     args = parser.parse_args(argv)
     from . import tracing
 
@@ -348,8 +360,19 @@ def main(argv: Optional[list] = None) -> None:
         # This process is the MCP server's own, so nothing else will set up where spans go.
         tracing.export_to_otlp()
     db = Vectrix(args.name, path=args.path, mode=args.mode)
+    # Over stdio the assistant that started the server is the only one talking to it.
+    # Over HTTP, anything on this machine that reaches the port is, so changing the
+    # collection is asked for. A team wants vectrixdb serve with VECTRIXDB_MCP=1:
+    # sign-in, roles and policies on every call.
+    writes = args.transport == "stdio" or args.allow_writes
+    if not writes:
+        print(
+            "Serving search, recall and context only: --allow-writes adds remember, feedback and forget. "
+            "For a team, run vectrixdb serve with VECTRIXDB_MCP=1.",
+            file=sys.stderr,
+        )
     try:
-        build_server(db).run(transport=args.transport)
+        build_server(db, writes=writes).run(transport=args.transport)
     except DependencyError as exc:
         # A plain install puts this command on the path but does not install
         # the `mcp` package, so this is the first thing a new user sees. A

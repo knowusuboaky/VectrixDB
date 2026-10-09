@@ -5,7 +5,7 @@ and ARM, built from the same wheel PyPI has and checked before they are tagged:
 
 | Image | What it runs | Port |
 | --- | --- | --- |
-| `ghcr.io/knowusuboaky/vectrixdb:2.2.0` | The server: the REST API and the dashboard, with the English embedding model and reranker inside | 7337 |
+| `ghcr.io/knowusuboaky/vectrixdb:2.2.0` | The server: the REST API, the dashboard and MCP at `/mcp`, with the English embedding model and reranker inside | 7337 |
 | `ghcr.io/knowusuboaky/vectrixdb:2.2.0-full` | The same server with the multilingual embedding model and reranker as well, for collections in the hundred-odd languages besides English | 7337 |
 | `ghcr.io/knowusuboaky/vectrixdb-extract:2.2.0` | The extraction service: scans, pictures, recordings, videos and YouTube addresses in, text out | 7338 |
 
@@ -46,6 +46,10 @@ docker compose up -d --wait
 The dashboard is at http://localhost:7337, on this machine only, and asks for
 the key in `vectrixdb.key`. A call sends it in the `api-key` header. Put a proxy
 that terminates TLS in front of the server before opening it to a network.
+An assistant connects at http://localhost:7337/mcp with a key the dashboard
+makes it, and searches as that key: see
+[Connect an assistant over MCP](mcp-server.md). `VECTRIXDB_MCP=0` turns the
+endpoint off.
 
 The containers run as user 10001 and read the key through a bind mount, which
 keeps the file's owner and permissions, so on Linux the file must be readable

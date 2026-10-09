@@ -234,16 +234,20 @@ CMD ["extract-serve", "--host", "0.0.0.0"]
 # ============================================================================
 #
 # INPUT   the runtime and the server environment
-# OUTPUT  vectrixdb serve on port 7337, with a health check
+# OUTPUT  vectrixdb serve on port 7337, with a health check, answering MCP
+#         at /mcp as well as the REST API and the dashboard
 #
 # It will not listen without VECTRIXDB_API_KEY (or its _FILE twin), sign-in,
-# or VECTRIXDB_ALLOW_OPEN=1 for a gateway that does the asking.
+# or VECTRIXDB_ALLOW_OPEN=1 for a gateway that does the asking. MCP is on
+# because an assistant is what a team runs the image for; VECTRIXDB_MCP=0
+# turns it off, and every tool call is held to the caller's key or token.
 
 FROM runtime AS server
 COPY --from=server-venv /opt/vectrixdb /opt/vectrixdb
-ENV VECTRIXDB_LISTEN_PORT=7337
+ENV VECTRIXDB_LISTEN_PORT=7337 \
+    VECTRIXDB_MCP=1
 LABEL org.opencontainers.image.title="VectrixDB" \
-      org.opencontainers.image.description="The VectrixDB server: REST API and dashboard, with the embedding and reranking models inside."
+      org.opencontainers.image.description="The VectrixDB server: REST API, dashboard and MCP endpoint, with the embedding and reranking models inside."
 USER 10001:0
 EXPOSE 7337
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

@@ -53,13 +53,14 @@ may change at any time.
   `ghcr.io/knowusuboaky/vectrixdb` (the server; `-full` with the
   multilingual embedding model and reranker too) and
   `ghcr.io/knowusuboaky/vectrixdb-extract` (the extraction service), built
-  from the wheel PyPI has. They run as a user that is not root on a
+  from the wheel PyPI has. The server answers MCP at `/mcp` as it is. They run as a user that is not root on a
   read-only root filesystem, carry their models so nothing is downloaded at
   run time, and will not start without a key or sign-in. The server reads
   feeds as it is, for the [sources](docs/how-to/sources.md) a collection
   keeps up with. Before anything is tagged, each is run the way the docs
-  have a reader run it (`scripts/container_smoke.py`: an intranet feed kept
-  current, the cloud's metadata address refused among it), held to a size
+  have a reader run it (`scripts/container_smoke.py`: a search over MCP with a key the
+  dashboard would make, an intranet feed kept current and the cloud's
+  metadata address refused among it), held to a size
   budget and scanned with Trivy, and a high or critical vulnerability with a
   fix stops the release; the published images are scanned again every
   week. Each carries its SBOM and build provenance, is signed with cosign by
@@ -113,6 +114,33 @@ may change at any time.
   dashboard's settings say whether it is on and the host spans go to. See
   [Trace searches and ingestion](docs/how-to/tracing.md).
 
+- **MCP on the server, for a team or a company.** With `VECTRIXDB_MCP=1`,
+  `vectrixdb serve` answers MCP at `/mcp`, and an assistant searches as the
+  person or the key it acts for. Every tool call is made to the REST API
+  with the caller's own key or token, so it is held to everything the server
+  already decides: the role, a key's collections, each collection's policy,
+  masking, the access log and the audit trail. A person connects with their
+  company's sign-in: the client finds the identity provider at
+  `/.well-known/oauth-protected-resource/mcp` (RFC 9728) and comes back with
+  their access token. A team connects with named keys, `reader`, `searcher`
+  or `operator`, one collection or all. The tools are `list_collections`,
+  `search` (hybrid, dense, keyword or rerank, with filters, relevance and
+  citations; on a collection with a policy or without an index of exact
+  words, hybrid searches by meaning and the answer says so), `open_source`,
+  and `add_document` only with
+  `VECTRIXDB_MCP_WRITES=1` and a role that may write. A dashboard session is
+  not a way in, a server with no key and no sign-in answers only its own
+  machine, and the endpoint is stateless, so copies behind a load balancer
+  share the work. With tracing on, each tool call is a span,
+  `vectrixdb.mcp.tool`, naming the tool and the collection and whether it
+  was refused, over the search it ran. Off unless set; the container image
+  sets it. Keys get a new action, `mcp.connect`. See
+  [Connect an assistant over MCP](docs/how-to/mcp-server.md).
+
+- **`vectrixdb mcp` over HTTP serves the reading tools only** unless
+  `--allow-writes` is given: anything on the machine that reaches the port
+  could otherwise remember, grade and forget. Over stdio nothing changes.
+
 - **A rechunk can be previewed.** `rechunk_preview()` takes `rechunk()`'s
   arguments and cuts each kept document with the settings it would get, and
   returns, per document, its chunks now and after and the settings before
@@ -150,9 +178,12 @@ may change at any time.
   the pages it already photographs: `tour-search`, `tour-ingest`,
   `tour-pages`, `tour-collections`, `tour-evaluate`, `tour-access` and
   `tour-console`, each a GIF of eleven to sixteen seconds, each with a test
-  that it is on disk and in the docs. The README opens with one, the
-  documentation's home page shows them all, and the site wears the
-  dashboard's own mark, amber and type.
+  that it is on disk and in the docs, and two of an assistant over MCP,
+  `tour-mcp` and `tour-mcp-keys`: real calls to the sample server and the
+  answers that came back, a key made for one collection seeing only it, a
+  reader refused a search, and no key at all told where to sign in. The
+  README opens with one, the documentation's home page shows them all, and
+  the site wears the dashboard's own mark, amber and type.
 
 - **`VectrixSync.cdc()` carries deletes to the target.** `full()` and
   `incremental()` only ever copied, so a chunk deleted or revoked in the
@@ -472,6 +503,12 @@ may change at any time.
   and `dashboard/requirements.txt` reads its Backend's.
 
 ### Changed
+
+- **The `mcp` extra needs mcp 2 or later.** The server's `/mcp` endpoint is
+  built on mcp 2's `MCPServer`, and `mcp>=1.0.0` let an install keep a 1.x
+  that cannot serve it, and the endpoint makes each tool's REST call through
+  httpx, which the extra now installs (mcp 2 brings httpx2, a different
+  package). `vectrixdb mcp` on one machine still runs on 1.x.
 
 - **A YouTube video with captions is read from them, not transcribed.** This
   changes what `load_youtube` does: it used to download every video's sound
