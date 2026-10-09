@@ -561,15 +561,28 @@ class _Rules:
         return allowed
 
 
+#: What a rule's final $ is turned into before robotparser reads it. Older
+#: robotparsers kept the $ quoted as %24 and newer ones drop it, so the anchor
+#: is carried through as letters every version keeps.
+_END = "VXRULEEND"
+_ANCHOR = re.compile(r"(?im)^(\s*(?:dis)?allow\s*:\s*\S*?)\$[ \t]*$")
+
+
 def _pattern(path: str) -> Optional["re.Pattern[str]"]:
     """A rule's path as robotparser kept it, quoted, as a pattern: ``*`` any run, a final ``$`` the end."""
     if not path:
         return None
+    from urllib.parse import quote, unquote
+
     raw = path.replace("%2A", "*").replace("%2a", "*")
-    anchored = raw.endswith("%24")
+    # A final $ anchors the rule. Older robotparsers kept it quoted as %24,
+    # newer ones as it was written; both are the anchor.
+    anchored = raw.endswith(_END)
     if anchored:
-        raw = raw[:-3]
-    body = "".join(".*" if ch == "*" else re.escape(ch) for ch in raw)
+        raw = raw[: -len(_END)]
+    # Quoted the way a target is, whichever way this Python's robotparser kept it.
+    pieces = [quote(unquote(piece), safe="/") for piece in raw.split("*")]
+    body = ".*".join(re.escape(piece) for piece in pieces)
     return re.compile(body + (r"\Z" if anchored else ""))
 
 
@@ -578,7 +591,7 @@ def _rules_from(text: str, token: str = PRODUCT) -> _Rules:
     from urllib.robotparser import RobotFileParser
 
     parser = RobotFileParser()
-    parser.parse(text.splitlines())
+    parser.parse(_ANCHOR.sub(lambda m: m.group(1) + _END, text).splitlines())
     entries = list(getattr(parser, "entries", []) or [])
     default = getattr(parser, "default_entry", None)
     if default is not None:

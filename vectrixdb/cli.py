@@ -2053,6 +2053,66 @@ def sources_refresh(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def doctor(
+    path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+    offline: bool = typer.Option(
+        False, "--offline", help="Ask no service over the network; VECTRIXDB_OFFLINE=1 does too"
+    ),
+    quick: bool = typer.Option(False, "--quick", help="Leave the models unloaded"),
+    json_out: bool = typer.Option(False, "--json", help="print JSON instead of a list"),
+):
+    """Try every part of this install: the models, the readers, and each service the settings name."""
+    import json as _json
+
+    from rich.markup import escape
+
+    from .doctor import run as diagnose
+    from .doctor import summary
+
+    _env_file(env_file)
+    where = _data_path(path)
+    found = diagnose(where, offline=True if offline else None, quick=quick)
+    counts = summary(found)
+    if json_out:
+        typer.echo(_json.dumps(counts, indent=2))
+        if not counts["healthy"]:
+            raise typer.Exit(code=1)
+        return
+    console.print(f"VectrixDB doctor, for {where}", markup=False, highlight=False)
+    console.print()
+    marks = {
+        "ok": "[green]ok[/green]   ",
+        "skip": "[dim]--[/dim]   ",
+        "warn": "[yellow]warn[/yellow] ",
+        "error": "[red]error[/red]",
+    }
+    for d in found:
+        console.print(
+            f"  {marks[d.level]}  {escape(d.area):<10} {escape(d.text)}",
+            highlight=False,
+        )
+        if d.fix and d.level in ("warn", "error"):
+            console.print(f"  {'':<5}  {'':<10} [dim]{escape(d.fix)}[/dim]", highlight=False)
+    errors, warnings = counts["counts"]["error"], counts["counts"]["warn"]
+    console.print()
+    if errors:
+        console.print(
+            f"{errors} error{'s' if errors != 1 else ''}, {warnings} warning{'s' if warnings != 1 else ''}. "
+            "Each says what to do under it.",
+            markup=False,
+            highlight=False,
+        )
+        raise typer.Exit(code=1)
+    console.print(
+        f"Healthy{f', {warnings} warning' + ('s' if warnings != 1 else '') if warnings else ''}. "
+        "-- marks what this install does not have, and how to add it.",
+        markup=False,
+        highlight=False,
+    )
+
+
 # ============================================================================
 # MAIN SCRIPT
 # ============================================================================
