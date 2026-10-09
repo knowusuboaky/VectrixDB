@@ -16,6 +16,18 @@ may change at any time.
 
 ### Added
 
+- **`vectrixdb doctor` tries every part of an install.** `vectrixdb check`
+  reads the settings; `doctor` runs it and then tries each part for real: it
+  writes and removes a file in the data folder, loads the embedding model and
+  the reranker and times an answer from each, reads a small document of each
+  built-in kind, and asks each
+  service the settings name whether it is there: the extraction service, the
+  identity provider (its description, its signing keys, and that it calls
+  itself the issuer set, with Entra's shared `common` address named for what
+  it is), the mail server, the stores, the chat models and the trace
+  collector. Every answer that is not ok says what to do. Nothing is changed
+  anywhere, no key is printed and an address shows only its host.
+  `--offline`, `--quick` and `--json`; it exits 1 while there is an error.
 - **A collection keeps up with feeds and pages.** `db.sources.add(url,
   every="6h")` and a scheduled `db.sources.refresh()`, `vectrixdb sources
   refresh` or `POST /api/v1/collections/{name}/sources/refresh` read RSS
