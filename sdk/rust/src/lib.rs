@@ -14,9 +14,21 @@
 //!
 //! Every call is an async method on [`Client`]; the `blocking` feature adds
 //! [`BlockingClient`] with the same calls, synchronous.
+//!
+//! [`ClientBuilder`] also has what a company network asks for:
+//! [`allow_http`](ClientBuilder::allow_http) (a key or token over plain
+//! `http://` to another machine is refused without it),
+//! [`key_header`](ClientBuilder::key_header),
+//! [`token_header`](ClientBuilder::token_header),
+//! [`header`](ClientBuilder::header), [`prefix`](ClientBuilder::prefix),
+//! [`gateway_paths`](ClientBuilder::gateway_paths),
+//! [`ca_certificate`](ClientBuilder::ca_certificate) and
+//! [`identity`](ClientBuilder::identity). The client never follows a
+//! redirect, and never prints the key or token.
 
 mod client;
 mod error;
+mod gateway;
 pub mod generated;
 mod types;
 
@@ -27,6 +39,7 @@ mod blocking;
 pub use blocking::BlockingClient;
 pub use client::{Client, ClientBuilder};
 pub use error::{Error, Kind, Result};
+pub use gateway::GatewayPaths;
 pub use types::{
     AddOptions, Added, Collection, CreateOptions, Document, Hit, Mode, Refreshed, SearchOptions,
     Source, SourceOptions, Text,

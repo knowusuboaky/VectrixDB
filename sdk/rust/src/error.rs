@@ -49,7 +49,8 @@ pub enum Error {
         /// The server's `detail`, `Null` when it sent none.
         detail: serde_json::Value,
     },
-    /// The server could not be reached, or answered something unreadable.
+    /// The server could not be reached, or answered something unreadable,
+    /// or the client's settings were refused when it was built.
     #[error("{0}")]
     Transport(String),
     /// The request took longer than the client's timeout.

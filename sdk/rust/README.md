@@ -38,7 +38,11 @@ async fn main() -> vectrixdb::Result<()> {
 `Client::new(url)` returns a builder: `.key(..)` sends an API key in the
 `api-key` header, `.token(..)` sends a company sign-in token as
 `Authorization: Bearer`, `.timeout(..)` sets the per-request timeout (30 s by
-default), and `.build()` makes the client. A 429 or 503 is retried up to three
+default), and `.build()` makes the client. A key or token is never sent over
+plain `http://` to a host other than this machine (`localhost`, `127.0.0.0/8`,
+`::1`): `build()` refuses unless `.allow_http(true)` is set. The client never
+follows a redirect, since the key would go with it; a 3xx is an
+`Error::Api` of kind `Other` naming the status and the `location`. A 429 or 503 is retried up to three
 times, waiting the server's `Retry-After` when it sends one, else 1 s, 2 s,
 4 s. Every request carries `user-agent: vectrixdb-rust/2.2.0`.
 
@@ -46,6 +50,46 @@ Each result struct (`Collection`, `Hit`, `Document`, `Added`, `Source`,
 `Refreshed`) names the fields the contract promises and keeps everything else
 the server sent in `extra`. A `Hit` has a `citation`: `_vx_citation` from the
 metadata, else `source`, else the id.
+
+## Behind a company gateway
+
+The builder has what a company's gateway, proxy and private CA ask for, the
+same options as the other VectrixDB clients:
+
+```rust
+let db = Client::new("https://gateway.example.com")
+    .token(token)
+    .token_header("X-Person-Token")              // default `authorization`, always `Bearer <token>`
+    .header("Ocp-Apim-Subscription-Key", sub)   // sent on every request
+    .prefix("/acme")
+    .gateway_paths("api/v1=/files/search, auth=/files/auth")
+    .ca_certificate(&std::fs::read("company-ca.pem")?)
+    .identity(&std::fs::read("client-cert-and-key.pem")?)
+    .build()?;
+```
+
+- `.key_header(name)` (default `api-key`) and `.token_header(name)` (default
+  `authorization`) name the headers the key and token go in. The server's
+  `VECTRIXDB_KEY_HEADER` and `VECTRIXDB_TOKEN_HEADER` are the same settings.
+- `.header(name, value)` adds a header to every request. It never replaces
+  `user-agent` or the key or token header.
+- `.prefix(p)` and `.gateway_paths(list)`: a request for a route goes to
+  `<gateway path><prefix><route>`, the gateway path being that of the longest
+  name the route falls under, so `/api/v1/collections` above goes to
+  `/files/search/acme/api/v1/collections` and `/health` to `/acme/health`.
+  The list is text or a map (`HashMap`, `BTreeMap`, or `(name, path)` pairs),
+  read as the server reads its `VECTRIXDB_GATEWAY_PATHS`: slashes trimmed,
+  doubled ones dropped, `.` and `..`, an empty side or a name given twice
+  refused.
+- `.ca_certificate(pem)` trusts a private CA (a PEM certificate or bundle) as
+  well as the usual roots; `.identity(pem)` gives a client certificate (the
+  certificate and its private key in one PEM). Certificates are always
+  checked; there is no option to turn that off.
+- `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured.
+
+Every setting is checked by `build()`, which says what is wrong as an
+`Error::Transport`. The key and token never appear in an error message or in
+the `Debug` form of the builder or the client.
 
 ## The calls
 

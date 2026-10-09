@@ -1,10 +1,14 @@
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
-use reqwest::{Method, Request, Response, StatusCode};
+use reqwest::header::{
+    HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE, LOCATION, RETRY_AFTER,
+    USER_AGENT as USER_AGENT_HEADER,
+};
+use reqwest::{redirect, Certificate, Identity, Method, Request, Response, StatusCode, Url};
 use serde_json::{json, Map, Value};
 
 use crate::error::{Error, Kind, Result};
+use crate::gateway::{Gateway, GatewayPaths};
 use crate::generated::{
     AddSourceRequest, CreateCollectionRequestV2, RefreshRequest, TextSearchRequest,
     TextUpsertPoint, TextUpsertRequest,
@@ -17,6 +21,8 @@ use crate::types::{
 pub(crate) const USER_AGENT: &str = concat!("vectrixdb-rust/", env!("CARGO_PKG_VERSION"));
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const RETRIES: u32 = 3;
+const DEFAULT_KEY_HEADER: &str = "api-key";
+const DEFAULT_TOKEN_HEADER: &str = "authorization";
 
 /// The routes the client calls, as the spec spells them. The unit test in
 /// `spec_check` asserts every one exists in `docs/reference/openapi.json`.
@@ -106,22 +112,81 @@ enum Auth {
     Token(String),
 }
 
+impl Auth {
+    fn describe(&self) -> &'static str {
+        match self {
+            Auth::None => "none",
+            Auth::Key(_) => "key",
+            Auth::Token(_) => "token",
+        }
+    }
+}
+
 /// Builds a [`Client`]: `Client::new(url).key("...").build()`.
+///
+/// Every setting is checked by [`build`](Self::build), which says what is
+/// wrong and never prints the key or token.
 #[derive(Clone)]
 pub struct ClientBuilder {
     url: String,
     auth: Auth,
     timeout: Duration,
+    allow_http: bool,
+    key_header: String,
+    token_header: String,
+    headers: Vec<(String, String)>,
+    prefix: String,
+    gateway_paths: GatewayPaths,
+    ca_certificates: Vec<Vec<u8>>,
+    identity: Option<Vec<u8>>,
+}
+
+impl std::fmt::Debug for ClientBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let header_names: Vec<&str> = self.headers.iter().map(|(n, _)| n.as_str()).collect();
+        f.debug_struct("ClientBuilder")
+            .field("url", &self.url)
+            .field("auth", &self.auth.describe())
+            .field("timeout", &self.timeout)
+            .field("allow_http", &self.allow_http)
+            .field("key_header", &self.key_header)
+            .field("token_header", &self.token_header)
+            .field("headers", &header_names)
+            .field("prefix", &self.prefix)
+            .field("gateway_paths", &self.gateway_paths)
+            .field("ca_certificates", &self.ca_certificates.len())
+            .field("identity", &self.identity.is_some())
+            .finish()
+    }
+}
+
+/// Whether `url`'s host is this machine: `localhost`, `127.0.0.0/8` or `::1`.
+fn is_loopback(url: &Url) -> bool {
+    let host = url.host_str().unwrap_or_default();
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    match bare.parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.is_loopback(),
+        Err(_) => host.eq_ignore_ascii_case("localhost"),
+    }
+}
+
+fn header_name(name: &str, what: &str) -> Result<HeaderName> {
+    HeaderName::from_bytes(name.trim().as_bytes()).map_err(|_| {
+        Error::Transport(format!(
+            "{what} is {name:?}, which cannot be the name of an HTTP header"
+        ))
+    })
 }
 
 impl ClientBuilder {
-    /// An API key, sent as the `api-key` header.
+    /// An API key, sent in the `api-key` header (see [`key_header`](Self::key_header)).
     pub fn key(mut self, key: impl Into<String>) -> Self {
         self.auth = Auth::Key(key.into());
         self
     }
 
-    /// A company sign-in token, sent as `Authorization: Bearer <token>`.
+    /// A company sign-in token, sent as `Authorization: Bearer <token>`
+    /// (see [`token_header`](Self::token_header)).
     pub fn token(mut self, token: impl Into<String>) -> Self {
         self.auth = Auth::Token(token.into());
         self
@@ -133,30 +198,144 @@ impl ClientBuilder {
         self
     }
 
+    /// Send a key or token over plain `http://` to a host that is not this
+    /// machine. Off by default: such a client refuses to be made.
+    pub fn allow_http(mut self, allow: bool) -> Self {
+        self.allow_http = allow;
+        self
+    }
+
+    /// The header the key goes in; `api-key` by default. A gateway may want
+    /// its own (`Ocp-Apim-Subscription-Key`).
+    pub fn key_header(mut self, name: impl Into<String>) -> Self {
+        self.key_header = name.into();
+        self
+    }
+
+    /// The header a sign-in token goes in, always as `Bearer <token>`;
+    /// `authorization` by default.
+    pub fn token_header(mut self, name: impl Into<String>) -> Self {
+        self.token_header = name.into();
+        self
+    }
+
+    /// An extra header sent on every request, for a gateway that wants a
+    /// subscription key as well as the person's token. It never replaces
+    /// `user-agent` or the key or token header.
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((name.into(), value.into()));
+        self
+    }
+
+    /// The path every route lives under at the gateway (`/acme`).
+    pub fn prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.prefix = prefix.into();
+        self
+    }
+
+    /// Each route's own gateway path, as the gateway team hands them over:
+    /// `"api/v1=/files/search, auth=/files/auth"`, or a map of the same.
+    /// A request goes to `<gateway path><prefix><route>`, the gateway path
+    /// being that of the longest name the route falls under.
+    pub fn gateway_paths(mut self, paths: impl Into<GatewayPaths>) -> Self {
+        self.gateway_paths = paths.into();
+        self
+    }
+
+    /// Trust a private CA as well as the usual roots: a PEM certificate, or
+    /// a bundle of them.
+    /// Certificates are always checked; there is no way to turn that off.
+    pub fn ca_certificate(mut self, pem: &[u8]) -> Self {
+        self.ca_certificates.push(pem.to_vec());
+        self
+    }
+
+    /// A client certificate for a gateway that asks for one: the
+    /// certificate and its private key, PEM, in one buffer.
+    pub fn identity(mut self, pem: &[u8]) -> Self {
+        self.identity = Some(pem.to_vec());
+        self
+    }
+
     pub fn build(self) -> Result<Client> {
-        let mut headers = HeaderMap::new();
-        let (name, value) = match &self.auth {
-            Auth::None => (None, None),
-            Auth::Key(key) => (Some("api-key"), Some(key.clone())),
-            Auth::Token(token) => (
-                Some(AUTHORIZATION.as_str()),
-                Some(format!("Bearer {token}")),
-            ),
+        let base = self.url.trim().trim_end_matches('/').to_owned();
+        let parsed = Url::parse(&base)
+            .map_err(|_| Error::Transport(format!("{base:?} is not a server address")))?;
+        let credential = match &self.auth {
+            Auth::None => None,
+            Auth::Key(key) => Some((header_name(&self.key_header, "key_header")?, key.clone())),
+            Auth::Token(token) => Some((
+                header_name(&self.token_header, "token_header")?,
+                format!("Bearer {token}"),
+            )),
         };
-        if let (Some(name), Some(value)) = (name, value) {
-            let value = HeaderValue::from_str(&value)
-                .map_err(|_| Error::Transport("the key holds characters a header cannot".into()))?;
+        if credential.is_some()
+            && parsed.scheme() == "http"
+            && !self.allow_http
+            && !is_loopback(&parsed)
+        {
+            return Err(Error::Transport(format!(
+                "refusing to send a {} over plain http to {}: use https, or set allow_http(true)",
+                self.auth.describe(),
+                parsed.host_str().unwrap_or_default()
+            )));
+        }
+        let gateway = Gateway::new(&self.prefix, &self.gateway_paths).map_err(Error::Transport)?;
+
+        let mut headers = HeaderMap::new();
+        for (name, value) in &self.headers {
+            let name = header_name(name, "a header")?;
+            if name == USER_AGENT_HEADER || credential.as_ref().is_some_and(|(n, _)| *n == name) {
+                continue;
+            }
+            let mut value = HeaderValue::from_str(value).map_err(|_| {
+                Error::Transport(format!(
+                    "the {name} header holds characters a header cannot"
+                ))
+            })?;
+            value.set_sensitive(true);
             headers.insert(name, value);
         }
-        let http = reqwest::Client::builder()
+        if let Some((name, value)) = credential {
+            let mut value = HeaderValue::from_str(&value).map_err(|_| {
+                Error::Transport(format!(
+                    "the {} holds characters a header cannot",
+                    self.auth.describe()
+                ))
+            })?;
+            value.set_sensitive(true);
+            headers.insert(name, value);
+        }
+
+        // No redirects: the key would go with one to wherever it points.
+        // Proxies from HTTPS_PROXY / HTTP_PROXY / NO_PROXY stay on.
+        let mut http = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .default_headers(headers)
             .timeout(self.timeout)
-            .build()
-            .map_err(|e| Error::Transport(e.to_string()))?;
+            .redirect(redirect::Policy::none());
+        for pem in &self.ca_certificates {
+            let certificates = Certificate::from_pem_bundle(pem)
+                .map_err(|e| Error::Transport(format!("unreadable CA certificate: {e}")))?;
+            if certificates.is_empty() {
+                return Err(Error::Transport(
+                    "the CA certificate holds no PEM certificate".into(),
+                ));
+            }
+            for certificate in certificates {
+                http = http.add_root_certificate(certificate);
+            }
+        }
+        if let Some(pem) = &self.identity {
+            let identity = Identity::from_pem(pem)
+                .map_err(|e| Error::Transport(format!("unreadable client certificate: {e}")))?;
+            http = http.identity(identity);
+        }
+        let http = http.build().map_err(|e| Error::Transport(e.to_string()))?;
         Ok(Client {
             http,
-            base: self.url.trim_end_matches('/').to_owned(),
+            base,
+            gateway,
             timeout: self.timeout,
         })
     }
@@ -173,12 +352,16 @@ impl ClientBuilder {
 pub struct Client {
     http: reqwest::Client,
     base: String,
+    gateway: Gateway,
     timeout: Duration,
 }
 
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Client").field("url", &self.base).finish()
+        f.debug_struct("Client")
+            .field("url", &self.base)
+            .field("prefix", &self.gateway.prefix)
+            .finish()
     }
 }
 
@@ -190,6 +373,14 @@ impl Client {
             url: url.into(),
             auth: Auth::None,
             timeout: DEFAULT_TIMEOUT,
+            allow_http: false,
+            key_header: DEFAULT_KEY_HEADER.to_owned(),
+            token_header: DEFAULT_TOKEN_HEADER.to_owned(),
+            headers: Vec::new(),
+            prefix: String::new(),
+            gateway_paths: GatewayPaths::default(),
+            ca_certificates: Vec::new(),
+            identity: None,
         }
     }
 
@@ -202,8 +393,8 @@ impl Client {
 
     fn request(&self, route: (&str, &str), values: &[&str]) -> reqwest::RequestBuilder {
         let method = Method::from_bytes(route.0.to_uppercase().as_bytes()).expect("a method");
-        self.http
-            .request(method, format!("{}{}", self.base, fill(route.1, values)))
+        let path = self.gateway.address(&fill(route.1, values));
+        self.http.request(method, format!("{}{}", self.base, path))
     }
 
     /// Send, retrying a 429 or 503 up to three times, waiting the server's
@@ -240,6 +431,9 @@ impl Client {
             }
             if status.is_success() {
                 return Ok(response);
+            }
+            if status.is_redirection() {
+                return Err(redirected(status.as_u16(), &url, response.headers()));
             }
             return Err(refusal(status.as_u16(), &url, response.text().await.ok()).await);
         }
@@ -512,6 +706,22 @@ impl Client {
 fn parse<T: serde::de::DeserializeOwned>(value: Value) -> Result<T> {
     serde_json::from_value(value)
         .map_err(|e| Error::Transport(format!("unexpected reply shape: {e}")))
+}
+
+/// A redirect, refused: the key would go with it to wherever it points.
+fn redirected(status: u16, url: &str, headers: &HeaderMap) -> Error {
+    let location = headers
+        .get(LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("nowhere given");
+    Error::Api {
+        status,
+        kind: Kind::Other,
+        message: format!(
+            "{status} from {url} redirects to {location}; the client does not follow redirects"
+        ),
+        detail: Value::Null,
+    }
 }
 
 /// An API refusal from a failed response's body. A `message` the server did
