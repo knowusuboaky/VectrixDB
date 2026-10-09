@@ -132,6 +132,17 @@ SETTINGS: Tuple[Setting, ...] = tuple(
             ("OFFLINE", "1 refuses every download: the bundled models only.", ""),
             ("MODELS_DIR", "Where models are kept, when not beside the package.", ""),
             ("AUTO_DOWNLOAD", "1 fetches a missing model on first use.", ""),
+            (
+                "MODELS_URL",
+                "A company's mirror of the model releases, in place of GitHub: an Artifactory or Nexus remote serving the same <tag>/<asset>.zip paths. Checked against the same checksums.",
+                "https://acme.jfrog.io/artifactory/vectrixdb-models",
+            ),
+            (
+                "MODELS_TOKEN",
+                "The token the mirror asks for, sent as a Bearer token to MODELS_URL alone, never on to a redirect.",
+                "",
+                "secret",
+            ),
         ],
     )
     + _s(
@@ -298,6 +309,11 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 "OIDC_API_AUDIENCE",
                 "The audience of an access token taken as a Bearer token, so an app acts as the person using it: api://vectrixdb. Empty: no token is taken.",
                 "",
+            ),
+            (
+                "OIDC_API_CLIENTS",
+                "The apps an access token may come from, by client id, separated by spaces: a company's own wrapper and the MCP clients it allows. Empty: any app the provider gave a token for OIDC_API_AUDIENCE.",
+                "<wrapper client id> <MCP client id>",
             ),
             (
                 "OIDC_TOKEN_ROLE",
