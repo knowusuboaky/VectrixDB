@@ -192,6 +192,8 @@ list serves both sides.
 
 From a terminal, the `vectrixdb` command does all of this too, with a key
 file or your company sign-in: [Use the command line on a server](command-line-server.md).
+To give a company's people one package with all of it filled in, see
+[Ship your own client or command on it](wrap-it.md).
 
 ## Another language
 

@@ -18,6 +18,7 @@ working directory.
 """
 
 import re
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,7 @@ PAGES = [
     "docs/how-to/rest-api.md",
     "docs/how-to/build-an-app.md",
     "docs/how-to/clients.md",
+    "docs/how-to/wrap-it.md",
     "docs/how-to/storage-backends.md",
     "docs/how-to/tips.md",
     "docs/how-to/tracing.md",
@@ -144,7 +146,8 @@ SKIP_IF_CONTAINS = NOT_EXECUTABLE + OPTIONAL_DEPENDENCY + CLOUD_BACKEND
 def _fences(page: Path):
     text = page.read_text(encoding="utf-8")
     for match in re.finditer(r"```python\n(.*?)```", text, re.S):
-        yield match.group(1)
+        # A fence inside a tab is indented with it.
+        yield textwrap.dedent(match.group(1))
 
 
 def _runnable(code: str) -> bool:

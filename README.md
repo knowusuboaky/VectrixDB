@@ -114,6 +114,8 @@ optional package or a cloud account, so the code on them cannot quietly rot.
   four clients and their one set of calls
 - [Use the command line on a server](docs/how-to/command-line-server.md),
   with a key file or your company sign-in
+- [Ship your own client or command on it](docs/how-to/wrap-it.md), a
+  company's wrapper with its settings filled in, published in its own registry
 - [Sign people in](docs/how-to/sign-in.md)
 - [Put your company's name on it](docs/how-to/branding.md)
 - [Deploy the server](docs/how-to/deploy.md)
