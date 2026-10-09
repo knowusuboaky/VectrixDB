@@ -14,6 +14,17 @@ may change at any time.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The server image builds its Postgres driver from source.** The
+  psycopg2-binary wheel carries its own libpq, OpenSSL, pcre2 and Kerberos
+  from the distribution it was built on; on arm64 that is AlmaLinux 8's, and
+  the release's scan refused the image for pcre2 holes with fixes out. The
+  image now builds psycopg2 against Debian's libpq, patched with the rest of
+  the system, and a build checks that no bundled copy is left.
+  `POSTGRES_FROM_SOURCE=0` takes the wheel, for a build Debian's archive is
+  out of reach of.
+
 ## [2.2.0] - 2026-10-09
 ### Added
 
