@@ -82,3 +82,13 @@ python -m spacy download en_core_web_sm
 ```
 
 The second line is the download; it is never run for you unless `VECTRIXDB_AUTO_DOWNLOAD=1`.
+
+## The speech model
+
+Recordings and the sound of videos are read by faster-whisper (`pip install "vectrixdb[asr]"`), and its model comes from Hugging Face, not from the models directory. Without `VECTRIXDB_OFFLINE` it is downloaded the first time a recording is read, whether or not `VECTRIXDB_AUTO_DOWNLOAD` is set. Fetch it ahead on a machine with a network:
+
+```bash
+python -c "from faster_whisper import download_model; download_model('base')"
+```
+
+It is kept in the Hugging Face cache, `HF_HOME`, `~/.cache/huggingface` by default; copy that across to a host with no network. With `VECTRIXDB_OFFLINE=1` the model is read from that cache alone, Hugging Face is not asked anything, and a model that is not there raises `ModelDownloadError` naming the command above. `vectrixdb check` says which it is before a start.

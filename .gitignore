@@ -79,5 +79,8 @@ examples/
 # A crash dump the shell leaves behind
 *.stackdump
 
+# The key the Compose setup reads, made on the machine that runs it
+docker/*.key
+
 # A collection written by 2.1.7, which the suite opens: kept, whatever its files are called
 !tests/fixtures/legacy_2_1_7/**

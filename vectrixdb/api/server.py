@@ -39,6 +39,7 @@ from ..exceptions import ConfigurationError, InvalidCollectionName, PolicyError,
 from ..chunk_store import describe as describe_chunk_store
 from ..core.database import VectrixDB
 from .. import __version__
+from .. import tracing
 from ..core.types import DistanceMetric
 from ..core.storage import StorageBackend, StorageConfig
 from ..core.cache import CacheBackend, CacheConfig
@@ -1157,7 +1158,10 @@ async def lifespan(app: FastAPI):
     logger.info("collection records: %s", describe_collection_store(_db.collection_store))
     logger.info("collections loaded: %d", len(_db))
 
-    yield
+    from .mcp import running as mcp_running
+
+    async with mcp_running(app):
+        yield
 
     # Shutdown
     if _db:
@@ -1190,8 +1194,16 @@ def served_paths() -> List[str]:
     from .gateway import declared_paths
     from .inspection import router as inspection_router
     from .signin import router as signin_router
+    from .sources import router as sources_router
 
-    routers = (router, inspection_router, documents_router, evaluations_router, signin_router)
+    routers = (
+        router,
+        inspection_router,
+        documents_router,
+        evaluations_router,
+        signin_router,
+        sources_router,
+    )
     return declared_paths([route for each in routers for route in each.routes]) + [
         "/dashboard",
         "/docs",
@@ -1260,6 +1272,8 @@ def create_app(
         # and behind a gateway that sends the caller round it. With a prefix
         # or gateway paths, a slash too many is not found, like any wrong path.
         redirect_slashes=not gateway.shaped,
+        # No request spans of FastAPI's own: they carry the path and the query.
+        **tracing.fastapi_options(),
     )
     app.state.gateway = gateway
     app.state.db_path = db_path
@@ -1364,6 +1378,9 @@ def create_app(
         ]
         return refusal(422, message_of(detail), detail=detail)
 
+    # The innermost layer, round the routes that make the spans: a request's
+    # spans join the trace its caller sent.
+    app.add_middleware(tracing.CallerTrace)
     # API Key Authentication Middleware (Qdrant-style)
     app.add_middleware(ApiKeyAuthMiddleware)
     # Around the sign-in layer, so who is asking is known when a reply comes back
@@ -1479,6 +1496,14 @@ def create_app(
     from .signin import router as signin_router
 
     app.include_router(signin_router)
+    from .sources import router as sources_router
+
+    app.include_router(sources_router)
+    # MCP at /mcp, when VECTRIXDB_MCP asks for it: tools that call the routes above as the caller.
+    from . import mcp as mcp_door
+
+    if mcp_door.enabled():
+        mcp_door.mount(app)
     # A gateway path given to a route that is not here is a typing mistake, found now rather than by a caller.
     gateway.check(declared_paths(app.routes))
     return app
@@ -1778,6 +1803,8 @@ async def database_info():
         "storage_backend": storage_backend,
         "shared_store": shared_store,
         "documents_count": documents_count,
+        # Whether searches are traced, and the host the spans go to.
+        "tracing": tracing.describe(),
     }
 
 
@@ -2959,7 +2986,10 @@ async def keyword_search(name: str, request: KeywordSearchRequest, req: Request)
     """
     db = get_db()
 
-    collection = _servable(db, name)
+    # A person is somebody a policy can judge, as text-search does: the library
+    # scores the words over what they may see, so a withheld document moves nothing.
+    collection, principal = _servable_as(db, name, req)
+    started = time.perf_counter()
 
     try:
         results = collection.keyword_search(
@@ -2967,8 +2997,10 @@ async def keyword_search(name: str, request: KeywordSearchRequest, req: Request)
             limit=request.limit,
             filter=request.filter,
             include_highlights=request.include_highlights,
+            **({"principal": principal} if principal is not None else {}),
         )
-        return ApiResponse(ok=True, data=_snipped(results.to_dict(), req))
+        _record_decision(req, collection, principal, request.query_text, results, started)
+        return ApiResponse(ok=True, data=_snipped(_judged(results.to_dict(), principal), req))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
@@ -3523,6 +3555,9 @@ def run_server(
         os.environ["VECTRIXDB_API_KEY"] = api_key
     if read_only_key:
         os.environ["VECTRIXDB_READ_ONLY_API_KEY"] = read_only_key
+    if tracing.enabled():
+        # This process is the server's own, so nothing else will set up where spans go.
+        tracing.export_to_otlp()
 
     uvicorn.run(
         "vectrixdb.api.server:app",

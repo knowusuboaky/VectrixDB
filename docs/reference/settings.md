@@ -2,7 +2,7 @@
 
 # Settings
 
-Every setting VectrixDB reads, 150 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
+Every setting VectrixDB reads, 160 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
 
 ## The server
 
@@ -20,6 +20,7 @@ Every setting VectrixDB reads, 150 of them, each an environment variable. `vectr
 | `VECTRIXDB_CORS_ORIGINS` | Other sites that may call the API from a browser, comma separated. With sign-in on, name them; * is refused. |  |
 | `VECTRIXDB_FRAME_ANCESTORS` | https origins that may show the dashboard in a frame, separated by spaces. None unless set. |  |
 | `VECTRIXDB_ALLOW_OPEN` | 1 lets serve listen beyond this machine with no key and no sign-in, for a server behind a gateway that asks. |  |
+| `VECTRIXDB_LISTEN_PORT` | The port serve listens on when --port is left out. The container image sets it to 7337. Not VECTRIXDB_PORT, which Kubernetes sets in every pod for a Service named vectrixdb. | `7337` |
 | `VECTRIXDB_MAX_UPLOAD_BYTES` | The largest document the server reads, in bytes. | `104857600` |
 | `VECTRIXDB_OFFLINE` | 1 refuses every download: the bundled models only. |  |
 | `VECTRIXDB_MODELS_DIR` | Where models are kept, when not beside the package. |  |
@@ -34,6 +35,14 @@ Every setting VectrixDB reads, 150 of them, each an environment variable. `vectr
 | `VECTRIXDB_READ_ONLY_API_KEY` | A key that reads and never writes. (a secret, or `VECTRIXDB_READ_ONLY_API_KEY_FILE`) |  |
 | `VECTRIXDB_READ_ONLY_API_KEY_SHA256` | The read-only key as its SHA-256. |  |
 | `VECTRIXDB_OPEN_READS` | With a key and no sign-in: 0 makes every read ask for the full or the read-only key, the dashboard's live feed too. On unless set, so a read needs no key. | `1` |
+
+## Assistants over MCP
+
+| Setting | What it does | Example or default |
+| --- | --- | --- |
+| `VECTRIXDB_MCP` | 1 answers MCP at /mcp: an assistant searches as the person or key it acts for, through the same checks as the REST API. Off unless set. |  |
+| `VECTRIXDB_MCP_WRITES` | 1 offers add_document over MCP, to a caller whose role may write. Off unless set, so an assistant only reads. |  |
+| `VECTRIXDB_MCP_SCOPES` | The scopes an MCP client asks the identity provider for, separated by spaces. Left out, <OIDC_API_AUDIENCE>/.default when the audience is an api:// one. | `api://vectrixdb/search` |
 
 ## Sign-in
 
@@ -121,7 +130,7 @@ Every setting VectrixDB reads, 150 of them, each an environment variable. `vectr
 | `VECTRIXDB_EXTRACTOR_URL` | A service that reads file types the server does not. |  |
 | `VECTRIXDB_EXTRACTOR_ROUTES` | JSON, file suffix to route on that service. | `{".pdf": "/extract/pdf"}` |
 | `VECTRIXDB_EXTRACTOR_BODY` | raw or multipart. | `raw` |
-| `VECTRIXDB_EXTRACTOR_KEY` | The key the service asks for. (a secret) |  |
+| `VECTRIXDB_EXTRACTOR_KEY` | The key the service asks for. (a secret, or `VECTRIXDB_EXTRACTOR_KEY_FILE`) |  |
 | `VECTRIXDB_EXTRACTOR_KEY_HEADER` | The header that key goes in. | `x-api-key` |
 | `VECTRIXDB_EXTRACTOR_TIMEOUT` | Seconds to wait for the service. | `300` |
 | `VECTRIXDB_EXTRACTOR_RETRIES` | How many more times to ask the service after a timeout, a connection error or a 408, 429, 502, 503 or 504, waiting longer each time with jitter; Retry-After is honoured. | `3` |
@@ -132,6 +141,7 @@ Every setting VectrixDB reads, 150 of them, each an environment variable. `vectr
 
 | Setting | What it does | Example or default |
 | --- | --- | --- |
+| `VECTRIXDB_EXTRACT_LISTEN_PORT` | The port extract-serve listens on when --port is left out. The container image sets it to 7338. | `7338` |
 | `VECTRIXDB_EXTRACT_PREFIX` | The path every route lives under, the deployment's choice: /api gives /api/extract/pdf. |  |
 | `VECTRIXDB_EXTRACT_GATEWAY_PATHS` | Comma separated route=path: the path a gateway publishes each endpoint under, as its team hands them over. |  |
 | `VECTRIXDB_EXTRACT_URL_HOSTS` | Comma separated: the only hosts its address routes may fetch from; *.example.com for subdomains. |  |
@@ -159,6 +169,13 @@ Every setting VectrixDB reads, 150 of them, each an environment variable. `vectr
 | `AZURE_LANGUAGE_ENDPOINT` | The Azure AI Language resource that finds names, addresses and national ids: https://<name>.cognitiveservices.azure.com. Set, auto picks it. |  |
 | `AZURE_LANGUAGE_KEY` | Its key. Left empty, the managed identity is used. (a secret, or `AZURE_LANGUAGE_KEY_FILE`) |  |
 
+## Sources
+
+| Setting | What it does | Example or default |
+| --- | --- | --- |
+| `VECTRIXDB_SOURCES_HOSTS` | Comma separated: the only hosts the feeds and pages a collection keeps up with may be fetched from, redirects included; *.example.com for subdomains. Unset, any public host. |  |
+| `VECTRIXDB_SOURCES_INTERNAL_HOSTS` | Comma separated: intranet hosts a source may fetch although they resolve to private addresses. Link-local addresses, where cloud metadata services answer, stay refused for them too. |  |
+
 ## Audit and evaluation
 
 | Setting | What it does | Example or default |
@@ -173,6 +190,9 @@ Every setting VectrixDB reads, 150 of them, each an environment variable. `vectr
 | `VECTRIXDB_WRITER_MODEL` | The model to ask, for a service that serves more than one. |  |
 | `VECTRIXDB_WRITER_KEY` | The key that service asks for. (a secret) |  |
 | `VECTRIXDB_WRITER_KEY_HEADER` | The header the key goes in; Authorization sends it as a Bearer token. | `Authorization` |
+| `VECTRIXDB_TRACING` | 1 sends a span for every search, ingestion and evaluation run to OpenTelemetry; 0 keeps it off even with an endpoint set. Off unless set or OTEL_EXPORTER_OTLP_ENDPOINT is. A span carries counts and timings, never query or document text. Needs vectrixdb[tracing]. |  |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Where spans go, an OTLP/HTTP collector: Jaeger, Grafana Tempo, Honeycomb, Datadog, Azure Monitor's collector. Setting it turns tracing on. | `http://localhost:4318` |
+| `OTEL_SERVICE_NAME` | The service name spans carry. | `vectrixdb` |
 
 ## Storage
 

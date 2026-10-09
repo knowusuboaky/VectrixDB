@@ -64,6 +64,7 @@ ExtractorType
 FacetAggregator
 FacetConfig
 FacetResult
+Feed
 Filter
 FilterCondition
 FilterPushdown
@@ -115,6 +116,7 @@ OpenAIEmbedder
 OpenSearchStorage
 Outcome
 Overlap
+Page
 ParallelBatchProcessor
 ParallelVectorInserter
 PayloadIndexManager
@@ -136,6 +138,7 @@ QuantizationError
 QuantizationType
 QueryExpander
 RRFFusion
+RechunkPreview
 Reproduction
 RerankConfig
 RerankMethod
@@ -157,6 +160,8 @@ SearchMode
 SearchQuery
 SearchResult
 SearchResults
+Source
+Sources
 SparseEmbedder
 SparseIndex
 SparseModelUnavailableWarning
@@ -212,6 +217,8 @@ parse_citations
 plugins
 quick_search
 readable_citation_for
+register_source
+tracing
 validate_answer
 write_evidence_pack
 extract

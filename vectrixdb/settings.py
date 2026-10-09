@@ -123,6 +123,11 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 "1 lets serve listen beyond this machine with no key and no sign-in, for a server behind a gateway that asks.",
                 "",
             ),
+            (
+                "LISTEN_PORT",
+                "The port serve listens on when --port is left out. The container image sets it to 7337. Not VECTRIXDB_PORT, which Kubernetes sets in every pod for a Service named vectrixdb.",
+                "7337",
+            ),
             ("MAX_UPLOAD_BYTES", "The largest document the server reads, in bytes.", "104857600"),
             ("OFFLINE", "1 refuses every download: the bundled models only.", ""),
             ("MODELS_DIR", "Where models are kept, when not beside the package.", ""),
@@ -150,6 +155,26 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 "OPEN_READS",
                 "With a key and no sign-in: 0 makes every read ask for the full or the read-only key, the dashboard's live feed too. On unless set, so a read needs no key.",
                 "1",
+            ),
+        ],
+    )
+    + _s(
+        "Assistants over MCP",
+        [
+            (
+                "MCP",
+                "1 answers MCP at /mcp: an assistant searches as the person or key it acts for, through the same checks as the REST API. Off unless set.",
+                "",
+            ),
+            (
+                "MCP_WRITES",
+                "1 offers add_document over MCP, to a caller whose role may write. Off unless set, so an assistant only reads.",
+                "",
+            ),
+            (
+                "MCP_SCOPES",
+                "The scopes an MCP client asks the identity provider for, separated by spaces. Left out, <OIDC_API_AUDIENCE>/.default when the audience is an api:// one.",
+                "api://vectrixdb/search",
             ),
         ],
     )
@@ -384,7 +409,7 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 '{".pdf": "/extract/pdf"}',
             ),
             ("EXTRACTOR_BODY", "raw or multipart.", "raw"),
-            ("EXTRACTOR_KEY", "The key the service asks for.", "", "secret"),
+            ("EXTRACTOR_KEY", "The key the service asks for.", "", "secret", "file"),
             ("EXTRACTOR_KEY_HEADER", "The header that key goes in.", "x-api-key"),
             ("EXTRACTOR_TIMEOUT", "Seconds to wait for the service.", "300"),
             (
@@ -407,6 +432,11 @@ SETTINGS: Tuple[Setting, ...] = tuple(
     + _s(
         "Extraction service",
         [
+            (
+                "EXTRACT_LISTEN_PORT",
+                "The port extract-serve listens on when --port is left out. The container image sets it to 7338.",
+                "7338",
+            ),
             (
                 "EXTRACT_PREFIX",
                 "The path every route lives under, the deployment's choice: /api gives /api/extract/pdf.",
@@ -510,6 +540,21 @@ SETTINGS: Tuple[Setting, ...] = tuple(
         ],
     )
     + _s(
+        "Sources",
+        [
+            (
+                "SOURCES_HOSTS",
+                "Comma separated: the only hosts the feeds and pages a collection keeps up with may be fetched from, redirects included; *.example.com for subdomains. Unset, any public host.",
+                "",
+            ),
+            (
+                "SOURCES_INTERNAL_HOSTS",
+                "Comma separated: intranet hosts a source may fetch although they resolve to private addresses. Link-local addresses, where cloud metadata services answer, stay refused for them too.",
+                "",
+            ),
+        ],
+    )
+    + _s(
         "Audit and evaluation",
         [
             (
@@ -555,6 +600,23 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 "WRITER_KEY_HEADER",
                 "The header the key goes in; Authorization sends it as a Bearer token.",
                 "Authorization",
+            ),
+            (
+                "TRACING",
+                "1 sends a span for every search, ingestion and evaluation run to OpenTelemetry; 0 keeps it off even with an endpoint set. Off unless set or OTEL_EXPORTER_OTLP_ENDPOINT is. A span carries counts and timings, never query or document text. Needs vectrixdb[tracing].",
+                "",
+            ),
+            (
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                "Where spans go, an OTLP/HTTP collector: Jaeger, Grafana Tempo, Honeycomb, Datadog, Azure Monitor's collector. Setting it turns tracing on.",
+                "http://localhost:4318",
+                "bare",
+            ),
+            (
+                "OTEL_SERVICE_NAME",
+                "The service name spans carry.",
+                "vectrixdb",
+                "bare",
             ),
         ],
     )
@@ -701,6 +763,15 @@ _NAMES = frozenset(s.name for s in SETTINGS) | frozenset(
 )
 _LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
 
+#: What Kubernetes puts in every pod for each Service in its namespace, unless
+#: the pod says ``enableServiceLinks: false``: a Service named vectrixdb gives
+#: VECTRIXDB_SERVICE_HOST, VECTRIXDB_PORT=tcp://..., VECTRIXDB_PORT_7337_TCP
+#: and more. They are not settings, so they are not reported as misspelt ones.
+SERVICE_LINK = re.compile(
+    r"^[A-Z0-9_]+_(SERVICE_HOST|SERVICE_PORT(_[A-Z0-9_]+)?"
+    r"|PORT(_[0-9]+_(TCP|UDP|SCTP)(_(ADDR|PORT|PROTO))?)?)$"
+)
+
 
 def known() -> frozenset:
     """Every name the server reads, the ``_FILE`` twins included."""
@@ -711,7 +782,7 @@ def unknown(names: Iterable[str]) -> List[Tuple[str, Optional[str]]]:
     """The ``VECTRIXDB_`` names among these that nothing reads, each with the setting it most likely meant."""
     out = []
     for name in sorted(set(names)):
-        if name.startswith("VECTRIXDB_") and name not in _NAMES:
+        if name.startswith("VECTRIXDB_") and name not in _NAMES and not SERVICE_LINK.match(name):
             near = difflib.get_close_matches(name, sorted(_NAMES), n=1, cutoff=0.8)
             out.append((name, near[0] if near else None))
     return out

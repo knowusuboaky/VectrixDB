@@ -36,7 +36,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from urllib.parse import urlparse
 
 from ..citations import _clock
-from ..exceptions import DependencyError, ExtractionError
+from ..exceptions import DependencyError, ExtractionError, ModelDownloadError
 from ..ingest import LoadedDocument, join_pages
 from .layout import (
     drop_running_lines,
@@ -164,9 +164,12 @@ def transcript_markdown(doc: LoadedDocument) -> str:
 
     A YouTube video is headed ``YouTube:`` and its title; any other
     recording ``Transcript:`` and its file name. A line whose value is not
-    known is left out rather than written as "Unknown". This is for people:
-    what a collection indexes is the document itself, whose paragraphs and
-    minute pages are what a chunk and a citation want.
+    known is left out rather than written as "Unknown". A transcript read
+    from a video's captions and not its sound says so, ``- Words: the
+    uploader's captions``, and whether YouTube made them or translated
+    them. This is for people: what a collection indexes is the document
+    itself, whose paragraphs and minute pages are what a chunk and a
+    citation want.
     """
     about = doc.metadata or {}
     if about.get("kind") == "youtube":
@@ -184,6 +187,15 @@ def transcript_markdown(doc: LoadedDocument) -> str:
         details.append(f"- Duration: {_clock(duration)}")
     if about.get("language"):
         details.append(f"- Language: {about['language']}")
+    if about.get("transcript_source") == "captions":
+        made = (
+            "YouTube's automatic captions"
+            if about.get("caption_automatic")
+            else "the uploader's captions"
+        )
+        if about.get("caption_translated_from"):
+            made += f", machine-translated from {about['caption_translated_from']}"
+        details.append(f"- Words: {made}")
 
     lines: List[str] = [f"# {heading}", ""]
     if details:
@@ -388,12 +400,21 @@ class RapidOcr:
         return LoadedDocument(text=text, pages=pages, metadata=metadata)
 
 
+def _whisper_fetch(model: str) -> str:
+    """The command that downloads faster-whisper's ``model`` ahead of the first recording."""
+    return f"python -c \"from faster_whisper import download_model; download_model('{model}')\""
+
+
 class Whisper:
     """Speech to text on this machine, with faster-whisper.
 
     ``engine`` takes a path to an audio file and returns ``(start, end,
     text)`` segments in seconds; left out, it is a ``WhisperModel`` of the
-    size named, loaded once and kept.
+    size named, loaded once and kept. faster-whisper downloads that model
+    from Hugging Face the first time it is loaded. With ``VECTRIXDB_OFFLINE``
+    set it is read from the Hugging Face cache alone, and a model that is not
+    there is a :class:`~vectrixdb.exceptions.ModelDownloadError` naming the
+    command that fetches it.
     """
 
     label = "faster-whisper"
@@ -426,7 +447,21 @@ class Whisper:
                 from faster_whisper import WhisperModel
             except ImportError as exc:
                 raise DependencyError("faster-whisper", "asr") from exc
-            self._loaded = WhisperModel(self.model)
+            from .._net import offline
+
+            if not offline():
+                self._loaded = WhisperModel(self.model)
+            else:
+                # Hugging Face is not asked anything, not even whether the copy here is current.
+                # A model not in its cache is a FileNotFoundError; a ValueError before huggingface_hub 0.14.
+                try:
+                    self._loaded = WhisperModel(self.model, local_files_only=True)
+                except (OSError, ValueError) as exc:
+                    raise ModelDownloadError(
+                        f"faster-whisper's {self.model} model is not on this machine, and VECTRIXDB_OFFLINE "
+                        f"refuses to download it. Fetch it where there is a network, {_whisper_fetch(self.model)}, "
+                        "and copy the Hugging Face cache across (HF_HOME, ~/.cache/huggingface by default)"
+                    ) from exc
         found, _info = self._loaded.transcribe(path, language=self.language)
         return [(float(s.start), float(s.end), str(s.text)) for s in found]
 

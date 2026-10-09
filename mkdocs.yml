@@ -78,6 +78,7 @@ nav:
   - Home: index.md
   - Tutorial:
       - Getting started: tutorial/getting-started.md
+      - Add it with your coding agent: how-to/coding-agents.md
   - How-to guides:
       - Handle errors: how-to/handle-errors.md
       - Choose a storage backend: how-to/storage-backends.md
@@ -86,6 +87,7 @@ nav:
       - Sign people in: how-to/sign-in.md
       - Put your company's name on it: how-to/branding.md
       - Deploy the server: how-to/deploy.md
+      - Run it in containers: how-to/containers.md
       - Put it behind a gateway: how-to/behind-a-gateway.md
       - Use the dashboard: how-to/dashboard.md
       - Tips and tricks: how-to/tips.md
@@ -93,11 +95,13 @@ nav:
       - Trace an answer to its source: how-to/lineage.md
       - Keep conversation memory: how-to/conversation-memory.md
       - Use it from an assistant over MCP: how-to/mcp-server.md
+      - Trace searches and ingestion: how-to/tracing.md
       - Run without a network: how-to/offline.md
       - Back up, move and restore: how-to/export-import.md
       - Ingest documents: how-to/ingest-documents.md
       - Extract, keep, index: how-to/extract-keep-index.md
       - Ingest when a file lands: how-to/ingest-on-event.md
+      - Keep a collection in step with feeds and pages: how-to/sources.md
       - Run an extraction service: how-to/extraction-service.md
       - Measure retrieval: how-to/measure-retrieval.md
       - Evaluate every setup: how-to/evaluate-setups.md

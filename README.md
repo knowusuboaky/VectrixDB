@@ -73,6 +73,19 @@ what. [Use the dashboard](docs/how-to/dashboard.md) walks every page.
   <br><sub>The run in this picture is sample data, drawn to show the page, not a measurement. <code>vectrixdb evaluate</code> on your own questions gives real numbers.</sub>
 </p>
 
+## Run it in containers
+
+Each release publishes signed images of the server and the extraction service,
+for Intel and ARM. `docker/compose.yaml` runs the two on one machine, with
+Jaeger beside them to see each search and upload as a trace, and
+`docker/kubernetes` runs them on a cluster.
+[Run it in containers](docs/how-to/containers.md) has the steps, and how to
+check a signature before anything runs.
+
+<p align="center">
+  <img src="docs/images/containers/compose.gif" alt="Compose starting the server, the extraction service and Jaeger, then a scan read by the extraction service and a search that finds its words" width="860">
+</p>
+
 ## Documentation
 
 Grouped by what you came for: learning it, doing one thing, looking something
@@ -85,6 +98,10 @@ optional package or a cloud account, so the code on them cannot quietly rot.
 
 - [Getting started](docs/tutorial/getting-started.md), from an empty directory
   to a working search in one sitting
+- [Add it with your coding agent](docs/how-to/coding-agents.md), a prompt to
+  paste into Claude Code, Cursor or Copilot, and
+  [llms.txt](https://knowusuboaky.github.io/VectrixDB/llms.txt), the docs index
+  agents read
 
 **How-to guides**
 
@@ -96,6 +113,8 @@ optional package or a cloud account, so the code on them cannot quietly rot.
 - [Sign people in](docs/how-to/sign-in.md)
 - [Put your company's name on it](docs/how-to/branding.md)
 - [Deploy the server](docs/how-to/deploy.md)
+- [Run it in containers](docs/how-to/containers.md), signed images for one
+  machine or Kubernetes
 - [Put it behind a gateway](docs/how-to/behind-a-gateway.md), APIM, API Gateway
   or any proxy
 - [Tips and tricks](docs/how-to/tips.md), the things that are easy to miss
@@ -104,11 +123,14 @@ optional package or a cloud account, so the code on them cannot quietly rot.
 - [Trace an answer to its source](docs/how-to/lineage.md)
 - [Keep conversation memory](docs/how-to/conversation-memory.md)
 - [Use it from an assistant over MCP](docs/how-to/mcp-server.md)
+- [Trace searches and ingestion](docs/how-to/tracing.md), opt-in OpenTelemetry
+  spans that never carry query or document text
 - [Run without a network](docs/how-to/offline.md)
 - [Back up, move and restore](docs/how-to/export-import.md)
 - [Ingest documents](docs/how-to/ingest-documents.md)
 - [Extract, keep, index](docs/how-to/extract-keep-index.md)
 - [Ingest when a file lands](docs/how-to/ingest-on-event.md)
+- [Keep a collection in step with feeds and pages](docs/how-to/sources.md)
 - [Run an extraction service](docs/how-to/extraction-service.md)
 - [Measure retrieval](docs/how-to/measure-retrieval.md)
 - [Evaluate every setup](docs/how-to/evaluate-setups.md)

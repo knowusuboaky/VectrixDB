@@ -22,7 +22,7 @@ Every way the server and the extraction service say no, read off the code, so a 
 
 Exceptions the library raises in Python are on [Exceptions](exceptions.md); the table at the end lists them. The server turns a `PolicyError` into 403 (or 503 for a records store that cannot be read), a `StorageError` from the store behind a collection into 502 with the store's own words, a route's `HTTPException` into its own status, and a body that is not the shape asked for into 422. The extraction service turns a `DependencyError` into 503, an `ExtractionError` into 503 when a service it uses is busy, 502 when one answered badly and 422 when the file could not be read, and a `ConfigurationError` in what was asked into 422.
 
-## What a route can send, 145 refusals
+## What a route can send, 149 refusals
 
 ### Sign-in and the door
 
@@ -43,28 +43,28 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 401 | API key required. Provide api-key header. | `_keys_only` |
 | 401 | Developer Access is off. Sign in again. | `step_up` |
 | 401 | Emergency sign-in is off. Sign in again. | `step_up` |
-| 401 | Invalid API key | `dispatch` |
-| 401 | Sign in to continue | `dispatch`, `_guest` |
+| 401 | Invalid API key | `_dispatch` |
+| 401 | Sign in to continue | `_dispatch`, `_guest` |
 | 401 | That code was not accepted. Codes change every 30 seconds, and each works once. | `password_reset`, `replace_authenticator_confirm`, `step_up` |
 | 401 | That code was not accepted. Codes change every 30 seconds, and each works once., or That password and code were not accepted together. Check both and try again. when passwords are on | `email_verify` |
 | 401 | That passkey is not registered here. | `passkey_finish` |
 | 401 | That password was not accepted. | `step_up` |
 | 401 | That username and password were not accepted together. Check both and try again. | `developer_signin` |
 | 401 | That username and password were not accepted together. Check both and try again., or That password was used in an earlier emergency, and a password works for one. An operator sets a new one. when spent | `break_glass_signin` |
-| 401 | the reason the provider gave | `passkey_finish`, `step_up_passkey_finish`, `dispatch` |
+| 401 | the reason the provider gave | `passkey_finish`, `step_up_passkey_finish`, `_dispatch` |
 | 403 | `said` | `_sso_first` |
-| 403 | Add a passkey to continue: this server signs people in with passkeys. | `dispatch` |
+| 403 | Add a passkey to continue: this server signs people in with passkeys. | `_dispatch` |
 | 403 | Admins sign in with SSO on this server. | `_admin_needs_sso` |
-| 403 | Confirm it's you to make this change | `dispatch` |
+| 403 | Confirm it's you to make this change | `_dispatch` |
 | 403 | Read-only API key cannot perform write operations | `_keys_only` |
 | 403 | Sign in with your passkey: this server signs people in with passkeys. | `email_verify` |
-| 403 | This change needs the person themselves, signed in at the dashboard. An app acting for them cannot make it. | `dispatch` |
+| 403 | This change needs the person themselves, signed in at the dashboard. An app acting for them cannot make it. | `_dispatch` |
 | 403 | This key reaches {named} and nothing else, so {method} {path} is not its to make. | `outside_the_scope` |
-| 403 | This request did not carry the session's forgery token | `dispatch` |
+| 403 | This request did not carry the session's forgery token | `_dispatch` |
 | 403 | This server signs people in with passkeys. Add a passkey instead. | `replace_authenticator_begin`, `replace_authenticator_confirm` |
 | 403 | This server signs people in with passkeys. Make one to finish setting up. | `enrol_confirm` |
 | 403 | why the policy refused, with its code in data | `_gate` |
-| 403 | Your role does not allow this | `dispatch` |
+| 403 | Your role does not allow this | `_dispatch` |
 | 404 | email sign-in is not turned on | `_email_on` |
 | 404 | no authenticator app is set up | `remove_my_authenticator` |
 | 404 | no such key | `revoke_key` |
@@ -89,7 +89,7 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 429 | Too many wrong codes. Wait {runtime.store.lock_minutes(key)} minutes and try again. | `replace_authenticator_confirm` |
 | 429 | Too many wrong tries. Wait {runtime.store.lock_minutes(held)} minutes and try again. | `_locked_out` |
 | 500 | the error's own words | `access_check`, `_gate` |
-| 503 | The access log cannot be written, so this request was not served | `_timed_search`, `dispatch` |
+| 503 | The access log cannot be written, so this request was not served | `_timed_search`, `_dispatch` |
 | 503 | the error's own words | `access_check`, `_gate` |
 | `status` | the rate limit's words, with retry_after in data | `_refuse` |
 
@@ -143,7 +143,7 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 400 | metadata is a JSON object | `add_document` |
 | 400 | metadata is not JSON: {exc} | `add_document` |
 | 400 | Name the file in X-Filename, for example X-Filename: report.pdf | `_upload` |
-| 400 | the error's own words | `add_document` |
+| 400 | the error's own words | `write_document` |
 | 400 | The form has no file field | `_upload` |
 | 400 | The request has no file in it | `_upload` |
 | 404 | No document {doc_id} | `delete_document` |
@@ -151,13 +151,25 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | 404 | This server does not keep documents. Start it with VECTRIXDB_KEEP_SOURCE=1 and the Markdown each document was indexed from is kept and served here. | `_kept` |
 | 413 | The file is larger than {MAX_UPLOAD_BYTES} bytes | `_upload` |
 | 415 | A multipart form needs python-multipart on the server. Send the file as the request body with its name in X-Filename instead, which needs nothing. | `_upload` |
-| 422 | Nothing could be read from {filename} | `add_document` |
-| 422 | the error's own words | `add_document` |
-| 500 | Text embedder not available: {exc} | `add_document` |
+| 422 | Nothing could be read from {what or document_id} | `write_document` |
+| 422 | the error's own words | `write_document` |
+| 500 | Text embedder not available: {exc} | `write_document` |
 | 500 | the error's own words | `configured_extractors` |
 | 500 | VECTRIXDB_KEEP_SOURCE is a Blob address with no container in it | `_files_at` |
 | 502 or 422 | the error's own words | `add_document` |
 | 503 | the error's own words | `add_document` |
+
+### Feeds and pages a collection keeps up with
+
+`vectrixdb/api/sources.py`
+
+| Status | Message | Raised by |
+| --- | --- | --- |
+| 400 | An address that reads ${NAME} from the environment is added from Python or the command line on the server, not over the API: a request could otherwise have the server send its own settings to any host. | `add_source` |
+| 400 | the error's own words | `add_source` |
+| 404 | No source {source_id} in {name} | `remove_source` |
+| 404 | the error's own words | `refresh_sources` |
+| 422 | the error's own words | `add_source` |
 
 ### Inspection, provenance and the audit trail
 
@@ -199,17 +211,16 @@ Exceptions the library raises in Python are on [Exceptions](exceptions.md); the 
 | --- | --- | --- |
 | 400 | the request has no body: send the file as it is | `_body` |
 | 403 | no address may be fetched: set VECTRIXDB_EXTRACT_URL_HOSTS to the hosts that may | `fetch` |
-| 403 | {req.full_url} redirected to {newurl}, which is not an allowed host | `redirect_request` |
-| 403 | {urlparse(url).hostname or url} is not one of the hosts this service fetches from | `fetch` |
+| 403 | {redact_url(req.full_url)} redirected to {site_of(newurl)}, which is not an allowed host | `redirect_request` |
+| 403 | {urlparse(url).hostname or shown} is not one of the hosts this service fetches from | `fetch` |
 | 404 | there is no job {job} | `job_status` |
 | 413 | the file is larger than {service.max_bytes} bytes | `_body` |
-| 413 | {url} is larger than {self.max_bytes} bytes | `fetch` |
+| 413 | {shown} is larger than {self.max_bytes} bytes | `fetch` |
 | 422 | output_dir is one folder name, letters, digits, spaces, dots, dashes and underscores | `transcribe_youtube_save` |
 | 422 | the error's own words | `_bad_value`, `_answer`, `mask_route` |
 | 422 | what did not validate, in words, with the fields in detail | `_shape` |
 | 422 | {body.url} is not the address of one YouTube video | `transcribe_youtube_save` |
 | 502 | the error's own words | `_translation` |
-| 502 | {url} answered {status} | `fetch` |
 | 502 or 422 | the error's own words | `_unreadable` |
 | 503 | nothing reads pictures: set AZURE_DOCINTEL_ENDPOINT and AZURE_DOCINTEL_KEY | `read_image` |
 | 503 | nothing reads sound: set AZURE_SPEECH_ENDPOINT and AZURE_SPEECH_KEY | `listening_in` |

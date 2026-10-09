@@ -35,6 +35,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Union
 from urllib.parse import unquote, unquote_plus, urlparse
 
+from ._web import redact_url
 from .exceptions import ConfigurationError
 
 
@@ -333,7 +334,8 @@ class IngestWorker:
     ``db`` is an open ``Vectrix``; whatever it was opened with, the policy
     and its metadata contract, the quality gate, the audit sink and the
     build stamping, applies to every event. ``doc_id_of`` maps a URI to a
-    document id; the default is the URI itself. ``metadata_of`` adds
+    document id; the default is the URI itself, without any signature, token
+    or key it carries, which is also what a chunk keeps as its ``source``. ``metadata_of`` adds
     metadata to every chunk of a document, which is where a policy's fields
     come from when the store does not carry them.
 
@@ -375,7 +377,9 @@ class IngestWorker:
             self.extractors: Any = resolve(extractors)
         else:
             self.extractors = getattr(db, "_extractors", None)
-        self.doc_id_of = doc_id_of or (lambda uri: uri)
+        # A signed link's credential stays in the fetch, and out of every id,
+        # chunk and citation; an address with none is its own id, as always.
+        self.doc_id_of = doc_id_of or redact_url
         self.metadata_of = metadata_of
         self.options = add_document_options
 
@@ -387,7 +391,9 @@ class IngestWorker:
         if store is not None and store.holds(event.uri):
             # The store's own files. Ingesting one would write another, and
             # that one would raise an event too.
-            logger.warning("ignored %s: it is inside the document store %r", event.uri, store)
+            logger.warning(
+                "ignored %s: it is inside the document store %r", redact_url(event.uri), store
+            )
             return IngestOutcome(
                 action="ignored",
                 doc_id=doc_id,
@@ -397,7 +403,9 @@ class IngestWorker:
             )
         chunks = getattr(self.db, "kept_chunks", None)
         if chunks is not None and chunks.holds(event.uri):
-            logger.warning("ignored %s: it is inside the chunk store %r", event.uri, chunks)
+            logger.warning(
+                "ignored %s: it is inside the chunk store %r", redact_url(event.uri), chunks
+            )
             return IngestOutcome(
                 action="ignored",
                 doc_id=doc_id,
@@ -489,7 +497,7 @@ class IngestWorker:
                         data,
                         name,
                         extractors=self.extractors,
-                        source=event.uri,
+                        source=redact_url(event.uri),
                         images=bool(wants and wants()),
                         # Whatever reads a scanned page for add_document reads one
                         # here too, or a blob and a file are two different documents.

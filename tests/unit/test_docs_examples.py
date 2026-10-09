@@ -42,6 +42,7 @@ PAGES = [
     "docs/how-to/ingest-documents.md",
     "docs/how-to/extract-keep-index.md",
     "docs/how-to/ingest-on-event.md",
+    "docs/how-to/sources.md",
     "docs/how-to/extraction-service.md",
     "docs/how-to/measure-retrieval.md",
     "docs/how-to/evaluate-setups.md",
@@ -53,6 +54,7 @@ PAGES = [
     "docs/how-to/build-an-app.md",
     "docs/how-to/storage-backends.md",
     "docs/how-to/tips.md",
+    "docs/how-to/tracing.md",
     "docs/reference/filters.md",
 ]
 
@@ -99,6 +101,10 @@ OPTIONAL_DEPENDENCY = (
     "import torch",
     "from transformers",
     "plugin:",
+    # A YouTube video: yt-dlp and a network hop to YouTube, which the suite
+    # never makes. test_youtube.py and test_youtube_captions.py hold
+    # load_youtube to its word with stand-ins for both.
+    "load_youtube(",
     # A chat model the reader serves, on their machine or a service: a
     # network hop to a model that is not here. What write_golden does with
     # its answers is held to in test_golden_writer.py, with fake models.
@@ -106,6 +112,10 @@ OPTIONAL_DEPENDENCY = (
     # A fetch the reader asks for by name. The suite runs offline, where it is
     # refused; test_models.py holds the refusal and the fetch to their words.
     "download_models(",
+    # A feed or a page on the network, which the suite does not have. Every
+    # step is held to its words with a fake one in test_sources.py and
+    # test_sources_api.py; the page's own Source runs here.
+    '.sources.add("https://',
 )
 
 # A cloud backend. Excluded because the suite runs offline against fakes, not

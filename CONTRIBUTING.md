@@ -158,7 +158,7 @@ Keep one logical change per pull request.
 
 ## Governance and releases
 
-`GOVERNANCE.md` says who decides, what is in scope, and the release cadence: patch releases when a fix is waiting, minor releases about every eight weeks or when a roadmap block completes, majors only to remove deprecated API. `ROADMAP.md` is the open list; `scripts/release.py` does the mechanics. `CODE_OF_CONDUCT.md` applies everywhere the project happens.
+`GOVERNANCE.md` says who decides, what is in scope, and the release cadence: patch releases when a fix is waiting, minor releases about every eight weeks or when a roadmap block completes, majors only to remove deprecated API. `ROADMAP.md` is the open list. A release is two steps: `python scripts/release.py X.Y.Z` stamps the changelog and the version, and after that commit is on main, **Actions > Release > Run workflow** checks the changelog is dated, runs the suite, builds and checks the package, tags `vX.Y.Z`, writes the GitHub release from the changelog, and waits for one approval on the `pypi` environment before uploading. `CODE_OF_CONDUCT.md` applies everywhere the project happens.
 
 ## Reporting bugs
 

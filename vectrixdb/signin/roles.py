@@ -102,10 +102,12 @@ GRANTABLE = frozenset({"document.read"})
 GRANTS: dict[str, frozenset[str]] = {
     VIEWER: frozenset(_SEE | _SELF),
     # The read-only key is a machine's, and it has always fetched documents.
-    READER: frozenset(_READ | {"document.read"}),
-    SEARCHER: frozenset(_READ | {"search"}),
+    READER: frozenset(_READ | {"document.read", "mcp.connect"}),
+    SEARCHER: frozenset(_READ | {"search", "mcp.connect"}),
     OPERATOR: frozenset(
-        _READ | _SELF | {"search", "content.write", "collection.create", "collection.maintain"}
+        _READ
+        | _SELF
+        | {"search", "content.write", "collection.create", "collection.maintain", "mcp.connect"}
     ),
     # An admin holds every action by name as well as the unnamed ones, so the
     # table reads whole.
@@ -128,6 +130,7 @@ GRANTS: dict[str, frozenset[str]] = {
             "keys.manage",
             "cache.clear",
             "about.read",
+            "mcp.connect",
         }
     ),
     # Somebody not signed in, on a server with guests on: what is shared, and how the setups scored. Never a search.
@@ -162,6 +165,7 @@ ACTIONS: dict[str, str] = {
     "self.manage": "See your own ways to sign in and where you are signed in, and sign out elsewhere",
     "self.secure": "Add or remove your own passkeys, authenticator, password and recovery codes",
     "about.read": "See which VectrixDB this is, its version, its licence and its notice",
+    "mcp.connect": "Connect an assistant over MCP, where each tool it calls is checked as a request of its own",
 }
 
 _C = r"/api(?:/v[12])?/collections/[^/]+"
@@ -202,6 +206,11 @@ _ROUTES: tuple[tuple[str, str, str], ...] = (
         "search",
     ),
     ("POST", _C + r"/(?:rebuild|graph/extract)", "collection.maintain"),
+    # The feeds and pages a collection keeps up with: listed with where its
+    # chunks came from, changed and refreshed as writes.
+    ("GET", _C + r"/sources", "content.index"),
+    ("POST", _C + r"/sources(?:/refresh)?", "content.write"),
+    ("DELETE", _C + r"/sources/[^/]+", "content.write"),
     ("POST", _C + r"/(?:points(?:/sparse)?|text-upsert|documents)", "content.write"),
     ("DELETE", _C + r"/(?:points|documents/.+)", "content.write"),
     ("GET", _C + r"/points", "content.index"),
@@ -218,6 +227,8 @@ _ROUTES: tuple[tuple[str, str, str], ...] = (
     ("DELETE", r"/api/v1/documents/.+", "content.write"),
     ("GET", r"/api/v1/?", "meta.read"),
     ("GET", r"/api(?:/v1)?/info(?:/extended)?", "meta.read"),
+    # Connecting is all the endpoint is: each tool call comes back through here as its own request.
+    ("*", r"/mcp", "mcp.connect"),
     ("GET", r"/api/v1/(?:models|extractors|resources|cache/stats|ws/status)", "meta.read"),
 )
 _COMPILED = tuple(

@@ -181,14 +181,47 @@ class TestServer:
             def run(self, transport):
                 captured["transport"] = transport
 
-        def fake_build(db, name="vectrixdb"):
+        def fake_build(db, name="vectrixdb", writes=True):
             captured["db"] = db
+            captured["writes"] = writes
             return FakeServer()
 
         monkeypatch.setattr("vectrixdb.mcp_server.build_server", fake_build)
         main(["--name", "notes", "--path", str(tmp_path), "--transport", "sse"])
         assert captured["db"].name == "notes"
         assert captured["transport"] == "sse"
+        assert captured["writes"] is False, "over HTTP, changing the collection is asked for"
+
+    def test_stdio_and_allow_writes_offer_the_write_tools(self, tmp_path, monkeypatch):
+        seen = []
+
+        class FakeServer:
+            def run(self, transport):
+                pass
+
+        def fake_build(db, name="vectrixdb", writes=True):
+            seen.append(writes)
+            return FakeServer()
+
+        monkeypatch.setattr("vectrixdb.mcp_server.build_server", fake_build)
+        main(["--name", "notes", "--path", str(tmp_path)])
+        main(
+            [
+                "--name",
+                "notes",
+                "--path",
+                str(tmp_path),
+                "--transport",
+                "streamable-http",
+                "--allow-writes",
+            ]
+        )
+        assert seen == [True, True]
+
+    @pytest.mark.skipif(not HAS_MCP, reason="the mcp extra is not installed")
+    def test_without_writes_only_the_reading_tools_are_registered(self, db):
+        tools = asyncio.run(build_server(db, writes=False).list_tools())
+        assert {t.name for t in tools} == {"search", "recall", "context"}
 
     def test_a_missing_extra_is_a_message_not_a_traceback(self, tmp_path, monkeypatch, capsys):
         """A plain install puts `vectrixdb-mcp` on the path without the `mcp`
@@ -196,7 +229,7 @@ class TestServer:
         It printed a stack trace ending in DependencyError; the message on
         that exception already says what to install."""
 
-        def refuse(db, name="vectrixdb"):
+        def refuse(db, name="vectrixdb", writes=True):
             raise DependencyError("mcp", extra="mcp")
 
         monkeypatch.setattr("vectrixdb.mcp_server.build_server", refuse)

@@ -105,7 +105,13 @@ def _settings(path: Optional[str], env_file: Optional[str]) -> str:
 
 @app.command()
 def serve(
-    port: int = typer.Option(7337, "--port", "-p", help="Port to run on"),
+    port: int = typer.Option(
+        7337,
+        "--port",
+        "-p",
+        envvar="VECTRIXDB_LISTEN_PORT",
+        help="Port to run on. Default: VECTRIXDB_LISTEN_PORT, else 7337",
+    ),
     host: str = typer.Option(
         "127.0.0.1", "--host", "-h", help="Host to bind to. 0.0.0.0 needs an API key or sign-in"
     ),
@@ -193,6 +199,69 @@ def serve(
     except ConfigurationError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2)
+
+
+@app.command("extract-serve")
+def extract_serve(
+    port: int = typer.Option(
+        7338,
+        "--port",
+        "-p",
+        envvar="VECTRIXDB_EXTRACT_LISTEN_PORT",
+        help="Port to run on. Default: VECTRIXDB_EXTRACT_LISTEN_PORT, else 7338",
+    ),
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
+    prefix: Optional[str] = typer.Option(
+        None,
+        "--prefix",
+        help="The path every route lives under, such as /api. Default: VECTRIXDB_EXTRACT_PREFIX, else the root",
+    ),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+):
+    """Start the extraction service: files, addresses and videos in, text out.
+
+    The app create_extraction_app builds, served on its own. It reads its
+    services from the environment, Azure Document Intelligence and Speech or
+    the readers on this machine, and will not start without VECTRIXDB_API_KEY
+    or sign-in, because a call can spend money on a paid service.
+    """
+    _env_file(env_file)
+    from rich.markup import escape
+
+    from .exceptions import ConfigurationError
+
+    console.print(Panel(BANNER, style="cyan", border_style="cyan"))
+    console.print("[bold green]Starting the VectrixDB extraction service...[/bold green]")
+    try:
+        import uvicorn
+
+        from .api.extraction import create_extraction_app, route_prefix
+    except ImportError as exc:
+        # The service is FastAPI and uvicorn, which only the api extra installs.
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        console.print(r"Install it with: pip install vectrixdb\[api,documents]")
+        raise typer.Exit(code=2)
+    try:
+        application = create_extraction_app(prefix=prefix)
+    except ConfigurationError as exc:
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        raise typer.Exit(code=2)
+    import os as _os
+
+    under = route_prefix(
+        _os.environ.get("VECTRIXDB_EXTRACT_PREFIX", "") if prefix is None else prefix
+    )
+    console.print(f"  [dim]Service:[/dim] http://{host}:{port}{under}")
+    console.print(f"  [dim]Routes:[/dim] http://{host}:{port}{under}/docs")
+    console.print()
+
+    from . import tracing
+
+    if tracing.enabled():
+        # This process is the service's own, so nothing else will set up where spans go.
+        tracing.export_to_otlp()
+    # "server: uvicorn" tells whoever finds the port what to look up.
+    uvicorn.run(application, host=host, port=port, server_header=False)
 
 
 @app.command()
@@ -1777,6 +1846,211 @@ def check(
         markup=False,
         highlight=False,
     )
+
+
+# ============================================================================
+# SOURCES: the feeds and pages a collection keeps up with
+# ============================================================================
+#
+# INPUT   an address and how often; a collection; a source's id or address
+# OUTPUT  the source kept; the list; the source forgotten; every source that
+#         is due read again, only what changed written, a line a source, and
+#         exit code 1 when anything failed, for the scheduler to see
+#
+# For collections on this machine's disk, as ingest is. A server whose index
+# lives elsewhere is refreshed through its own route, which a scheduler calls.
+
+sources_app = typer.Typer(
+    help="Feeds and pages a collection keeps up with, read again on a schedule.",
+    no_args_is_help=True,
+)
+app.add_typer(sources_app, name="sources")
+
+
+def _say(text: str) -> None:
+    console.print(text, markup=False, highlight=False, soft_wrap=True)
+
+
+def _collections_with_sources(path: str) -> List[str]:
+    """The collections at ``path`` that keep up with a source, read from the database's own file without opening any."""
+    from pathlib import Path as _Path
+
+    from .sources import SOURCE, local_store
+
+    if not (_Path(path) / "_vectrixdb.db").is_file():
+        return []
+    store = local_store(path)
+    try:
+        return sorted({str(r.data.get("collection") or "") for r in store.query(SOURCE)} - {""})
+    finally:
+        store.close()
+
+
+@sources_app.command("add")
+def sources_add(
+    address: str = typer.Argument(
+        ..., help="The feed's or the page's address. Write ${NAME} where a secret goes."
+    ),
+    name: str = typer.Option("docs", "--name", "-n", help="Collection name"),
+    every: str = typer.Option("6h", "--every", help="How often it is read: 30m, 6h, 1d, 1w"),
+    kind: Optional[str] = typer.Option(
+        None, "--kind", help="feed or page. Left out, it is fetched once to tell"
+    ),
+    articles: bool = typer.Option(
+        False, "--articles", help="A feed: index the article each entry links to"
+    ),
+    no_transcribe: bool = typer.Option(
+        False, "--no-transcribe", help="A podcast: its show notes, even with an audio engine"
+    ),
+    delete_when_gone: bool = typer.Option(
+        False, "--delete-when-gone", help="A page: remove its chunks when it answers 404 or 410"
+    ),
+    path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+):
+    """Keep a collection up with a feed or a page. Nothing is written until a refresh."""
+    from .easy import Vectrix
+    from .exceptions import ConfigurationError, DependencyError, ExtractionError
+    from .sources import every_text
+
+    path = _settings(path, env_file)
+    options: dict = {}
+    if articles:
+        options["articles"] = True
+    if no_transcribe:
+        options["transcribe"] = False
+    if delete_when_gone:
+        options["delete_when_gone"] = True
+    db = Vectrix(name, path=path)
+    try:
+        info = db.sources.add(address, every, kind=kind, by="command line", **options)
+    except (ConfigurationError, DependencyError, ExtractionError) as exc:
+        _say(str(exc))
+        raise typer.Exit(code=2)
+    finally:
+        db.close()
+    _say(
+        f"{name}: added the {info.kind} {info.address}, read every {every_text(info.every)}, id {info.id}. "
+        "Nothing is written until: vectrixdb sources refresh"
+    )
+
+
+@sources_app.command("list")
+def sources_list(
+    name: str = typer.Option("docs", "--name", "-n", help="Collection name"),
+    path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+):
+    """The feeds and pages a collection keeps up with, and how each last went."""
+    from .easy import Vectrix
+    from .sources import every_text
+
+    path = _settings(path, env_file)
+    db = Vectrix(name, path=path)
+    try:
+        found = db.sources.list()
+    finally:
+        db.close()
+    if not found:
+        _say(
+            f"{name} keeps up with no sources. Add one: vectrixdb sources add <address> --name {name}"
+        )
+        return
+    table = Table(title=f"Sources of {name}")
+    for column in ("id", "kind", "address", "every", "last read", "status", "documents"):
+        table.add_column(column)
+    for s in found:
+        status = s.last_status or "not read yet"
+        if s.last_error:
+            status += f": {s.last_error}"
+        table.add_row(
+            s.id,
+            s.kind,
+            s.address,
+            every_text(s.every),
+            s.last_refresh or "",
+            status,
+            str(s.documents),
+        )
+    console.print(table)
+
+
+@sources_app.command("remove")
+def sources_remove(
+    source: str = typer.Argument(..., help="The source's id or its address"),
+    name: str = typer.Option("docs", "--name", "-n", help="Collection name"),
+    delete_documents: bool = typer.Option(
+        False, "--delete-documents", help="Take the documents it wrote too"
+    ),
+    path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+):
+    """Stop keeping up with a source. Its documents stay unless --delete-documents."""
+    from .easy import Vectrix
+
+    path = _settings(path, env_file)
+    db = Vectrix(name, path=path)
+    try:
+        removed = db.sources.remove(source, delete_documents=delete_documents)
+    finally:
+        db.close()
+    if not removed:
+        _say(f"{name} has no source {source}. See: vectrixdb sources list --name {name}")
+        raise typer.Exit(code=1)
+    _say(
+        f"{name}: removed {source}"
+        + (", and the documents it wrote." if delete_documents else "; its documents stay.")
+    )
+
+
+@sources_app.command("refresh")
+def sources_refresh(
+    name: Optional[str] = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help="Collection name. Left out, every collection here that keeps up with a source",
+    ),
+    force: bool = typer.Option(False, "--force", help="Every source, not only the ones due"),
+    max_items: int = typer.Option(50, "--max-items", help="Entries written per source this time"),
+    path: Optional[str] = typer.Option(None, "--path", "-d", help=_PATH_HELP),
+    env_file: Optional[str] = typer.Option(None, "--env-file", help=_ENV_FILE_HELP),
+):
+    """Read the sources that are due and write only what changed. Run it from cron or a scheduled job."""
+    from .easy import Vectrix
+
+    path = _settings(path, env_file)
+    names = [name] if name else _collections_with_sources(path)
+    if not names:
+        _say("No collection here keeps up with a source.")
+        return
+    failed = 0
+    for each in names:
+        db = Vectrix(each, path=path)
+        try:
+            report = db.sources.refresh(force, max_items=max_items)
+        finally:
+            db.close()
+        for outcome in report.sources:
+            line = (
+                f"{each}: {outcome.address}: {outcome.status}, {len(outcome.added)} added, "
+                f"{len(outcome.updated)} updated, {outcome.unchanged} unchanged"
+            )
+            if outcome.removed or outcome.gone:
+                line += f", {len(outcome.removed)} removed, {len(outcome.gone)} gone"
+            if outcome.waiting:
+                line += f", {outcome.waiting} waiting"
+            if outcome.reason:
+                line += f". {outcome.reason}"
+            _say(line)
+            for failure in outcome.failed:
+                _say(f"  {failure['item']}: {failure['reason']}")
+            for note in outcome.notes:
+                _say(f"  {note}")
+        _say(f"{each}: {report}")
+        failed += len(report.failed)
+    if failed:
+        raise typer.Exit(code=1)
 
 
 # ============================================================================

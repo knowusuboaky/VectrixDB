@@ -900,6 +900,40 @@ class VectrixDB:
         """Where every collection's rules are kept, shared by every server, or None. See vectrixdb.collection_records."""
         return getattr(self, "_collection_store", None)
 
+    @property
+    def sources_store(self) -> Any:
+        """Where the feeds and pages each collection keeps up with are kept. See vectrixdb.sources.
+
+        Beside the collection records when there is a store for them, so
+        every server sees the same sources and one refresh at a time reads
+        each; in this database's own file otherwise, or in memory for a
+        database with no path.
+        """
+        shared = getattr(self, "_collection_store", None)
+        if shared is not None:
+            return shared.records
+        with self._lock:
+            held = getattr(self, "_sources_records", None)
+            if held is None:
+                from ..sources import local_store
+
+                held = self._sources_records = local_store(self.path)
+            return held
+
+    def _forget_sources(self, name: str) -> None:
+        """A deleted collection's sources, and what they wrote down, gone with it.
+
+        Left behind, a collection made again under the name would be
+        refreshed into as if it were the old one, its entries taken as
+        already written.
+        """
+        from ..sources import forget_collection
+
+        try:
+            forget_collection(self.sources_store, name)
+        except Exception as exc:  # the store's own error, whatever database it is
+            logger.warning("the sources of %s could not be forgotten: %s", name, exc)
+
     def use_collection_store(self, where: Any, *, key: Optional[str] = None) -> Any:
         """Read every collection's rules from ``where`` from now on, for every collection here.
 
@@ -976,6 +1010,7 @@ class VectrixDB:
             # the same reason as the chunks.
             if getattr(self, "_collection_store", None) is not None:
                 self._collection_store.delete(name)
+            self._forget_sources(name)
 
             # Unregister from auto-scaler
             if self._auto_scaler:
@@ -1022,6 +1057,7 @@ class VectrixDB:
             chunks.clear()
         if getattr(self, "_collection_store", None) is not None:
             self._collection_store.delete(name)
+        self._forget_sources(name)
         if self._storage is not None:
             self._storage.delete_collection(name)
         self._db.execute("DELETE FROM collections WHERE name = ?", (name,))
@@ -1184,6 +1220,12 @@ class VectrixDB:
             # Close storage
             if hasattr(self._storage, "close"):
                 self._storage.close()
+
+            # The sources table's own connection, when one was opened
+            held = getattr(self, "_sources_records", None)
+            if held is not None:
+                held.close()
+                self._sources_records = None
 
             # Close metadata database
             self._db.close()

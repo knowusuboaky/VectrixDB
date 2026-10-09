@@ -1,6 +1,6 @@
-"""Plugins: third-party embedders, rerankers, extractors and storage backends.
+"""Plugins: third-party embedders, rerankers, extractors, storage backends and sources.
 
-A plugin is a Python package that declares an entry point in one of four
+A plugin is a Python package that declares an entry point in one of five
 groups. Nothing else is needed; VectrixDB finds it by name.
 
     # in the plugin's pyproject.toml
@@ -27,6 +27,8 @@ What each group must provide:
 * ``vectrixdb.storage``: a subclass of ``vectrixdb.core.storage.BaseStorage``
   taking a ``StorageConfig``. The storage contract suite in the VectrixDB
   repository is the definition of done for one of these.
+* ``vectrixdb.sources``: a subclass of ``vectrixdb.sources.Source``, a kind
+  of source a collection keeps up with, such as a licensed news feed.
 
 ``load()`` returns the entry point's object (a class or factory); callers
 instantiate it. ``available()`` lists what is installed, for error messages
@@ -43,13 +45,13 @@ __all__ = ["GROUPS", "available", "load", "register", "PluginNotFound"]
 
 
 # ============================================================================
-# SETTINGS: the four groups, and the in-code registrations
+# SETTINGS: the five groups, and the in-code registrations
 # ============================================================================
 #
-# Embedders, rerankers, extractors and storage backends, and the registrations
-# made in code beside the entry points.
+# Embedders, rerankers, extractors, storage backends and sources, and the
+# registrations made in code beside the entry points.
 
-GROUPS = ("embedders", "rerankers", "extractors", "storage")
+GROUPS = ("embedders", "rerankers", "extractors", "storage", "sources")
 _REGISTERED: Dict[str, Dict[str, Any]] = {group: {} for group in GROUPS}
 
 
@@ -83,7 +85,7 @@ def _group_name(group: str) -> str:
 #         code, and the function that removes it; the name in a plugin:name
 #         reference, or None
 #
-# A plugin is a package that declares an entry point in one of four groups.
+# A plugin is a package that declares an entry point in one of five groups.
 # Nothing is imported until it is asked for by name.
 
 

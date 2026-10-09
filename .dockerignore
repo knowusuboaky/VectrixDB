@@ -1,0 +1,19 @@
+# The images are built from the package and the files its metadata reads, and
+# nothing else, so a stray .env, a data folder or a model cache in a checkout
+# never reaches a build, let alone an image layer. Everything is left out, then
+# the few files the build needs are let back in.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!NOTICE
+!vectrixdb/
+
+# Compiled files from a local run, and the models the wheel leaves out anyway.
+**/__pycache__
+**/*.py[cod]
+vectrixdb/models/data/dense
+vectrixdb/models/data/dense_en
+vectrixdb/models/data/reranker
+vectrixdb/models/data/bge-m3
+vectrixdb/models/data/rebel

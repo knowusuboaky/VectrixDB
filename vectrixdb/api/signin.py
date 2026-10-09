@@ -156,6 +156,9 @@ PUBLIC_PATHS = {
     "/brand/logo-dark",
     "/auth/break-glass",
     "/auth/developer",
+    # Where an MCP client is told to sign its person in: RFC 9728, nothing stored in it.
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/mcp",
 }
 #: How a session opened by emergency sign-in says how it came in.
 BREAK_GLASS = "break_glass"
@@ -696,6 +699,11 @@ def outside_the_scope(path: str, method: str, scope: Sequence[str]) -> Optional[
         return collection_not_found(wanted)
     if path in SCOPED_KEY_MAY_ALSO_READ and method in READ_ONLY_METHODS:
         return None
+    if path == "/mcp":
+        # The MCP endpoint names no collection: each tool it runs comes back
+        # through this check as its own request, with this key, and is held to
+        # the key's collections there.
+        return None
     # The route is real and the app was built from a document that lists it, so
     # this one says what is wrong rather than pretending the route is missing.
     named = ", ".join(scope)
@@ -767,6 +775,16 @@ def _address(request: Request) -> Optional[str]:
 
 class AccessMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Any) -> Response:
+        response = await self._dispatch(request, call_next)
+        if response.status_code == 401 and route_path(request) == "/mcp":
+            # An MCP client reads the header to find where its person signs in, and
+            # its person reads the words, which are about an assistant, not a page.
+            from .mcp import refusal
+
+            return refusal(request)
+        return response
+
+    async def _dispatch(self, request: Request, call_next: Any) -> Response:
         # The path as the app knows it. Behind a gateway that serves the app
         # under a path, the raw one carries the prefix, the role table cannot
         # place it, and a route nothing places is admin only: every operator,
@@ -1067,7 +1085,10 @@ class AccessMiddleware(BaseHTTPMiddleware):
             if caller is not None or reads_are_open():
                 return await call_next(request)
             return _refuse(401, "API key required. Provide api-key header.")
-        if caller is not None and roles.action_for(request.method, route_path(request)) == "search":
+        if caller is not None and roles.action_for(request.method, route_path(request)) in (
+            "search",
+            "mcp.connect",
+        ):
             # A search is a read sent as a POST. Refusing it left the read-only
             # key unable to do the one thing it is for.
             return await call_next(request)

@@ -2,7 +2,7 @@
 
 # REST API
 
-Every documented route the server answers, 104 of them, grouped as the interactive docs at `/docs` group them. The last column is who may call it once sign-in is on: the action the role table places it under, the roles that hold that action, the key roles that do, and whether it needs a check from the last ten minutes. With sign-in off, the API key rules in [Run the REST API](../how-to/rest-api.md) apply instead. A route no action places is for admins only, so an endpoint added later is closed until somebody decides who it is for. Older aliases under `/api/` that the dashboard used are left out.
+Every documented route the server answers, 108 of them, grouped as the interactive docs at `/docs` group them. The last column is who may call it once sign-in is on: the action the role table places it under, the roles that hold that action, the key roles that do, and whether it needs a check from the last ten minutes. With sign-in off, the API key rules in [Run the REST API](../how-to/rest-api.md) apply instead. A route no action places is for admins only, so an endpoint added later is closed until somebody decides who it is for. Older aliases under `/api/` that the dashboard used are left out.
 
 ## Auth
 
@@ -167,3 +167,12 @@ Every documented route the server answers, 104 of them, grouped as the interacti
 | `POST` | `/api/v1/collections/{name}/sparse-search` | Search using sparse vectors only. | `search`: operator, admin; keys: searcher, operator |
 | `POST` | `/api/v1/collections/{name}/text-hybrid-search` | Hybrid search with automatic text embedding. | `search`: operator, admin; keys: searcher, operator |
 | `POST` | `/api/v1/collections/{name}/text-search` | Semantic search using text query. | `search`: operator, admin; keys: searcher, operator |
+
+## Sources
+
+| Method | Path | What it does | Who may call it |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/collections/{name}/sources` | The feeds and pages this collection keeps up with, when each was read and what it found. | `content.index`: viewer, operator, admin; keys: reader, searcher, operator |
+| `POST` | `/api/v1/collections/{name}/sources` | Keep this collection up with a feed or a page. Nothing is written until a refresh. | `content.write`: operator, admin; keys: operator |
+| `POST` | `/api/v1/collections/{name}/sources/refresh` | Read the sources that are due, every one with force, and write only what changed. | `content.write`: operator, admin; keys: operator |
+| `DELETE` | `/api/v1/collections/{name}/sources/{source_id}` | Stop keeping up with a source. Its documents stay unless delete_documents is true. | `content.write`: operator, admin; keys: operator |

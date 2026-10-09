@@ -353,6 +353,11 @@ class CollectionRecords:
         """Where this is, in words fit for a log: never a key."""
         return str(self._records.describe())
 
+    @property
+    def records(self) -> Any:
+        """The records store underneath, where each collection's sources are kept too: see vectrixdb.sources."""
+        return self._records
+
     def close(self) -> None:
         self._records.close()
 

@@ -231,6 +231,83 @@
         "title": "AddPointsWithSparseRequest",
         "type": "object"
       },
+      "AddSourceRequest": {
+        "properties": {
+          "address": {
+            "description": "The feed's or the page's address.",
+            "maxLength": 2048,
+            "title": "Address",
+            "type": "string"
+          },
+          "articles": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A feed: index the article each entry links to.",
+            "title": "Articles"
+          },
+          "delete_when_gone": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A page: remove its chunks when it answers 404 or 410.",
+            "title": "Delete When Gone"
+          },
+          "every": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "default": "6h",
+            "description": "How often it is read: 30m, 6h, 1d, or seconds.",
+            "title": "Every"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "pattern": "^(feed|page)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "feed or page. Left out, it is fetched once to tell.",
+            "title": "Kind"
+          },
+          "transcribe": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A podcast: transcribe episodes when an audio extractor is configured.",
+            "title": "Transcribe"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "AddSourceRequest",
+        "type": "object"
+      },
       "BeginRequest": {
         "properties": {
           "email": {
@@ -1068,6 +1145,38 @@
           }
         },
         "title": "PolicyRequest",
+        "type": "object"
+      },
+      "RefreshRequest": {
+        "properties": {
+          "force": {
+            "default": false,
+            "description": "Every source, not only the ones that are due.",
+            "title": "Force",
+            "type": "boolean"
+          },
+          "max_items": {
+            "default": 50,
+            "description": "Entries written per source.",
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Max Items",
+            "type": "integer"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "One source's id or address.",
+            "title": "Source"
+          }
+        },
+        "title": "RefreshRequest",
         "type": "object"
       },
       "RerankSearchRequest": {
@@ -3793,6 +3902,216 @@
         "summary": "Search With Rerank",
         "tags": [
           "enterprise-search"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/sources": {
+      "get": {
+        "description": "The feeds and pages this collection keeps up with, when each was read and what it found.",
+        "operationId": "list_sources_api_v1_collections__name__sources_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sources",
+        "tags": [
+          "sources"
+        ]
+      },
+      "post": {
+        "description": "Keep this collection up with a feed or a page. Nothing is written until a refresh.",
+        "operationId": "add_source_api_v1_collections__name__sources_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Source",
+        "tags": [
+          "sources"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/sources/refresh": {
+      "post": {
+        "description": "Read the sources that are due, every one with force, and write only what changed.",
+        "operationId": "refresh_sources_api_v1_collections__name__sources_refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RefreshRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Sources",
+        "tags": [
+          "sources"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/sources/{source_id}": {
+      "delete": {
+        "description": "Stop keeping up with a source. Its documents stay unless delete_documents is true.",
+        "operationId": "remove_source_api_v1_collections__name__sources__source_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Take the documents it wrote too, unless another source wrote them.",
+            "in": "query",
+            "name": "delete_documents",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Take the documents it wrote too, unless another source wrote them.",
+              "title": "Delete Documents",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Source",
+        "tags": [
+          "sources"
         ]
       }
     },

@@ -16,6 +16,149 @@ may change at any time.
 
 ### Added
 
+- **A collection keeps up with feeds and pages.** `db.sources.add(url,
+  every="6h")` and a scheduled `db.sources.refresh()`, `vectrixdb sources
+  refresh` or `POST /api/v1/collections/{name}/sources/refresh` read RSS
+  2.0, RSS 1.0, Atom and JSON Feed, podcasts and pages again and write only
+  what changed: a `304` costs one request, an unchanged entry is left alone,
+  a changed one replaces its document under the same id, and entries that
+  share a link are each a document of their own. Every chunk carries the
+  entry's title, link, author and dates. A podcast is transcribed when the
+  collection has an audio engine and is its show notes otherwise; a page is
+  its main text, and one that answers `404` or `410` is reported gone. Every
+  fetch is guarded: http and https only, never a private, loopback or cloud
+  metadata address however the name resolves, every redirect checked again
+  and a key or cookie never sent on to another site, size and time capped
+  however slowly a server answers, plain http refused through a proxy,
+  robots.txt and `Crawl-delay` obeyed, and a site that asks for time left
+  alone until then, a week at the most, by every refresh the process runs, a
+  forced one too. A secret is written into an address as `${NAME}` and read
+  from the environment, never kept or shown. A licensed feed is a `Source`
+  of your own, registered in code or by entry point. A lease keeps two
+  refreshes off one source, on one server or several, and sources are kept
+  beside the collection records, in Cosmos DB for an Azure AI Search
+  deployment. `pip install "vectrixdb[feeds]"` reads XML feeds. See
+  [Keep a collection in step with feeds and pages](docs/how-to/sources.md).
+
+- **A release is one button and one approval.** Actions > Release > Run
+  workflow checks that the changelog's section for the version is dated and
+  no tag for it exists, runs the suite, builds the package and checks its
+  version, metadata and size, then tags it, writes the GitHub release from
+  the changelog and, after one approval on the `pypi` environment, uploads
+  it. `scripts/release_notes.py` reads the notes; a section too long for a
+  GitHub release becomes each entry's lead-in and a link to the rest. A
+  release published by hand still goes the same way.
+
+- **Container images, for Intel and ARM, signed.** Each release publishes
+  `ghcr.io/knowusuboaky/vectrixdb` (the server; `-full` with the
+  multilingual embedding model and reranker too) and
+  `ghcr.io/knowusuboaky/vectrixdb-extract` (the extraction service), built
+  from the wheel PyPI has. The server answers MCP at `/mcp` as it is. They run as a user that is not root on a
+  read-only root filesystem, carry their models so nothing is downloaded at
+  run time, and will not start without a key or sign-in. The server reads
+  feeds as it is, for the [sources](docs/how-to/sources.md) a collection
+  keeps up with. Before anything is tagged, each is run the way the docs
+  have a reader run it (`scripts/container_smoke.py`: a search over MCP with a key the
+  dashboard would make, an intranet feed kept current and the cloud's
+  metadata address refused among it), held to a size
+  budget and scanned with Trivy, and a high or critical vulnerability with a
+  fix stops the release; the published images are scanned again every
+  week. Each carries its SBOM and build provenance, is signed with cosign by
+  the workflow that built it, with no key to keep, and is attested on GitHub.
+  `docker/compose.yaml` runs the server and the extraction service on one
+  machine, `docker/compose.tracing.yaml` adds Jaeger, and
+  `docker/kubernetes` is a Kustomize setup whose pods meet the restricted
+  Pod Security Standard and whose network policy lets only the server call
+  the extraction service. See [Run it in containers](docs/how-to/containers.md),
+  whose two clips `scripts/container_shots.py` films from the running
+  containers: Compose bringing them up, a scan read and found, and that
+  scan's trace in Jaeger.
+
+- **`vectrixdb extract-serve` starts the extraction service** on port 7338,
+  or `VECTRIXDB_EXTRACT_LISTEN_PORT`, under `VECTRIXDB_EXTRACT_PREFIX` when
+  set, so a host needs no `main.py` of its own. `vectrixdb serve` likewise
+  reads its port from `VECTRIXDB_LISTEN_PORT` when `--port` is left out.
+  Neither is `VECTRIXDB_PORT`, which Kubernetes sets in every pod of a
+  namespace with a Service named `vectrixdb`.
+
+- **The key for an extraction service can come from a file.**
+  `VECTRIXDB_EXTRACTOR_KEY_FILE` is read as the other secrets' `_FILE`
+  twins are, which is how Docker and Kubernetes mount secrets; setting it
+  and `VECTRIXDB_EXTRACTOR_KEY` together is refused.
+
+- **`vectrixdb check` knows the variables Kubernetes sets.** A pod gets
+  `<NAME>_SERVICE_HOST`, `<NAME>_PORT=tcp://...` and the rest for every
+  Service in its namespace, and the check no longer calls one named
+  `vectrixdb...` a misspelt setting. When one lands on a setting VectrixDB
+  reads, a Service named `vectrixdb-redis` setting `VECTRIXDB_REDIS_PORT`
+  for one, the check says which Service did it and that
+  `enableServiceLinks: false` on the pod stops it.
+
+- **Searches, ingestion and evaluation runs can be traced, off until asked.**
+  `pip install "vectrixdb[tracing]"` and `OTEL_EXPORTER_OTLP_ENDPOINT` (or
+  `VECTRIXDB_TRACING=1`, or `vectrixdb.tracing.enable()` in an app that set
+  up OpenTelemetry itself) send a span for every `search`, `add_document`,
+  `rechunk`, `write_golden` and `evaluate`, every search and upload the
+  REST server runs, and every file the extraction service reads, to
+  Jaeger, Tempo, Honeycomb, Datadog, Azure Monitor or any OTLP collector.
+  A span carries the collection, the mode, the counts, the top relevance
+  and the time taken; never query text, document text, file names,
+  metadata values or keys, and an exception by its type alone. Only the
+  names in `tracing.SAFE_ATTRIBUTES` can be set. Off, a call costs one
+  boolean check and OpenTelemetry is not imported. A request with a
+  `traceparent` header joins the caller's trace, and a file the server
+  sends to the extraction service is read in the same trace. Neither
+  server makes a span for each request, so FastAPI's own, which from 0.142
+  carry the request's path and query and send logs with exception messages
+  wherever `OTEL_EXPORTER_OTLP_ENDPOINT` points, are turned off. The
+  dashboard's settings say whether it is on and the host spans go to. See
+  [Trace searches and ingestion](docs/how-to/tracing.md).
+
+- **MCP on the server, for a team or a company.** With `VECTRIXDB_MCP=1`,
+  `vectrixdb serve` answers MCP at `/mcp`, and an assistant searches as the
+  person or the key it acts for. Every tool call is made to the REST API
+  with the caller's own key or token, so it is held to everything the server
+  already decides: the role, a key's collections, each collection's policy,
+  masking, the access log and the audit trail. A person connects with their
+  company's sign-in: the client finds the identity provider at
+  `/.well-known/oauth-protected-resource/mcp` (RFC 9728) and comes back with
+  their access token. A team connects with named keys, `reader`, `searcher`
+  or `operator`, one collection or all. The tools are `list_collections`,
+  `search` (hybrid, dense, keyword or rerank, with filters, relevance and
+  citations; on a collection with a policy or without an index of exact
+  words, hybrid searches by meaning and the answer says so), `open_source`,
+  and `add_document` only with
+  `VECTRIXDB_MCP_WRITES=1` and a role that may write. A dashboard session is
+  not a way in, a server with no key and no sign-in answers only its own
+  machine, and the endpoint is stateless, so copies behind a load balancer
+  share the work. With tracing on, each tool call is a span,
+  `vectrixdb.mcp.tool`, naming the tool and the collection and whether it
+  was refused, over the search it ran. Off unless set; the container image
+  sets it. Keys get a new action, `mcp.connect`. See
+  [Connect an assistant over MCP](docs/how-to/mcp-server.md).
+
+- **`vectrixdb mcp` over HTTP serves the reading tools only** unless
+  `--allow-writes` is given: anything on the machine that reaches the port
+  could otherwise remember, grade and forget. Over stdio nothing changes.
+
+- **A rechunk can be previewed.** `rechunk_preview()` takes `rechunk()`'s
+  arguments and cuts each kept document with the settings it would get, and
+  returns, per document, its chunks now and after and the settings before
+  and after, with totals, `changed` and `to_dict()`. Nothing is written,
+  deleted or embedded.
+
+- **The docs have an index for coding agents and a prompt to give one.**
+  [llms.txt](https://knowusuboaky.github.io/VectrixDB/llms.txt) lists every
+  page with a line on what it is for and the rules an agent should keep;
+  [Add it with your coding agent](docs/how-to/coding-agents.md) is a prompt
+  for Claude Code, Cursor or Copilot that has the agent read it, plan
+  before installing, pick a mode by evaluation, and ask before re-chunking,
+  deleting or turning tracing on. A test keeps the index in step with the
+  docs nav.
+  The same rules come as a skill an agent loads by itself,
+  `skills/vectrixdb/SKILL.md`, to put in a project's `.claude/skills/`; a
+  test looks up every name it uses in the code.
+
 - **The test-question writer spreads its questions and judges harder.**
   `write_golden` now gives every collection, then every document, a floor of
   questions, so a three-file media collection beside a 240-page report is
@@ -35,9 +178,12 @@ may change at any time.
   the pages it already photographs: `tour-search`, `tour-ingest`,
   `tour-pages`, `tour-collections`, `tour-evaluate`, `tour-access` and
   `tour-console`, each a GIF of eleven to sixteen seconds, each with a test
-  that it is on disk and in the docs. The README opens with one, the
-  documentation's home page shows them all, and the site wears the
-  dashboard's own mark, amber and type.
+  that it is on disk and in the docs, and two of an assistant over MCP,
+  `tour-mcp` and `tour-mcp-keys`: real calls to the sample server and the
+  answers that came back, a key made for one collection seeing only it, a
+  reader refused a search, and no key at all told where to sign in. The
+  README opens with one, the documentation's home page shows them all, and
+  the site wears the dashboard's own mark, amber and type.
 
 - **`VectrixSync.cdc()` carries deletes to the target.** `full()` and
   `incremental()` only ever copied, so a chunk deleted or revoked in the
@@ -160,6 +306,23 @@ may change at any time.
   `--gateway-paths`, or the settings, asks each route where it is published,
   and says whether every gateway path reaches the server. The extraction
   service reads its own two settings with the same reader.
+
+- **`vectrixdb check` says what reads each kind of file.** A reader that is
+  missing stops nothing at a start; the first file that needs it is refused.
+  Under **Extraction** the check says who reads PDFs with a text layer,
+  scanned pages, pictures, recordings, videos and YouTube addresses on this
+  server, which file types go to the extraction service in
+  `VECTRIXDB_EXTRACTOR_URL`, and, for each kind nothing reads, the extra to
+  install or the settings to set. It asks the machine and changes nothing:
+  each reader's package is imported, so one installed that does not import is
+  an error, ffmpeg is run with `-version`, and the speech model is looked for
+  in the Hugging Face cache, never fetched. The settings of an extraction
+  service are held to what would stop one at its start or fail its first
+  file: Document Intelligence, Azure Speech, the picture describers and
+  Translator. So is the masking engine: `presidio` with a language whose
+  spaCy model is not installed, Azure AI Language with no key and no
+  `azure-identity`, Amazon Comprehend without boto3. See
+  [Deploy the server](docs/how-to/deploy.md#what-reads-each-kind-of-file).
 
 - **The restricted note says why.** A search a collection's policy turns away
   says whether the collection has no policy yet, the person is in none of its
@@ -341,6 +504,31 @@ may change at any time.
 
 ### Changed
 
+- **The `mcp` extra needs mcp 2 or later.** The server's `/mcp` endpoint is
+  built on mcp 2's `MCPServer`, and `mcp>=1.0.0` let an install keep a 1.x
+  that cannot serve it, and the endpoint makes each tool's REST call through
+  httpx, which the extra now installs (mcp 2 brings httpx2, a different
+  package). `vectrixdb mcp` on one machine still runs on 1.x.
+
+- **A YouTube video with captions is read from them, not transcribed.** This
+  changes what `load_youtube` does: it used to download every video's sound
+  and pay a speech engine for it, and now it reads the captions the uploader
+  made, with no download, no ffmpeg and no speech engine, and downloads and
+  transcribes the sound only for a video without them. YouTube's automatic
+  captions have no punctuation and more mistakes than Azure Speech, so they
+  are read only with `captions="automatic"`, a machine translation only with
+  `captions="translated"`, and `captions="never"` transcribes every video as
+  before. `language` picks the track, `en-US` taking an `en` one. The
+  metadata's `transcript_source` says `captions` or `speech`, with
+  `caption_language` and `caption_automatic`, and the saved transcript has a
+  `- Words:` line; `keep_audio` keeps a sound only when one was downloaded,
+  and a `download=` function of your own is still asked for the sound alone.
+  The extraction service's `/transcribe/youtube` and `/transcribe/youtube_save`
+  take `"captions"` in the body, `"uploaded"` by default, and a finished job
+  says where its words came from. See
+  [A YouTube video](docs/how-to/extract-keep-index.md#a-youtube-video) and
+  [YouTube videos](docs/how-to/extraction-service.md#youtube-videos).
+
 - **The authenticator's QR code is drawn as the dashboard's own.** Round
   dots, corner eyes with softened corners, and the dashboard's logo in the
   middle, or the layers mark in its accent, dark on the light theme's page
@@ -426,6 +614,32 @@ may change at any time.
 
 ### Fixed
 
+- **A signed link stays secret.** An address with an Azure SAS signature, an
+  S3, Cloud Storage or CDN signature, or a token, key or code in its query,
+  a path parameter or a `#/` route is still fetched whole, but what is kept
+  and repeated, a document's `source` and citations, an error's words, the
+  transport's own among them, the extraction service's replies and the
+  ingest worker's document ids, is the address without them. They are
+  dropped, not masked, so a document keeps one address however often its
+  link is signed again, and a source added with one is refused and asked for
+  `${NAME}` instead. See
+  [Run an extraction service](docs/how-to/extraction-service.md#the-addresses-it-may-fetch).
+
+- **A bot check is refused, not indexed.** A Cloudflare, DataDome, HUMAN
+  (PerimeterX), Imperva, Akamai or AWS WAF challenge, or a page that only
+  asks to enable JavaScript and cookies, sent in place of what was asked
+  for, used to be read as the page and cited. `load_url`, the extraction
+  service's address routes and sources now refuse it, naming the site and
+  what it sent, and only when sure: an article that quotes "Just a
+  moment..." is still read. A `401` or `403` says the site refused, a `429`
+  or `503` that it asked for time and how long, and the extraction service
+  answers those two with a `503` to come back to.
+
+- **Three optional models are found where they were published.** The
+  English BGE base, its reranker and ColBERTv2 were looked for under release
+  tags nobody made, so the fallback when Hugging Face is out of reach always
+  missed; they point at the 1.9.0 release that holds their files.
+
 - **Two results that score alike come back in the same order every time.**
   Keyword scoring walked the query's words in a set's order, which changes
   from run to run, and broke ties by that order, so under a policy a pile of
@@ -450,6 +664,12 @@ may change at any time.
   another ran the keyword half against an empty local copy and found
   nothing; it runs where the text is, and a store that fails says so as a
   502 in words.
+- **`VECTRIXDB_OFFLINE` holds for the speech model.** faster-whisper fetched
+  its model from Hugging Face the first time a recording was read, even on a
+  host set to refuse every download. With `VECTRIXDB_OFFLINE` it is read from
+  the Hugging Face cache alone, and a model that is not there raises
+  `ModelDownloadError` with the command that fetches it. See
+  [Run without a network](docs/how-to/offline.md#the-speech-model).
 
 - **The audit before release.** Found by reading the tree and running it, each
   with a test:

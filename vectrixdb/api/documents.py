@@ -25,7 +25,8 @@ folder a collection.
 
 Like every data route, these refuse a policied collection: a document route
 that served one would hand out whole documents with nobody's entitlements
-checked. And the server never fetches an address a request names.
+checked. And these routes never fetch an address a request names: the
+sources routes do, for operators, through the guard in vectrixdb._fetch.
 """
 
 from __future__ import annotations
@@ -33,16 +34,24 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
+from .. import tracing
 from ..exceptions import DependencyError, ExtractionError, ExtractionQualityError
 from . import chunk_source
 
-__all__ = ["router", "MAX_UPLOAD_BYTES", "configured_extractors", "keeps_source", "store_for"]
+__all__ = [
+    "router",
+    "MAX_UPLOAD_BYTES",
+    "configured_extractors",
+    "keeps_source",
+    "store_for",
+    "write_document",
+]
 
 
 # ============================================================================
@@ -291,16 +300,8 @@ async def add_document(
     Sending the same id again replaces the document. The reply says how many
     chunks were written, how the extraction scored, and each chunk's citation.
     """
-    from ..ingest import STRATEGIES, load_bytes, prepare_document, texts_to_embed
-    from ..quality import DEFAULT_THRESHOLD
-    from .server import (
-        DEFAULT_QUERY_MODEL,
-        _mint_build,
-        _servable,
-        emit_event,
-        get_db,
-        get_text_embedder,
-    )
+    from ..ingest import STRATEGIES, SUFFIX_KINDS, load_bytes
+    from .server import _servable, emit_event, get_db
 
     collection = _servable(get_db(), name)
     if chunk not in STRATEGIES or chunk in ("semantic", "llm"):
@@ -313,18 +314,71 @@ async def add_document(
         raise HTTPException(status_code=400, detail=f"metadata is not JSON: {exc}")
     if not isinstance(extra, dict):
         raise HTTPException(status_code=400, detail="metadata is a JSON object")
-    data, filename = await _upload(request)
+    # The span the SDK's add_document makes, with the same attributes: never
+    # the file's name, its text or its metadata.
+    with tracing.span("add_document", collection=name, chunking=chunk) as span:
+        data, filename = await _upload(request)
+        span.set(kind=SUFFIX_KINDS.get(Path(filename).suffix.lower()))
 
-    try:
-        doc = load_bytes(data, filename, extractors=configured_extractors(), source=filename)
-    except ExtractionError as exc:
-        raise HTTPException(status_code=502 if exc.route else 422, detail=str(exc))
-    except DependencyError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    front_id = doc.metadata.get("doc_id")
-    document_id = (
-        doc_id or (front_id if isinstance(front_id, str) and front_id else None) or filename
-    )
+        try:
+            doc = load_bytes(data, filename, extractors=configured_extractors(), source=filename)
+        except ExtractionError as exc:
+            raise HTTPException(status_code=502 if exc.route else 422, detail=str(exc))
+        except DependencyError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        front_id = doc.metadata.get("doc_id")
+        document_id = (
+            doc_id or (front_id if isinstance(front_id, str) and front_id else None) or filename
+        )
+        reply, ids = write_document(
+            name,
+            collection,
+            doc,
+            document_id,
+            chunk=chunk,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            embed_heading=embed_heading,
+            metadata=extra,
+            on_low_quality=on_low_quality,
+            what=filename,
+        )
+        await emit_event(
+            "points_added",
+            {"collection": name, "added": reply["chunks"], "total": collection.count(), "ids": ids},
+        )
+        span.set(chunks=reply["chunks"])
+        return reply
+
+
+def write_document(
+    name: str,
+    collection: Any,
+    doc: Any,
+    document_id: str,
+    *,
+    chunk: str = "markdown",
+    chunk_size: int = 1000,
+    overlap: int = 200,
+    embed_heading: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+    on_low_quality: str = "warn",
+    source_version: Optional[str] = None,
+    what: Optional[str] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """A document already read, cut, embedded and written in place of the one under its id.
+
+    What the upload route does once the file is read, and what a source the
+    server refreshes writes through, so a document is the same chunks,
+    citations and lineage however it arrived. Returns the reply the route
+    sends and the ids of the chunks written. Raises HTTPException as the
+    route answers.
+    """
+    from ..ingest import prepare_document, texts_to_embed
+    from ..quality import DEFAULT_THRESHOLD
+    from .server import _mint_build, get_text_embedder
+
+    extra = dict(metadata or {})
     prepared = prepare_document(
         doc,
         document_id,
@@ -335,7 +389,9 @@ async def add_document(
         embed_heading=embed_heading,
     )
     if prepared is None:
-        raise HTTPException(status_code=422, detail=f"Nothing could be read from {filename}")
+        raise HTTPException(
+            status_code=422, detail=f"Nothing could be read from {what or document_id}"
+        )
     if prepared.quality < DEFAULT_THRESHOLD and on_low_quality == "reject":
         raise HTTPException(
             status_code=422,
@@ -376,6 +432,7 @@ async def add_document(
         store.put(
             document_id,
             doc,
+            source_version=source_version,
             chunking={
                 "chunk": chunk,
                 "chunk_size": chunk_size,
@@ -384,11 +441,7 @@ async def add_document(
             },
             user_metadata=extra,
         )
-    await emit_event(
-        "points_added",
-        {"collection": name, "added": added, "total": collection.count(), "ids": prepared.ids},
-    )
-    return {
+    reply = {
         "ok": True,
         "doc_id": document_id,
         "replaced": len(stale),
@@ -403,6 +456,7 @@ async def add_document(
         "build": build,
         "kept": store is not None,
     }
+    return reply, list(prepared.ids)
 
 
 def _kept(name: str) -> Any:

@@ -1,0 +1,95 @@
+# VectrixDB on one machine with Docker Compose: the server, and the extraction
+# service beside it for the files the server does not read itself.
+#
+#   cd docker
+#   python -c "import secrets; print(secrets.token_urlsafe(32))" > vectrixdb.key
+#   docker compose up -d
+#
+# The containers run as user 10001, which reads the key through a bind mount:
+# on Linux the file must be readable by it, so `chmod 644 vectrixdb.key`, or
+# `sudo chown 10001 vectrixdb.key && chmod 400 vectrixdb.key` for a key no
+# other user of the machine can read. VECTRIXDB_KEY_FILE names a key kept
+# elsewhere, and VECTRIXDB_HOST_PORT another port than 7337.
+#
+# The dashboard is then at http://localhost:7337, and every call takes the key
+# in vectrixdb.key, in the api-key header or the dashboard's sign-in. Scans,
+# recordings and videos added to a collection are read by the extraction
+# service, which nothing but the server can reach.
+#
+# With Jaeger as well, to see each search and ingest as a trace:
+#
+#   docker compose -f compose.yaml -f compose.tracing.yaml up -d
+#
+# The images are the published ones; `docker compose build` builds both from
+# this checkout instead. The data lives in named volumes, so `docker compose
+# down` keeps it and `docker compose down --volumes` deletes it.
+#
+# Both containers start the way a careful platform starts them: a read-only
+# root filesystem, every Linux capability dropped, no privilege escalation,
+# and /tmp the only scratch space.
+
+name: vectrixdb
+
+x-hardened: &hardened
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  secrets:
+    - source: vectrixdb_key
+      target: vectrixdb.key
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  server:
+    <<: *hardened
+    image: ${VECTRIXDB_IMAGE:-ghcr.io/knowusuboaky/vectrixdb:2.2}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: server
+    ports:
+      # This machine only. Put a proxy that terminates TLS in front of it
+      # before opening it to a network.
+      - "127.0.0.1:${VECTRIXDB_HOST_PORT:-7337}:7337"
+    environment:
+      VECTRIXDB_API_KEY_FILE: /run/secrets/vectrixdb.key
+      VECTRIXDB_EXTRACTOR_URL: http://extract:7338
+      VECTRIXDB_EXTRACTOR_KEY_FILE: /run/secrets/vectrixdb.key
+      VECTRIXDB_EXTRACTOR_KEY_HEADER: api-key
+      # An assistant connects at http://localhost:7337/mcp with a key the
+      # dashboard made it. "0" turns the endpoint off.
+      VECTRIXDB_MCP: "1"
+    volumes:
+      - server-data:/data
+    depends_on:
+      extract:
+        condition: service_healthy
+
+  extract:
+    <<: *hardened
+    image: ${VECTRIXDB_EXTRACT_IMAGE:-ghcr.io/knowusuboaky/vectrixdb-extract:2.2}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: extract
+    # No ports: the server reaches it on the network Compose makes for the two.
+    environment:
+      VECTRIXDB_API_KEY_FILE: /run/secrets/vectrixdb.key
+    volumes:
+      - extract-data:/data
+
+secrets:
+  vectrixdb_key:
+    file: ${VECTRIXDB_KEY_FILE:-./vectrixdb.key}
+
+volumes:
+  server-data:
+  extract-data:

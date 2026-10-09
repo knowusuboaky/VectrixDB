@@ -1,0 +1,511 @@
+# Container images: the server and the extraction service, from docker/Dockerfile.
+#
+# Checked on every pull request and push to main that could change them, and
+# weekly: the Dockerfile is linted; the server, its multilingual variant and
+# the extraction service are built for Intel (and ARM, weekly or by hand), run
+# the way docs/how-to/containers.md has a reader run them, held to a size
+# budget and scanned; and the Kubernetes setup is validated against the API of
+# the versions a company is likely to run.
+#
+# Published by the release workflow once PyPI has the wheel, or by hand with a
+# version, to rebuild a release's images for a security fix without a new
+# release. Built from the very wheel PyPI has, for Intel and ARM, and checked
+# as above before anything is tagged:
+#
+#   ghcr.io/knowusuboaky/vectrixdb:<version>          the server
+#   ghcr.io/knowusuboaky/vectrixdb:<version>-full     and the multilingual models
+#   ghcr.io/knowusuboaky/vectrixdb-extract:<version>  the extraction service
+#
+# Each carries its SBOM and build provenance, is signed with this workflow's
+# own identity through Sigstore, so there is no key to keep, and is attested on
+# GitHub. docs/how-to/containers.md says how to verify one.
+#
+# The weekly run also scans what is published: a finding with a fix means a
+# rebuild picks the fix up, and the run says how to start one.
+
+name: Containers
+
+on:
+  pull_request:
+    paths:
+      - docker/**
+      - .dockerignore
+      - pyproject.toml
+      - vectrixdb/**
+      - scripts/container_smoke.py
+      - .github/workflows/containers.yml
+  push:
+    branches: [main]
+    paths:
+      - docker/**
+      - .dockerignore
+      - pyproject.toml
+      - vectrixdb/**
+      - scripts/container_smoke.py
+      - .github/workflows/containers.yml
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Publish the images of this released version, such as 2.2.0. Empty: build and check only."
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      version:
+        description: The released version to publish the images of.
+        required: true
+        type: string
+      wheels-artifact:
+        description: The artifact of this run that holds the wheel. Empty fetches it from PyPI.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: containers-${{ github.event_name }}-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: ${{ !inputs.version }}
+
+# A command that fails anywhere in a pipeline fails its step.
+defaults:
+  run:
+    shell: bash
+
+env:
+  # The tools run as containers, pinned by digest so that a moved tag cannot
+  # change what runs here; Trivy is handed the Docker socket.
+  HADOLINT: hadolint/hadolint:v2.15.1-debian@sha256:9a3944b7fddcb947d1ffd90829ac1a6e5c30479223358f249d8b96c7d0019e27
+  TRIVY: aquasec/trivy:0.67.2@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08
+  # The base image is the newest python:3.12-slim on the day of the build,
+  # pinned by its digest for the build and recorded in the provenance, so a
+  # rebuild for a security fix gets Python's own fixes too.
+  BASE: python:3.12-slim
+  # What each image may weigh unpacked, in MB, about a fifth above what it
+  # does. What breaks it is a dependency that drags in something heavy, such
+  # as a build of PyTorch.
+  BUDGET_SERVER: "800"
+  BUDGET_FULL: "1150"
+  BUDGET_EXTRACT: "1500"
+
+jobs:
+  check:
+    name: Build, run and scan on ${{ matrix.arch }}
+    if: ${{ !inputs.version }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        # ARM weekly and by hand; a release always builds both.
+        arch: ${{ fromJSON((github.event_name == 'pull_request' || github.event_name == 'push') && '["amd64"]' || '["amd64", "arm64"]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true # the models the server image carries are in Git LFS
+
+      - name: Make room for three images
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+
+      - name: Lint the Dockerfile
+        if: matrix.arch == 'amd64'
+        run: docker run --rm -i "$HADOLINT" hadolint - < docker/Dockerfile
+
+      - name: Build the server, the multilingual server and the extraction service
+        run: |
+          base="$(docker buildx imagetools inspect "$BASE" --format '{{json .Manifest}}' | jq -r .digest)"
+          [[ "$base" == sha256:* ]] || { echo "::error::no digest found for $BASE"; exit 1; }
+          common=(--file docker/Dockerfile --build-arg "PYTHON_IMAGE=$BASE@$base" --build-arg "REVISION=$GITHUB_SHA")
+          docker build "${common[@]}" --target server -t vectrixdb:ci .
+          docker build "${common[@]}" --target server --build-arg MODELS=all -t vectrixdb-full:ci .
+          docker build "${common[@]}" --target extract -t vectrixdb-extract:ci .
+
+      - name: Run them as the containers page does
+        run: |
+          python3 scripts/container_smoke.py --server vectrixdb:ci --extract vectrixdb-extract:ci --whisper --compose
+          python3 scripts/container_smoke.py --server vectrixdb-full:ci --full
+
+      # Measured inside each image, which reads the same whatever store Docker keeps.
+      - name: Within their size budget
+        run: |
+          within() { # image, budget in MB
+            size="$(docker run --rm --network none --user 0:0 --entrypoint du "$1" -sxb / | cut -f1)"
+            if [ -z "$size" ]; then
+              echo "::error::$1 could not be measured"
+              return 1
+            fi
+            echo "$1: $((size / 1000000)) MB of $2 MB"
+            if [ "$((size / 1000000))" -gt "$2" ]; then
+              echo "::error::$1 is $((size / 1000000)) MB unpacked, over its budget of $2 MB"
+              return 1
+            fi
+          }
+          failed=0
+          within vectrixdb:ci "$BUDGET_SERVER" || failed=1
+          within vectrixdb-full:ci "$BUDGET_FULL" || failed=1
+          within vectrixdb-extract:ci "$BUDGET_EXTRACT" || failed=1
+          exit "$failed"
+
+      - name: Nothing high or critical with a fix out
+        run: |
+          for image in vectrixdb:ci vectrixdb-full:ci vectrixdb-extract:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$RUNNER_TEMP/trivy:/root/.cache/trivy" "$TRIVY" \
+              image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$image"
+          done
+
+  kubernetes:
+    name: Kubernetes setup is valid
+    if: ${{ !inputs.version }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubeconform, checked against its published checksum
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/kubeconform.tar.gz" \
+            https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  $RUNNER_TEMP/kubeconform.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP" kubeconform
+
+      # The oldest version the large clouds still support, one between, and the newest.
+      - name: Valid against the API of Kubernetes 1.29, 1.33 and 1.37
+        run: |
+          kubectl kustomize docker/kubernetes > "$RUNNER_TEMP/vectrixdb.yaml"
+          for version in 1.29.0 1.33.0 1.37.0; do
+            "$RUNNER_TEMP/kubeconform" -strict -summary -kubernetes-version "$version" "$RUNNER_TEMP/vectrixdb.yaml"
+          done
+
+  published:
+    name: Scan the published ${{ matrix.name }} image
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.version)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+      security-events: write # the findings go to the repository's Security tab
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: server
+            image: vectrixdb:latest
+          - name: full
+            image: vectrixdb:full
+          - name: extract
+            image: vectrixdb-extract:latest
+    steps:
+      - name: Pull it
+        id: pull
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ matrix.image }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          ref="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE"
+          if docker pull --quiet "$ref"; then
+            echo "ref=$ref" >> "$GITHUB_OUTPUT"
+            echo "version=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$ref")" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$ref is not published yet."
+          fi
+
+      - name: Scan it
+        if: steps.pull.outputs.ref
+        env:
+          REF: ${{ steps.pull.outputs.ref }}
+          VERSION: ${{ steps.pull.outputs.version }}
+        run: |
+          trivy() {
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$RUNNER_TEMP/trivy:/root/.cache/trivy" -v "$RUNNER_TEMP:/out" "$TRIVY" \
+              image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed "$@" "$REF"
+          }
+          trivy --format sarif --output /out/trivy.sarif
+          if ! trivy --exit-code 1; then
+            echo "::error::A fix is out for something in $REF. Rebuild it: Actions > Containers > Run workflow, with version $VERSION."
+            exit 1
+          fi
+
+      - uses: github/codeql-action/upload-sarif@v4
+        if: ${{ !cancelled() && steps.pull.outputs.ref }}
+        with:
+          sarif_file: ${{ runner.temp }}/trivy.sarif
+          category: image-${{ matrix.name }}
+
+  build:
+    name: Build ${{ matrix.arch }} images of ${{ inputs.version }}
+    if: ${{ inputs.version }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write # pushed by digest alone: nothing is tagged until both pass
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      ARCH: ${{ matrix.arch }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      # The release's own Dockerfile and checks, whichever branch this runs from.
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: The wheel this release built
+        if: inputs.wheels-artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.wheels-artifact }}
+          path: ${{ runner.temp }}/release
+
+      - name: Or the wheel PyPI has
+        if: ${{ !inputs.wheels-artifact }}
+        run: |
+          python -m pip download --no-deps --only-binary :all: --dest "$RUNNER_TEMP/release" "vectrixdb==$VERSION"
+
+      - name: Exactly one wheel, of this version
+        run: |
+          mkdir -p "$RUNNER_TEMP/wheels"
+          find "$RUNNER_TEMP/release" -name "vectrixdb-$VERSION-py3-none-any.whl" -exec cp {} "$RUNNER_TEMP/wheels/" \;
+          wheels=("$RUNNER_TEMP"/wheels/*.whl)
+          if [ "${#wheels[@]}" != 1 ] || [ ! -f "${wheels[0]}" ]; then
+            echo "::error::no wheel of vectrixdb $VERSION"
+            exit 1
+          fi
+          echo "building from ${wheels[0]##*/}"
+
+      - name: Make room for three images
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+
+      - name: Build and push by digest, with SBOM and provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx create --name release --driver docker-container --bootstrap --use
+          images="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          base="$(docker buildx imagetools inspect "$BASE" --format '{{json .Manifest}}' | jq -r .digest)"
+          [[ "$base" == sha256:* ]] || { echo "::error::no digest found for $BASE"; exit 1; }
+          created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p "$RUNNER_TEMP/digests"
+          build() { # local name, target, repository, then any further build arguments
+            local name="$1" target="$2" repo="$3"
+            shift 3
+            docker buildx build --file docker/Dockerfile --target "$target" \
+              --platform "linux/$ARCH" \
+              --build-context "wheels=$RUNNER_TEMP/wheels" \
+              --build-arg "PYTHON_IMAGE=$BASE@$base" \
+              --build-arg "VERSION=$VERSION" \
+              --build-arg "REVISION=$(git rev-parse HEAD)" \
+              --build-arg "CREATED=$created" \
+              "$@" \
+              --provenance mode=max --sbom true \
+              --output "type=image,name=$repo,push-by-digest=true,name-canonical=true,push=true" \
+              --metadata-file "$RUNNER_TEMP/$name.json" \
+              .
+            digest="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/$name.json")"
+            echo "$digest" > "$RUNNER_TEMP/digests/$name-$ARCH"
+            # What is checked next is what was pushed, byte for byte.
+            docker pull --quiet "$repo@$digest"
+            docker tag "$repo@$digest" "$name:ci"
+          }
+          build vectrixdb server "$images/vectrixdb"
+          build vectrixdb-full server "$images/vectrixdb" --build-arg MODELS=all
+          build vectrixdb-extract extract "$images/vectrixdb-extract"
+
+      - name: Run them as the containers page does
+        run: |
+          python scripts/container_smoke.py --server vectrixdb:ci --extract vectrixdb-extract:ci --whisper --compose
+          python scripts/container_smoke.py --server vectrixdb-full:ci --full
+
+      # Measured inside each image, which reads the same whatever store Docker keeps.
+      - name: Within their size budget
+        run: |
+          within() { # image, budget in MB
+            size="$(docker run --rm --network none --user 0:0 --entrypoint du "$1" -sxb / | cut -f1)"
+            if [ -z "$size" ]; then
+              echo "::error::$1 could not be measured"
+              return 1
+            fi
+            echo "$1: $((size / 1000000)) MB of $2 MB"
+            if [ "$((size / 1000000))" -gt "$2" ]; then
+              echo "::error::$1 is $((size / 1000000)) MB unpacked, over its budget of $2 MB"
+              return 1
+            fi
+          }
+          failed=0
+          within vectrixdb:ci "$BUDGET_SERVER" || failed=1
+          within vectrixdb-full:ci "$BUDGET_FULL" || failed=1
+          within vectrixdb-extract:ci "$BUDGET_EXTRACT" || failed=1
+          exit "$failed"
+
+      - name: Nothing high or critical with a fix out
+        run: |
+          for image in vectrixdb:ci vectrixdb-full:ci vectrixdb-extract:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$RUNNER_TEMP/trivy:/root/.cache/trivy" "$TRIVY" \
+              image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$image"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Tag, sign and attest ${{ inputs.version }}
+    needs: [build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # Sigstore's certificate names this workflow, so no key is kept
+      attestations: write
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      # 2.2 and latest move only when this is the newest release of its line
+      # and of all, so a rebuild of an older release never moves them back.
+      - name: Work out the tags
+        id: tags
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+
+          version = os.environ["VERSION"]
+          plain = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+          moving = []
+          if plain:
+              with urllib.request.urlopen("https://pypi.org/pypi/vectrixdb/json", timeout=60) as reply:
+                  released = [v for v in json.load(reply)["releases"] if re.fullmatch(r"\d+\.\d+\.\d+", v)]
+
+              def key(v):
+                  return tuple(int(part) for part in v.split("."))
+
+              line = f"{plain[1]}.{plain[2]}"
+              if all(key(v) <= key(version) for v in released if v.startswith(line + ".")):
+                  moving.append(line)
+              if all(key(v) <= key(version) for v in released):
+                  moving.append("latest")
+          tags = {
+              "vectrixdb": [version, *moving],
+              "vectrixdb-full": [f"{t}-full" if t != "latest" else "full" for t in [version, *moving]],
+              "vectrixdb-extract": [version, *moving],
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              for name, names in tags.items():
+                  print(f"{name}: {' '.join(names)}")
+                  out.write(f"{name}={' '.join(names)}\n")
+          PY
+
+      - name: Tag the images that passed, for Intel and ARM together
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAGS_SERVER: ${{ steps.tags.outputs.vectrixdb }}
+          TAGS_FULL: ${{ steps.tags.outputs.vectrixdb-full }}
+          TAGS_EXTRACT: ${{ steps.tags.outputs.vectrixdb-extract }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          images="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          publish() { # local name, repository, tags, description
+            local name="$1" repo="$2" tags="$3" description="$4" args=() sources=()
+            for tag in $tags; do args+=(--tag "$repo:$tag"); done
+            for file in "$RUNNER_TEMP/digests/$name"-*; do sources+=("$repo@$(cat "$file")"); done
+            if [ "${#sources[@]}" != 2 ]; then
+              echo "::error::$name: an Intel and an ARM build were expected, ${#sources[@]} found"
+              exit 1
+            fi
+            docker buildx imagetools create "${args[@]}" \
+              --annotation "index:org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              --annotation "index:org.opencontainers.image.version=$VERSION" \
+              --annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
+              --annotation "index:org.opencontainers.image.description=$description" \
+              "${sources[@]}"
+            digest="$(docker buildx imagetools inspect "$repo:${tags%% *}" --format '{{json .Manifest}}' | jq -r .digest)"
+            echo "$name-repo=$repo" >> "$GITHUB_OUTPUT"
+            echo "$name-digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "| \`$repo\` | ${tags// /, } | \`$digest\` |" >> "$RUNNER_TEMP/summary.md"
+          }
+          publish vectrixdb "$images/vectrixdb" "$TAGS_SERVER" \
+            "The VectrixDB server: REST API and dashboard, with the embedding and reranking models inside."
+          publish vectrixdb-full "$images/vectrixdb" "$TAGS_FULL" \
+            "The VectrixDB server with the multilingual embedding model and reranker inside as well."
+          publish vectrixdb-extract "$images/vectrixdb-extract" "$TAGS_EXTRACT" \
+            "The VectrixDB extraction service: files, addresses and videos in, text out."
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # Each platform's image and the list that names them both.
+      - name: Sign them with this workflow's identity
+        env:
+          SERVER: ${{ steps.push.outputs.vectrixdb-repo }}@${{ steps.push.outputs.vectrixdb-digest }}
+          FULL: ${{ steps.push.outputs.vectrixdb-full-repo }}@${{ steps.push.outputs.vectrixdb-full-digest }}
+          EXTRACT: ${{ steps.push.outputs.vectrixdb-extract-repo }}@${{ steps.push.outputs.vectrixdb-extract-digest }}
+        run: |
+          for ref in "$SERVER" "$FULL" "$EXTRACT"; do
+            cosign sign --yes --recursive "$ref"
+          done
+
+      - name: Attest the server's provenance on GitHub
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.push.outputs.vectrixdb-repo }}
+          subject-digest: ${{ steps.push.outputs.vectrixdb-digest }}
+          push-to-registry: true
+          create-storage-record: false # for organisations' repositories only
+
+      - name: Attest the multilingual server's provenance on GitHub
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.push.outputs.vectrixdb-full-repo }}
+          subject-digest: ${{ steps.push.outputs.vectrixdb-full-digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest the extraction service's provenance on GitHub
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.push.outputs.vectrixdb-extract-repo }}
+          subject-digest: ${{ steps.push.outputs.vectrixdb-extract-digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Verify them as a user would
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVER: ${{ steps.push.outputs.vectrixdb-repo }}@${{ steps.push.outputs.vectrixdb-digest }}
+          FULL: ${{ steps.push.outputs.vectrixdb-full-repo }}@${{ steps.push.outputs.vectrixdb-full-digest }}
+          EXTRACT: ${{ steps.push.outputs.vectrixdb-extract-repo }}@${{ steps.push.outputs.vectrixdb-extract-digest }}
+        run: |
+          identity="^$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/\.github/workflows/containers\.yml@refs/(heads/main|tags/v.+)$"
+          for ref in "$SERVER" "$FULL" "$EXTRACT"; do
+            cosign verify --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null
+            gh attestation verify "oci://$ref" --repo "$GITHUB_REPOSITORY" > /dev/null
+            echo "verified: $ref"
+          done
+          {
+            echo "### Container images of $VERSION"
+            echo
+            echo "| Image | Tags | Digest |"
+            echo "| --- | --- | --- |"
+            cat "$RUNNER_TEMP/summary.md"
+          } >> "$GITHUB_STEP_SUMMARY"

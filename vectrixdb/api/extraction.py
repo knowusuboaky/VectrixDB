@@ -52,7 +52,9 @@ was a real hole in one:
   and follows a redirect only to another of them. A route that fetches
   whatever a caller names can be pointed at addresses only the server can
   reach, and one that checks only the first address can be redirected
-  there.
+  there. A signed link is fetched whole and kept and repeated without its
+  signature or token, and a bot check sent in place of the page is refused
+  with the site and what it sent.
 * **A long job is a job.** Azure ends every HTTP request at 230 seconds,
   whatever the function's own timeout says, so ``youtube_save`` answers 202
   and a job at once and the work finishes on a queue. The finished job
@@ -76,7 +78,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequence, Tuple, Union
 from urllib.parse import unquote, urlparse
 
 from fastapi import FastAPI, Request
@@ -86,6 +88,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .. import tracing
 from ..exceptions import ConfigurationError, DependencyError, ExtractionError, TranslationError
 from .replies import message_of, refusal
 from .gateway import read_gateway_paths, route_prefix
@@ -142,6 +145,14 @@ class YouTubeSaveBody(BaseModel):
     language: str = "en-US"
     output_dir: str = "output"
     auto_delete: bool = True
+    #: Which captions may give the words before the sound is read, as load_youtube takes it.
+    captions: Literal["uploaded", "automatic", "translated", "never"] = "uploaded"
+
+
+class YouTubeBody(UrlBody):
+    """A video: its address, its language, and which captions may give the words before its sound."""
+
+    captions: Literal["uploaded", "automatic", "translated", "never"] = "uploaded"
 
 
 class TranslateBody(BaseModel):
@@ -195,11 +206,16 @@ def _guarded_transport(
     import urllib.error
     import urllib.request
 
+    from .._web import redact_url, site_of
+
     class _AllowedRedirects(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001 - urllib's signature
             if not allowed_host(newurl, hosts):
+                # The address without its signature, and only the host it
+                # was sent on to: that one's own link may be signed as well.
                 raise _Refused(
-                    403, f"{req.full_url} redirected to {newurl}, which is not an allowed host"
+                    403,
+                    f"{redact_url(req.full_url)} redirected to {site_of(newurl)}, which is not an allowed host",
                 )
             return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -580,6 +596,8 @@ class ExtractionService:
 
         return _listening_in(self.audio, language)
 
+    # Each read is a span, by its kind alone, in the trace of the server that sent the file.
+    @tracing.traced("extract", before=lambda a: {"kind": DOCUMENT_KINDS.get(a["kind"])})
     def read_document(self, data: bytes, name: str, kind: str) -> Any:
         from ..ingest import _pdf_extras, describe_figures, load_bytes
 
@@ -603,6 +621,7 @@ class ExtractionService:
             doc = describe_figures(doc, self.describer, name=name)
         return doc
 
+    @tracing.traced("extract", before=lambda a: {"kind": "image"})
     def read_image(self, data: bytes, name: str) -> Any:
         from ..ingest import LoadedDocument
 
@@ -643,9 +662,11 @@ class ExtractionService:
                 doc = LoadedDocument(text=text, metadata=meta)
         return doc
 
+    @tracing.traced("extract", before=lambda a: {"kind": "audio"})
     def read_audio(self, data: bytes, name: str, language: Optional[str]) -> Any:
         return self.listening_in(language)(data, name)
 
+    @tracing.traced("extract", before=lambda a: {"kind": "video"})
     def read_video(self, data: bytes, name: str, language: Optional[str]) -> Any:
         from ..extract.engines import Video
 
@@ -656,7 +677,17 @@ class ExtractionService:
         return video(data, name)
 
     def fetch(self, url: str) -> Tuple[bytes, str, str]:
-        """An allowed address's bytes, the name to read them by, and their content type."""
+        """An allowed address's bytes, the name to read them by, and their content type.
+
+        The address is fetched whole and never repeated whole: what an error
+        says, and what a route keeps as a document's source, is the address
+        without its signature, token or key. A bot check sent in place of
+        what was asked for is refused with the site and what it sent, and
+        any other answer that is not a success says what it means.
+        """
+        from .._web import bot_check, bot_check_message, redact_url, status_message
+
+        shown = redact_url(url)
         if not self.url_hosts:
             raise _Refused(
                 403,
@@ -665,13 +696,20 @@ class ExtractionService:
         if not allowed_host(url, self.url_hosts):
             raise _Refused(
                 403,
-                f"{urlparse(url).hostname or url} is not one of the hosts this service fetches from",
+                f"{urlparse(url).hostname or shown} is not one of the hosts this service fetches from",
             )
         status, headers, body = self._fetch("GET", url, {"Accept": "*/*"}, b"", self.timeout)
+        reason = bot_check(int(status), headers or {}, bytes(body or b""))
+        if reason:
+            raise ExtractionError(bot_check_message(url, int(status), reason), status=int(status))
         if not 200 <= int(status) < 300:
-            raise _Refused(502, f"{url} answered {status}")
+            # The site's answer, in words: a 502, or a 503 when the site asked
+            # for time, so the caller knows to come back.
+            raise ExtractionError(
+                status_message(shown, int(status), headers or {}), status=int(status)
+            )
         if len(body) > self.max_bytes:
-            raise _Refused(413, f"{url} is larger than {self.max_bytes:,} bytes")
+            raise _Refused(413, f"{shown} is larger than {self.max_bytes:,} bytes")
         content_type = next(
             (
                 str(v).lower()
@@ -698,6 +736,8 @@ class ExtractionService:
             doc = load_youtube(
                 str(params["url"]),
                 audio=self.audio,
+                # A job queued before there was a choice takes the default.
+                captions=str(params.get("captions") or "uploaded"),
                 language=params.get("language") or None,
                 save_to=scratch,
                 keep_audio=keep_audio,
@@ -718,6 +758,11 @@ class ExtractionService:
             "auto_delete_enabled": not keep_audio,
             "duration": about.get("duration", 0),
             "channel": about.get("channel", "Unknown"),
+            # Where the words came from: with captions no sound was
+            # downloaded, so none was deleted and none could be kept.
+            "transcript_source": about.get("transcript_source"),
+            "caption_language": about.get("caption_language"),
+            "caption_automatic": about.get("caption_automatic"),
         }
 
 
@@ -1139,6 +1184,8 @@ def create_extraction_app(
         # behind a gateway it sends the caller around it. A path with a
         # slash too many is not found, like any other wrong path.
         redirect_slashes=False,
+        # No request spans of FastAPI's own: they carry the path and the query.
+        **tracing.fastapi_options(),
     )
     router = APIRouter()
     app.state.extraction = service
@@ -1165,6 +1212,8 @@ def create_extraction_app(
     public = {f"{prefix}/health", f"{prefix}/docs", f"{prefix}/openapi.json"}
     if "health" in gateways:
         public.add(f"{gateways['health']}{prefix}/health")
+    # Round the routes: a file's span joins the trace of the server that sent it.
+    app.add_middleware(tracing.CallerTrace)
     app.add_middleware(_door(AccessMiddleware, public))
     from .security_headers import SecurityHeadersMiddleware, frame_ancestors_from_env
 
@@ -1296,11 +1345,12 @@ def create_extraction_app(
     async def transcribe_webpage(body: WebpageBody, request: Request) -> Response:
         """The page's text. The pictures, sound and video it embeds are not fetched: each would be
         another address, usually on a CDN nobody allowed, so include_* are taken and not acted on."""
+        from .._web import redact_url
         from ..ingest import load_bytes
 
         data, _name, _type = await run_in_threadpool(service.fetch, body.url)
         doc = await run_in_threadpool(
-            lambda: load_bytes(data, "page.html", kind="html", source=body.url)
+            lambda: load_bytes(data, "page.html", kind="html", source=redact_url(body.url))
         )
         doc.metadata["embedded_media"] = "not read"
         return await _answer(request, doc)
@@ -1315,36 +1365,56 @@ def create_extraction_app(
 
     @router.post("/transcribe/audio_url", tags=["transcribe"])
     async def transcribe_audio_url(body: UrlBody, request: Request) -> Response:
+        from .._web import redact_url
+
         data, name, _type = await run_in_threadpool(service.fetch, body.url)
         doc = await run_in_threadpool(
             service.read_audio, data, name or _MEDIA_NAMES["audio"], body.language
         )
-        doc.metadata.update(source=body.url, language=body.language)
+        doc.metadata.update(source=redact_url(body.url), language=body.language)
         doc.metadata.setdefault("filename", name)
         return await _answer(request, doc, transcript_markdown(doc))
 
     @router.post("/transcribe/video_url", tags=["transcribe"])
     async def transcribe_video_url(body: UrlBody, request: Request) -> Response:
+        from .._web import redact_url
+
         data, name, _type = await run_in_threadpool(service.fetch, body.url)
         doc = await run_in_threadpool(
             service.read_video, data, name or _MEDIA_NAMES["video"], body.language
         )
-        doc.metadata.update(source=body.url, language=body.language)
+        doc.metadata.update(source=redact_url(body.url), language=body.language)
         doc.metadata.setdefault("filename", name)
         return await _answer(request, doc, transcript_markdown(doc))
 
     # -- YouTube
 
-    @router.post("/transcribe/youtube", tags=["transcribe"])
     async def transcribe_youtube(body: UrlBody, request: Request) -> Response:
+        """A video's transcript, for /transcribe/youtube and for a YouTube address sent to /transcribe/auto.
+
+        Its captions first, as ``captions`` allows, then its sound. The
+        reply's metadata says which, ``transcript_source``, and so does the
+        Markdown when the words are captions. /transcribe/auto's body has
+        no choice, so a video sent there takes the default.
+        """
         from ..extract.youtube import load_youtube
 
+        captions = getattr(body, "captions", "uploaded")
         doc = await run_in_threadpool(
             lambda: load_youtube(
-                body.url, audio=service.audio, language=body.language, download=service.download
+                body.url,
+                audio=service.audio,
+                captions=captions,
+                language=body.language,
+                download=service.download,
             )
         )
         return await _answer(request, doc, transcript_markdown(doc))
+
+    # Named as it always was, so the operation a gateway imported keeps its id.
+    @router.post("/transcribe/youtube", tags=["transcribe"], name="transcribe_youtube")
+    async def transcribe_youtube_route(body: YouTubeBody, request: Request) -> Response:
+        return await transcribe_youtube(body, request)
 
     @router.post("/transcribe/youtube_save", tags=["transcribe"], status_code=202)
     async def transcribe_youtube_save(body: YouTubeSaveBody, request: Request) -> Response:
@@ -1378,6 +1448,7 @@ def create_extraction_app(
     @router.post("/transcribe/auto", tags=["transcribe"])
     async def transcribe_auto(body: UrlBody, request: Request) -> Response:
         """A YouTube video, or an allowed address read by what it turns out to be."""
+        from .._web import redact_url
         from ..extract.youtube import is_youtube
 
         if is_youtube(body.url):
@@ -1414,12 +1485,12 @@ def create_extraction_app(
             doc = await run_in_threadpool(
                 reader, data, name or _MEDIA_NAMES["audio"], body.language
             )
-            doc.metadata.update(source=body.url, language=body.language)
+            doc.metadata.update(source=redact_url(body.url), language=body.language)
             return await _answer(request, doc, transcript_markdown(doc))
         from ..ingest import load_bytes
 
         doc = await run_in_threadpool(
-            lambda: load_bytes(data, "page.html", kind="html", source=body.url)
+            lambda: load_bytes(data, "page.html", kind="html", source=redact_url(body.url))
         )
         return await _answer(request, doc)
 

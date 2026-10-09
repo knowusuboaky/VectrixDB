@@ -218,6 +218,8 @@ _LAZY: Dict[str, Tuple[str, Optional[str]]] = {
     "load_document": (".ingest", "load"),
     "LoadedDocument": (".ingest", "LoadedDocument"),
     "AddReport": (".easy", "AddReport"),
+    "RechunkPreview": (".easy", "RechunkPreview"),
+    "tracing": (".tracing", None),
     "OpenAIEmbedder": (".models.openai_compat", "OpenAIEmbedder"),
     "plugins": (".plugins", None),
     "ModelMismatchWarning": (".exceptions", "ModelMismatchWarning"),
@@ -301,6 +303,12 @@ _LAZY: Dict[str, Tuple[str, Optional[str]]] = {
     "build_tree_from_markdown": (".core.document_index", "build_tree_from_markdown"),
     "build_tree_from_pdf": (".core.document_index", "build_tree_from_pdf"),
     "build_tree_from_text": (".core.document_index", "build_tree_from_text"),
+    # Feeds and pages a collection keeps up with
+    "Feed": (".sources", "Feed"),
+    "Page": (".sources", "Page"),
+    "Source": (".sources", "Source"),
+    "Sources": (".sources", "Sources"),
+    "register_source": (".sources", "register_source"),
 }
 
 # GraphRAG is optional; these come back as None when it cannot be imported,
@@ -754,6 +762,8 @@ __all__ = [
     "load_document",
     "LoadedDocument",
     "AddReport",
+    "RechunkPreview",
+    "tracing",
     "OpenAIEmbedder",
     "plugins",
     "ModelMismatchWarning",
@@ -836,6 +846,11 @@ __all__ = [
     "build_tree_from_markdown",
     "build_tree_from_pdf",
     "build_tree_from_text",
+    "Feed",
+    "Page",
+    "Source",
+    "Sources",
+    "register_source",
     # Exceptions
     "VectrixError",
     "ConfigurationError",
