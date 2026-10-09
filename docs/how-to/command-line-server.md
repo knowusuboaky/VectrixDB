@@ -174,7 +174,7 @@ front of it:
 | Setting | For |
 |---|---|
 | `HTTPS_PROXY`, `NO_PROXY` | a proxy, honoured as everywhere else |
-| `VECTRIXDB_CA_BUNDLE`, or `SSL_CERT_FILE` | a company's own certificate authority, for a proxy that inspects traffic or an internal server |
+| `VECTRIXDB_CA_BUNDLE`, or `SSL_CERT_FILE` | a company's own certificate authority, for a proxy that inspects traffic or an internal server; `system` trusts what the operating system trusts, where a managed machine already keeps it |
 | `VECTRIXDB_CLIENT_CERT`, `VECTRIXDB_CLIENT_CERT_KEY` | a client certificate, for a gateway that asks for one |
 | `VECTRIXDB_KEY_HEADER` | the header a gateway wants the key in: `Ocp-Apim-Subscription-Key` |
 | `VECTRIXDB_TOKEN_HEADER` | the header a gateway wants a sign-in token in |
@@ -195,6 +195,40 @@ VECTRIXDB_CA_BUNDLE=/etc/ssl/company-ca.pem
 EOF
 vectrixdb list --env-file company.env
 ```
+
+### Presets for every command on a machine
+
+An administrator can put the same lines in one file that every command
+reads first, with no `--env-file`, and ship it the way other settings are
+shipped (Intune, Jamf, Group Policy, Ansible):
+
+| System | File |
+|---|---|
+| Linux | `/etc/vectrixdb/defaults.env` |
+| macOS | `/Library/Application Support/vectrixdb/defaults.env` |
+| Windows | `%ProgramData%\vectrixdb\defaults.env` |
+
+`VECTRIXDB_DEFAULTS_FILE` names another, for a container or a CI runner. A
+person's own environment wins over the file, so `VECTRIXDB_URL` still points
+one command at staging. The file holds `VECTRIXDB_` settings alone: a line
+that sets anything else, `PATH` or a proxy, stops every command until it is
+taken out, so the file cannot change what runs.
+
+A company's own tool presets two more: `VECTRIXDB_COMMAND`, the command
+every hint names (`acme vectors login`, not `vectrixdb login`), and
+`VECTRIXDB_USER_AGENT`, its name and version, put before the client's own in
+every request's `User-Agent`, so the gateway's log says which tool called.
+See [Ship your own client or command on it](wrap-it.md).
+
+### Where a sign-in is kept
+
+`vectrixdb login` keeps a sign-in in a file readable by you alone, under
+`VECTRIXDB_CONFIG_DIR` or the platform's config folder.
+`VECTRIXDB_CREDENTIALS=keyring` keeps its tokens in the system keychain
+instead (Windows Credential Manager, macOS Keychain, the Secret Service on
+Linux) with `pip install keyring`; the file then holds only which servers you
+signed in to. A keychain that cannot be reached is said plainly, never fallen
+back from in silence.
 
 ## What it will not do
 

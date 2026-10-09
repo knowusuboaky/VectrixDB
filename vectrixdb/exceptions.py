@@ -580,9 +580,9 @@ class ExtractionQualityError(VectrixError, ValueError):
             f"document {doc_id} scores {score:.2f} on extraction quality, below the "
             f"threshold of {threshold:.2f}: its text reads as a failed extraction, broken "
             f"words, glyph noise or joined lines, and would pass every schema check while "
-            f"answering nothing. Check the extraction, or open the collection with "
-            f'on_low_quality="warn" to write it anyway; extraction_quality(text).signals '
-            f"says which signal failed."
+            f'answering nothing. Check the extraction, or pass on_low_quality="warn" to '
+            f"add_document to write it anyway; extraction_quality(text).signals says which "
+            f"signal failed."
         )
 
 

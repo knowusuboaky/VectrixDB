@@ -44,6 +44,7 @@ type Client struct {
 	prefix       string
 	gatewayPaths map[string]string
 	allowHTTP    bool
+	agent        string
 	timeout      time.Duration
 	http         *http.Client
 	// err is the first refusal of the client's settings; every call returns it.
@@ -52,6 +53,12 @@ type Client struct {
 
 // Option configures a Client.
 type Option func(*Client)
+
+// WithUserAgent puts a wrapper's name and version, "acme-vectors/1.4", before
+// this client's own in User-Agent, so a gateway's log says which tool called.
+func WithUserAgent(name string) Option {
+	return func(c *Client) { c.agent = strings.TrimSpace(name) }
+}
 
 // WithKey sends the API key in the api-key header, or the one WithKeyHeader
 // names.
@@ -105,6 +112,9 @@ func New(url string, opts ...Option) *Client {
 	}
 	if !headerValueOK(c.token) {
 		c.refuse(fmt.Errorf("%w: the token holds a character a header cannot carry", ErrConfig))
+	}
+	if !headerValueOK(c.agent) {
+		c.refuse(fmt.Errorf("%w: the user agent holds a character a header cannot carry", ErrConfig))
 	}
 	c.refuse(c.checkUserinfo())
 	c.refuse(c.checkPlainHTTP())
@@ -233,7 +243,11 @@ func (c *Client) once(ctx context.Context, r request, full string) (*response, e
 	for k, v := range r.headers {
 		req.Header.Set(k, v)
 	}
-	req.Header.Set("User-Agent", userAgent)
+	if c.agent != "" {
+		req.Header.Set("User-Agent", c.agent+" "+userAgent)
+	} else {
+		req.Header.Set("User-Agent", userAgent)
+	}
 	if c.token != "" {
 		req.Header.Set(c.tokenHeader, "Bearer "+c.token)
 	} else if c.key != "" {

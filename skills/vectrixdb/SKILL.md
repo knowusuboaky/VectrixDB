@@ -61,4 +61,17 @@ The picks are `finds_the_most`, `best_for_balance` and `best_for_time`. `vectrix
 
 ## Answer from a collection
 
-To answer from an existing collection in this session, open it with the same name and `path=` it was written with, search it, and cite each result by its `citation`. To give an assistant the collection as a tool, run the MCP server, `vectrixdb mcp --name docs --path ./data/vectrixdb` (`pip install "vectrixdb[mcp]"`), and register that command with the client; its `search` tool returns each result with its id, which is what to cite.
+To answer from an existing collection in this session, open it with the same name and `path=` it was written with, search it, and cite each result by its `citation`.
+
+To give an assistant a collection as a tool, there are two ways:
+
+- **One person, on this machine:** `vectrixdb mcp --name docs --path ./data/vectrixdb` (`pip install "vectrixdb[mcp]"`), registered with the client as a command. Over HTTP it serves search only, unless `vectrixdb mcp --allow-writes` adds remember, feedback and forget.
+- **A team or a company, on a server:** `vectrixdb serve` with `VECTRIXDB_MCP` on answers MCP at the server's own address, as each caller, with their key or company sign-in. Its tools read (`search`, `describe_collection`, `list_documents`, `similar`, `open_source`, `whoami`, `list_collections`), and the tools that write appear only with `VECTRIXDB_MCP_WRITES` on. An assistant connected to it follows the `vectrixdb-mcp` skill beside this one.
+
+Either way, each result comes with its id and its source, which is what to cite.
+
+## Call a server from a program
+
+A program that talks to a running server uses the client, not a local collection: `pip install "vectrixdb[client]"`, then `vectrixdb.connect` with the server's address and a key, or a person's token. Its `search` takes the collection's name and answers with the same results as a local collection, and the server's refusals come as `vectrixdb.client.RequestError` and its kinds. TypeScript, Go and Rust clients sit in the repository's sdk folder. Every client sends a key only over https, or over http to the same machine, and never follows a redirect; never turn that off to make an error go away, fix the address instead.
+
+From a shell, the same commands that work on local collections go to a server when given its address, or when `VECTRIXDB_URL` is set: `vectrixdb query "..." --name handbook --url https://...`. The key comes from `VECTRIXDB_KEY`, from a file (`vectrixdb list --url https://... --key-file FILE`), or from what `vectrixdb login --url https://...` kept; never put a key in a command's arguments, where shell history keeps it.

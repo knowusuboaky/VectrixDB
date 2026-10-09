@@ -51,7 +51,8 @@ print(results.top.text)
 There is no configuration step. The embedding model ships with the package, so
 the first search works offline on a machine that has never seen an API key.
 
-Give it a path and it persists:
+It persists under `./vectrixdb_data` unless told otherwise; give a path to
+choose where:
 
 ```python
 db = Vectrix("my_docs", path="./data")
@@ -130,17 +131,81 @@ optional package or a cloud account, so the code on them cannot quietly rot.
 - [Getting started](docs/tutorial/getting-started.md), from an empty directory
   to a working search in one sitting
 - [Add it with your coding agent](docs/how-to/coding-agents.md), a prompt to
-  paste into Claude Code, Cursor or Copilot, and
+  paste into any coding agent, and
   [llms.txt](https://knowusuboaky.github.io/VectrixDB/llms.txt), the docs index
   agents read
 
-**How-to guides**
+**Start**
 
+- [Install what you need](docs/how-to/install.md), which extra adds what
+- [Run without a network](docs/how-to/offline.md)
+- [Tips and tricks](docs/how-to/tips.md), the things that are easy to miss
 - [Handle errors](docs/how-to/handle-errors.md)
-- [Choose a storage backend](docs/how-to/storage-backends.md)
+
+**Ingest**
+
+- [Ingest documents](docs/how-to/ingest-documents.md)
+- [Chunking](docs/how-to/chunking.md), the strategies, parent sections and
+  rechunking
+- [Extraction quality and blocked pages](docs/how-to/extraction-quality.md)
+- [Videos, podcasts and recordings](docs/how-to/recordings.md), cited by the
+  second
+- [Embedding models](docs/how-to/embedding-models.md), which ship in the wheel
+  and which download
+- [Extract, keep, index](docs/how-to/extract-keep-index.md)
+- [Ingest when a file lands](docs/how-to/ingest-on-event.md)
+- [Keep a collection in step with feeds and pages](docs/how-to/sources.md)
+- [Run an extraction service](docs/how-to/extraction-service.md)
+
+**Search and evaluate**
+
+- [Search options](docs/how-to/search-options.md), every argument and what a
+  result carries
+- [Trace an answer to its source](docs/how-to/lineage.md)
+- [Work with the knowledge graph](docs/how-to/knowledge-graph.md)
+- [Measure retrieval](docs/how-to/measure-retrieval.md)
+- [Evaluate every setup](docs/how-to/evaluate-setups.md)
+
+**Assistants and agents**
+
+- [Use it from an assistant over MCP](docs/how-to/mcp-server.md)
+- [Connect your client](docs/how-to/mcp-connect.md), VS Code, Cursor, a desktop
+  assistant, a command line
+- [Company sign-in for MCP](docs/how-to/mcp-sign-in.md)
+- [Keys for a team](docs/how-to/mcp-keys.md)
+- [Tools reference](docs/how-to/mcp-tools.md), every tool, prompt and resource
+- [On your own machine](docs/how-to/mcp-local.md), the one-person server
+- [Keep conversation memory](docs/how-to/conversation-memory.md)
+
+**Secure**
+
+- [Sign people in](docs/how-to/sign-in.md)
+- [Keys and roles](docs/how-to/keys-and-roles.md), scoped and expiring keys
+- [Collection policies](docs/how-to/collection-policies.md)
+- [Restrict what a search can see](docs/how-to/entitlements.md)
+- [Masking](docs/how-to/masking.md), names and ids replaced before indexing
+- [Audit trail](docs/how-to/audit-trail.md)
+
+**Run in production**
+
 - [Run the REST API](docs/how-to/rest-api.md)
-- [Build an app on it](docs/how-to/build-an-app.md), in any language, on
-  somebody else's server
+- [Deploy the server](docs/how-to/deploy.md)
+- [Run it in containers](docs/how-to/containers.md), signed images for one
+  machine or Kubernetes
+- [Put it behind a gateway](docs/how-to/behind-a-gateway.md), APIM, API Gateway
+  or any proxy
+- [Size the server for load](docs/how-to/sizing.md)
+- [Scale out](docs/how-to/scale.md)
+- [Check and doctor](docs/how-to/troubleshoot.md)
+- [Trace searches and ingestion](docs/how-to/tracing.md), opt-in OpenTelemetry
+  spans that never carry query or document text
+- [Choose a storage backend](docs/how-to/storage-backends.md)
+- [Back up, move and restore](docs/how-to/export-import.md)
+- [Put your company's name on it](docs/how-to/branding.md)
+- [Use the dashboard](docs/how-to/dashboard.md), every page, with pictures
+
+**Build on it**
+
 - [Use it from Python, TypeScript, Go or Rust](docs/how-to/clients.md), the
   four clients and their one set of calls
 - [Use the command line on a server](docs/how-to/command-line-server.md),
@@ -150,37 +215,24 @@ optional package or a cloud account, so the code on them cannot quietly rot.
 - [Run it inside your company's registry](docs/how-to/inside-your-registry.md),
   packages, images and models through JFrog Artifactory, and the company's
   own tool as the way in
-- [Sign people in](docs/how-to/sign-in.md)
-- [Put your company's name on it](docs/how-to/branding.md)
-- [Deploy the server](docs/how-to/deploy.md)
-- [Run it in containers](docs/how-to/containers.md), signed images for one
-  machine or Kubernetes
-- [Put it behind a gateway](docs/how-to/behind-a-gateway.md), APIM, API Gateway
-  or any proxy
-- [Tips and tricks](docs/how-to/tips.md), the things that are easy to miss
-- [Use the dashboard](docs/how-to/dashboard.md), every page, with pictures
-- [Restrict what a search can see](docs/how-to/entitlements.md)
-- [Trace an answer to its source](docs/how-to/lineage.md)
-- [Keep conversation memory](docs/how-to/conversation-memory.md)
-- [Use it from an assistant over MCP](docs/how-to/mcp-server.md)
-- [Trace searches and ingestion](docs/how-to/tracing.md), opt-in OpenTelemetry
-  spans that never carry query or document text
-- [Run without a network](docs/how-to/offline.md)
-- [Back up, move and restore](docs/how-to/export-import.md)
-- [Ingest documents](docs/how-to/ingest-documents.md)
-- [Extract, keep, index](docs/how-to/extract-keep-index.md)
-- [Ingest when a file lands](docs/how-to/ingest-on-event.md)
-- [Keep a collection in step with feeds and pages](docs/how-to/sources.md)
-- [Run an extraction service](docs/how-to/extraction-service.md)
-- [Measure retrieval](docs/how-to/measure-retrieval.md)
-- [Evaluate every setup](docs/how-to/evaluate-setups.md)
+- [Use it from async code](docs/how-to/async.md)
+- [Build an app on it](docs/how-to/build-an-app.md), in any language, on
+  somebody else's server
 - [LangChain, LlamaIndex, plugins, CLI](docs/how-to/integrations.md)
-- [Work with the knowledge graph](docs/how-to/knowledge-graph.md)
 
 **Reference**
 
 - [Easy API](docs/reference/easy.md), the `Vectrix` surface
 - [Python client](docs/reference/client.md), `connect()` and the server's calls
+- [Async](docs/reference/aio.md)
+- [Sources](docs/reference/sources.md), [Ingest](docs/reference/ingest.md),
+  [Extract](docs/reference/extract.md),
+  [Chunk models](docs/reference/chunk-models.md),
+  [Extraction quality](docs/reference/quality.md)
+- [Evaluation](docs/reference/evaluation.md),
+  [Policy](docs/reference/policy.md), [Masking](docs/reference/masking.md),
+  [Conversation memory](docs/reference/memory.md),
+  [Tracing](docs/reference/tracing.md)
 - [Exceptions](docs/reference/exceptions.md), the full hierarchy
 - [Filters](docs/reference/filters.md), every operator and what it does to
   absent fields, nulls and lists
@@ -244,8 +296,9 @@ See [Handle errors](docs/how-to/handle-errors.md) for the full hierarchy.
 
 ### What is on it
 
-Eight pages, one server, no build step. Every number on them is read from the
-running database and the page says so when it cannot read one.
+Nine pages, one server, no build step. Every number on them is read from the
+running database and the page says so when it cannot read one. Each page is
+shown with pictures in [Use the dashboard](docs/how-to/dashboard.md).
 
 - **Overview.** Collections, vectors, size on disk and search latency, and a
   *needs attention* list: a collection past 20% deleted vectors, a collection
@@ -263,18 +316,20 @@ running database and the page says so when it cannot read one.
   offered Rerank and Late interaction modes that the server ignored, so both
   ran plain dense search; Rerank is real now and Late interaction is gone
   until there is a text route for it.
+- **Evaluate.** Golden questions run against every setup, ranked by how
+  often the right answer is in the top ten and how long it took.
 - **Ingest.** Files or pasted text into a collection as chunks, or into the
   document index, with metadata on every chunk. A plain splitter, on purpose:
   loaders, the four chunkers, parent sections, deduplication, the quality score
   and the metadata contract live in `add_document()`.
-- **Audit.** The decision and ingestion records from a JSONL sink, served only
-  from a server with an API key and only with that key, and never with the
-  principal snapshot, the result ids or the undisclosable count.
+- **Audit.** The decision and ingestion records from a JSONL sink: with
+  sign-in, to an admin; without it, only with `VECTRIXDB_API_KEY`; and never
+  with the principal snapshot, the result ids or the undisclosable count.
+- **Access.** For admins: the people and their roles, the keys and when each
+  was last used, sign-ins against refusals.
 - **Console.** A request builder with presets that shows the curl for what it
   sent.
 - **Learn.** The tutorials and the copy-paste guide.
-- **Settings.** Every model the library knows and whether it is on this
-  machine, the server's facts, the API key, and the theme.
 
 <p align="center">
   <img src="docs/images/dashboard/tour-ingest.gif" alt="The Ingest page: a PDF added, and the server saying what it read: its pages, its chunks and their citations" width="860">
@@ -514,7 +569,7 @@ from vectrixdb import VectrixDB
 # SQLite with file path
 db = VectrixDB(path="./my_vectors")
 
-# Creates: ./my_vectors/vectrix.db
+# Creates: ./my_vectors/_vectrixdb.db
 ```
 
 ### Lakebase Storage (Databricks)
@@ -529,7 +584,6 @@ lakebase = VectrixDB.with_lakebase(
     user="your-user",
     password="your-oauth-token",  # OAuth JWT from Lakebase Connect
     port=5432,
-    schema="public",  # Optional, defaults to "public"
 )
 
 # Use with Vectrix
@@ -689,21 +743,15 @@ tree = build_tree_from_markdown(markdown_text, doc_id="guide")
 ### Document Index with Storage Backend
 
 ```python
-from vectrixdb import DocumentIndex, VectrixDB
+from vectrixdb import VectrixDB
 
 # Connect to storage
 lakebase = VectrixDB.with_lakebase(...)
 
-# Document index uses storage backend
-doc_index = DocumentIndex(storage=lakebase)
+# The document index keeps its documents and nodes in the same storage
+doc_index = lakebase.documents
 
-# Save documents and nodes
-doc_index.save_document({
-    "doc_id": "doc_001",
-    "title": "My Document",
-    "doc_type": "markdown",
-    "page_count": 5,
-})
+doc_index.index_text("doc_001", "# My Document\n\nThe text.", title="My Document")
 
 # Query documents
 docs = doc_index.list_documents()
@@ -784,7 +832,7 @@ from vectrixdb import (
 )
 
 # Dense embeddings
-dense = DenseEmbedder(model="e5-small")
+dense = DenseEmbedder(model="bge-small")  # in the wheel; e5-small is fetched by download-models
 vectors = dense.embed(["Hello world", "How are you?"])
 
 # Sparse embeddings (BM25)
@@ -808,7 +856,8 @@ scores = colbert.score("greeting", ["Hello world", "Quarterly revenue"])
 Start the server:
 
 ```bash
-VECTRIXDB_API_KEY=your_secret vectrixdb serve --port 7337
+export VECTRIXDB_API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+vectrixdb serve --port 7337
 ```
 
 Open the dashboard at `http://localhost:7337/dashboard`
@@ -819,19 +868,19 @@ Open the dashboard at `http://localhost:7337/dashboard`
 # Create collection
 curl -X POST http://localhost:7337/api/v1/collections \
   -H "Content-Type: application/json" \
-  -H "api-key: your_secret" \
+  -H "api-key: $VECTRIXDB_API_KEY" \
   -d '{"name": "docs", "dimension": 384}'
 
 # Add documents (auto-embedding)
 curl -X POST http://localhost:7337/api/v1/collections/docs/text-upsert \
   -H "Content-Type: application/json" \
-  -H "api-key: your_secret" \
+  -H "api-key: $VECTRIXDB_API_KEY" \
   -d '{"points": [{"id": "1", "text": "Hello world"}]}'
 
 # Search
 curl -X POST http://localhost:7337/api/v1/collections/docs/text-search \
   -H "Content-Type: application/json" \
-  -H "api-key: your_secret" \
+  -H "api-key: $VECTRIXDB_API_KEY" \
   -d '{"query_text": "greeting", "limit": 10}'
 ```
 
@@ -909,6 +958,8 @@ it with a client and the other transports, are in
 Build knowledge graphs from documents:
 
 ```python
+import os
+
 from vectrixdb import Vectrix, create_openai_config
 
 # Create with graph mode
@@ -916,8 +967,8 @@ db = Vectrix("docs", mode="graph")
 
 # Or with custom LLM config
 config = create_openai_config(
-    api_key="your-openai-key",
     model="gpt-4o-mini",
+    llm_api_key=os.environ.get("OPENAI_API_KEY"),
 )
 
 db = Vectrix(

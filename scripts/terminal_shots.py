@@ -10,12 +10,15 @@ clients.gif starts a server with sdk/conformance/serve.py, adds a document
 with the Python client, and runs the same search with each client's own
 example: Python, TypeScript, Go and Rust, each answering with the same
 citation. doctor.gif runs ``vectrixdb doctor --offline`` in an empty folder.
+mcp.gif calls three of the server's MCP tools with curl, as an assistant
+would, and shows what each answered: whoami, describe_collection naming the
+fields a filter can use, and a search counting its results by team.
 Every command on screen is the one that ran, in the folder it names, and what
 is shown under it is what it printed. Both are saved in docs/images/terminal,
 960 wide.
 
 Needs Pillow, websocket-client, Edge or Chrome (VECTRIXDB_BROWSER names one
-somewhere else), jq for cli.gif, and for clients.gif node with sdk/typescript's packages
+somewhere else), jq for cli.gif, curl for mcp.gif, and for clients.gif node with sdk/typescript's packages
 installed, go and cargo. The Go and Rust examples are built before filming,
 so the clip shows what they print and not the compiler.
 """
@@ -46,6 +49,7 @@ CLIPS = {
     "clients": "One server, one document, the same search from Python, TypeScript, Go and Rust",
     "doctor": "vectrixdb doctor trying every part of a fresh install",
     "cli": "The vectrixdb command on a server: ingest, search, whoami, and a key it will not send",
+    "mcp": "An assistant's tools on a server: whoami, describe_collection, a search with facets",
 }
 QUERY = "how long do refunds take?"
 #: The clips are taller than the containers page's, so a whole run fits without scrolling.
@@ -282,7 +286,118 @@ def film_cli(reel: shots.Reel, scratch: Path) -> None:
         server.wait(timeout=30)
 
 
-FILMS = {"clients": film_clients, "doctor": film_doctor, "cli": film_cli}
+#: The handbook the mcp clip searches, each line with the team that owns it.
+HANDBOOK = [
+    ("refunds", "Refunds are paid by the billing team within ten working days.", "finance"),
+    ("refund-card", "A refund goes back to the card the customer paid with.", "finance"),
+    (
+        "travel",
+        "Travel is booked through the office manager, economy under six hours.",
+        "operations",
+    ),
+    ("laptops", "Laptops are replaced every three years by the IT desk.", "it"),
+    ("leave", "Annual leave is twenty five days, plus public holidays.", "people"),
+]
+
+
+def film_mcp(reel: shots.Reel, scratch: Path) -> None:
+    server = subprocess.Popen(
+        [sys.executable, str(SDK / "conformance" / "serve.py")],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        env={**os.environ, "VECTRIXDB_MCP": "1"},
+    )
+    try:
+        assert server.stdout is not None
+        where = json.loads(server.stdout.readline())
+        url, key = where["url"], where["key"]
+
+        def post(path: str, body: object) -> str:
+            done = subprocess.run(
+                [
+                    "curl",
+                    "-s",
+                    f"{url}{path}",
+                    "-H",
+                    f"api-key: {key}",
+                    "-H",
+                    "content-type: application/json",
+                    "-H",
+                    "accept: application/json, text/event-stream",
+                    "-d",
+                    json.dumps(body),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=True,
+            )
+            return done.stdout
+
+        post(
+            "/api/v2/collections",
+            {"name": "handbook", "dimension": 384, "enable_text_index": True, "tags": ["hybrid"]},
+        )
+        post(
+            "/api/v1/collections/handbook/text-upsert",
+            {
+                "points": [
+                    {"id": i, "text": t, "payload": {"team": team}} for i, t, team in HANDBOOK
+                ]
+            },
+        )
+
+        term = terminal.Terminal(
+            reel, scratch, "an assistant's tools, on a VectrixDB server", HEIGHT
+        )
+        # What an MCP reply holds is JSON with the tool's words inside; this prints the words.
+        words = "import json,sys; print(json.load(sys.stdin)['result']['content'][0]['text'])"
+        reel.hold(600)
+        term.type(f"export URL={url}/mcp", 200)
+        term.type('export KEY="$(cat handbook.key)"', 200)
+        term.type(f"alias words='python -c \"{words}\"'", 300)
+        calls = [
+            ("whoami", {}),
+            ("describe_collection", {"collection": "handbook"}),
+            (
+                "search",
+                {
+                    "collection": "handbook",
+                    "query": "how are refunds paid",
+                    "limit": 3,
+                    "facets": ["team"],
+                },
+            ),
+        ]
+        for at, (tool, arguments) in enumerate(calls):
+            body = {
+                "jsonrpc": "2.0",
+                "id": at + 1,
+                "method": "tools/call",
+                "params": {"name": tool, "arguments": arguments},
+            }
+            # The pipe on screen, run: curl's reply through the same words one-liner.
+            said = subprocess.run(
+                [sys.executable, "-c", words],
+                input=post("/mcp", body),
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+            ).stdout.rstrip("\n")
+            term.type(
+                f'curl -s $URL -H "api-key: $KEY" -H "accept: application/json, text/event-stream" '
+                f"-d '{json.dumps(body)}' | words",
+                300,
+            )
+            term.show(html.escape(said), 2600 if at < len(calls) - 1 else 4500)
+    finally:
+        server.terminate()
+        server.wait(timeout=30)
+
+
+FILMS = {"clients": film_clients, "doctor": film_doctor, "cli": film_cli, "mcp": film_mcp}
 
 
 def main(argv: Optional[List[str]] = None) -> int:

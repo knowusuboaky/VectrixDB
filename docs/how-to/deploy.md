@@ -131,14 +131,13 @@ VectrixDB doctor, for ./vectrixdb_data
   ok     Models     Embedding model loads and embeds, 384 dimensions, 378 ms
   ok     Models     Reranker loads and scores, 283 ms
   ok     Readers    Markdown, HTML, Plain text: read
-  ok     Readers    PDF: ready
   ok     Sign-in    The identity provider at login.microsoftonline.com answers, 212 ms
   ok     Sign-in    Its 6 signing keys read
-  --     Readers    Scanned pages (OCR): pip install 'vectrixdb[ocr]'
+  warn   Extraction Nothing reads recordings here. pip install 'vectrixdb[asr]', or set VECTRIXDB_EXTRACTOR_URL to an extraction service that has AZURE_SPEECH_ENDPOINT and AZURE_SPEECH_KEY
   error  Documents  The extraction service at extract.company.com cannot be reached: the name does not resolve
                     Check VECTRIXDB_EXTRACTOR_URL, and that this machine can reach extract.company.com (a firewall, a private endpoint, a proxy).
 
-1 error, 0 warnings. Each says what to do under it.
+1 error, 1 warning. Each says what to do under it.
 ```
 
 On a fresh install with no settings, offline, every part it can try answers:

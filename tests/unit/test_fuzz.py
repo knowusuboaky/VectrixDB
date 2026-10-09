@@ -136,6 +136,9 @@ class TestRestSurface:
                     kwargs["content"] = json.dumps(body)
                     kwargs["headers"] = {"content-type": "application/json"}
                 response = client.request(method, path, **kwargs)
+                # /ready answers 503 until the models are loaded: that is its contract, not a fault.
+                if (method, path) == ("GET", "/ready") and response.status_code == 503:
+                    break
                 if response.status_code >= 500:
                     failures.append((method, path, body, response.status_code, response.text[:120]))
                 if method in ("GET", "DELETE"):

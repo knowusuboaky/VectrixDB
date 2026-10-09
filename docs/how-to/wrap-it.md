@@ -25,8 +25,9 @@ its own. What it owes:
 
 ## A client of your own
 
-Preset the address, the gateway's settings and a header naming the wrapper,
-so the server's access log can tell its callers apart. Leave the key or token
+Preset the address, the gateway's settings and the wrapper's name, which
+goes before the client's own in every request's `User-Agent`, so the
+gateway's log can tell its callers apart. Leave the key or token
 to the caller: a wrapper that holds one gives it to everyone who installs it.
 
 === "Python"
@@ -45,7 +46,7 @@ to the caller: a wrapper that holds one gives it to everyone who installs it.
         settings = {
             "key_header": "Ocp-Apim-Subscription-Key",
             "prefix": "/acme",
-            "headers": {"x-acme-client": "acme-vectors/1.0"},
+            "user_agent": "acme-vectors/1.0",
             **options,
         }
         url = os.environ.get("ACME_VECTORS_URL", "https://vectors.acme.com")
@@ -65,7 +66,7 @@ to the caller: a wrapper that holds one gives it to everyone who installs it.
         url: process.env.ACME_VECTORS_URL ?? "https://vectors.acme.com",
         keyHeader: "Ocp-Apim-Subscription-Key",
         prefix: "/acme",
-        headers: { "x-acme-client": "acme-vectors/1.0" },
+        userAgent: "acme-vectors/1.0",
         ...options,
       });
     }
@@ -85,7 +86,7 @@ to the caller: a wrapper that holds one gives it to everyone who installs it.
             vectrixdb.WithKey(key),
             vectrixdb.WithKeyHeader("Ocp-Apim-Subscription-Key"),
             vectrixdb.WithPrefix("/acme"),
-            vectrixdb.WithHeader("x-acme-client", "acme-vectors/1.0"),
+            vectrixdb.WithUserAgent("acme-vectors/1.0"),
         }, more...)
         db := vectrixdb.New("https://vectors.acme.com", opts...)
         return db, db.Err()
@@ -104,7 +105,7 @@ to the caller: a wrapper that holds one gives it to everyone who installs it.
             .key(key)
             .key_header("Ocp-Apim-Subscription-Key")
             .prefix("/acme")
-            .header("x-acme-client", "acme-vectors/1.0")
+            .user_agent("acme-vectors/1.0")
             .build()
     }
     ```
@@ -136,6 +137,9 @@ PRESETS = {
     "VECTRIXDB_LOGIN_SCOPES": "api://acme-vectors/search",
     "VECTRIXDB_KEY_HEADER": "Ocp-Apim-Subscription-Key",
     "VECTRIXDB_PREFIX": "/acme",
+    "VECTRIXDB_COMMAND": "acme vectors",  # every hint names this command
+    "VECTRIXDB_USER_AGENT": "acme-cli/1.0",  # and every request this tool
+    "VECTRIXDB_CA_BUNDLE": "system",  # the company's authority, from the laptop's own store
 }
 
 app = typer.Typer(help="Acme's tools")
@@ -170,12 +174,17 @@ acme vectors query "how long do refunds take?" --name handbook
 
 With the scopes pinned, `login` asks nobody to confirm and refuses a server
 that asks for anything else ([Sign in with your company account](command-line-server.md#sign-in-with-your-company-account)).
-The messages still name `vectrixdb` in their hints, `vectrixdb login --url ...`,
-since they come from the command underneath.
+Every hint names the wrapper's command, `acme vectors login --url ...`, from
+`VECTRIXDB_COMMAND`. For sign-ins kept in the system keychain rather than a
+file, add `"VECTRIXDB_CREDENTIALS": "keyring"` and `keyring` to the
+dependencies.
 
-A company that would rather not ship code at all can ship the presets alone:
-an env file every command reads with `--env-file`, or the same lines in the
-machine image its people use.
+A company that would rather not ship code at all can ship the presets alone,
+as `VECTRIXDB_` lines in the file every command reads first:
+`/etc/vectrixdb/defaults.env`, `/Library/Application Support/vectrixdb/defaults.env`
+or `%ProgramData%\vectrixdb\defaults.env`, put there by the tool that already
+manages its people's machines. A person's own environment still wins
+([Presets for every command on a machine](command-line-server.md#presets-for-every-command-on-a-machine)).
 
 ## Publish it inside the company
 

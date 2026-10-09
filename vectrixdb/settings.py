@@ -143,6 +143,28 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 "",
                 "secret",
             ),
+            (
+                "WARM",
+                "1 loads the embedding model at start, and /ready says so once it has. On under "
+                "vectrixdb serve and in the image; 0 loads it on the first search.",
+                "1",
+            ),
+            (
+                "THREADS",
+                "Threads one model session uses. Left out, the CPUs this process may use, the "
+                "container's quota when there is one, at most 4.",
+                "2",
+            ),
+            (
+                "INFERENCE_CONCURRENCY",
+                "Model calls the server runs at once; the rest wait their turn, a batch at a time.",
+                "2",
+            ),
+            (
+                "INFERENCE_WAIT_SECONDS",
+                "How long a request waits for its turn before it is answered 503 with Retry-After.",
+                "30",
+            ),
         ],
     )
     + _s(
@@ -179,7 +201,7 @@ SETTINGS: Tuple[Setting, ...] = tuple(
             ),
             (
                 "MCP_WRITES",
-                "1 offers add_document over MCP, to a caller whose role may write. Off unless set, so an assistant only reads.",
+                "1 offers the tools that write over MCP (add_document, create_collection, delete_document, add_source, refresh_source), to a caller whose role may. Off unless set, so an assistant only reads.",
                 "",
             ),
             (
@@ -796,7 +818,31 @@ SETTINGS: Tuple[Setting, ...] = tuple(
                 "1 lets the command send a key or token over plain HTTP to another machine, on a network you trust.",
                 "0",
             ),
-            ("CA_BUNDLE", "A CA bundle to trust, for a company's own CA.", ""),
+            (
+                "CA_BUNDLE",
+                "A CA bundle to trust, for a company's own CA; system trusts what the operating system trusts, where a managed machine keeps the company's authority.",
+                "",
+            ),
+            (
+                "CREDENTIALS",
+                "keyring keeps vectrixdb login's tokens in the system keychain (Windows Credential Manager, macOS Keychain, the Secret Service); unset or file, a file readable by its owner alone.",
+                "",
+            ),
+            (
+                "COMMAND",
+                "The command a hint names, for a company's wrapper: acme vectors login. Unset, vectrixdb.",
+                "",
+            ),
+            (
+                "USER_AGENT",
+                "A wrapper's name and version, put before the client's own in User-Agent, so a gateway's log says which tool called.",
+                "acme-vectors/1.4",
+            ),
+            (
+                "DEFAULTS_FILE",
+                "A presets file of VECTRIXDB_ lines read before every command, the environment winning. Unset, /etc/vectrixdb/defaults.env, %ProgramData%\\vectrixdb\\defaults.env or /Library/Application Support/vectrixdb/defaults.env, when there is one.",
+                "",
+            ),
             (
                 "CLIENT_CERT",
                 "A client certificate for a gateway that asks for one, PEM.",

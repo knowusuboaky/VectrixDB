@@ -1351,6 +1351,40 @@
         "title": "SearchRequest",
         "type": "object"
       },
+      "SimilarRequest": {
+        "description": "More like this: the chunks nearest to one the caller can already see.",
+        "properties": {
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "id": {
+            "description": "The chunk's id, as a search result gives it.",
+            "title": "Id",
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "exclusiveMinimum": 0.0,
+            "maximum": 100.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SimilarRequest",
+        "type": "object"
+      },
       "SparseSearchRequest": {
         "description": "Sparse vector search request.",
         "example": {
@@ -3905,6 +3939,57 @@
         ]
       }
     },
+    "/api/v1/collections/{name}/similar": {
+      "post": {
+        "description": "The chunks most like one chunk, judged as the caller.\n\nThe chunk is looked up as the caller, so one they may not see is not\nfound, the same answer as one that is not there; the search is theirs\ntoo, under the collection's policy.",
+        "operationId": "similar_api_v1_collections__name__similar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimilarRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Similar",
+        "tags": [
+          "search"
+        ]
+      }
+    },
     "/api/v1/collections/{name}/sources": {
       "get": {
         "description": "The feeds and pages this collection keeps up with, when each was read and what it found.",
@@ -4966,6 +5051,26 @@
         "summary": "Get Resource Stats",
         "tags": [
           "monitoring"
+        ]
+      }
+    },
+    "/api/v1/whoami": {
+      "get": {
+        "description": "Who the caller is, how they came in, their role, what it allows, and which collections they reach.\n\nA key's name and a person's address are theirs to see; no secret is\never in the answer.",
+        "operationId": "whoami_api_v1_whoami_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Whoami",
+        "tags": [
+          "info"
         ]
       }
     },
@@ -6241,7 +6346,7 @@
     },
     "/health": {
       "get": {
-        "description": "Health check.",
+        "description": "Health check: the process is up and answering. What a liveness probe asks.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -6254,6 +6359,26 @@
           }
         },
         "summary": "Health",
+        "tags": [
+          "info"
+        ]
+      }
+    },
+    "/ready": {
+      "get": {
+        "description": "Readiness: the models are loaded, or load on first use. What a readiness probe asks.\n\n503 while ``VECTRIXDB_WARM`` is loading them, or when loading failed, with\nthe reason, so an orchestrator sends no traffic to a server that would\nanswer the first search by loading a model.",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ready",
         "tags": [
           "info"
         ]

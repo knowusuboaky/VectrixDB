@@ -51,6 +51,13 @@ test("the key goes in api-key, a token in Authorization, and the user-agent is s
   assert.equal(b.calls[0]?.headers["api-key"], undefined);
 });
 
+test("a wrapper's name goes before the client's own in the user-agent", async () => {
+  const a = fake([json(200, { ok: true, data: {} })]);
+  await new VectrixClient({ url: "https://x", key: "k", userAgent: "acme-vectors/1.4", fetch: a.fetch }).whoami();
+  assert.equal(a.calls[0]?.headers["user-agent"], "acme-vectors/1.4 vectrixdb-typescript/2.2.0");
+  assert.throws(() => new VectrixClient({ url: "https://x", userAgent: "acme\r\nx-evil: 1" }), /userAgent/);
+});
+
 test("429 and 503 are retried, honouring Retry-After, then BusyError", async () => {
   const ok = fake([
     json(429, { ok: false, message: "slow down" }, { "retry-after": "0" }),

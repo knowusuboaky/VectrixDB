@@ -16,6 +16,49 @@ may change at any time.
 
 ### Added
 
+- **The server stays up under load.** Search, hybrid search, text upsert and
+  document upload ran the embedding model on the event loop, so one large
+  upload held every other request, `/health` among them, until an
+  orchestrator restarted the pod and the models loaded again. The model now
+  runs in worker threads, `VECTRIXDB_INFERENCE_CONCURRENCY` calls at a time
+  (2), one batch of 32 texts at a time, so a search waits for one batch,
+  never a whole document; a request that waits
+  `VECTRIXDB_INFERENCE_WAIT_SECONDS` (30) is answered 503 with
+  `Retry-After`. Reading an uploaded file and cutting it moved off the loop
+  too. The models load at start under `vectrixdb serve` and in the image
+  (`VECTRIXDB_WARM`), and `/ready` says whether they have, 503 until then or
+  with the reason they failed; the image's health check and the Kubernetes
+  startup and readiness probes ask `/ready`, liveness stays on `/health`.
+  `VECTRIXDB_THREADS` sets the threads each ONNX session uses, read once,
+  from the container's CPU quota (cgroup v1 or v2) at most four, where every
+  session asked for four whatever the machine. Two first requests build one
+  embedder, not two. onnxruntime is held below 2. See
+  [Sizing](docs/how-to/sizing.md).
+- **More MCP tools, resources and prompts.** `whoami`, `describe_collection`
+  (with the metadata fields a filter can name), `list_documents`, `similar`
+  and facets on `search`; with `VECTRIXDB_MCP_WRITES` on, `create_collection`,
+  `delete_document` (marked destructive), `add_source` and `refresh_source`
+  beside `add_document`. Collections and documents are MCP resources,
+  `vectrixdb://collections/{collection}` and its documents, read as the
+  caller. Prompts to summarise a document, say what a collection holds, and
+  compare two documents. Each is a REST call made as the caller, behind new
+  routes `GET /api/v1/whoami` and `POST /api/v1/collections/{name}/similar`,
+  and the collection's own route now names its filterable `fields`. A tool's
+  REST call carries its trace, so a tool and its search are one trace.
+  `vectrixdb mcp --allow-writes` reaches the server's flag, as the docs said.
+  See [Tools reference](docs/how-to/mcp-tools.md).
+- **A skill for an assistant connected over MCP.**
+  `skills/vectrixdb-mcp/SKILL.md`: which tool when, describing before
+  filtering, citing every claim, refusals as answers, and asking before a
+  delete. A test holds every name in it, and in `skills/vectrixdb/SKILL.md`,
+  to the code.
+- **The docs, grown.** MCP is a section of six pages; new pages for keys and
+  roles, collection policies, masking, the audit trail, chunking, extraction
+  quality, recordings, embedding models, sizing, check and doctor, scale,
+  async, search options and installing; twelve more reference
+  pages from the code; a home card for MCP keys; every picture opens
+  full size over the page, with thumbnails, arrows, swipe and Esc; and a
+  terminal clip of the MCP tools filmed from a real run.
 - **One release, every registry.** The Release workflow runs each client's
   own checks and its walk against a real server (the new SDKs workflow, also
   run on every pull request that touches a client or the server), then, once
@@ -56,6 +99,24 @@ may change at any time.
   a private CA and a client certificate, and honour `HTTPS_PROXY`. The Go
   module is `github.com/knowusuboaky/VectrixDB/sdk/go/v2`, as a 2.x release
   needs.
+- **A company's presets, its command's name, and its keychain.** Every
+  `vectrixdb` command first reads `VECTRIXDB_` lines from a machine-wide file
+  (`/etc/vectrixdb/defaults.env`, `%ProgramData%\vectrixdb\defaults.env`,
+  `/Library/Application Support/vectrixdb/defaults.env`, or
+  `VECTRIXDB_DEFAULTS_FILE`), the environment winning; a line that sets
+  anything else stops the command, so the file cannot change `PATH` or a
+  proxy. `VECTRIXDB_COMMAND` names a wrapper's command in every hint
+  (`acme vectors login`), and `VECTRIXDB_USER_AGENT` its name in every
+  request. The four clients take the same: `user_agent=` in Python,
+  `userAgent` in TypeScript, `WithUserAgent` in Go, `.user_agent()` in
+  Rust, put before the client's own `User-Agent` and refused with a line
+  break in it (the TypeScript and Rust clients went to npm and crates.io as 2.2.0
+  before this, so theirs ships in the next release of each). `VECTRIXDB_CREDENTIALS=keyring` keeps `vectrixdb login`'s
+  tokens in the system keychain, the file holding only which servers.
+  `verify="system"` in Python, and `VECTRIXDB_CA_BUNDLE=system` for the
+  command, trust the operating system's own certificate store, where a
+  managed machine keeps the company's authority (`truststore`, now in the
+  `client` extra on Python 3.10 and later).
 - **The `vectrixdb` command on a server.** Every command that works on a
   folder takes `--url` (or `VECTRIXDB_URL`) and works on a server instead:
   `list`, `info`, `stats`, `create`, `delete`, `ingest`, `query`, `sources`
@@ -233,13 +294,13 @@ may change at any time.
   [llms.txt](https://knowusuboaky.github.io/VectrixDB/llms.txt) lists every
   page with a line on what it is for and the rules an agent should keep;
   [Add it with your coding agent](docs/how-to/coding-agents.md) is a prompt
-  for Claude Code, Cursor or Copilot that has the agent read it, plan
+  for any coding agent that has it read the index, plan
   before installing, pick a mode by evaluation, and ask before re-chunking,
   deleting or turning tracing on. A test keeps the index in step with the
   docs nav.
   The same rules come as a skill an agent loads by itself,
-  `skills/vectrixdb/SKILL.md`, to put in a project's `.claude/skills/`; a
-  test looks up every name it uses in the code.
+  `skills/vectrixdb/SKILL.md`, to put in the skills folder an agent reads;
+  a test looks up every name it uses in the code.
 
 - **The test-question writer spreads its questions and judges harder.**
   `write_golden` now gives every collection, then every document, a floor of
@@ -585,6 +646,12 @@ may change at any time.
   and `dashboard/requirements.txt` reads its Backend's.
 
 ### Changed
+
+- **`vectrixdb check` says when a key leaves reads open.** A server with a
+  key and no sign-in answers reads with no key unless
+  `VECTRIXDB_OPEN_READS=0`, as it always has; `check` called that
+  configuration ok. It is now a warning that names the setting. The
+  container image already sets it.
 
 - **The `mcp` extra needs mcp 2 or later.** The server's `/mcp` endpoint is
   built on mcp 2's `MCPServer`, and `mcp>=1.0.0` let an install keep a 1.x

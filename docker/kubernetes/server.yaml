@@ -88,15 +88,18 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          # Started once the models are loaded: /ready is 503 until then. Alive is
+          # /health, which answers while a long upload is embedded, so a busy
+          # server is never restarted for being busy.
           startupProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: http
             periodSeconds: 2
             failureThreshold: 60
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: http
             periodSeconds: 10
           livenessProbe:

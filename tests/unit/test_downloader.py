@@ -1179,3 +1179,19 @@ def test_the_easy_api_github_download_is_contained_too(tmp_path, monkeypatch):
         Vectrix._download_github_model(object.__new__(Vectrix), "github:v1", "reranker")
     assert not list(tmp_path.rglob("escaped.txt"))
     assert not list(tmp_path.rglob("model.onnx"))
+
+
+def test_a_company_mirror_takes_the_place_of_github(monkeypatch):
+    from vectrixdb.models import downloader
+    from vectrixdb.models.embedded import release_base
+
+    monkeypatch.setenv(
+        "VECTRIXDB_MODELS_URL", "https://acme.jfrog.io/artifactory/vx-models/releases/download/"
+    )
+    assert release_base() == "https://acme.jfrog.io/artifactory/vx-models/releases/download"
+    url = downloader.release_asset_url("reranker")
+    assert url is not None and url.startswith(
+        "https://acme.jfrog.io/artifactory/vx-models/releases/download/"
+    )
+    monkeypatch.delenv("VECTRIXDB_MODELS_URL")
+    assert release_base() == GITHUB_RELEASE_BASE

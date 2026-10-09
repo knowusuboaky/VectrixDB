@@ -25,9 +25,15 @@ A browser's session cookie is not one of them: a page could make an
 assistant's request for whoever has the dashboard open. A server with no
 key and no sign-in answers MCP only from this machine.
 
-The tools: ``list_collections``, ``search``, ``open_source``, and
-``add_document`` when ``VECTRIXDB_MCP_WRITES`` is on and the caller's role
-may write. Every answer is text with an honest first line, cut to a token
+The tools that read: ``whoami``, ``list_collections``,
+``describe_collection``, ``list_documents``, ``search`` (with facets),
+``similar`` and ``open_source``. The tools that write, only when
+``VECTRIXDB_MCP_WRITES`` is on and then only for a role that may:
+``create_collection``, ``add_document``, ``delete_document``, ``add_source``
+and ``refresh_source``. Collections and their documents are resources too,
+``vectrixdb://collections/{collection}`` and
+``vectrixdb://collections/{collection}/documents/{document}``, read as the
+caller. Every answer is text with an honest first line, cut to a token
 budget, because it goes straight into a model's context and a list cut
 silently reads as a complete one.
 """
@@ -52,6 +58,10 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "MCP_PATH",
+    "READ_TOOLS",
+    "WRITE_TOOLS",
+    "PROMPTS",
+    "RESOURCES",
     "enabled",
     "writes_enabled",
     "mount",
@@ -85,6 +95,36 @@ MODES: Dict[str, Tuple[str, Dict[str, Any]]] = {
     "keyword": ("keyword-search", {}),
     "rerank": ("text-search", {"rerank": True}),
 }
+#: The tools every caller is offered, in the order a client lists them.
+READ_TOOLS = (
+    "list_collections",
+    "whoami",
+    "describe_collection",
+    "list_documents",
+    "similar",
+    "search",
+    "open_source",
+)
+#: The tools offered only when VECTRIXDB_MCP_WRITES is on, and then judged by the caller's role.
+WRITE_TOOLS = (
+    "add_document",
+    "create_collection",
+    "delete_document",
+    "add_source",
+    "refresh_source",
+)
+#: The prompts a client offers its person.
+PROMPTS = (
+    "answer_from_documents",
+    "summarise_document",
+    "whats_in_collection",
+    "compare_documents",
+)
+#: The resources, as URI templates, each read as the caller.
+RESOURCES = (
+    "vectrixdb://collections/{collection}",
+    "vectrixdb://collections/{collection}/documents/{+document}",
+)
 #: The callers an MCP client can be. A session cookie is not one: see the module's account.
 _CALLERS = ("key", "token")
 
@@ -269,7 +309,11 @@ async def _call(
     transport = httpx.ASGITransport(
         app=request.app, client=(client[0], client[1]), root_path=request.scope.get("root_path", "")
     )
+    from .. import tracing
+
     sent = {**_credentials(request), **(headers or {}), "user-agent": "vectrixdb-mcp"}
+    # The tool's own request joins the tool's trace, so one trace shows the call and its search.
+    tracing.inject(sent)
     base = f"{request.url.scheme}://{request.headers.get('host') or 'localhost'}"
     async with httpx.AsyncClient(transport=transport, base_url=base) as http:
         response = await http.request(
@@ -340,6 +384,7 @@ async def tool_search(
     limit: int = 10,
     filter: Optional[Dict[str, Any]] = None,
     token_budget: Optional[int] = None,
+    facets: Optional[List[str]] = None,
 ) -> str:
     if not str(query).strip():
         raise _tool_error("Give a query: the words to search for.")
@@ -378,7 +423,194 @@ async def tool_search(
     data = reply.json()
     payload = data.get("data", data) if isinstance(data, dict) else {}
     hits = payload.get("results", []) if isinstance(payload, dict) else []
-    return note + render_hits(collection, hits, _budget(token_budget))
+    return note + render_hits(collection, hits, _budget(token_budget)) + _facets(hits, facets)
+
+
+def _facets(hits: List[Dict[str, Any]], fields: Optional[List[str]]) -> str:
+    """How the results spread over each named metadata field: the values and how many have each.
+
+    Counted over the results this search returned, which the line says, so a
+    model does not take it for the whole collection.
+    """
+    if not fields:
+        return ""
+    lines = [f"\n\n[i] Facets over these {len(hits)} results:"]
+    for name in fields:
+        counts: Dict[str, int] = {}
+        for hit in hits:
+            value = (hit.get("metadata") or {}).get(name)
+            if value is None or isinstance(value, (dict, list)):
+                continue
+            counts[str(value)] = counts.get(str(value), 0) + 1
+        shown = ", ".join(
+            f"{value} {count}"
+            for value, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        )
+        lines.append(f"- {name}: {shown or 'not on any of them'}")
+    return "\n".join(lines)
+
+
+async def tool_whoami(ctx: Any) -> str:
+    data = (await _call(ctx, "GET", "/api/v1/whoami")).json()
+    me = data.get("data", data) if isinstance(data, dict) else {}
+    if me.get("method") == "none":
+        return "[i] " + str(me.get("note"))
+    reach = me.get("collections")
+    reach_said = (
+        "every collection your role allows"
+        if not isinstance(reach, list)
+        else "only " + ", ".join(str(c) for c in reach)
+    )
+    came_in = {"key": "an API key", "token": "your company's sign-in"}.get(
+        str(me.get("method")), str(me.get("method"))
+    )
+    actions = me.get("actions") or []
+    return (
+        f"[i] You are {me.get('who')}, through {came_in}, with the role {me.get('role')}.\n"
+        f"- You reach {reach_said}.\n"
+        f"- You may: {', '.join(actions) if actions else 'nothing beyond looking'}."
+    )
+
+
+async def tool_describe_collection(ctx: Any, collection: str) -> str:
+    data = (await _call(ctx, "GET", _collection_path(collection))).json()
+    info = data.get("data", data) if isinstance(data, dict) else {}
+    tags = [str(t) for t in (info.get("tags") or [])]
+    fields = info.get("fields") or []
+    lines = [f"[i] {collection}"]
+    if info.get("description"):
+        lines.append(str(info["description"]))
+    lines.append(
+        f"- {info.get('count', 0)} chunks, {info.get('dimension')} dimensions, {info.get('metric')}."
+    )
+    lines.append(
+        f"- Search: {'hybrid works' if info.get('has_text_index') else 'by meaning only (no index of exact words)'}"
+        + (f"; made as {', '.join(tags)}" if tags else "")
+        + "."
+    )
+    lines.append(
+        "- Filter on: "
+        + (", ".join(fields) if fields else "no metadata fields found")
+        + '. A filter is a JSON object, such as {"'
+        + (fields[0] if fields else "department")
+        + '": "legal"}.'
+    )
+    if info.get("entitlement_policy") or info.get("policy"):
+        lines.append("- A policy decides document by document what each person may see.")
+    return "\n".join(lines)
+
+
+async def tool_list_documents(
+    ctx: Any, collection: str, title: Optional[str] = None, limit: int = 50
+) -> str:
+    data = (await _call(ctx, "GET", f"{_collection_path(collection)}/documents")).json()
+    payload = data.get("data", data) if isinstance(data, dict) else {}
+    rows = payload.get("documents", []) if isinstance(payload, dict) else []
+    wanted = str(title or "").strip().lower()
+    if wanted:
+        rows = [
+            r
+            for r in rows
+            if wanted in str(r.get("doc_id", "")).lower()
+            or wanted in str(r.get("title") or (r.get("metadata") or {}).get("title") or "").lower()
+        ]
+    total, limit = len(rows), max(1, min(200, int(limit)))
+    if not rows:
+        return f"[i] No documents{' matching ' + repr(title) if wanted else ''} in {collection}."
+    head = (
+        f"[i] {total} document{'' if total == 1 else 's'} in {collection}"
+        + (f" matching {title!r}" if wanted else "")
+        + (f", showing the first {limit}." if total > limit else ".")
+    )
+    lines = [head]
+    for row in rows[:limit]:
+        named = row.get("title") or (row.get("metadata") or {}).get("title")
+        lines.append(
+            f"- {row.get('doc_id')}"
+            + (f": {named}" if named and named != row.get("doc_id") else "")
+        )
+    return "\n".join(lines)
+
+
+async def tool_similar(
+    ctx: Any,
+    collection: str,
+    id: str,
+    limit: int = 10,
+    filter: Optional[Dict[str, Any]] = None,
+    token_budget: Optional[int] = None,
+) -> str:
+    body: Dict[str, Any] = {"id": id, "limit": max(1, min(MAX_LIMIT, int(limit)))}
+    if filter:
+        body["filter"] = filter
+    data = (await _call(ctx, "POST", f"{_collection_path(collection)}/similar", body=body)).json()
+    payload = data.get("data", data) if isinstance(data, dict) else {}
+    hits = payload.get("results", []) if isinstance(payload, dict) else []
+    return f"[i] Most like {id}:\n" + render_hits(collection, hits, _budget(token_budget))
+
+
+async def tool_create_collection(
+    ctx: Any, collection: str, description: Optional[str] = None, hybrid: bool = True
+) -> str:
+    body: Dict[str, Any] = {
+        "name": collection,
+        "dimension": 384,
+        "metric": "cosine",
+        "enable_text_index": bool(hybrid),
+        "tags": ["hybrid"] if hybrid else ["dense"],
+    }
+    if description:
+        body["description"] = description
+    await _call(ctx, "POST", "/api/v2/collections", body=body)
+    return f"Made {collection}" + (
+        ", searchable by meaning and exact words." if hybrid else ", searchable by meaning."
+    )
+
+
+async def tool_delete_document(ctx: Any, collection: str, document: str) -> str:
+    path = f"{_collection_path(collection)}/documents/{quote(str(document), safe='/')}"
+    data = (await _call(ctx, "DELETE", path)).json()
+    gone = data.get("chunks_removed") if isinstance(data, dict) else None
+    return f"Deleted {document} from {collection}" + (
+        f": {gone} chunks." if isinstance(gone, int) else "."
+    )
+
+
+async def tool_add_source(
+    ctx: Any, collection: str, address: str, every: str = "6h", kind: Optional[str] = None
+) -> str:
+    body: Dict[str, Any] = {"address": address, "every": every}
+    if kind:
+        body["kind"] = kind
+    data = (await _call(ctx, "POST", f"{_collection_path(collection)}/sources", body=body)).json()
+    source = data.get("source") if isinstance(data, dict) else None
+    said_id = source.get("id") if isinstance(source, dict) else None
+    return (
+        f"{collection} now keeps up with {address}, read every {every}."
+        + (f" Its id is {said_id}." if said_id else "")
+        + " Nothing is written until a refresh: refresh_source reads it now."
+    )
+
+
+async def tool_refresh_source(
+    ctx: Any, collection: str, source: Optional[str] = None, force: bool = False
+) -> str:
+    body: Dict[str, Any] = {"force": bool(force)}
+    if source:
+        body["source"] = source
+    report = (
+        await _call(ctx, "POST", f"{_collection_path(collection)}/sources/refresh", body=body)
+    ).json()
+    if not isinstance(report, dict):
+        report = {}
+    said = ", ".join(
+        f"{report[k]} {k}"
+        for k in ("added", "updated", "unchanged", "removed", "failed")
+        if isinstance(report.get(k), int)
+    )
+    return f"Refreshed {source or 'every due source'} in {collection}" + (
+        f": {said}." if said else "."
+    )
 
 
 async def tool_open_source(
@@ -446,11 +678,16 @@ async def tool_add_document(
 
 INSTRUCTIONS = (
     "This server searches the user's document collections, as the user: it only ever returns "
-    "what the user is allowed to read. Call list_collections first if you do not know the "
-    "collection's name, then search. Answer from what the results say, cite each claim by its "
-    "source, and say so when the results do not answer the question. open_source reads the "
-    "document around a result when a snippet is not enough. Every answer's first line says "
-    "whether anything was cut."
+    "what the user is allowed to read, and a refusal is the server's answer, not an error to "
+    "work around. Start with list_collections when you do not know the collection's name, and "
+    "describe_collection before filtering, so the filter names a field that exists. search with "
+    "mode hybrid suits most questions; keyword suits names, codes and exact phrases; rerank is "
+    "slower and orders the best first. similar finds more like a result you already have, by its "
+    "id. open_source reads the document around a result when a snippet is not enough, and "
+    "list_documents says what a collection holds. Answer from what the results say, cite each "
+    "claim by its source, and say so when the results do not answer the question. Every "
+    "answer's first line says whether anything was cut. Tools that change a collection are "
+    "offered only when the server allows writes; ask the user before deleting anything."
 )
 
 
@@ -484,13 +721,72 @@ def build_server(writes: bool = False) -> Any:
             return await tool_list_collections(ctx)
 
     @server.tool(
+        name="whoami",
+        title="Who am I here",
+        description="Who you are on this server, how you came in, your role, what it allows, and which collections you reach.",
+        annotations=looks,
+    )
+    async def whoami(ctx: Context) -> str:
+        async with _tool_span("whoami", None):
+            return await tool_whoami(ctx)
+
+    @server.tool(
+        name="describe_collection",
+        title="Describe a collection",
+        description=(
+            "A collection's size, how it can be searched, and the metadata fields a search can "
+            "filter on. Call it before writing a filter."
+        ),
+        annotations=looks,
+    )
+    async def describe_collection(ctx: Context, collection: str) -> str:
+        async with _tool_span("describe_collection", collection):
+            return await tool_describe_collection(ctx, collection)
+
+    @server.tool(
+        name="list_documents",
+        title="List a collection's documents",
+        description=(
+            "The documents a collection holds, by id and title. title narrows to those whose id or "
+            "title contains it. Needs a server that keeps documents."
+        ),
+        annotations=looks,
+    )
+    async def list_documents(
+        ctx: Context, collection: str, title: Optional[str] = None, limit: int = 50
+    ) -> str:
+        async with _tool_span("list_documents", collection):
+            return await tool_list_documents(ctx, collection, title, limit)
+
+    @server.tool(
+        name="similar",
+        title="More like this",
+        description=(
+            "The chunks most like one you already have, by the id a search result gives. filter "
+            "narrows by metadata. Judged as you, like a search."
+        ),
+        annotations=looks,
+    )
+    async def similar(
+        ctx: Context,
+        collection: str,
+        id: str,
+        limit: int = 10,
+        filter: Optional[Dict[str, Any]] = None,
+        token_budget: int = DEFAULT_BUDGET,
+    ) -> str:
+        async with _tool_span("similar", collection):
+            return await tool_similar(ctx, collection, id, limit, filter, token_budget)
+
+    @server.tool(
         name="search",
         title="Search a collection",
         description=(
             "Search a collection, as you. mode: hybrid (meaning and exact words, the default), "
             "dense (meaning), keyword (exact words) or rerank (meaning, re-ranked). filter narrows by "
-            'metadata, e.g. {"department": "legal"}. Results come with their relevance and source, '
-            "cut to token_budget; the first line says whether any were cut."
+            'metadata, e.g. {"department": "legal"}. facets names metadata fields to count over '
+            "the results. Results come with their relevance, id and source, cut to token_budget; "
+            "the first line says whether any were cut."
         ),
         annotations=looks,
     )
@@ -502,9 +798,12 @@ def build_server(writes: bool = False) -> Any:
         limit: int = 10,
         filter: Optional[Dict[str, Any]] = None,
         token_budget: int = DEFAULT_BUDGET,
+        facets: Optional[List[str]] = None,
     ) -> str:
         async with _tool_span("search", collection):
-            return await tool_search(ctx, collection, query, mode, limit, filter, token_budget)
+            return await tool_search(
+                ctx, collection, query, mode, limit, filter, token_budget, facets
+            )
 
     @server.tool(
         name="open_source",
@@ -551,6 +850,91 @@ def build_server(writes: bool = False) -> Any:
             async with _tool_span("add_document", collection):
                 return await tool_add_document(ctx, collection, text, title)
 
+        writes = annotations(
+            read_only_hint=False,
+            destructive_hint=False,
+            idempotent_hint=True,
+            open_world_hint=False,
+        )
+
+        @server.tool(
+            name="create_collection",
+            title="Make a collection",
+            description=(
+                "Make an empty collection. hybrid (the default) searches by meaning and exact words. "
+                "Needs a role that may make collections."
+            ),
+            annotations=writes,
+        )
+        async def create_collection(
+            ctx: Context, collection: str, description: Optional[str] = None, hybrid: bool = True
+        ) -> str:
+            async with _tool_span("create_collection", collection):
+                return await tool_create_collection(ctx, collection, description, hybrid)
+
+        @server.tool(
+            name="delete_document",
+            title="Delete a document",
+            description=(
+                "Delete a document and every chunk of it from a collection, for good. Ask the user "
+                "first. Needs a role that may write."
+            ),
+            annotations=annotations(
+                read_only_hint=False,
+                destructive_hint=True,
+                idempotent_hint=True,
+                open_world_hint=False,
+            ),
+        )
+        async def delete_document(ctx: Context, collection: str, document: str) -> str:
+            async with _tool_span("delete_document", collection):
+                return await tool_delete_document(ctx, collection, document)
+
+        @server.tool(
+            name="add_source",
+            title="Keep a collection up with a feed or a page",
+            description=(
+                "Have a collection keep up with a feed or a web page, read every `every` (30m, 6h, "
+                "1d). kind is feed or page; left out, the server tells. Nothing is written until "
+                "a refresh. Needs a role that may write."
+            ),
+            annotations=annotations(
+                read_only_hint=False,
+                destructive_hint=False,
+                idempotent_hint=True,
+                open_world_hint=True,
+            ),
+        )
+        async def add_source(
+            ctx: Context,
+            collection: str,
+            address: str,
+            every: str = "6h",
+            kind: Optional[str] = None,
+        ) -> str:
+            async with _tool_span("add_source", collection):
+                return await tool_add_source(ctx, collection, address, every, kind)
+
+        @server.tool(
+            name="refresh_source",
+            title="Refresh a collection's sources",
+            description=(
+                "Read a collection's sources now: one, by its id or address, or every one that is "
+                "due; force reads every one. Needs a role that may write."
+            ),
+            annotations=annotations(
+                read_only_hint=False,
+                destructive_hint=False,
+                idempotent_hint=True,
+                open_world_hint=True,
+            ),
+        )
+        async def refresh_source(
+            ctx: Context, collection: str, source: Optional[str] = None, force: bool = False
+        ) -> str:
+            async with _tool_span("refresh_source", collection):
+                return await tool_refresh_source(ctx, collection, source, force)
+
     @server.prompt(
         name="answer_from_documents",
         title="Answer from my documents",
@@ -563,6 +947,67 @@ def build_server(writes: bool = False) -> Any:
             "Search first (list_collections if you need the name). Use only what the results say, "
             "cite every claim by its source, and say plainly if they do not answer it."
         )
+
+    @server.prompt(
+        name="summarise_document",
+        title="Summarise a document",
+        description="Summarise one document from a collection, citing where each point comes from.",
+    )
+    def summarise_document(collection: str, document: str) -> str:
+        return (
+            f"Summarise the document {document} in the {collection} collection. Read it with "
+            "open_source (raise token_budget for a long one, or read it part by part with around=). "
+            "Give the main points in plain words, each with where in the document it is, and say "
+            "what the document does not cover if the reader would expect it to."
+        )
+
+    @server.prompt(
+        name="whats_in_collection",
+        title="What is in this collection",
+        description="An overview of a collection: what it holds, how to search it, what to ask it.",
+    )
+    def whats_in_collection(collection: str) -> str:
+        return (
+            f"Tell me what the {collection} collection holds. Use describe_collection for its size "
+            "and fields, list_documents for what is in it, and one or two searches for its main "
+            "topics. End with three questions it can answer well, and cite what you found."
+        )
+
+    @server.prompt(
+        name="compare_documents",
+        title="Compare documents",
+        description="Compare two documents from a collection on a question, citing both.",
+    )
+    def compare_documents(collection: str, first: str, second: str, question: str = "") -> str:
+        about = f" on this: {question}" if question else ""
+        return (
+            f"Compare {first} and {second} in the {collection} collection{about}. Read both with "
+            "open_source. Say where they agree, where they differ, and what one covers that the "
+            "other does not, citing each point to the document it came from."
+        )
+
+    @server.resource(
+        "vectrixdb://collections/{collection}",
+        name="collection",
+        title="A collection",
+        description="A collection's size, how it is searched, and its filterable fields, as you see it.",
+        mime_type="text/plain",
+    )
+    async def collection_resource(collection: str, ctx: Context) -> str:
+        async with _tool_span("resource.collection", collection):
+            return await tool_describe_collection(ctx, collection)
+
+    @server.resource(
+        "vectrixdb://collections/{collection}/documents/{+document}",
+        name="document",
+        title="A document",
+        description="A document as it was indexed, for a person to attach to the conversation.",
+        mime_type="text/markdown",
+    )
+    async def document_resource(collection: str, document: str, ctx: Context) -> str:
+        async with _tool_span("resource.document", collection):
+            path = f"{_collection_path(collection)}/documents/{quote(str(document), safe='/')}"
+            return (await _call(ctx, "GET", path)).text
 
     return server
 

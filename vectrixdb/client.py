@@ -690,6 +690,23 @@ def _tls(verify: Any, cert: Any) -> Any:
         raise ConfigurationError(
             "Certificates are always checked. For a private CA, give its bundle: verify='/path/to/ca.pem'"
         )
+    if verify == "system":
+        # The operating system's own store, where a managed machine keeps the
+        # company's authority and a TLS-inspecting proxy's.
+        try:
+            import truststore
+        except ImportError as exc:
+            raise ConfigurationError(
+                'verify="system" needs truststore, which the client extra brings on Python 3.10 '
+                'and later: pip install "vectrixdb[client]"'
+            ) from exc
+        system = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        if cert:
+            certfile, keyfile = (
+                (cert, None) if isinstance(cert, (str, os.PathLike)) else tuple(cert)
+            )
+            system.load_cert_chain(str(certfile), str(keyfile) if keyfile else None)
+        return system
     if isinstance(verify, ssl.SSLContext):
         if cert:
             raise ConfigurationError(
@@ -738,6 +755,7 @@ class _Wire:
         gateway_paths: Union[None, str, Mapping[str, str]],
         verify: Any,
         cert: Any,
+        user_agent: Optional[str] = None,
     ) -> "_Wire":
         base = str(url or "").strip().rstrip("/")
         parts = urlsplit(base)
@@ -751,6 +769,7 @@ class _Wire:
             ("The key", key),
             ("The token", token),
             *((f"The header {name}", v) for name, v in (headers or {}).items()),
+            ("The user agent", user_agent),
         ):
             if value is not None and _CONTROL.search(str(value)):
                 # The value is not repeated: it is likely a secret with a stray line break.
@@ -770,7 +789,8 @@ class _Wire:
         sent: Dict[str, str] = {}
         for name, value in (headers or {}).items():
             sent[_header_name(name, "a header")] = str(value)
-        sent["user-agent"] = USER_AGENT
+        # A wrapper's name goes first, so a gateway's log says which tool called, and this client's after it.
+        sent["user-agent"] = f"{user_agent.strip()} {USER_AGENT}" if user_agent else USER_AGENT
         sent.setdefault("accept", "application/json")
         if token:
             sent[_header_name(token_header, "token_header")] = f"Bearer {token}"
@@ -848,10 +868,15 @@ class VectrixClient(_Calls):
         prefix: The path every route lives under, as the server's ``VECTRIXDB_PREFIX``.
         gateway_paths: Each route's gateway path, as the server's
             ``VECTRIXDB_GATEWAY_PATHS``: ``api/v1=/files/search, auth=/files/auth``.
-        verify: A CA bundle to trust, for a private CA, or an ``ssl.SSLContext``.
-            Certificates are always checked.
+        verify: A CA bundle to trust, for a private CA; ``"system"`` for the
+            operating system's own store, where a managed machine keeps the
+            company's authority; or an ``ssl.SSLContext``. Certificates are
+            always checked.
         cert: A client certificate for a gateway that asks for one: a path,
             or ``(certificate, key)``.
+        user_agent: A wrapper's name and version, ``acme-vectors/1.4``, put
+            before this client's own in ``User-Agent``, so a gateway's log says
+            which tool made each call.
     """
 
     def __init__(
@@ -870,6 +895,7 @@ class VectrixClient(_Calls):
         gateway_paths: Union[None, str, Mapping[str, str]] = None,
         verify: Any = True,
         cert: Any = None,
+        user_agent: Optional[str] = None,
     ) -> None:
         httpx = _httpx()
         self._wire = _Wire.of(
@@ -884,6 +910,7 @@ class VectrixClient(_Calls):
             gateway_paths=gateway_paths,
             verify=verify,
             cert=cert,
+            user_agent=user_agent,
         )
         self.url = self._wire.url
         self._http = httpx.Client(
@@ -1071,6 +1098,7 @@ class AsyncVectrixClient(_Calls):
         gateway_paths: Union[None, str, Mapping[str, str]] = None,
         verify: Any = True,
         cert: Any = None,
+        user_agent: Optional[str] = None,
     ) -> None:
         httpx = _httpx()
         self._wire = _Wire.of(
@@ -1085,6 +1113,7 @@ class AsyncVectrixClient(_Calls):
             gateway_paths=gateway_paths,
             verify=verify,
             cert=cert,
+            user_agent=user_agent,
         )
         self.url = self._wire.url
         self._http = httpx.AsyncClient(
@@ -1247,6 +1276,7 @@ def connect(
     """A server, by address and key: ``connect("https://vectors.example.com", key="...")``.
 
     ``options`` are ``VectrixClient``'s: ``key_header``, ``prefix``,
-    ``gateway_paths``, ``verify``, ``cert``, ``headers``, ``allow_http``.
+    ``gateway_paths``, ``verify``, ``cert``, ``headers``, ``allow_http``,
+    ``user_agent``.
     """
     return VectrixClient(url, key=key, token=token, timeout=timeout, **options)

@@ -328,6 +328,7 @@ class TestRoles:
         open_to_all = {
             "/",
             "/health",
+            "/ready",
             "/auth/status",
             "/auth/me",
             "/auth/signout",

@@ -2,7 +2,7 @@
 
 # Settings
 
-Every setting VectrixDB reads, 174 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
+Every setting VectrixDB reads, 182 of them, each an environment variable. `vectrixdb check --template` prints them as a file to fill in, and `vectrixdb check` tests a set before a start; see [Deploy the server](../how-to/deploy.md). A secret can also be given as `NAME_FILE`, naming a file that holds it, which is how Docker and Kubernetes secrets arrive; setting both is refused.
 
 ## The server
 
@@ -27,6 +27,10 @@ Every setting VectrixDB reads, 174 of them, each an environment variable. `vectr
 | `VECTRIXDB_AUTO_DOWNLOAD` | 1 fetches a missing model on first use. |  |
 | `VECTRIXDB_MODELS_URL` | A company's mirror of the model releases, in place of GitHub: an Artifactory or Nexus remote serving the same <tag>/<asset>.zip paths. Checked against the same checksums. | `https://acme.jfrog.io/artifactory/vectrixdb-models` |
 | `VECTRIXDB_MODELS_TOKEN` | The token the mirror asks for, sent as a Bearer token to MODELS_URL alone, never on to a redirect. (a secret) |  |
+| `VECTRIXDB_WARM` | 1 loads the embedding model at start, and /ready says so once it has. On under vectrixdb serve and in the image; 0 loads it on the first search. | `1` |
+| `VECTRIXDB_THREADS` | Threads one model session uses. Left out, the CPUs this process may use, the container's quota when there is one, at most 4. | `2` |
+| `VECTRIXDB_INFERENCE_CONCURRENCY` | Model calls the server runs at once; the rest wait their turn, a batch at a time. | `2` |
+| `VECTRIXDB_INFERENCE_WAIT_SECONDS` | How long a request waits for its turn before it is answered 503 with Retry-After. | `30` |
 
 ## Keys for scripts
 
@@ -43,7 +47,7 @@ Every setting VectrixDB reads, 174 of them, each an environment variable. `vectr
 | Setting | What it does | Example or default |
 | --- | --- | --- |
 | `VECTRIXDB_MCP` | 1 answers MCP at /mcp: an assistant searches as the person or key it acts for, through the same checks as the REST API. Off unless set. |  |
-| `VECTRIXDB_MCP_WRITES` | 1 offers add_document over MCP, to a caller whose role may write. Off unless set, so an assistant only reads. |  |
+| `VECTRIXDB_MCP_WRITES` | 1 offers the tools that write over MCP (add_document, create_collection, delete_document, add_source, refresh_source), to a caller whose role may. Off unless set, so an assistant only reads. |  |
 | `VECTRIXDB_MCP_SCOPES` | The scopes an MCP client asks the identity provider for, separated by spaces. Left out, <OIDC_API_AUDIENCE>/.default when the audience is an api:// one. | `api://vectrixdb/search` |
 
 ## Sign-in
@@ -259,6 +263,10 @@ Every setting VectrixDB reads, 174 of them, each an environment variable. `vectr
 | `VECTRIXDB_LOGIN_SCOPES` | The scopes vectrixdb login may ask for, space-separated. Set, a server asking for any other is refused and nobody is asked to confirm. | `api://vectrixdb/search` |
 | `VECTRIXDB_CONFIG_DIR` | Where vectrixdb login keeps sign-ins. Unset, the platform's config folder. |  |
 | `VECTRIXDB_ALLOW_HTTP` | 1 lets the command send a key or token over plain HTTP to another machine, on a network you trust. | `0` |
-| `VECTRIXDB_CA_BUNDLE` | A CA bundle to trust, for a company's own CA. |  |
+| `VECTRIXDB_CA_BUNDLE` | A CA bundle to trust, for a company's own CA; system trusts what the operating system trusts, where a managed machine keeps the company's authority. |  |
+| `VECTRIXDB_CREDENTIALS` | keyring keeps vectrixdb login's tokens in the system keychain (Windows Credential Manager, macOS Keychain, the Secret Service); unset or file, a file readable by its owner alone. |  |
+| `VECTRIXDB_COMMAND` | The command a hint names, for a company's wrapper: acme vectors login. Unset, vectrixdb. |  |
+| `VECTRIXDB_USER_AGENT` | A wrapper's name and version, put before the client's own in User-Agent, so a gateway's log says which tool called. | `acme-vectors/1.4` |
+| `VECTRIXDB_DEFAULTS_FILE` | A presets file of VECTRIXDB_ lines read before every command, the environment winning. Unset, /etc/vectrixdb/defaults.env, %ProgramData%\vectrixdb\defaults.env or /Library/Application Support/vectrixdb/defaults.env, when there is one. |  |
 | `VECTRIXDB_CLIENT_CERT` | A client certificate for a gateway that asks for one, PEM. |  |
 | `VECTRIXDB_CLIENT_CERT_KEY` | Its private key, readable by its owner alone. |  |

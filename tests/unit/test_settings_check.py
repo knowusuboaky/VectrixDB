@@ -186,6 +186,16 @@ class TestTheCheck:
         assert levels(found, "error") == [] and levels(found, "warn") == []
         assert any("listens on this machine only" in text for text in levels(found, "ok"))
 
+    def test_a_key_that_leaves_reads_open_is_said(self, tmp_path):
+        env = {"VECTRIXDB_OFFLINE": "1", "VECTRIXDB_API_KEY": "k" * 32}
+        found = run(str(tmp_path / "data"), env, machine=NoReaders())
+        assert any("a read needs no key" in text for text in levels(found, "warn"))
+        closed = run(
+            str(tmp_path / "data"), {**env, "VECTRIXDB_OPEN_READS": "0"}, machine=NoReaders()
+        )
+        assert any("every call needs a key" in text for text in levels(closed, "ok"))
+        assert not any("a read needs no key" in text for text in levels(closed, "warn"))
+
     def test_sign_in_is_read_through_the_servers_own_code(self, tmp_path):
         short = run(str(tmp_path), signin_env(tmp_path, VECTRIXDB_SIGNIN_SECRET="too short"))
         assert any("at least 32 characters" in text for text in levels(short, "error"))

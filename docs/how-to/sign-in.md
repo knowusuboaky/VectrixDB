@@ -410,7 +410,7 @@ For a team with no identity provider.
 
 ```bash
 export VECTRIXDB_SIGNIN=email
-export VECTRIXDB_SMTP_URL="smtp://user:password@smtp.example.com:587"
+export VECTRIXDB_SMTP_URL_FILE=/run/secrets/smtp-url   # holds smtp://user:password@smtp.example.com:587
 export VECTRIXDB_MAIL_FROM="vectrixdb@example.com"
 vectrixdb serve --host 0.0.0.0
 ```
@@ -608,6 +608,7 @@ because the setting belongs to the moment the collection was made.
 | Open a chunk to read its text and metadata, one at a time, each one recorded | | yes | yes |
 | Open a whole stored document | | if given | yes |
 | Search | | yes | yes |
+| Connect an assistant over [MCP](mcp-server.md) | | yes | yes |
 | Add, change and remove chunks and documents; create a collection; rebuild | | yes | yes |
 | Manage their own ways to sign in and where they are signed in | yes | yes | yes |
 | Delete a collection, clear the cache | | | yes |
@@ -644,6 +645,10 @@ quality. A chunk's text is one request for that chunk, made by pressing **Show
 text**, and search results carry a 200 character excerpt cut on the server. So
 the access log can say which chunks a person opened, not only that they looked
 at a collection.
+
+A key can also be made as `reader` or `searcher`, two roles only a key has,
+for a script that reads or searches and does nothing else: see
+[Keys and roles](keys-and-roles.md).
 
 The table lives in one place, `vectrixdb.signin.roles`, and the dashboard's
 Access page is drawn from it, as is the [REST API reference](../reference/rest-api.md),
@@ -727,7 +732,8 @@ Behind a proxy that ends TLS, HSTS is sent when the proxy says
 ## API keys
 
 `VECTRIXDB_API_KEY` is an admin and `VECTRIXDB_READ_ONLY_API_KEY` reads and
-does not search or write, as before. Give the server a key's SHA-256 in place
+never writes; with sign-in on it does not search either, and with sign-in off
+it searches, as before. Give the server a key's SHA-256 in place
 of the key, and its environment never holds a working key:
 
 ```bash

@@ -1,6 +1,6 @@
 # Add VectrixDB with your coding agent
 
-A coding agent, such as Claude Code, Cursor, Copilot or Codex, can add VectrixDB to a project for you. Give it the prompt below. It points the agent at [llms.txt](../llms.txt), a short index of these docs written for agents, and tells it what to ask you before it changes anything that is hard to undo.
+A coding agent can add VectrixDB to a project for you. Give it the prompt below. It points the agent at [llms.txt](../llms.txt), a short index of these docs written for agents, and tells it what to ask you before it changes anything that is hard to undo.
 
 ## The prompt
 
@@ -36,19 +36,17 @@ Keep the change small and run the project's tests when you are done.
 
 ## Or install the skill
 
-The same rules come as a skill, which an agent loads by itself when a task needs it, so you do not paste anything: the folder [`skills/vectrixdb`](https://github.com/knowusuboaky/VectrixDB/tree/main/skills/vectrixdb) in the repository, one file, `SKILL.md`. Claude Code reads skills from `.claude/skills/` in a project, for everyone who works on it, and from `~/.claude/skills/` for you alone. Put the folder in one of them:
+The same rules come as a skill, which an agent lThe same rules come as a skill, which an agent loads by itself when a task needs it, so you do not paste anything: the folder [`skills/vectrixdb`](https://github.com/knowusuboaky/VectrixDB/tree/main/skills/vectrixdb) in the repository, one file, `SKILL.md`. Agents that load skills read them from a skills folder of their own, in the project for everyone who works on it or in your home folder for you alone; your agent's documentation names it. Put the folder there:
 
 ```bash
-mkdir -p .claude/skills/vectrixdb
-curl -fsSL -o .claude/skills/vectrixdb/SKILL.md \
-  https://raw.githubusercontent.com/knowusuboaky/VectrixDB/v2.2.0/skills/vectrixdb/SKILL.md
+SKILLS=path/to/your/agents/skills   # the folder your agent reads skills from
+mkdir -p "$SKILLS/vectrixdb"
+curl -fsSL -o "$SKILLS/vectrixdb/SKILL.md"   https://raw.githubusercontent.com/knowusuboaky/VectrixDB/v2.2.0/skills/vectrixdb/SKILL.md
 ```
 
-Take it from the tag of the version you install, `v2.2.0` here, and again when you upgrade: a test holds every name in it to the code of that version. An agent that reads skills from another folder takes the same folder there. The agent then uses it when you ask for search, retrieval or answers over your files, or name VectrixDB.
+Take it from the tag of the version you install, `v2.2.0` here, and again when you upgrade: a test holds every name in it to the code of that version. The agent then uses it when you ask for search, retrieval or answers over your files, or name VectrixDB.
 
-## What a good result looks like
-
-- One place that opens the collection, with a path that is not the working directory.
+An assistant connected to a VectrixDB server over MCP has a skill of its own, [`skills/vectrixdb-mcp`](https://github.com/knowusuboaky/VectrixDB/tree/main/skills/vectrixdb-mcp): which tool to use when, how to filter, to cite every claim, and to ask before deleting anything. See [Use it from an assistant over MCP](mcp-server.md).that opens the collection, with a path that is not the working directory.
 - Ingestion that keeps the source, so the chunking can change later without reading the files again. See [Extract, keep, index](extract-keep-index.md).
 - Search that shows a citation beside every answer. See [Trace an answer to its source](lineage.md).
 - A golden file and an evaluation report checked into the project, so the choice of mode can be checked again when the data changes. See [Evaluate every setup](evaluate-setups.md).

@@ -371,6 +371,7 @@ Serve a collection over MCP so an assistant can use it as a tool.
 | `--env-file` | Read settings from this file first. What the environment already sets wins |  |
 | `--mode` | dense, hybrid, ultimate or graph |  |
 | `--transport` | stdio, sse or streamable-http | `stdio` |
+| `--allow-writes` | Over HTTP, also offer remember, feedback and forget. stdio always has them | off |
 
 ## models-info
 

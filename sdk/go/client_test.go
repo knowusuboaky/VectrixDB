@@ -85,3 +85,22 @@ func TestPathEscaping(t *testing.T) {
 		t.Fatal(got, err)
 	}
 }
+
+// A wrapper's name goes before the client's own in User-Agent.
+func TestAWrappersNameInTheUserAgent(t *testing.T) {
+	var seen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get("User-Agent")
+		w.Write([]byte(`{"status": "healthy"}`))
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL, WithKey("k"), WithUserAgent("acme-vectors/1.4")).Health(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "acme-vectors/1.4 vectrixdb-go/"+Version {
+		t.Fatalf("user agent: %q", seen)
+	}
+	if err := New(srv.URL, WithUserAgent("acme\r\nX-Evil: 1")).Err(); !errors.Is(err, ErrConfig) {
+		t.Fatalf("a line break in the user agent: %v", err)
+	}
+}

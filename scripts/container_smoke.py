@@ -352,10 +352,63 @@ def server_checks(report: Report, image: str) -> None:
             if isinstance(listed, dict)
             else []
         )
+        reading = [
+            "describe_collection",
+            "list_collections",
+            "list_documents",
+            "open_source",
+            "search",
+            "similar",
+            "whoami",
+        ]
         report.check(
-            "the image answers MCP at /mcp: search, open_source, list_collections, no writes",
-            status == 200 and names == ["list_collections", "open_source", "search"],
+            "the image answers MCP at /mcp: the seven reading tools, no writes",
+            status == 200 and names == reading,
             f"status {status}: {names or listed}",
+        )
+
+        def said_by(tool: str, arguments: Dict[str, Any]) -> Tuple[int, str]:
+            status, found = rpc("tools/call", {"name": tool, "arguments": arguments}, assistant)
+            text = (
+                found.get("result", {}).get("content", [{}])[0].get("text", "")
+                if isinstance(found, dict)
+                else str(found)
+            )
+            return status, text
+
+        status, said = said_by("whoami", {})
+        report.check(
+            "whoami over MCP says who the key is",
+            status == 200 and "through an API key" in said,
+            f"status {status}: {said[:200]}",
+        )
+        status, said = said_by("describe_collection", {"collection": "smoke"})
+        report.check(
+            "describe_collection over MCP names the collection and what to filter on",
+            status == 200 and said.startswith("[i] smoke") and "Filter on" in said,
+            f"status {status}: {said[:200]}",
+        )
+        status, said = said_by(
+            "search",
+            {"collection": "smoke", "query": "change my password", "facets": ["heading"]},
+        )
+        report.check(
+            "a search over MCP counts facets over its results",
+            status == 200 and "Facets over these" in said,
+            f"status {status}: {said[-200:]}",
+        )
+        status, templates = rpc("resources/templates/list", {}, assistant)
+        uris = (
+            sorted(
+                t["uriTemplate"] for t in templates.get("result", {}).get("resourceTemplates", [])
+            )
+            if isinstance(templates, dict)
+            else []
+        )
+        report.check(
+            "collections and documents are MCP resources",
+            status == 200 and "vectrixdb://collections/{collection}" in uris,
+            f"status {status}: {uris or templates}",
         )
         status, found = rpc(
             "tools/call",
@@ -374,6 +427,12 @@ def server_checks(report: Report, image: str) -> None:
         )
         status, refused = rpc("tools/list", {}, "wrong-key")
         report.check("MCP with a wrong key is refused", status == 401, f"status {status}")
+        status, _, readiness = call("GET", first.base + "/ready")
+        report.check(
+            "/ready says the models are loaded, without a key",
+            status == 200 and b'"loaded"' in readiness,
+            f"status {status}: {readiness[:200]!r}",
+        )
         status, headers, page = call("GET", first.base + "/dashboard/")
         report.check(
             "the dashboard is served",

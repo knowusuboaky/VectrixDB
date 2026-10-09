@@ -336,6 +336,17 @@ class TestBotChecks:
                 id="larger-than-any-bot-check",
             ),
         ],
+        # Short names: pytest puts the test's name in an environment variable,
+        # and Windows refuses one longer than 32767 characters.
+        ids=[
+            "an-article-about-cloudflare",
+            "a-page-behind-cloudflare",
+            "a-404",
+            "json",
+            "a-poem-titled-just-a-moment",
+            "empty",
+            "larger-than-any-bot-check",
+        ],
     )
     def test_a_page_is_not_one(self, status, headers, body):
         assert bot_check(status, headers, body) is None

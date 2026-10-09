@@ -126,6 +126,8 @@ SCOPED_KEY_MAY_ALSO_READ = frozenset(
     {
         "/",
         "/health",
+        "/ready",
+        "/api/v1/whoami",
         "/openapi.json",
         "/docs",
         "/redoc",
@@ -145,6 +147,7 @@ PUBLIC_PATHS = {
     "/",
     "/auth/status",
     "/health",
+    "/ready",
     "/docs",
     "/redoc",
     "/openapi.json",

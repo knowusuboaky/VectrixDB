@@ -359,16 +359,27 @@ def _server_parts(report: _Report, env: Mapping[str, str]) -> None:
                 "VECTRIXDB_MCP is on and the mcp package, version 2 or later, is not installed",
                 "pip install -U 'vectrixdb[mcp]'",
             )
-    tracing = _setting(env, "VECTRIXDB_TRACING").lower()
-    if tracing in ("otlp", "console"):
+    if _tracing_on(env):
         if _installed("opentelemetry.sdk"):
-            report.ok("Tracing", f"{tracing}, and the OpenTelemetry SDK is installed")
+            report.ok("Tracing", "On, and the OpenTelemetry SDK is installed")
         else:
             report.error(
                 "Tracing",
-                f"VECTRIXDB_TRACING is {tracing} and the OpenTelemetry SDK is not installed",
+                "Tracing is on and the OpenTelemetry SDK is not installed",
                 "pip install 'vectrixdb[tracing]'",
             )
+
+
+def _tracing_on(env: Mapping[str, str]) -> bool:
+    """On as the library turns it on: VECTRIXDB_TRACING=1, or an OTLP endpoint set and tracing not turned off."""
+    said = _setting(env, "VECTRIXDB_TRACING").lower()
+    if said in ("0", "false", "no", "off"):
+        return False
+    return (
+        said in _TRUE
+        or said in ("otlp", "console")
+        or bool(_setting(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"))
+    )
 
 
 # ============================================================================
@@ -569,7 +580,7 @@ def _chat_models(report: _Report, env: Mapping[str, str], reach: Reach) -> None:
 
 
 def _collector(report: _Report, env: Mapping[str, str], connect: Connect) -> None:
-    if _setting(env, "VECTRIXDB_TRACING").lower() != "otlp":
+    if not _tracing_on(env) or _setting(env, "VECTRIXDB_TRACING").lower() == "console":
         return
     endpoint = _setting(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT")
     parts = urlsplit(endpoint or "http://localhost:4318")
@@ -632,7 +643,8 @@ def run(
                         finding.level,
                         finding.area,
                         finding.text,
-                        "vectrixdb check lists every setting it read.",
+                        # The check's own words already say what to do.
+                        "",
                     )
                 )
     report.guard("Install", lambda: _python(report))

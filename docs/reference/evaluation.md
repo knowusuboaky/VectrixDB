@@ -1,0 +1,59 @@
+# Evaluation
+
+Golden questions, and every setup scored on them. See [Measure retrieval](../how-to/measure-retrieval.md) and [Evaluate every setup](../how-to/evaluate-setups.md).
+
+::: vectrixdb.evaluation
+    options:
+      members:
+        - ADDS
+        - ANSWER_METRICS
+        - ChatWriter
+        - ChunkingStore
+        - GOLDEN_SCHEMA
+        - PICKS
+        - TECHNIQUES
+        - Golden
+        - GoldenCheck
+        - GoldenProblem
+        - GoldenWriting
+        - MissingDocumentsWarning
+        - Question
+        - ReportStore
+        - Target
+        - WriterUnavailable
+        - answer_cutoff
+        - answer_report
+        - answer_with
+        - build_report
+        - check_golden
+        - choose
+        - chunking_build
+        - chunking_choice
+        - chunking_options
+        - chunking_plan
+        - chunking_report
+        - chunking_store
+        - compare_chunking
+        - describe_target
+        - evaluate
+        - golden_template
+        - handed_over
+        - judge_with
+        - late_possible
+        - load_bedrock_jsonl
+        - load_questions
+        - missing_documents
+        - stale_evidence
+        - plan_chunking
+        - read_golden
+        - report_store
+        - retrieval_report
+        - run_chunking_build
+        - run_setup
+        - save_questions
+        - search_of
+        - setups_of
+        - suggest_expected
+        - sweep
+        - sweep_markdown
+        - write_golden

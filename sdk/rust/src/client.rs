@@ -157,6 +157,7 @@ pub struct ClientBuilder {
     gateway_paths: GatewayPaths,
     ca_certificates: Vec<Vec<u8>>,
     identity: Option<Vec<u8>>,
+    user_agent: Option<String>,
 }
 
 impl std::fmt::Debug for ClientBuilder {
@@ -174,6 +175,7 @@ impl std::fmt::Debug for ClientBuilder {
             .field("gateway_paths", &self.gateway_paths)
             .field("ca_certificates", &self.ca_certificates.len())
             .field("identity", &self.identity.is_some())
+            .field("user_agent", &self.user_agent)
             .finish()
     }
 }
@@ -242,6 +244,13 @@ impl ClientBuilder {
     /// `user-agent` or the key or token header.
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
+        self
+    }
+
+    /// A wrapper's name and version, `acme-vectors/1.4`, put before this
+    /// client's own in `user-agent`, so a gateway's log says which tool called.
+    pub fn user_agent(mut self, name: impl Into<String>) -> Self {
+        self.user_agent = Some(name.into().trim().to_owned());
         self
     }
 
@@ -341,8 +350,17 @@ impl ClientBuilder {
 
         // No redirects: the key would go with one to wherever it points.
         // Proxies from HTTPS_PROXY / HTTP_PROXY / NO_PROXY stay on.
+        let agent = match &self.user_agent {
+            Some(name) if !name.is_empty() => format!("{name} {USER_AGENT}"),
+            _ => USER_AGENT.to_owned(),
+        };
+        if agent.bytes().any(|b| b < 0x20 || b == 0x7f) {
+            return Err(Error::Transport(
+                "the user agent holds a character a header cannot carry".into(),
+            ));
+        }
         let mut http = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
+            .user_agent(agent)
             .default_headers(headers)
             .timeout(self.timeout)
             .redirect(redirect::Policy::none());
@@ -413,6 +431,7 @@ impl Client {
             gateway_paths: GatewayPaths::default(),
             ca_certificates: Vec::new(),
             identity: None,
+            user_agent: None,
         }
     }
 

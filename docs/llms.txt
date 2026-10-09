@@ -17,9 +17,11 @@ Notes for coding agents:
 
 - [Getting started](https://knowusuboaky.github.io/VectrixDB/tutorial/getting-started/): from an empty directory to a working search
 - [Add VectrixDB with your coding agent](https://knowusuboaky.github.io/VectrixDB/how-to/coding-agents/): a prompt to paste into an agent, and what it should do
-- [The VectrixDB skill](https://github.com/knowusuboaky/VectrixDB/blob/main/skills/vectrixdb/SKILL.md): the same rules as a skill an agent loads by itself, to copy into `.claude/skills/vectrixdb/`
+- [The VectrixDB skill](https://github.com/knowusuboaky/VectrixDB/blob/main/skills/vectrixdb/SKILL.md): the same rules as a skill an agent loads by itself, to copy into the skills folder your agent reads
 - [Easy API](https://knowusuboaky.github.io/VectrixDB/reference/easy/): the `Vectrix` surface
 - [Handle errors](https://knowusuboaky.github.io/VectrixDB/how-to/handle-errors/): every exception and what to do about it
+- [Install what you need](https://knowusuboaky.github.io/VectrixDB/how-to/install/): every extra and what it adds
+- [The skill for an assistant over MCP](https://github.com/knowusuboaky/VectrixDB/blob/main/skills/vectrixdb-mcp/SKILL.md): which tool when, filter after describing, cite every claim, ask before deleting
 
 ## Documents
 
@@ -29,6 +31,10 @@ Notes for coding agents:
 - [Keep a collection in step with feeds and pages](https://knowusuboaky.github.io/VectrixDB/how-to/sources/): RSS, Atom, JSON Feed, podcasts and pages read again on a schedule, only what changed written
 - [Run an extraction service](https://knowusuboaky.github.io/VectrixDB/how-to/extraction-service/): OCR and parsing behind HTTP
 - [Trace an answer to its source](https://knowusuboaky.github.io/VectrixDB/how-to/lineage/): citations and lineage
+- [Chunking](https://knowusuboaky.github.io/VectrixDB/how-to/chunking/): the strategies, parent sections, late chunking, rechunk and its preview
+- [Extraction quality and blocked pages](https://knowusuboaky.github.io/VectrixDB/how-to/extraction-quality/): the score every chunk carries, the threshold, and bot-check pages refused
+- [Videos, podcasts and recordings](https://knowusuboaky.github.io/VectrixDB/how-to/recordings/): speech, video, YouTube captions, cited by the second
+- [Embedding models](https://knowusuboaky.github.io/VectrixDB/how-to/embedding-models/): which ship in the wheel, which download, and bringing your own
 
 ## Search quality
 
@@ -37,6 +43,7 @@ Notes for coding agents:
 - [Measure retrieval](https://knowusuboaky.github.io/VectrixDB/how-to/measure-retrieval/): recall, MRR and nDCG on golden questions
 - [Evaluate every setup](https://knowusuboaky.github.io/VectrixDB/how-to/evaluate-setups/): rank every setup and pick three
 - [Work with the knowledge graph](https://knowusuboaky.github.io/VectrixDB/how-to/knowledge-graph/): graph mode
+- [Search options](https://knowusuboaky.github.io/VectrixDB/how-to/search-options/): every argument of search, and what a result carries
 
 ## Apps and servers
 
@@ -56,6 +63,16 @@ Notes for coding agents:
 - [Trace searches and ingestion](https://knowusuboaky.github.io/VectrixDB/how-to/tracing/): opt-in OpenTelemetry spans
 - [Use it from an assistant over MCP](https://knowusuboaky.github.io/VectrixDB/how-to/mcp-server/): the MCP server
 - [Keep conversation memory](https://knowusuboaky.github.io/VectrixDB/how-to/conversation-memory/): memory for agents
+- [Use it from async code](https://knowusuboaky.github.io/VectrixDB/how-to/async/): the library and the client from asyncio
+- [Connect your client](https://knowusuboaky.github.io/VectrixDB/how-to/mcp-connect/): MCP config for VS Code, Cursor, a desktop assistant and a command line
+- [Company sign-in for MCP](https://knowusuboaky.github.io/VectrixDB/how-to/mcp-sign-in/): the protected-resource document, Entra ID, Okta, any OIDC provider
+- [Keys for a team](https://knowusuboaky.github.io/VectrixDB/how-to/mcp-keys/): roles over MCP, keys for named collections
+- [MCP tools reference](https://knowusuboaky.github.io/VectrixDB/how-to/mcp-tools/): every tool, prompt and resource, and what each refuses
+- [MCP on your own machine](https://knowusuboaky.github.io/VectrixDB/how-to/mcp-local/): the one-person server and its memory tools
+- [Keys and roles](https://knowusuboaky.github.io/VectrixDB/how-to/keys-and-roles/): every role, scoped and expiring keys, whoami
+- [Collection policies](https://knowusuboaky.github.io/VectrixDB/how-to/collection-policies/): who may search a collection at all
+- [Masking](https://knowusuboaky.github.io/VectrixDB/how-to/masking/): names, addresses and ids replaced before indexing
+- [Audit trail](https://knowusuboaky.github.io/VectrixDB/how-to/audit-trail/): every policy decision recorded, and how to find one
 
 ## Storage and operations
 
@@ -67,6 +84,23 @@ Notes for coding agents:
 - [REST API reference](https://knowusuboaky.github.io/VectrixDB/reference/rest-api/): every route
 - [Python client reference](https://knowusuboaky.github.io/VectrixDB/reference/client/): connect(), VectrixClient, AsyncVectrixClient
 - [Filters](https://knowusuboaky.github.io/VectrixDB/reference/filters/): the filter grammar
+- [Check and doctor](https://knowusuboaky.github.io/VectrixDB/how-to/troubleshoot/): settings read without starting, then every part tried
+- [Size the server for load](https://knowusuboaky.github.io/VectrixDB/how-to/sizing/): model calls in line, /ready, threads, memory a process
+- [Scale out](https://knowusuboaky.github.io/VectrixDB/how-to/scale/): more than one server, what they share, workers and dead letters
+
+## Reference from the code
+
+- [Async](https://knowusuboaky.github.io/VectrixDB/reference/aio/): the library for asyncio
+- [Sources](https://knowusuboaky.github.io/VectrixDB/reference/sources/): feeds and pages
+- [Ingest](https://knowusuboaky.github.io/VectrixDB/reference/ingest/): readers and chunking
+- [Extract](https://knowusuboaky.github.io/VectrixDB/reference/extract/): extractors, OCR, speech, video
+- [Chunk models](https://knowusuboaky.github.io/VectrixDB/reference/chunk-models/): a chat model that cuts or notes chunks
+- [Extraction quality](https://knowusuboaky.github.io/VectrixDB/reference/quality/): the score and its calibration
+- [Evaluation](https://knowusuboaky.github.io/VectrixDB/reference/evaluation/): golden questions and scoring
+- [Policy](https://knowusuboaky.github.io/VectrixDB/reference/policy/): per-document rules
+- [Masking](https://knowusuboaky.github.io/VectrixDB/reference/masking/): engines and mask
+- [Conversation memory](https://knowusuboaky.github.io/VectrixDB/reference/memory/): turns, facts, recall
+- [Tracing](https://knowusuboaky.github.io/VectrixDB/reference/tracing/): spans and what they carry
 
 ## Optional
 

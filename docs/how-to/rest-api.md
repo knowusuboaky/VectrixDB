@@ -112,8 +112,11 @@ Every write through the API mints an index build id and stamps it on the
 chunks it lands, the same `_vx_build` the library writes, so `builds` and
 `provenance` cover API-written chunks too.
 
-`/api/v1/audit` is served only when `VECTRIXDB_API_KEY` is set, the request
-carries it, and `VECTRIXDB_AUDIT_JSONL` names a JSONL sink. Records go out
+`/api/v1/audit` is served only when the audit trail is kept, in
+`VECTRIXDB_AUDIT_STORE` or the older `VECTRIXDB_AUDIT_JSONL`, and only to a
+caller allowed to read it: with sign-in on, a role that holds `audit.read`;
+without it, a request carrying `VECTRIXDB_API_KEY` itself. See
+[Audit trail](audit-trail.md). Records go out
 without the principal snapshot, the result ids and the undisclosable count.
 The audit log is more sensitive than the index it audits, which is why an open
 server never serves it.
@@ -150,8 +153,9 @@ so the server's environment never holds one that works.
 With a key and no sign-in, a read still needs no key: anyone who reaches the
 port lists the collections and reads the points, text and vectors included.
 `VECTRIXDB_OPEN_READS=0` closes that, so every read, and the live feed at
-`/ws`, asks for the full or the read-only key; only `/`, `/health`,
-`/auth/status`, `/openapi.json` and the dashboard's own files stay public.
+`/ws`, asks for the full or the read-only key; only `/`, `/health`, `/ready`,
+`/auth/status`, `/openapi.json`, the MCP sign-in description under
+`/.well-known/` and the dashboard's own files stay public.
 With sign-in on, an admin can also make named keys for scripts, each with its
 own role, shown once and revoked on its own: see
 [Sign people in](sign-in.md#api-keys).
@@ -160,9 +164,11 @@ Behind a gateway, the same routes are published by the team that owns it,
 from the OpenAPI document this server serves at `/openapi.json`. See
 [Put it behind a gateway](behind-a-gateway.md).
 
-None of that is a substitute for a boundary. The server has no rate limiting
-beyond the guests', and no tenancy, so keep it on a private network or behind
-a proxy that terminates TLS. API keys are for machines: to let people in as
+None of that is a substitute for a boundary. A named key can carry a
+per-minute allowance (`vectrixdb keys add --per-minute`, or
+`VECTRIXDB_KEY_REQUESTS_PER_MINUTE` for every key), and guests are limited,
+but the server's own key never is and there is no tenancy, so keep it on a
+private network or behind a proxy that terminates TLS. API keys are for machines: to let people in as
 themselves, with roles and a record of who read what, see
 [Sign people in](sign-in.md). The server listens on `127.0.0.1` by default and
 refuses any other address with no key and no sign-in. Bind to `127.0.0.1` rather than `0.0.0.0` unless

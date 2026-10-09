@@ -163,7 +163,7 @@ db = connect(
     key_header="Ocp-Apim-Subscription-Key",  # the header the gateway wants the key in
     prefix="/acme",  # the path every route lives under
     gateway_paths="api/v1=/files/search, auth=/files/auth",  # the gateway team's list
-    verify="/etc/ssl/company-ca.pem",  # a company's own certificate authority
+    verify="/etc/ssl/company-ca.pem",  # a company's own certificate authority, or "system"
 )
 ```
 
@@ -172,8 +172,9 @@ db = connect(
 | key header | `key_header=` | `keyHeader` | `WithKeyHeader` | `.key_header()` |
 | token header | `token_header=` | `tokenHeader` | `WithTokenHeader` | `.token_header()` |
 | more headers | `headers=` | `headers` | `WithHeader` | `.header()` |
+| a wrapper's name in `User-Agent` | `user_agent=` | `userAgent` | `WithUserAgent` | `.user_agent()` |
 | gateway paths | `prefix=`, `gateway_paths=` | `prefix`, `gatewayPaths` | `WithPrefix`, `WithGatewayPaths` | `.prefix()`, `.gateway_paths()` |
-| private CA | `verify="ca.pem"` | `NODE_EXTRA_CA_CERTS` | `WithHTTPClient` | `.ca_certificate(pem)` |
+| private CA | `verify="ca.pem"`, or `verify="system"` for the operating system's store | `NODE_EXTRA_CA_CERTS` | `WithHTTPClient` | `.ca_certificate(pem)` |
 | client certificate | `cert=` | your own `fetch` | `WithHTTPClient` | `.identity(pem)` |
 | proxy | `HTTPS_PROXY` | `NODE_USE_ENV_PROXY=1` | `HTTPS_PROXY` | `HTTPS_PROXY` |
 

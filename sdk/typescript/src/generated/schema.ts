@@ -901,6 +901,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/{name}/similar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Similar
+         * @description The chunks most like one chunk, judged as the caller.
+         *
+         *     The chunk is looked up as the caller, so one they may not see is not
+         *     found, the same answer as one that is not there; the search is theirs
+         *     too, under the collection's policy.
+         */
+        post: operations["similar_api_v1_collections__name__similar_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collections/{name}/sources": {
         parameters: {
             query?: never;
@@ -1378,6 +1402,29 @@ export interface paths {
          * @description Get current resource utilization stats.
          */
         get: operations["get_resource_stats_api_v1_resources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/whoami": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whoami
+         * @description Who the caller is, how they came in, their role, what it allows, and which collections they reach.
+         *
+         *     A key's name and a person's address are theirs to see; no secret is
+         *     ever in the answer.
+         */
+        get: operations["whoami_api_v1_whoami_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2044,9 +2091,33 @@ export interface paths {
         };
         /**
          * Health
-         * @description Health check.
+         * @description Health check: the process is up and answering. What a liveness probe asks.
          */
         get: operations["health_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ready
+         * @description Readiness: the models are loaded, or load on first use. What a readiness probe asks.
+         *
+         *     503 while ``VECTRIXDB_WARM`` is loading them, or when loading failed, with
+         *     the reason, so an orchestrator sends no traffic to a server that would
+         *     answer the first search by loading a model.
+         */
+        get: operations["ready_ready_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2802,6 +2873,26 @@ export interface components {
              * @default true
              */
             use_cache?: boolean;
+        };
+        /**
+         * SimilarRequest
+         * @description More like this: the chunks nearest to one the caller can already see.
+         */
+        SimilarRequest: {
+            /** Filter */
+            filter?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Id
+             * @description The chunk's id, as a search result gives it.
+             */
+            id: string;
+            /**
+             * Limit
+             * @default 10
+             */
+            limit?: number;
         };
         /**
          * SparseSearchRequest
@@ -4399,6 +4490,41 @@ export interface operations {
             };
         };
     };
+    similar_api_v1_collections__name__similar_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimilarRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_sources_api_v1_collections__name__sources_get: {
         parameters: {
             query?: never;
@@ -5150,6 +5276,26 @@ export interface operations {
         };
     };
     get_resource_stats_api_v1_resources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    whoami_api_v1_whoami_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -6185,6 +6331,26 @@ export interface operations {
         };
     };
     health_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    ready_ready_get: {
         parameters: {
             query?: never;
             header?: never;

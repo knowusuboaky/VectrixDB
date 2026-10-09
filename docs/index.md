@@ -144,12 +144,18 @@ One server, one document, and the same search from four languages, each answerin
 <div class="vx-tour" markdown>
 ![An assistant connects over MCP, lists the collections and searches: real calls to a sample server and the answers that came back](images/dashboard/tour-mcp.gif)
 ### [MCP](how-to/mcp-server.md)
-An assistant connects, lists the collections and searches them, with real calls and real answers.
+An assistant connects, lists the collections and searches them, with real calls and real answers. Every tool: [Tools reference](how-to/mcp-tools.md).
+</div>
+
+<div class="vx-tour" markdown>
+![A key made for one collection sees only that one, a reader may not search, and a call with no key is told where to sign in](images/dashboard/tour-mcp-keys.gif)
+### [MCP keys for a team](how-to/mcp-keys.md)
+A key made for one collection cannot tell the others exist, and every refusal comes back in words.
 </div>
 
 <div class="vx-tour" markdown>
 ![vectrixdb doctor --offline in an empty folder: the install, the models, the readers and the server each tried and timed](images/terminal/doctor.gif)
-### [Doctor](how-to/deploy.md#then-try-every-part-of-it)
+### [Doctor](how-to/troubleshoot.md)
 `vectrixdb doctor` tries every part of an install and says what to do about anything missing.
 </div>
 
@@ -262,6 +268,18 @@ One trace from the server into the extraction service: counts and timings, never
 - **[Measure retrieval](how-to/measure-retrieval.md)**
 
     Golden questions written from your own documents, and checked against them.
+
+- **[Keys and roles](how-to/keys-and-roles.md)**
+
+    Every role, keys scoped to collections and expiring, and who may do what.
+
+- **[Size the server for load](how-to/sizing.md)**
+
+    Model calls in line, `/ready`, threads and memory, so a busy server stays up.
+
+- **[Chunking](how-to/chunking.md)**
+
+    The strategies, parent sections and late chunking, and how to pick.
 
 - **[What it does not do](explanation/limits.md)**
 

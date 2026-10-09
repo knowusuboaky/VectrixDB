@@ -38,11 +38,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
 
 from .. import tracing
 from ..exceptions import DependencyError, ExtractionError, ExtractionQualityError
-from . import chunk_source
+from . import chunk_source, inference
 
 __all__ = [
     "router",
@@ -321,7 +322,10 @@ async def add_document(
         span.set(kind=SUFFIX_KINDS.get(Path(filename).suffix.lower()))
 
         try:
-            doc = load_bytes(data, filename, extractors=configured_extractors(), source=filename)
+            # Reading a PDF or asking an extraction service takes time: off the event loop.
+            doc = await run_in_threadpool(
+                load_bytes, data, filename, extractors=configured_extractors(), source=filename
+            )
         except ExtractionError as exc:
             raise HTTPException(status_code=502 if exc.route else 422, detail=str(exc))
         except DependencyError as exc:
@@ -330,18 +334,35 @@ async def add_document(
         document_id = (
             doc_id or (front_id if isinstance(front_id, str) and front_id else None) or filename
         )
-        reply, ids = write_document(
+        try:
+            prepared, vectors = await run_in_threadpool(
+                prepare_and_embed,
+                doc,
+                document_id,
+                chunk=chunk,
+                chunk_size=chunk_size,
+                overlap=overlap,
+                embed_heading=embed_heading,
+                metadata=extra,
+                on_low_quality=on_low_quality,
+                what=filename,
+            )
+        except inference.Busy as exc:
+            raise HTTPException(
+                status_code=503, detail=str(exc), headers={"Retry-After": "5"}
+            ) from exc
+        reply, ids = store_document(
             name,
             collection,
             doc,
             document_id,
+            prepared,
+            vectors,
             chunk=chunk,
             chunk_size=chunk_size,
             overlap=overlap,
             embed_heading=embed_heading,
             metadata=extra,
-            on_low_quality=on_low_quality,
-            what=filename,
         )
         await emit_event(
             "points_added",
@@ -368,15 +389,62 @@ def write_document(
 ) -> Tuple[Dict[str, Any], List[str]]:
     """A document already read, cut, embedded and written in place of the one under its id.
 
-    What the upload route does once the file is read, and what a source the
-    server refreshes writes through, so a document is the same chunks,
-    citations and lineage however it arrived. Returns the reply the route
-    sends and the ids of the chunks written. Raises HTTPException as the
-    route answers.
+    What a source the server refreshes writes through, and what the upload
+    route does in two halves, so a document is the same chunks, citations
+    and lineage however it arrived. Returns the reply the route sends and
+    the ids of the chunks written. Raises HTTPException as the route answers.
+    """
+    try:
+        prepared, vectors = prepare_and_embed(
+            doc,
+            document_id,
+            chunk=chunk,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            embed_heading=embed_heading,
+            metadata=metadata,
+            on_low_quality=on_low_quality,
+            what=what,
+        )
+    except inference.Busy as exc:
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "5"}) from exc
+    return store_document(
+        name,
+        collection,
+        doc,
+        document_id,
+        prepared,
+        vectors,
+        chunk=chunk,
+        chunk_size=chunk_size,
+        overlap=overlap,
+        embed_heading=embed_heading,
+        metadata=metadata,
+        source_version=source_version,
+    )
+
+
+def prepare_and_embed(
+    doc: Any,
+    document_id: str,
+    *,
+    chunk: str = "markdown",
+    chunk_size: int = 1000,
+    overlap: int = 200,
+    embed_heading: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+    on_low_quality: str = "warn",
+    what: Optional[str] = None,
+) -> Tuple[Any, Any]:
+    """Cut a document and embed its chunks, touching no store: safe in a worker thread.
+
+    The embedding goes a batch at a time through the server's line, so a
+    search that arrives during a long document waits for one batch. Raises
+    HTTPException for what the route refuses, and ``inference.Busy`` when
+    the line stayed full.
     """
     from ..ingest import prepare_document, texts_to_embed
     from ..quality import DEFAULT_THRESHOLD
-    from .server import _mint_build, get_text_embedder
 
     extra = dict(metadata or {})
     prepared = prepare_document(
@@ -399,11 +467,35 @@ def write_document(
         )
 
     try:
-        embedder = get_text_embedder()
+        vectors = inference.embed_blocking(texts_to_embed(prepared.texts, prepared.metadata))
+    except (HTTPException, inference.Busy):
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Text embedder not available: {exc}")
+    return prepared, vectors
+
+
+def store_document(
+    name: str,
+    collection: Any,
+    doc: Any,
+    document_id: str,
+    prepared: Any,
+    vectors: Any,
+    *,
+    chunk: str = "markdown",
+    chunk_size: int = 1000,
+    overlap: int = 200,
+    embed_heading: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+    source_version: Optional[str] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Write a cut and embedded document in place of the one under its id, and its reply."""
+    from ..quality import DEFAULT_THRESHOLD
+    from .server import _mint_build
+
+    extra = dict(metadata or {})
     try:
-        vectors = embedder.embed(texts_to_embed(prepared.texts, prepared.metadata))
         metas = [
             dict(m, text=t) if "text" not in m else dict(m)
             for m, t in zip(prepared.metadata, prepared.texts)
