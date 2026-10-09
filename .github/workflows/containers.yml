@@ -7,10 +7,10 @@
 # budget and scanned; and the Kubernetes setup is validated against the API of
 # the versions a company is likely to run.
 #
-# Published by the release workflow once PyPI has the wheel, or by hand with a
-# version, to rebuild a release's images for a security fix without a new
-# release. Built from the very wheel PyPI has, for Intel and ARM, and checked
-# as above before anything is tagged:
+# Published by the release workflow once PyPI has the wheel, or by hand from
+# main with a version, to rebuild a release's images for a security fix without
+# a new release, main's Dockerfile included. Built from the very wheel PyPI has,
+# for Intel and ARM, and checked as above before anything is tagged:
 #
 #   ghcr.io/knowusuboaky/vectrixdb:<version>          the server
 #   ghcr.io/knowusuboaky/vectrixdb:<version>-full     and the multilingual models
@@ -251,10 +251,17 @@ jobs:
       ARCH: ${{ matrix.arch }}
       VERSION: ${{ inputs.version }}
     steps:
-      # The release's own Dockerfile and checks, whichever branch this runs from.
+      # The release runs this at its own tag. A rebuild by hand takes main's
+      # Dockerfile and checks with the release's wheel, so a fix to the image
+      # itself (a bundled library, a base package) reaches a released version
+      # without a new release; from any other branch it is refused.
+      - name: A rebuild by hand runs from main
+        if: ${{ !inputs.wheels-artifact && github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::rebuild a release's images from main, not $GITHUB_REF"
+          exit 1
+
       - uses: actions/checkout@v4
-        with:
-          ref: v${{ inputs.version }}
 
       - uses: actions/setup-python@v5
         with:
