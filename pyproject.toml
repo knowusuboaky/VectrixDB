@@ -71,6 +71,11 @@ dev = [
     # FastAPI's TestClient is built on it. The mcp extra happened to bring it,
     # so a test job without mcp stopped at collection, before a single test ran.
     "httpx>=0.24.0",
+    # On GitHub Actions, each failing test is written as an annotation on the
+    # job, with its file, line and assertion. The job's log is not always
+    # readable from where the failure is looked into; an annotation is read
+    # through the API like the job's result. Does nothing anywhere else.
+    "pytest-github-actions-annotate-failures>=0.3.0",
     # Draws the PDFs the layout tests read, and nothing else: the reader under
     # test is PDFium. Without it the sixty tests of the PDF reader skipped
     # everywhere, CI included, and seven faults in what a PDF reads as went
