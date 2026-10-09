@@ -12,7 +12,9 @@ only after it has emitted a `DeprecationWarning` naming its replacement for at
 least one full minor release. Names prefixed with an underscore are internal and
 may change at any time.
 
-## [2.2.0] - Unreleased
+## [Unreleased]
+
+## [2.2.0] - 2026-10-09
 
 ### Added
 
