@@ -48,6 +48,12 @@ extra_css:
 
 plugins:
   - search
+  # Click any picture or clip to open it full size, and zoom in on it.
+  - glightbox:
+      zoomable: true
+      draggable: true
+      skip_classes:
+        - skip-lightbox
   - mkdocstrings:
       handlers:
         python:

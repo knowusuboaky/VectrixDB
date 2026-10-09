@@ -139,6 +139,7 @@ docs = [
     "mkdocs>=1.5.0,<2",  # 2.0 drops the plugin system mkdocstrings and material need
     "mkdocs-material>=9.5.0",
     "mkdocstrings[python]>=0.24.0",
+    "mkdocs-glightbox>=0.4",  # pictures and clips open full size, zoomable
 ]
 # Everything the test suite exercises without a network, cloud services through
 # fakes that speak their SDKs' types. CI's coverage job installs exactly this and

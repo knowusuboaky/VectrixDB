@@ -28,6 +28,8 @@ may change at any time.
   2.3.0-rc.1, and to npm under `next`.
 - **The documentation's home page shows every way in:** the command line, the
   four clients and MCP, each with its install line, its clip and its guide.
+- **Every picture and clip in the documentation opens full size on a click**,
+  zoomable and draggable, with the page's other pictures a swipe away.
 - **A client in four languages, one surface.** `vectrixdb.connect(url,
   key=...)` returns a `VectrixClient` with the same calls as `Vectrix`:
   `search` returns the same `Results` with the same citations, `add_document`
